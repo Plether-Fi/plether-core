@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -9,12 +10,11 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract PerpOracleHandler is Test {
 
-    MockUSDC public immutable usdc;
+    MockSettlementToken public immutable settlementToken;
     MockPyth public immutable mockPyth;
     CfdEngine public immutable engine;
     CfdEngineAdmin public immutable engineAdmin;
@@ -32,13 +32,13 @@ contract PerpOracleHandler is Test {
     error PerpOracleHandler__UnexpectedRevert(bytes reason);
 
     constructor(
-        MockUSDC _usdc,
+        MockSettlementToken _settlementToken,
         MockPyth _mockPyth,
         CfdEngine _engine,
         MarginClearinghouse _clearinghouse,
         LegacyOrderRouterHarness _router
     ) {
-        usdc = _usdc;
+        settlementToken = _settlementToken;
         mockPyth = _mockPyth;
         engine = _engine;
         engineAdmin = CfdEngineAdmin(_engine.admin());
@@ -186,10 +186,10 @@ contract PerpOracleHandler is Test {
             return;
         }
 
-        usdc.mint(actor, 25_000e6);
+        settlementToken.mint(actor, 25_000e6);
         uint64 orderId = router.nextCommitId();
         vm.startPrank(actor);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(account, 25_000e6);
         router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 10_000e6, 0, false);
         vm.stopPrank();

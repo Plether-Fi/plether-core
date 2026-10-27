@@ -56,8 +56,8 @@ contract OrderHardeningGasTest is SourceBoundBountyFixture {
         uint256 used = start - gasleft();
         assertEq(uint8(router.lifecycleBook().lifecycleStatus(id)), uint8(OrderV3Types.LifecycleStatus.Pending));
         assertEq(router.accountHeadOrderId(BOUNTY_TRADER), id);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), 1000e6);
-        assertGt(_bountyReservation(id).freeFundedUsdc, 0);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), 1000e6);
+        assertGt(_bountyReservation(id).freeFundedAssets, 0);
         emit log_named_uint(stale ? "hardening_commit_stale" : "hardening_commit_fresh", used);
     }
 
@@ -75,18 +75,18 @@ contract OrderHardeningGasTest is SourceBoundBountyFixture {
         _fundTrader(BOUNTY_TRADER, 1000e6);
         if (floor) {
             OrderV3Types.OrderRequest memory request = _bountyRequest(CfdTypes.Side.LONG, false, BOUNTY_SIZE, 250e6);
-            request.bounds.minPostSettlementBalanceUsdc = 700e6;
-            request.bounds.maxGrossAccountDebitUsdc = 200e6;
+            request.bounds.minPostSettlementBalanceAssets = 700e6;
+            request.bounds.maxGrossAccountDebitAssets = 200e6;
             vm.prank(BOUNTY_TRADER);
             router.commitOrder(request);
         }
-        uint256 wallet = usdc.balanceOf(BOUNTY_TRADER);
+        uint256 wallet = settlementToken.balanceOf(BOUNTY_TRADER);
         vm.prank(BOUNTY_TRADER);
         uint256 start = gasleft();
         clearinghouse.withdraw(BOUNTY_TRADER, 100e6);
         uint256 used = start - gasleft();
-        assertEq(usdc.balanceOf(BOUNTY_TRADER), wallet + 100e6);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), 900e6);
+        assertEq(settlementToken.balanceOf(BOUNTY_TRADER), wallet + 100e6);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), 900e6);
         assertEq(router.pendingOrderCounts(BOUNTY_TRADER), floor ? 1 : 0);
         emit log_named_uint(floor ? "hardening_withdraw_floor" : "hardening_withdraw_no_floor", used);
     }

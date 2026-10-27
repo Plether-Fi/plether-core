@@ -6,38 +6,38 @@ pragma solidity 0.8.35;
 library CashPriorityLib {
 
     /// @notice Snapshot of senior claim reservations and the cash left for a requested action.
-    /// @dev All fields are USDC amounts with 6 decimals.
-    /// @param physicalAssetsUsdc Physical pool cash included in the priority calculation.
-    /// @param traderClaimBalanceUsdc Aggregate outstanding trader claims.
-    /// @param totalSeniorClaimsUsdc Total claims senior to fresh payouts; currently trader claims only.
-    /// @param reservedSeniorCashUsdc Senior claim amount notionally reserved; it may exceed physical assets.
-    /// @param freeCashUsdc Physical cash left for fresh payouts after the senior reservation.
+    /// @dev All fields are settlement token amounts with 6 decimals.
+    /// @param physicalAssets Physical pool cash included in the priority calculation.
+    /// @param traderClaimBalanceAssets Aggregate outstanding trader claims.
+    /// @param totalSeniorClaimsAssets Total claims senior to fresh payouts; currently trader claims only.
+    /// @param reservedSeniorCashAssets Senior claim amount notionally reserved; it may exceed physical assets.
+    /// @param freeCashAssets Physical cash left for fresh payouts after the senior reservation.
     struct SeniorCashReservation {
-        uint256 physicalAssetsUsdc;
-        uint256 traderClaimBalanceUsdc;
-        uint256 totalSeniorClaimsUsdc;
-        uint256 reservedSeniorCashUsdc;
-        uint256 freeCashUsdc;
+        uint256 physicalAssets;
+        uint256 traderClaimBalanceAssets;
+        uint256 totalSeniorClaimsAssets;
+        uint256 reservedSeniorCashAssets;
+        uint256 freeCashAssets;
     }
 
     /// @notice Reserves aggregate trader claims and reports cash available for a fresh payout.
-    /// @param physicalAssetsUsdc Physical pool assets (6 decimals).
-    /// @param traderClaimBalanceUsdc Aggregate outstanding trader claims (6 decimals).
+    /// @param physicalAssets Physical pool assets (6 decimals).
+    /// @param traderClaimBalanceAssets Aggregate outstanding trader claims (6 decimals).
     /// @return reservation Senior reservation and residual free-cash snapshot.
     function reserveFreshPayouts(
-        uint256 physicalAssetsUsdc,
-        uint256 traderClaimBalanceUsdc
+        uint256 physicalAssets,
+        uint256 traderClaimBalanceAssets
     ) internal pure returns (SeniorCashReservation memory reservation) {
-        return _buildSeniorCashReservation(physicalAssetsUsdc, traderClaimBalanceUsdc);
+        return _buildSeniorCashReservation(physicalAssets, traderClaimBalanceAssets);
     }
 
     /// @notice Returns cash senior to fresh payouts for the current priority model.
-    /// @param traderClaimBalanceUsdc Aggregate outstanding trader claims (6 decimals).
+    /// @param traderClaimBalanceAssets Aggregate outstanding trader claims (6 decimals).
     /// @return Aggregate senior cash reservation (6 decimals).
-    function reservedSeniorCashUsdc(
-        uint256 traderClaimBalanceUsdc
+    function reservedSeniorCashAssets(
+        uint256 traderClaimBalanceAssets
     ) internal pure returns (uint256) {
-        return traderClaimBalanceUsdc;
+        return traderClaimBalanceAssets;
     }
 
     /// @notice Subtracts `rhs` from `lhs`, flooring the result at zero.
@@ -52,18 +52,18 @@ library CashPriorityLib {
     }
 
     /// @notice Builds the senior reservation fields used by fresh-payout checks.
-    /// @param physicalAssetsUsdc Physical pool assets (6 decimals).
-    /// @param traderClaimBalanceUsdc Aggregate outstanding trader claims (6 decimals).
+    /// @param physicalAssets Physical pool assets (6 decimals).
+    /// @param traderClaimBalanceAssets Aggregate outstanding trader claims (6 decimals).
     /// @return reservation Senior reservation and residual free-cash snapshot.
     function _buildSeniorCashReservation(
-        uint256 physicalAssetsUsdc,
-        uint256 traderClaimBalanceUsdc
+        uint256 physicalAssets,
+        uint256 traderClaimBalanceAssets
     ) private pure returns (SeniorCashReservation memory reservation) {
-        reservation.physicalAssetsUsdc = physicalAssetsUsdc;
-        reservation.traderClaimBalanceUsdc = traderClaimBalanceUsdc;
-        reservation.totalSeniorClaimsUsdc = reservedSeniorCashUsdc(traderClaimBalanceUsdc);
-        reservation.reservedSeniorCashUsdc = reservation.totalSeniorClaimsUsdc;
-        reservation.freeCashUsdc = _saturatingSub(physicalAssetsUsdc, reservation.reservedSeniorCashUsdc);
+        reservation.physicalAssets = physicalAssets;
+        reservation.traderClaimBalanceAssets = traderClaimBalanceAssets;
+        reservation.totalSeniorClaimsAssets = reservedSeniorCashAssets(traderClaimBalanceAssets);
+        reservation.reservedSeniorCashAssets = reservation.totalSeniorClaimsAssets;
+        reservation.freeCashAssets = _saturatingSub(physicalAssets, reservation.reservedSeniorCashAssets);
     }
 
 }

@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
-import {ILegacyCloseRouter, LegacyCloseTypes} from "../../fixtures/LegacyCloseV2.sol";
+import {
+    ILegacyCloseClearinghouse,
+    ILegacyCloseEngine,
+    ILegacyCloseRouter,
+    LegacyCloseTypes
+} from "../../fixtures/LegacyCloseV2.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
-import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {Test} from "forge-std/Test.sol";
 
 /// @notice Original deployed-bytecode regressions. No state overrides, candidate substitution, or broadcast.
@@ -14,8 +18,8 @@ contract HistoricalCloseRegressionTest is Test {
 
     CfdEngine constant ENGINE = CfdEngine(address(bytes20(hex"afece93321be41aa73474457e2f47cf7b2fb738f")));
     OrderRouter constant ROUTER = OrderRouter(address(bytes20(hex"6215d36fcbd610ca1525252eebcbfd8b223a6072")));
-    IMarginClearinghouse constant HOUSE =
-        IMarginClearinghouse(address(bytes20(hex"fa6e677ec1062757c1194d411a5e61e1e9644499")));
+    ILegacyCloseClearinghouse constant HOUSE =
+        ILegacyCloseClearinghouse(address(bytes20(hex"fa6e677ec1062757c1194d411a5e61e1e9644499")));
     CfdEngineLens constant LENS = CfdEngineLens(address(bytes20(hex"8fe702213241482d6e94327f9e70195ad183d1ad")));
 
     function _fork(
@@ -40,7 +44,7 @@ contract HistoricalCloseRegressionTest is Test {
         uint256 positionWord = uint256(vm.load(address(ENGINE), keccak256(abi.encode(account, uint256(35)))));
         (uint256 size, uint256 margin,,,,,) = ENGINE.positions(account);
         assertEq(uint256(uint112(positionWord)) * CfdTypes.SIZE_QUANTUM, size);
-        assertEq(positionWord >> 112, ENGINE.positionEntryCostUsdcAtoms(account));
+        assertEq(positionWord >> 112, ILegacyCloseEngine(address(ENGINE)).positionEntryCostUsdcAtoms(account));
         assertEq(
             uint256(vm.load(address(HOUSE), keccak256(abi.encode(account, uint256(2))))), HOUSE.balanceUsdc(account)
         );

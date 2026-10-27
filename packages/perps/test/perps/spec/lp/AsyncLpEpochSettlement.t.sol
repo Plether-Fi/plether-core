@@ -39,7 +39,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
             initMarginBps: 150,
             fadMarginBps: 300,
             baseCarryBps: 0,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -81,7 +81,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertEq(seniorVault.maxRequestDeposit(address(0)), 0);
         assertEq(juniorVault.maxRequestDeposit(address(0)), 0);
 
-        uint256 amount = pool.minTrancheDepositUsdc();
+        uint256 amount = pool.minTrancheDepositAssets();
         vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
         seniorVault.requestDeposit(amount, address(0), ALICE);
         vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
@@ -122,7 +122,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertEq(redeemShares, 0);
         assertEq(juniorVault.maxRequestRedeem(address(this)), 0, "seed shares must still be cooling down");
 
-        uint256 amount = pool.minTrancheDepositUsdc();
+        uint256 amount = pool.minTrancheDepositAssets();
         vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
         juniorVault.requestDeposit(amount, address(0), ALICE);
 
@@ -243,12 +243,12 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
     function test_DepositCancellationEndsAtMaturity() public {
         uint256 assets = 25_000e6;
         uint256 requestId = _requestDeposit(juniorVault, ALICE, assets);
-        uint256 balanceBeforeRefund = usdc.balanceOf(ALICE);
+        uint256 balanceBeforeRefund = settlementToken.balanceOf(ALICE);
 
         vm.prank(ALICE);
         uint256 refunded = _async(juniorVault).cancelPendingDeposit(requestId, ALICE, ALICE);
         assertEq(refunded, assets);
-        assertEq(usdc.balanceOf(ALICE), balanceBeforeRefund + assets);
+        assertEq(settlementToken.balanceOf(ALICE), balanceBeforeRefund + assets);
         assertEq(_pendingDeposit(juniorVault, requestId, ALICE), 0);
 
         requestId = _requestDeposit(juniorVault, ALICE, assets);
@@ -480,7 +480,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
 
         uint256 juniorPendingBefore = _pendingRedeem(juniorVault, juniorRequest, BOB);
         uint256 juniorClaimableBefore = _claimableRedeem(juniorVault, juniorRequest, BOB);
-        usdc.mint(address(pool), 25_000e6);
+        settlementToken.mint(address(pool), 25_000e6);
         pool.accountExcess();
 
         IHousePool.LpEpochSettlementResult memory second = _settleAt(seniorRequest);
@@ -495,7 +495,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
     function test_DormantSeniorWithoutDemandDoesNotBlockJunior() public {
         uint256 juniorShares = _fundOne(juniorVault, ALICE, 100_000e6);
         _reserveLiquidityLeaving(500e6);
-        uint256 freeBefore = pool.getFreeUSDC();
+        uint256 freeBefore = pool.getFreeAssets();
         assertLt(freeBefore, pool.seniorPrincipal(), "setup requires cash below dormant Senior principal");
 
         uint256 requestId = _requestRedeem(juniorVault, ALICE, juniorShares / 2, ALICE, ALICE);
@@ -525,10 +525,10 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertEq(_claimableDeposit(juniorVault, depositId, BOB), 0);
 
         uint256 claimableShares = _claimableRedeem(juniorVault, redeemId, ALICE);
-        uint256 balanceBefore = usdc.balanceOf(ALICE);
+        uint256 balanceBefore = settlementToken.balanceOf(ALICE);
         uint256 claimedAssets = _claimRedeem(juniorVault, redeemId, ALICE, claimableShares);
         assertGt(claimedAssets, 0, "funded claims must remain callable during pause");
-        assertEq(usdc.balanceOf(ALICE), balanceBefore + claimedAssets);
+        assertEq(settlementToken.balanceOf(ALICE), balanceBefore + claimedAssets);
 
         pool.unpause();
         _refreshMark();
@@ -547,12 +547,12 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         _reserveLiquidityLeaving(25_000e6);
         _warpToEpoch(depositId);
         _refreshMark();
-        uint256 preEntryFreeUsdc = pool.getFreeUSDC();
+        uint256 preEntryFreeAssets = pool.getFreeAssets();
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
 
         assertGt(result.seniorFundedAssets, 0);
-        assertLe(result.seniorFundedAssets, preEntryFreeUsdc, "entry escrow must not expand the frozen exit budget");
-        assertLe(preEntryFreeUsdc - result.seniorFundedAssets, 1, "sole Senior head should consume its cash budget");
+        assertLe(result.seniorFundedAssets, preEntryFreeAssets, "entry escrow must not expand the frozen exit budget");
+        assertLe(preEntryFreeAssets - result.seniorFundedAssets, 1, "sole Senior head should consume its cash budget");
         assertLt(result.seniorFundedAssets, 200_000e6, "same-call deposit would otherwise materially increase fill");
         assertFalse(result.entriesDeferred, "zero-PnL exposure alone must not defer symmetric-NAV entry");
         assertEq(result.juniorDepositAssets, 200_000e6, "safe entry must activate after withdrawal budgets freeze");
@@ -574,13 +574,13 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
             pool.isSeniorImpairedAfterPendingDepositReconcile(),
             "existing Junior capital must absorb the conservative open-risk reserve"
         );
-        uint256 preEntryFreeUsdc = pool.getFreeUSDC();
+        uint256 preEntryFreeAssets = pool.getFreeAssets();
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
 
         assertGt(result.seniorFundedAssets, 0);
         assertTrue(result.seniorBacklog, "the frozen cash budget must leave Senior shares queued");
-        assertLe(result.seniorFundedAssets, preEntryFreeUsdc, "entry escrow must not expand the exit budget");
-        assertLe(preEntryFreeUsdc - result.seniorFundedAssets, 1, "Senior should consume the frozen cash budget");
+        assertLe(result.seniorFundedAssets, preEntryFreeAssets, "entry escrow must not expand the exit budget");
+        assertLe(preEntryFreeAssets - result.seniorFundedAssets, 1, "Senior should consume the frozen cash budget");
         assertEq(result.juniorDepositAssets, 200_000e6, "Junior entry should finalize after withdrawal pricing");
         assertFalse(result.entriesDeferred, "liquidity exhaustion alone must not defer entries");
         assertEq(_pendingDeposit(juniorVault, depositId, BOB), 0);
@@ -623,7 +623,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         (uint256 seniorShares,) = _fundPair(ALICE, 100_000e6, BOB, 100_000e6);
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 150_000e6);
+        settlementToken.transfer(address(0xDEAD), 150_000e6);
         vm.warp(SATURDAY_FROZEN);
         _refreshMark();
         assertTrue(engine.isOracleFrozen(), "setup must charge the nonzero frozen Senior exit fee");
@@ -755,9 +755,9 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertTrue(engine.isOracleFrozen(), "setup must use a frozen-oracle window");
         assertEq(juniorVault.maxRequestDeposit(ALICE), 0, "frozen entry capacity must be zero");
 
-        usdc.mint(ALICE, assets);
+        settlementToken.mint(ALICE, assets);
         vm.startPrank(ALICE);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
         _async(juniorVault).requestDeposit(assets, ALICE, ALICE);
         vm.stopPrank();
@@ -821,9 +821,9 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         address owner,
         uint256 assets
     ) internal returns (uint256 requestId) {
-        usdc.mint(owner, assets);
+        settlementToken.mint(owner, assets);
         vm.startPrank(owner);
-        usdc.approve(address(vault), assets);
+        settlementToken.approve(address(vault), assets);
         requestId = _async(vault).requestDeposit(assets, owner, owner);
         vm.stopPrank();
     }
@@ -945,24 +945,24 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
     }
 
     function _reserveLiquidityLeaving(
-        uint256 targetFreeUsdc
+        uint256 targetFreeAssets
     ) internal returns (uint256 positionSize) {
         uint256 assets = pool.totalAssets();
-        assertGt(assets, targetFreeUsdc, "target free cash must be below pool assets");
-        uint256 reservedUsdc = assets - targetFreeUsdc;
-        uint256 maxLiabilityUsdc = reservedUsdc * 10_000 / (10_000 + engine.settlementBufferBps());
-        maxLiabilityUsdc -= maxLiabilityUsdc % 100e6;
-        uint256 margin = maxLiabilityUsdc / 10 + 10e6;
+        assertGt(assets, targetFreeAssets, "target free cash must be below pool assets");
+        uint256 reservedAssets = assets - targetFreeAssets;
+        uint256 maxLiabilityAssets = reservedAssets * 10_000 / (10_000 + engine.settlementBufferBps());
+        maxLiabilityAssets -= maxLiabilityAssets % 100e6;
+        uint256 margin = maxLiabilityAssets / 10 + 10e6;
         _fundTrader(TRADER, margin);
-        positionSize = maxLiabilityUsdc * 1e12;
+        positionSize = maxLiabilityAssets * 1e12;
         _open(TRADER, CfdTypes.Side.LONG, positionSize, margin, 1e8);
-        uint256 settlementBufferUsdc =
-            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engine.settlementBufferBps());
-        uint256 expectedFreeUsdc = assets - maxLiabilityUsdc - settlementBufferUsdc;
-        assertEq(pool.getFreeUSDC(), expectedFreeUsdc, "position must create the quantized cash budget");
-        assertGe(expectedFreeUsdc, targetFreeUsdc, "lot quantization must not over-reserve the target budget");
+        uint256 settlementBufferAssets =
+            SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, engine.settlementBufferBps());
+        uint256 expectedFreeAssets = assets - maxLiabilityAssets - settlementBufferAssets;
+        assertEq(pool.getFreeAssets(), expectedFreeAssets, "position must create the quantized cash budget");
+        assertGe(expectedFreeAssets, targetFreeAssets, "lot quantization must not over-reserve the target budget");
         assertLe(
-            expectedFreeUsdc - targetFreeUsdc,
+            expectedFreeAssets - targetFreeAssets,
             101e6,
             "one liability lot plus its buffer bounds the target-budget rounding"
         );

@@ -65,11 +65,11 @@ interface IPositionProtectionBookBootstrapView {
 contract BootstrapPerpsArbitrumSepolia is Script {
 
     address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
-    uint256 internal constant RELEASE_SENIOR_SEED_USDC = 1e6;
-    uint256 internal constant RELEASE_JUNIOR_SEED_USDC = 1e6;
-    uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_USDC = 40_000_000e6;
+    uint256 internal constant RELEASE_SENIOR_SEED_ASSETS = 1e6;
+    uint256 internal constant RELEASE_JUNIOR_SEED_ASSETS = 1e6;
+    uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_ASSETS = 40_000_000e6;
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
-    uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_USDC = 1000e6;
+    uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_ASSETS = 1000e6;
     uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
     uint256 internal constant RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS = 10;
     uint256 internal constant RELEASE_MAX_PENDING_ORDERS = 5;
@@ -86,15 +86,15 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         uint256 privateKey = vm.envUint("TEST_PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
 
-        address usdc = vm.envAddress("PERPS_USDC");
+        address settlementToken = vm.envAddress("PERPS_SETTLEMENT_TOKEN");
         address housePoolAddr = vm.envAddress("PERPS_HOUSE_POOL");
         address redemptionMathSidecarAddr = vm.envAddress("PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR");
         address routerAddr = vm.envAddress("PERPS_ORDER_ROUTER");
         address emergencyCoordinatorAddr = vm.envAddress("PERPS_EMERGENCY_COORDINATOR");
         address desiredGuardian = vm.envAddress("PERPS_GUARDIAN");
 
-        uint256 seniorSeedUsdc = vm.envUint("SENIOR_SEED_USDC");
-        uint256 juniorSeedUsdc = vm.envUint("JUNIOR_SEED_USDC");
+        uint256 seniorSeedAssets = vm.envUint("SENIOR_SEED_ASSETS");
+        uint256 juniorSeedAssets = vm.envUint("JUNIOR_SEED_ASSETS");
         address seniorSeedReceiver = vm.envAddress("SENIOR_SEED_RECEIVER");
         address juniorSeedReceiver = vm.envAddress("JUNIOR_SEED_RECEIVER");
         bool activateTrading = vm.envBool("ACTIVATE_TRADING");
@@ -112,9 +112,9 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         EmergencyPauseCoordinator emergencyCoordinator = EmergencyPauseCoordinator(emergencyCoordinatorAddr);
 
         _validateGuardian(desiredGuardian);
-        _validateReleaseInputs(seniorSeedUsdc, juniorSeedUsdc, seniorSeedReceiver, juniorSeedReceiver);
+        _validateReleaseInputs(seniorSeedAssets, juniorSeedAssets, seniorSeedReceiver, juniorSeedReceiver);
         _verifyRedemptionMathSidecar(redemptionMathSidecarAddr);
-        _verifyAsyncVaultPair(housePool, usdc);
+        _verifyAsyncVaultPair(housePool, settlementToken);
         _verifyTerminalNavBook(housePool);
         _verifyRouterWiring(housePool, router);
         _verifyInitialReleaseConfig(housePool, router, routerAdmin);
@@ -122,7 +122,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
         console.log("Bootstrapping Plether perps on Arbitrum Sepolia");
         console.log("Deployer:", deployer);
-        console.log("USDC:", usdc);
+        console.log("Settlement token:", settlementToken);
         console.log("HousePool:", housePoolAddr);
         console.log("HousePoolRedemptionMathSidecar:", redemptionMathSidecarAddr);
         console.log("OrderRouter:", routerAddr);
@@ -142,14 +142,14 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         _configureGuardian(emergencyCoordinator, desiredGuardian, deployer);
         _seedLifecycle(
             housePool,
-            IMintableERC20(usdc),
-            seniorSeedUsdc,
-            juniorSeedUsdc,
+            IMintableERC20(settlementToken),
+            seniorSeedAssets,
+            juniorSeedAssets,
             seniorSeedReceiver,
             juniorSeedReceiver,
             deployer
         );
-        _fundTestUsers(IMintableERC20(usdc), testUsers, testUserAmounts);
+        _fundTestUsers(IMintableERC20(settlementToken), testUsers, testUserAmounts);
         _activateTrading(housePool, router, routerAdmin, emergencyCoordinator, activateTrading);
 
         vm.stopBroadcast();
@@ -160,18 +160,21 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Junior seed initialized:", housePool.juniorSeedInitialized());
         console.log("HousePool pauser:", housePool.pauser());
         console.log("Router pauser:", routerAdmin.pauser());
-        console.log("Position protection trigger bounty USDC:", router.positionProtectionTriggerBountyUsdc());
+        console.log(
+            "Position protection trigger bounty (settlement-token units):",
+            router.positionProtectionTriggerBountyAssets()
+        );
         console.log("Emergency guardian:", emergencyCoordinator.guardian());
         console.log("Risk-off order cutoff:", routerAdmin.riskOffOrderCutoff());
         console.log("LP epoch settlement paused:", housePool.lpEpochSettlementPaused());
-        console.log("Maximum senior exposure (USDC units):", housePool.maxSeniorExposureUsdc());
+        console.log("Maximum senior exposure (settlement-token units):", housePool.maxSeniorExposureAssets());
         console.log("Maximum senior share (bps):", housePool.maxSeniorShareBps());
-        console.log("Minimum opening notional (USDC units):", router.minOpenNotionalUsdc());
+        console.log("Minimum opening notional (settlement-token units):", router.minOpenNotionalAssets());
         console.log("Adverse confidence multiplier (bps):", router.pletherOracle().adverseConfidenceMultiplierBps());
         console.log("LP epoch duration:", housePool.LP_EPOCH_DURATION());
         console.log("Maximum LP epochs per settlement phase:", housePool.MAX_LP_EPOCHS_PER_PHASE());
         console.log("Current LP epoch:", housePool.currentLpEpoch());
-        console.log("Note: this script funds users with mock USDC only; ETH still needs a faucet.");
+        console.log("Note: this script funds users with Mock USDG only; ETH still needs a faucet.");
     }
 
     /// @dev Keeps bootstrap reruns fail-closed against an omitted or wrong-generation redemption math dependency.
@@ -210,8 +213,14 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(address(engine.pool()) == address(housePool), "Engine HousePool mismatch");
         MarginClearinghouse clearinghouse = MarginClearinghouse(address(engine.clearinghouse()));
         require(clearinghouse.engine() == address(engine), "Clearinghouse Engine mismatch");
-        require(address(engine.USDC()) == address(housePool.USDC()), "Engine settlement asset mismatch");
-        require(clearinghouse.settlementAsset() == address(housePool.USDC()), "Clearinghouse settlement asset mismatch");
+        require(
+            address(engine.settlementToken()) == address(housePool.settlementToken()),
+            "Engine settlement asset mismatch"
+        );
+        require(
+            clearinghouse.settlementAsset() == address(housePool.settlementToken()),
+            "Clearinghouse settlement asset mismatch"
+        );
         require(engine.orderRouter() == address(router), "Engine OrderRouter mismatch");
         require(address(router.pletherOracle()).code.length > 0, "PletherOracle has no code");
         require(address(router.pletherOracle().engine()) == address(engine), "PletherOracle Engine mismatch");
@@ -265,11 +274,12 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         OrderRouterAdmin routerAdmin
     ) internal view {
         require(
-            housePool.maxSeniorExposureUsdc() == RELEASE_MAX_SENIOR_EXPOSURE_USDC, "Unexpected maximum senior exposure"
+            housePool.maxSeniorExposureAssets() == RELEASE_MAX_SENIOR_EXPOSURE_ASSETS,
+            "Unexpected maximum senior exposure"
         );
         require(housePool.maxSeniorShareBps() == RELEASE_MAX_SENIOR_SHARE_BPS, "Unexpected maximum senior share");
         require(housePool.poolConfigActivationTime() == 0, "Outstanding HousePool config proposal");
-        require(router.minOpenNotionalUsdc() == RELEASE_MIN_OPEN_NOTIONAL_USDC, "Unexpected opening notional");
+        require(router.minOpenNotionalAssets() == RELEASE_MIN_OPEN_NOTIONAL_ASSETS, "Unexpected opening notional");
         require(
             router.pletherOracle().adverseConfidenceMultiplierBps() == RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS,
             "Unexpected adverse multiplier"
@@ -300,9 +310,11 @@ contract BootstrapPerpsArbitrumSepolia is Script {
     /// @dev Checks all immutable/set-once LP wiring before any governance proposal, seed mint, or activation occurs.
     function _verifyAsyncVaultPair(
         HousePool housePool,
-        address usdc
+        address settlementToken
     ) internal view {
-        require(address(housePool.USDC()) == usdc, "PERPS_USDC does not match HousePool");
+        require(
+            address(housePool.settlementToken()) == settlementToken, "PERPS_SETTLEMENT_TOKEN does not match HousePool"
+        );
         require(housePool.LP_EPOCH_DURATION() == 1 hours, "Unexpected LP epoch duration");
         require(housePool.MAX_LP_EPOCHS_PER_PHASE() == 16, "Unexpected LP epoch bound");
 
@@ -326,11 +338,11 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         address juniorFeeRecipient = CfdEngine(address(housePool.ENGINE())).protocolTreasury();
         require(juniorFeeRecipient != address(0), "Protocol treasury is zero");
         (uint256 seniorNextRequestEpoch, uint256 seniorNextRequestCutoffTime) =
-            _verifyAsyncVault(seniorVault, address(housePool), usdc, true, 0, address(0), true);
+            _verifyAsyncVault(seniorVault, address(housePool), settlementToken, true, 0, address(0), true);
         (uint256 juniorNextRequestEpoch, uint256 juniorNextRequestCutoffTime) = _verifyAsyncVault(
             juniorVault,
             address(housePool),
-            usdc,
+            settlementToken,
             false,
             RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS,
             juniorFeeRecipient,
@@ -360,7 +372,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
     function _verifyAsyncVault(
         address vault,
         address housePool,
-        address usdc,
+        address settlementToken,
         bool isSenior,
         uint256 expectedMaintenanceFeeAprBps,
         address expectedMaintenanceFeeRecipient,
@@ -370,7 +382,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(candidate.POOL() == housePool, "TrancheVault pool mismatch");
         require(candidate.IS_SENIOR() == isSenior, "TrancheVault side mismatch");
         require(candidate.LP_REQUEST_CUTOFF_DURATION() == 5 minutes, "Unexpected LP request cutoff duration");
-        require(candidate.asset() == usdc, "TrancheVault asset mismatch");
+        require(candidate.asset() == settlementToken, "TrancheVault asset mismatch");
         require(candidate.share() == vault, "TrancheVault share mismatch");
         require(candidate.supportsInterface(ERC165_INTERFACE_ID), "TrancheVault missing ERC165");
         require(candidate.supportsInterface(ERC7540_OPERATOR_INTERFACE_ID), "TrancheVault missing ERC7540 operator");
@@ -387,7 +399,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
             "TrancheVault missing claimable redeem interface"
         );
         require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
-        require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
+        require(candidate.vault(settlementToken) == vault, "TrancheVault share lookup mismatch");
         require(
             candidate.maintenanceFeeAprBps() == expectedMaintenanceFeeAprBps,
             "TrancheVault maintenance fee APR mismatch"
@@ -407,13 +419,13 @@ contract BootstrapPerpsArbitrumSepolia is Script {
     }
 
     function _validateReleaseInputs(
-        uint256 seniorSeedUsdc,
-        uint256 juniorSeedUsdc,
+        uint256 seniorSeedAssets,
+        uint256 juniorSeedAssets,
         address seniorSeedReceiver,
         address juniorSeedReceiver
     ) internal pure {
-        require(seniorSeedUsdc == RELEASE_SENIOR_SEED_USDC, "Unexpected senior seed");
-        require(juniorSeedUsdc == RELEASE_JUNIOR_SEED_USDC, "Unexpected junior seed");
+        require(seniorSeedAssets == RELEASE_SENIOR_SEED_ASSETS, "Unexpected senior seed");
+        require(juniorSeedAssets == RELEASE_JUNIOR_SEED_ASSETS, "Unexpected junior seed");
         require(seniorSeedReceiver != address(0), "SENIOR_SEED_RECEIVER is zero");
         require(juniorSeedReceiver != address(0), "JUNIOR_SEED_RECEIVER is zero");
     }
@@ -441,43 +453,43 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
     function _seedLifecycle(
         HousePool housePool,
-        IMintableERC20 usdc,
-        uint256 seniorSeedUsdc,
-        uint256 juniorSeedUsdc,
+        IMintableERC20 settlementToken,
+        uint256 seniorSeedAssets,
+        uint256 juniorSeedAssets,
         address seniorSeedReceiver,
         address juniorSeedReceiver,
         address seedFunder
     ) internal {
-        uint256 totalSeedUsdc;
-        if (!housePool.seniorSeedInitialized() && seniorSeedUsdc > 0) {
-            totalSeedUsdc += seniorSeedUsdc;
+        uint256 totalSeedAssets;
+        if (!housePool.seniorSeedInitialized() && seniorSeedAssets > 0) {
+            totalSeedAssets += seniorSeedAssets;
         }
-        if (!housePool.juniorSeedInitialized() && juniorSeedUsdc > 0) {
-            totalSeedUsdc += juniorSeedUsdc;
-        }
-
-        if (totalSeedUsdc > 0) {
-            usdc.mint(seedFunder, totalSeedUsdc);
-            usdc.approve(address(housePool), totalSeedUsdc);
-            console.log("Minted seed USDC to broadcaster:", seedFunder);
-            console.log("Seed USDC amount:", totalSeedUsdc);
+        if (!housePool.juniorSeedInitialized() && juniorSeedAssets > 0) {
+            totalSeedAssets += juniorSeedAssets;
         }
 
-        if (!housePool.juniorSeedInitialized() && juniorSeedUsdc > 0) {
-            housePool.initializeSeedPosition(false, juniorSeedUsdc, juniorSeedReceiver);
-            console.log("Initialized junior seed:", juniorSeedUsdc);
+        if (totalSeedAssets > 0) {
+            settlementToken.mint(seedFunder, totalSeedAssets);
+            settlementToken.approve(address(housePool), totalSeedAssets);
+            console.log("Minted seed Mock USDG to broadcaster:", seedFunder);
+            console.log("Seed assets amount:", totalSeedAssets);
+        }
+
+        if (!housePool.juniorSeedInitialized() && juniorSeedAssets > 0) {
+            housePool.initializeSeedPosition(false, juniorSeedAssets, juniorSeedReceiver);
+            console.log("Initialized junior seed:", juniorSeedAssets);
             console.log("Junior seed receiver:", juniorSeedReceiver);
         }
 
-        if (!housePool.seniorSeedInitialized() && seniorSeedUsdc > 0) {
-            housePool.initializeSeedPosition(true, seniorSeedUsdc, seniorSeedReceiver);
-            console.log("Initialized senior seed:", seniorSeedUsdc);
+        if (!housePool.seniorSeedInitialized() && seniorSeedAssets > 0) {
+            housePool.initializeSeedPosition(true, seniorSeedAssets, seniorSeedReceiver);
+            console.log("Initialized senior seed:", seniorSeedAssets);
             console.log("Senior seed receiver:", seniorSeedReceiver);
         }
     }
 
     function _fundTestUsers(
-        IMintableERC20 usdc,
+        IMintableERC20 settlementToken,
         address[] memory testUsers,
         uint256[] memory testUserAmounts
     ) internal {
@@ -485,7 +497,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
             if (testUsers[i] == address(0) || testUserAmounts[i] == 0) {
                 continue;
             }
-            usdc.mint(testUsers[i], testUserAmounts[i]);
+            settlementToken.mint(testUsers[i], testUserAmounts[i]);
             console.log("Funded test user:", testUsers[i]);
             console.log("Amount:", testUserAmounts[i]);
         }

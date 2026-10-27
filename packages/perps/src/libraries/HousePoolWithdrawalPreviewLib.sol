@@ -8,7 +8,7 @@ import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccounti
 library HousePoolWithdrawalPreviewLib {
 
     /// @notice Applies an additional reservation to a withdrawal snapshot.
-    /// @dev Increases `reserved` by the full amount and reduces `freeUsdc` with saturation at zero.
+    /// @dev Increases `reserved` by the full amount and reduces `freeAssets` with saturation at zero.
     /// @param snapshot Current withdrawal accounting snapshot.
     /// @param reservedAssets Additional reserved assets (6 decimals).
     /// @return nextSnapshot Snapshot after applying the reservation.
@@ -22,18 +22,19 @@ library HousePoolWithdrawalPreviewLib {
         }
 
         nextSnapshot.reserved += reservedAssets;
-        nextSnapshot.freeUsdc = nextSnapshot.freeUsdc > reservedAssets ? nextSnapshot.freeUsdc - reservedAssets : 0;
+        nextSnapshot.freeAssets =
+            nextSnapshot.freeAssets > reservedAssets ? nextSnapshot.freeAssets - reservedAssets : 0;
     }
 
     /// @notice Caps senior withdrawals by both free cash and senior principal.
-    /// @param freeUsdc Cash remaining after senior protocol reservations (6 decimals).
+    /// @param freeAssets Cash remaining after senior protocol reservations (6 decimals).
     /// @param seniorPrincipal Current senior principal (6 decimals).
     /// @return Maximum senior withdrawal (6 decimals).
     function seniorWithdrawCap(
-        uint256 freeUsdc,
+        uint256 freeAssets,
         uint256 seniorPrincipal
     ) internal pure returns (uint256) {
-        return freeUsdc < seniorPrincipal ? freeUsdc : seniorPrincipal;
+        return freeAssets < seniorPrincipal ? freeAssets : seniorPrincipal;
     }
 
 }

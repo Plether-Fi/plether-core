@@ -19,7 +19,7 @@ export const implementationSlot = '0x360894a13ba1a3210667c828492db98dca3e2076cc3
 
 export const selectors = Object.freeze({
   'settlementAsset()': '0xd3781d58', 'engine()': '0xc9d4623f',
-  'USDC()': '0x89a30271', 'clearinghouse()': '0x5d4f5f97',
+  'settlementToken()': '0x7b9e618d', 'clearinghouse()': '0x5d4f5f97',
   'orderRouter()': '0xcd41f0c6', 'pool()': '0x16f0115b',
   'ENGINE()': '0x4785e8d4', 'housePool()': '0x281c9cbf',
   'decimals()': '0x313ce567',
@@ -37,11 +37,11 @@ export const eventTopics = Object.freeze({
 export const bindings = Object.freeze([
   ['marginClearinghouse', 'settlementAsset()', 'settlementToken'],
   ['marginClearinghouse', 'engine()', 'cfdEngine'],
-  ['cfdEngine', 'USDC()', 'settlementToken'],
+  ['cfdEngine', 'settlementToken()', 'settlementToken'],
   ['cfdEngine', 'clearinghouse()', 'marginClearinghouse'],
   ['cfdEngine', 'pool()', 'housePool'],
   ['cfdEngine', 'orderRouter()', 'orderRouter'],
-  ['housePool', 'USDC()', 'settlementToken'],
+  ['housePool', 'settlementToken()', 'settlementToken'],
   ['housePool', 'ENGINE()', 'cfdEngine'],
   ['orderRouter', 'engine()', 'cfdEngine'],
   ['orderRouter', 'pletherOracle()', 'pletherOracle'],
@@ -128,13 +128,13 @@ export function validateFundingManifest(manifest, { template = false } = {}) {
       seen.add(lower(contract.address))
     }
   }
-  assert.equal(evidence.contracts.settlementToken.decimals, 6, 'Funding requires six-decimal settlement USDC')
+  assert.equal(evidence.contracts.settlementToken.decimals, 6, 'Funding requires a six-decimal settlement token')
   const probe = manifest.evidence.depositFor
-  keys(probe, ['transactionHash', 'payer', 'beneficiary', 'amountUsdc'], 'evidence.depositFor')
+  keys(probe, ['transactionHash', 'payer', 'beneficiary', 'amountAssets'], 'evidence.depositFor')
   field(probe.transactionHash, validHash, 'depositFor.transactionHash', template)
   field(probe.payer, validAddress, 'depositFor.payer', template)
   field(probe.beneficiary, validAddress, 'depositFor.beneficiary', template)
-  field(probe.amountUsdc, value => typeof value === 'string' && /^[1-9][0-9]*$/.test(value) && BigInt(value) <= uint256Max, 'depositFor.amountUsdc', template)
+  field(probe.amountAssets, value => typeof value === 'string' && /^[1-9][0-9]*$/.test(value) && BigInt(value) <= uint256Max, 'depositFor.amountAssets', template)
   if (probe.payer !== null && probe.beneficiary !== null) {
     assert.notEqual(lower(probe.payer), lower(probe.beneficiary), 'Probe must demonstrate a third-party deposit')
   }
@@ -206,7 +206,7 @@ export async function verifyFundingManifest(manifest, { rpc, hash = castKeccak }
   const token = contracts.settlementToken.address
   assert.equal(lower(transaction.to), lower(clearinghouse), 'Probe must directly call the clearinghouse')
   assert.equal(lower(transaction.from), lower(probe.payer), 'Probe payer mismatch')
-  assert.equal(lower(transaction.input), `${selectors['depositFor(address,uint256)']}${addressWord(probe.beneficiary).slice(2)}${word(probe.amountUsdc)}`, 'Probe must call depositFor with the recorded beneficiary and amount')
+  assert.equal(lower(transaction.input), `${selectors['depositFor(address,uint256)']}${addressWord(probe.beneficiary).slice(2)}${word(probe.amountAssets)}`, 'Probe must call depositFor with the recorded beneficiary and amount')
   assert.equal(quantity(transaction.value, 'probe value'), 0n, 'Probe must not send native value')
   await Promise.all(['marginClearinghouse', 'settlementToken'].map(name => checkCode(name, receipt.blockNumber)))
   const requireEvent = (emitter, topic, from, to, label) => {
@@ -214,13 +214,13 @@ export async function verifyFundingManifest(manifest, { rpc, hash = castKeccak }
     const matches = receipt.logs.filter(log => lower(log.address) === lower(emitter)
       && Array.isArray(log.topics) && log.topics.length === 3
       && lower(log.topics[0]) === topic && lower(log.topics[1]) === addressWord(from)
-      && lower(log.topics[2]) === addressWord(to) && lower(log.data) === `0x${word(probe.amountUsdc)}`
+      && lower(log.topics[2]) === addressWord(to) && lower(log.data) === `0x${word(probe.amountAssets)}`
       && log.removed !== true)
     assert.equal(matches.length, 1, `Expected exactly one matching ${label} event`)
   }
   requireEvent(clearinghouse, eventTopics.depositFor, probe.payer, probe.beneficiary, 'DepositFor')
   requireEvent(clearinghouse, eventTopics.deposit, probe.beneficiary, token, 'Deposit')
-  requireEvent(token, eventTopics.transfer, probe.payer, clearinghouse, 'USDC Transfer')
+  requireEvent(token, eventTopics.transfer, probe.payer, clearinghouse, 'Settlement token Transfer')
 
   // Recheck every evidence block after all reads so a reorg cannot silently mix
   // receipts and code from different canonical histories during this run.

@@ -16,11 +16,11 @@ interface IOrderRouterAdminHost {
     /// @param orderSettlementWindow Post-commit window searched for a unique historical execution basket, in seconds.
     /// @param maxComponentPublishTimeDivergence Maximum publish-time spread for historical baskets, in seconds.
     /// @param adverseConfidenceMultiplierBps Multiplier applied to basket confidence for account-adverse prices, in bps.
-    /// @param minOpenNotionalUsdc Minimum open/increase notional accepted at commit, in 6-decimal USDC.
+    /// @param minOpenNotionalAssets Minimum open/increase notional accepted at commit, in 6-decimal settlement token.
     /// @param openOrderExecutionBountyBps Open bounty rate applied to reference notional, in basis points.
-    /// @param minOpenOrderExecutionBountyUsdc Minimum open-order bounty in 6-decimal USDC.
-    /// @param maxOpenOrderExecutionBountyUsdc Maximum open-order bounty in 6-decimal USDC.
-    /// @param positionProtectionTriggerBountyUsdc Fixed protection-trigger bounty in 6-decimal USDC.
+    /// @param minOpenOrderExecutionBountyAssets Minimum open-order bounty in 6-decimal settlement token.
+    /// @param maxOpenOrderExecutionBountyAssets Maximum open-order bounty in 6-decimal settlement token.
+    /// @param positionProtectionTriggerBountyAssets Fixed protection-trigger bounty in 6-decimal settlement token.
     /// @param maxPendingOrders Maximum number of live pending orders per account.
     /// @param minEngineGas Minimum EIP-150-forwardable gas required before an engine execution attempt.
     /// @param maxPruneOrdersPerCall Maximum expired or config-mismatched heads one call may prune; risk-off uses a separate cap.
@@ -32,11 +32,11 @@ interface IOrderRouterAdminHost {
         uint256 orderSettlementWindow;
         uint256 maxComponentPublishTimeDivergence;
         uint256 adverseConfidenceMultiplierBps;
-        uint256 minOpenNotionalUsdc;
+        uint256 minOpenNotionalAssets;
         uint256 openOrderExecutionBountyBps;
-        uint256 minOpenOrderExecutionBountyUsdc;
-        uint256 maxOpenOrderExecutionBountyUsdc;
-        uint256 positionProtectionTriggerBountyUsdc;
+        uint256 minOpenOrderExecutionBountyAssets;
+        uint256 maxOpenOrderExecutionBountyAssets;
+        uint256 positionProtectionTriggerBountyAssets;
         uint256 maxPendingOrders;
         uint256 minEngineGas;
         uint256 maxPruneOrdersPerCall;

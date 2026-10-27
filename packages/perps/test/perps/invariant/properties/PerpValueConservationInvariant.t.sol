@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {RecordedOrderReceipts} from "../../../utils/RecordedOrderReceipts.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -15,13 +16,12 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract PerpValueConservationHandler is RecordedOrderReceipts {
 
     error UnexpectedCloseResult(OrderV3Types.ExecutionResult result);
 
-    MockUSDC internal immutable usdc;
+    MockSettlementToken internal immutable settlementToken;
     CfdEngine internal immutable engine;
     MarginClearinghouse internal immutable clearinghouse;
     OrderRouter internal immutable router;
@@ -45,10 +45,10 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
     bool public checkpointForgaveHistoricalCarry;
     bool public pendingRevenueDisappeared;
 
-    uint256 public failedCloseKeeperGainUsdc;
-    uint256 public neutralMtmLpProfitUsdc;
-    uint256 public forgivenCarryUsdc;
-    uint256 public disappearedRevenueUsdc;
+    uint256 public failedCloseKeeperGainAssets;
+    uint256 public neutralMtmLpProfitAssets;
+    uint256 public forgivenCarryAssets;
+    uint256 public disappearedRevenueAssets;
     uint256 public successfulCloseExecutions;
     uint256 public slippageCloseRejections;
     uint256 public completedNeutralRounds;
@@ -56,7 +56,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
     uint256 public completedRecapReconciliations;
 
     constructor(
-        MockUSDC usdc_,
+        MockSettlementToken settlementToken_,
         CfdEngine engine_,
         MarginClearinghouse clearinghouse_,
         OrderRouter router_,
@@ -64,7 +64,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         TrancheVault juniorVault_,
         MockPyth mockPyth_
     ) {
-        usdc = usdc_;
+        settlementToken = settlementToken_;
         engine = engine_;
         clearinghouse = clearinghouse_;
         router = router_;
@@ -90,13 +90,13 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         vm.prank(address(router));
         engine.updateMarkPrice(executionPrice, uint64(vm.getBlockTimestamp()));
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(FAILED_CLOSE_KEEPER);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(FAILED_CLOSE_KEEPER);
         bool expectSlippage = executionPriceFuzz % 2 == 0;
         // The two equal basket weights independently floor each half of an odd mock price.
         uint256 targetPrice = (executionPrice / 2) * 2 - (expectSlippage ? 1 : 0);
 
         assertEq(
-            clearinghouse.getFreeBuyingPowerUsdc(FULL_CLOSE_TRADER), 0, "fixture leaves no free settlement for close"
+            clearinghouse.getFreeBuyingPowerAssets(FULL_CLOSE_TRADER), 0, "fixture leaves no free settlement for close"
         );
         vm.prank(FULL_CLOSE_TRADER);
         uint64 orderId = LegacyOrderRouterHarness(payable(address(router)))
@@ -118,7 +118,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         ) {
             revert UnexpectedCloseResult(result);
         }
-        keeperGain = clearinghouse.balanceUsdc(FAILED_CLOSE_KEEPER) - keeperSettlementBefore;
+        keeperGain = clearinghouse.balanceAssets(FAILED_CLOSE_KEEPER) - keeperSettlementBefore;
         violation = _closeBountyViolation(orderId, reservation, marginAfterCommit, expectSlippage, keeperGain);
 
         vm.revertToState(snapshot);
@@ -129,7 +129,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         }
         if (violation) {
             failedCloseExtractedMargin = true;
-            failedCloseKeeperGainUsdc = keeperGain;
+            failedCloseKeeperGainAssets = keeperGain;
         }
     }
 
@@ -142,19 +142,19 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
     ) internal returns (bool) {
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(FULL_CLOSE_TRADER);
         OrderV3Types.OrderReceipt memory receipt = _verifiedReceipt(router.lifecycleBook(), orderId);
-        uint256 expectedPaid = failed ? 0 : reservation.amountUsdc;
-        uint256 expectedRefunded = failed ? reservation.amountUsdc : 0;
+        uint256 expectedPaid = failed ? 0 : reservation.amountAssets;
+        uint256 expectedRefunded = failed ? reservation.amountAssets : 0;
         OrderV3Types.BountyDisposition expectedDisposition = OrderV3Types.BountyDisposition.None;
         // This fixture leaves no free collateral and the close bounty is zero. A failed close must
         // preserve the pledge; a successful close cannot pay an execution bounty to the keeper.
         return reservation.account != FULL_CLOSE_TRADER
             || reservation.state != IMarginClearinghouse.BountyReservationState.Active
-            || reservation.freeFundedUsdc != 0 || reservation.amountUsdc != 0 || keeperGain != expectedPaid
-            || receipt.bountyDisposition != expectedDisposition || receipt.bounty.bountyPaidUsdc != expectedPaid
-            || receipt.bounty.bountyRefundedUsdc != expectedRefunded || receipt.bounty.bountyForfeitedUsdc != 0
+            || reservation.freeFundedAssets != 0 || reservation.amountAssets != 0 || keeperGain != expectedPaid
+            || receipt.bountyDisposition != expectedDisposition || receipt.bounty.bountyPaidAssets != expectedPaid
+            || receipt.bounty.bountyRefundedAssets != expectedRefunded || receipt.bounty.bountyForfeitedAssets != 0
             || receipt.bountyRecipient != address(0)
             || (failed
-                    ? sizeAfter != 100_000e18 || marginAfter != marginAfterCommit + reservation.amountUsdc
+                    ? sizeAfter != 100_000e18 || marginAfter != marginAfterCommit + reservation.amountAssets
                     : sizeAfter != 0);
     }
 
@@ -175,7 +175,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         ++completedNeutralRounds;
         if (violation) {
             neutralMtmCreatedLpProfit = true;
-            neutralMtmLpProfitUsdc = profit;
+            neutralMtmLpProfitAssets = profit;
         }
     }
 
@@ -205,9 +205,9 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
     function _depositJuniorForNeutralMtm(
         uint256 depositAssets
     ) private returns (uint256 shares) {
-        usdc.mint(JUNIOR_ATTACKER, depositAssets);
+        settlementToken.mint(JUNIOR_ATTACKER, depositAssets);
         vm.startPrank(JUNIOR_ATTACKER);
-        usdc.approve(address(juniorVault), depositAssets);
+        settlementToken.approve(address(juniorVault), depositAssets);
         uint256 depositRequestId = juniorVault.requestDeposit(depositAssets, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
         vm.stopPrank();
 
@@ -251,7 +251,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         );
         vm.prank(JUNIOR_ATTACKER);
         juniorVault.claimRedeem(redeemRequestId, shares, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
-        return usdc.balanceOf(JUNIOR_ATTACKER);
+        return settlementToken.balanceOf(JUNIOR_ATTACKER);
     }
 
     function timedCheckpointCannotForgiveHistoricalCarry(
@@ -265,23 +265,23 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         _fundTrader(CARRY_TRADER, 150_000e6);
         _open(CARRY_TRADER, CfdTypes.Side.LONG, 200_000e18, 100_000e6, 1e8);
 
-        uint256 balanceBeforeCheckpoint = clearinghouse.balanceUsdc(CARRY_TRADER);
+        uint256 balanceBeforeCheckpoint = clearinghouse.balanceAssets(CARRY_TRADER);
         uint256 elapsed = bound(elapsedFuzz, 7 days, 60 days);
         uint256 checkpointPrice = bound(checkpointPriceFuzz, 0.4e8, 0.7e8);
 
         vm.warp(block.timestamp + elapsed);
         vm.prank(address(router));
         engine.updateMarkPrice(checkpointPrice, uint64(vm.getBlockTimestamp()));
-        uint256 minimumHistoricalCarryUsdc = _pendingIndexedCarryUsdc(CARRY_TRADER);
+        uint256 minimumHistoricalCarryAssets = _pendingIndexedCarryAssets(CARRY_TRADER);
 
-        usdc.mint(CARRY_TRADER, 1);
+        settlementToken.mint(CARRY_TRADER, 1);
         vm.startPrank(CARRY_TRADER);
-        usdc.approve(address(clearinghouse), 1);
+        settlementToken.approve(address(clearinghouse), 1);
         clearinghouse.deposit(CARRY_TRADER, 1);
         vm.stopPrank();
 
-        uint256 balanceAfterCheckpoint = clearinghouse.balanceUsdc(CARRY_TRADER);
-        uint256 maxAllowedBalance = balanceBeforeCheckpoint + 1 - minimumHistoricalCarryUsdc;
+        uint256 balanceAfterCheckpoint = clearinghouse.balanceAssets(CARRY_TRADER);
+        uint256 maxAllowedBalance = balanceBeforeCheckpoint + 1 - minimumHistoricalCarryAssets;
         violation = balanceAfterCheckpoint > maxAllowedBalance;
         forgiven = violation ? balanceAfterCheckpoint - maxAllowedBalance : 0;
 
@@ -289,7 +289,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         ++completedCarryCheckpoints;
         if (violation) {
             checkpointForgaveHistoricalCarry = true;
-            forgivenCarryUsdc = forgiven;
+            forgivenCarryAssets = forgiven;
         }
     }
 
@@ -301,31 +301,31 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         bool violation;
         uint256 disappeared;
 
-        usdc.burn(address(pool), pool.rawAssets());
+        settlementToken.burn(address(pool), pool.rawAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), 0, "empty pool must reach a complete principal wipe");
         {
-            uint256 recapitalizationUsdc = bound(recapFuzz, 1e6, 5000e6);
-            uint256 revenueUsdc = bound(revenueFuzz, 1e6, 5000e6);
-            usdc.mint(address(pool), recapitalizationUsdc + revenueUsdc);
+            uint256 recapitalizationAssets = bound(recapFuzz, 1e6, 5000e6);
+            uint256 revenueAssets = bound(revenueFuzz, 1e6, 5000e6);
+            settlementToken.mint(address(pool), recapitalizationAssets + revenueAssets);
 
             vm.startPrank(address(engine));
             pool.recordClaimantInflow(
-                recapitalizationUsdc,
+                recapitalizationAssets,
                 IHousePool.ClaimantInflowKind.Recapitalization,
                 IHousePool.ClaimantInflowCashMode.CashArrived
             );
             pool.recordClaimantInflow(
-                revenueUsdc, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+                revenueAssets, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
             );
             vm.stopPrank();
 
-            uint256 claimantLedgerBefore = _claimantLedgerUsdc();
+            uint256 claimantLedgerBefore = _claimantLedgerAssets();
             vm.prank(address(juniorVault));
             pool.reconcile();
-            uint256 claimantLedgerAfter = _claimantLedgerUsdc();
+            uint256 claimantLedgerAfter = _claimantLedgerAssets();
             violation = claimantLedgerAfter < claimantLedgerBefore;
             disappeared = violation ? claimantLedgerBefore - claimantLedgerAfter : 0;
         }
@@ -334,7 +334,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         ++completedRecapReconciliations;
         if (violation) {
             pendingRevenueDisappeared = true;
-            disappearedRevenueUsdc = disappeared;
+            disappearedRevenueAssets = disappeared;
         }
     }
 
@@ -342,9 +342,9 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         address trader,
         uint256 amount
     ) internal {
-        usdc.mint(trader, amount);
+        settlementToken.mint(trader, amount);
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
+        settlementToken.approve(address(clearinghouse), amount);
         clearinghouse.deposit(trader, amount);
         vm.stopPrank();
     }
@@ -429,27 +429,27 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         return longPnl + shortPnl;
     }
 
-    function _claimantLedgerUsdc() internal view returns (uint256) {
+    function _claimantLedgerAssets() internal view returns (uint256) {
         return pool.seniorPrincipal() + pool.juniorPrincipal() + pool.unassignedAssets()
-            + pool.pendingRecapitalizationUsdc() + pool.pendingTradingRevenueUsdc();
+            + pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets();
     }
 
-    function _pendingIndexedCarryUsdc(
+    function _pendingIndexedCarryAssets(
         address account
     ) internal view returns (uint256) {
         (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
             return 0;
         }
-        (uint256 borrowBaseUsdc, uint256 startIndex,) = engine.positionCarryState(account);
-        if (borrowBaseUsdc == 0) {
+        (uint256 borrowBaseAssets, uint256 startIndex,) = engine.positionCarryState(account);
+        if (borrowBaseAssets == 0) {
             return 0;
         }
         uint256 endIndex = _currentSideCarryIndex(side);
         if (endIndex <= startIndex) {
             return 0;
         }
-        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, endIndex - startIndex);
     }
 
     function _currentSideCarryIndex(
@@ -461,7 +461,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
             engine.sideCarryIndex(sideIndex),
             engine.sideCarryTimestamp(sideIndex),
             block.timestamp,
-            engine.sideBorrowBaseUsdc(sideIndex),
+            engine.sideBorrowBaseAssets(sideIndex),
             pool.totalAssets(),
             baseCarryBps
         );
@@ -481,7 +481,7 @@ contract PerpValueConservationInvariantTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -491,7 +491,9 @@ contract PerpValueConservationInvariantTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpValueConservationHandler(usdc, engine, clearinghouse, router, pool, juniorVault, baseMockPyth);
+        handler = new PerpValueConservationHandler(
+            settlementToken, engine, clearinghouse, router, pool, juniorVault, baseMockPyth
+        );
 
         bytes4[] memory selectors = new bytes4[](4);
         selectors[0] = handler.failedFullCloseCannotExtractMargin.selector;

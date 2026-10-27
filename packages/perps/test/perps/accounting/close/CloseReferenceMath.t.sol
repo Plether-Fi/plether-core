@@ -121,7 +121,7 @@ contract CloseReferenceMathTest is Test {
         x.otherActionReserve = 1e6;
         x.committedMargin = 100e6;
         x.protectedBounty = 20e6;
-        x.cash = 127e6; // includes one USDC initially free
+        x.cash = 127e6; // includes one settlementToken initially free
         x.vpiDelta = 16_800_000;
         CloseReferenceMath.Values memory v = CloseReferenceMath.calculate(x);
         assertTrue(v.valid);
@@ -394,7 +394,7 @@ contract CloseReferenceMathTest is Test {
         x.lots = 100;
         x.closeLots = 100;
         x.basis = 2500e6;
-        x.price = 25_000_000; // $2,500 notional gives exactly one USDC execution fee.
+        x.price = 25_000_000; // $2,500 notional gives exactly one settlementToken execution fee.
         x.unpaidCarry = 10e6;
         x.protectedBounty = 20e6;
         x.cash = 20e6;

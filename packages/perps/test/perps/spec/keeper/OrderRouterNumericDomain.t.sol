@@ -42,11 +42,11 @@ abstract contract NumericDomainRouterFixture is BasePerpTest {
         request.bounds.executionWindowSeconds = 60;
         request.bounds.allowedExecutionModes = 7;
         request.bounds.expectedConfigHash = book.currentExecutionConfigHash();
-        request.bounds.maxExecutionBountyUsdc = type(uint256).max;
-        request.bounds.maxExecutionNotionalUsdc = type(uint256).max;
-        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
-        request.bounds.maxActionChargeUsdc = type(uint256).max;
-        request.bounds.maxExplicitFeesUsdc = type(uint256).max;
+        request.bounds.maxExecutionBountyAssets = type(uint256).max;
+        request.bounds.maxExecutionNotionalAssets = type(uint256).max;
+        request.bounds.maxGrossAccountDebitAssets = type(uint256).max;
+        request.bounds.maxActionChargeAssets = type(uint256).max;
+        request.bounds.maxExplicitFeesAssets = type(uint256).max;
         request.bounds.maxPostPositionSize = type(uint256).max;
         request.bounds.maxPostLeverageBps = type(uint32).max;
     }
@@ -66,8 +66,8 @@ abstract contract NumericDomainRouterFixture is BasePerpTest {
         assertEq(_remainingCommittedMargin(orderId), 0, "terminal order must release margin");
         IOrderRouterAccounting.AccountReservationView memory reserves = router.getAccountReservations(account);
         assertEq(reserves.pendingOrderCount, 0, "terminal account queue must be empty");
-        assertEq(reserves.committedMarginUsdc, 0);
-        assertEq(reserves.executionBountyUsdc, 0, "terminal bounty must be released");
+        assertEq(reserves.committedMarginAssets, 0);
+        assertEq(reserves.executionBountyAssets, 0, "terminal bounty must be released");
         assertEq(router.accountHeadOrderId(account), 0);
     }
 
@@ -96,11 +96,11 @@ abstract contract NumericDomainRouterFixture is BasePerpTest {
         assertFalse(receipt.priceReachedEngine, "planner rejection must precede Engine application");
         assertEq(receipt.expectedConfigHash, receipt.observedConfigHash, "not a configuration rejection");
         assertEq(receipt.bountyRecipient, KEEPER);
-        assertEq(receipt.bountyUsdc, bounty);
-        assertEq(receipt.bounty.bountyPaidUsdc, bounty);
+        assertEq(receipt.bountyAssets, bounty);
+        assertEq(receipt.bounty.bountyPaidAssets, bounty);
         assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
         assertEq(receipt.economics.postPositionSize, 0);
-        assertEq(receipt.economics.preSettlementBalanceUsdc - receipt.economics.postSettlementBalanceUsdc, bounty);
+        assertEq(receipt.economics.preSettlementBalanceAssets - receipt.economics.postSettlementBalanceAssets, bounty);
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "failed order must not open exposure");
         _assertClean(account, orderId);
@@ -134,7 +134,7 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
 
     function test_StaleOriginalExtremeSize_SingleRejectsSkewAndFollowerExecutes() public {
         (uint64 poison, uint64 follower, uint256 totalBounty) = _stalePoisonQueue();
-        uint256 poisonBounty = book.pendingIntent(poison).executionBountyUsdc;
+        uint256 poisonBounty = book.pendingIntent(poison).executionBountyAssets;
         uint256 keeperBefore = _settlementBalance(KEEPER);
         bytes[] memory updates = _mockPythUpdateData();
         vm.prank(KEEPER);
@@ -152,7 +152,7 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
 
     function test_StaleOriginalExtremeSize_BatchRejectsSkewAndDrainsFollower() public {
         (uint64 poison, uint64 follower, uint256 totalBounty) = _stalePoisonQueue();
-        uint256 poisonBounty = book.pendingIntent(poison).executionBountyUsdc;
+        uint256 poisonBounty = book.pendingIntent(poison).executionBountyAssets;
         uint256 keeperBefore = _settlementBalance(KEEPER);
         bytes[] memory updates = _mockPythUpdateData();
         vm.prank(KEEPER);
@@ -196,7 +196,7 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
         uint64 head = _commit(ALICE, _request(bytes32("unknown-panic"), 10_000e18, 1000e6));
         uint64 follower = _commit(BOB, _request(bytes32("panic-follower"), 10_000e18, 1000e6));
         bytes32 intentHash = keccak256(abi.encode(book.pendingIntent(head)));
-        uint256 bounty = book.pendingIntent(head).executionBountyUsdc;
+        uint256 bounty = book.pendingIntent(head).executionBountyAssets;
         uint256 aliceSettlement = _settlementBalance(ALICE);
         uint256 keeperBefore = _settlementBalance(KEEPER);
         bytes[] memory updates = _mockPythUpdateData();
@@ -213,7 +213,7 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
         assertEq(book.terminalOutcome(head).receiptHash, bytes32(0));
         assertEq(keccak256(abi.encode(book.pendingIntent(head))), intentHash);
         assertEq(_remainingCommittedMargin(head), 1000e6);
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, bounty);
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, bounty);
         assertEq(_settlementBalance(ALICE), aliceSettlement);
         assertEq(_settlementBalance(KEEPER), keeperBefore);
         (uint256 size,,,,,,) = engine.positions(ALICE);
@@ -247,7 +247,7 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
 
     function test_NumericCodeDoesNotBroadenUnknownTypedFailureAcceptance() public {
         uint64 orderId = _commit(ALICE, _request(bytes32("typed-whitelist"), 10_000e18, 1000e6));
-        uint256 bounty = book.pendingIntent(orderId).executionBountyUsdc;
+        uint256 bounty = book.pendingIntent(orderId).executionBountyAssets;
         bytes32 pendingHash = keccak256(abi.encode(book.pendingIntent(orderId)));
         uint256 keeperBefore = _settlementBalance(KEEPER);
         bytes[] memory updates = _mockPythUpdateData();
@@ -271,7 +271,7 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
             assertEq(book.terminalOutcome(orderId).receiptHash, bytes32(0));
             assertEq(keccak256(abi.encode(book.pendingIntent(orderId))), pendingHash);
             assertEq(_remainingCommittedMargin(orderId), 1000e6);
-            assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, bounty);
+            assertEq(router.getAccountReservations(ALICE).executionBountyAssets, bounty);
             assertEq(_settlementBalance(KEEPER), keeperBefore);
         }
         vm.clearMockedCalls();
@@ -290,7 +290,7 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
         assertEq(pending.sizeDelta, 1e39);
         emit log_named_uint("Stale extreme open commit gas", commitGas);
         follower = _commit(BOB, _request(bytes32("healthy-follower"), 10_000e18, 1000e6));
-        bounty = book.pendingIntent(poison).executionBountyUsdc + book.pendingIntent(follower).executionBountyUsdc;
+        bounty = book.pendingIntent(poison).executionBountyAssets + book.pendingIntent(follower).executionBountyAssets;
     }
 
 }
@@ -322,9 +322,9 @@ contract OrderRouterNumericExposureTransitionTest is NumericDomainRouterFixture 
 
     function test_ExposureChangeNumericFailureIsTerminalAndBatchContinues() public {
         (uint64 first, uint64 rejected, uint64 follower) = _queueCrossing();
-        uint256 rejectedBounty = book.pendingIntent(rejected).executionBountyUsdc;
-        uint256 totalBounty = book.pendingIntent(first).executionBountyUsdc + rejectedBounty
-            + book.pendingIntent(follower).executionBountyUsdc;
+        uint256 rejectedBounty = book.pendingIntent(rejected).executionBountyAssets;
+        uint256 totalBounty = book.pendingIntent(first).executionBountyAssets + rejectedBounty
+            + book.pendingIntent(follower).executionBountyAssets;
         uint256 keeperBefore = _settlementBalance(KEEPER);
         bytes[] memory updates = _mockPythUpdateData();
         vm.prank(KEEPER);
@@ -345,7 +345,7 @@ contract OrderRouterNumericExposureTransitionTest is NumericDomainRouterFixture 
         router.executeOrder(first, updates);
         _assertExecuted(first, ALICE, LARGE_SIZE);
         bytes32 pendingHash = keccak256(abi.encode(book.pendingIntent(rejected)));
-        uint256 bounty = book.pendingIntent(rejected).executionBountyUsdc;
+        uint256 bounty = book.pendingIntent(rejected).executionBountyAssets;
         uint256 keeperBefore = _settlementBalance(KEEPER);
         uint256 bobSettlement = _settlementBalance(BOB);
         vm.mockCallRevert(address(book), abi.encodeWithSelector(book.finalize.selector), hex"12345678");
@@ -357,7 +357,7 @@ contract OrderRouterNumericExposureTransitionTest is NumericDomainRouterFixture 
         assertEq(book.terminalOutcome(rejected).receiptHash, bytes32(0));
         assertEq(keccak256(abi.encode(book.pendingIntent(rejected))), pendingHash);
         assertEq(_remainingCommittedMargin(rejected), LARGE_MARGIN);
-        assertEq(router.getAccountReservations(BOB).executionBountyUsdc, bounty);
+        assertEq(router.getAccountReservations(BOB).executionBountyAssets, bounty);
         assertEq(_settlementBalance(BOB), bobSettlement);
         assertEq(_settlementBalance(KEEPER), keeperBefore);
         vm.clearMockedCalls();
@@ -407,10 +407,10 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         vm.prank(KEEPER);
         router.executeOrder(initial, updates);
         _assertExecuted(initial, ALICE, 10_000e18);
-        uint256 beforePledge = clearinghouse.pnlPledgeUsdc(ALICE);
+        uint256 beforePledge = clearinghouse.pnlPledgeAssets(ALICE);
         vm.prank(ALICE);
         engine.addMargin(ALICE, pledge - beforePledge);
-        assertEq(clearinghouse.pnlPledgeUsdc(ALICE), pledge);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), pledge);
         vm.prank(address(engine));
         terminalNavBook.authenticateEngineState(ALICE);
     }
@@ -419,15 +419,15 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         _positionAtPledge(type(uint144).max);
         // Added 100 lots at $1: fee=4e6 and liquidation-reserve increase=10e6; P therefore stays unchanged.
         uint64 orderId = _commit(ALICE, _request(bytes32("cap-equality"), 10_000e18, 14e6));
-        uint256 bounty = book.pendingIntent(orderId).executionBountyUsdc;
+        uint256 bounty = book.pendingIntent(orderId).executionBountyAssets;
         uint256 custody = _settlementBalance(ALICE);
         uint256 keeper = _settlementBalance(KEEPER);
         bytes[] memory updates = _mockPythUpdateData();
         vm.prank(KEEPER);
         router.executeOrder(orderId, updates);
         _assertExecuted(orderId, ALICE, 20_000e18);
-        assertEq(clearinghouse.pnlPledgeUsdc(ALICE), type(uint144).max);
-        assertEq(engine.positionEntryCostUsdcAtoms(ALICE), 20_000e6);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max);
+        assertEq(engine.positionEntryCostAssetAtoms(ALICE), 20_000e6);
         assertEq(custody - _settlementBalance(ALICE), 4e6 + bounty);
         assertEq(_settlementBalance(KEEPER) - keeper, bounty);
         assertEq(router.nextExecuteId(), 0);
@@ -448,7 +448,7 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         assertEq(router.nextCommitId(), nextId);
         assertEq(router.nextExecuteId(), 0);
         assertEq(_settlementBalance(ALICE), custody);
-        assertEq(clearinghouse.pnlPledgeUsdc(ALICE), type(uint144).max);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max);
         assertEq(router.pendingOrderCounts(ALICE), 0);
     }
 
@@ -456,8 +456,8 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         _positionAtPledge(uint256(type(uint144).max) - 1);
         uint64 rejected = _commit(ALICE, _request(bytes32("cap-changed"), 10_000e18, 14e6 + 1));
         uint64 follower = _commit(BOB, _request(bytes32("cap-follower"), 10_000e18, 1000e6));
-        uint256 failedBounty = book.pendingIntent(rejected).executionBountyUsdc;
-        uint256 totalBounty = failedBounty + book.pendingIntent(follower).executionBountyUsdc;
+        uint256 failedBounty = book.pendingIntent(rejected).executionBountyAssets;
+        uint256 totalBounty = failedBounty + book.pendingIntent(follower).executionBountyAssets;
         vm.prank(ALICE);
         engine.addMargin(ALICE, 1);
         uint256 custody = _settlementBalance(ALICE);
@@ -490,9 +490,9 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         );
         assertEq(receipt.economics.postPositionSize, 10_000e18);
         assertEq(receipt.bountyRecipient, KEEPER);
-        assertEq(receipt.bounty.bountyPaidUsdc, failedBounty);
+        assertEq(receipt.bounty.bountyPaidAssets, failedBounty);
         assertEq(custody - _settlementBalance(ALICE), failedBounty);
-        assertEq(clearinghouse.pnlPledgeUsdc(ALICE), type(uint144).max);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max);
         assertEq(_settlementBalance(KEEPER) - keeper, totalBounty);
         _assertClean(ALICE, rejected);
         _assertExecuted(follower, BOB, 10_000e18);

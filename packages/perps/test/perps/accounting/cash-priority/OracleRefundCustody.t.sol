@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 // Category: accounting. All cases assert current documented behavior and are expected to pass.
 // Source of truth: packages/perps/SECURITY.md#router-and-reservation-accounting
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {RejectingRefundReceiver} from "../../support/BehaviorScenarioHelpers.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -15,7 +16,6 @@ import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract RejectedOracleRefundTest is BasePerpTest {
 
@@ -26,18 +26,18 @@ contract RejectedOracleRefundTest is BasePerpTest {
     bytes32 internal constant FEED_B = bytes32(uint256(2));
 
     function setUp() public override {
-        usdc = new MockUSDC();
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        settlementToken = new MockSettlementToken();
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
 
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));

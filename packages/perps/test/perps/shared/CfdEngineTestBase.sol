@@ -24,7 +24,7 @@ struct VpiRebateExtractionSnapshot {
     uint256 settlementBeforeOpen;
     uint256 walletBeforeOpen;
     uint256 poolAssetsBeforeOpen;
-    uint256 rebateReserveUsdc;
+    uint256 rebateReserveAssets;
 }
 
 contract LiquidationAccountingLibHarness {
@@ -32,10 +32,10 @@ contract LiquidationAccountingLibHarness {
     function build(
         uint256 size,
         uint256 oraclePrice,
-        uint256 reachableCollateralUsdc,
-        int256 equityUsdc,
+        uint256 reachableCollateralAssets,
+        int256 equityAssets,
         uint256 maintMarginBps,
-        uint256 minBountyUsdc,
+        uint256 minBountyAssets,
         uint256 bountyBps,
         uint256 keeperShareBps,
         uint256 protocolShareBps,
@@ -44,10 +44,10 @@ contract LiquidationAccountingLibHarness {
         return LiquidationAccountingLib.buildLiquidationState(
             size,
             oraclePrice,
-            reachableCollateralUsdc,
-            equityUsdc,
+            reachableCollateralAssets,
+            equityAssets,
             maintMarginBps,
-            minBountyUsdc,
+            minBountyAssets,
             bountyBps,
             keeperShareBps,
             protocolShareBps,
@@ -60,8 +60,8 @@ contract LiquidationAccountingLibHarness {
 contract CfdEnginePlanLibHarness {
 
     struct OpenWithExistingVpiParams {
-        uint256 settlementBalanceUsdc;
-        uint256 positionMarginUsdc;
+        uint256 settlementBalanceAssets;
+        uint256 positionMarginAssets;
         uint256 currentSize;
         uint256 currentEntryPrice;
         int256 vpiAccrued;
@@ -71,51 +71,51 @@ contract CfdEnginePlanLibHarness {
     }
 
     function planLiquidation(
-        uint256 pnlPledgeUsdc,
-        uint256 traderClaimBalanceUsdc,
+        uint256 pnlPledgeAssets,
+        uint256 traderClaimBalanceAssets,
         uint256 size,
         uint256 entryPrice,
         uint256 oraclePrice
     ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
         CfdEnginePlanTypes.RawSnapshot memory snap;
         uint256 lots = CfdMath.sizeToLots(size);
-        uint256 entryCostUsdcAtoms = lots * entryPrice;
-        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.SHORT, 2e8);
+        uint256 entryCostAssetAtoms = lots * entryPrice;
+        uint256 maxProfitAssets = CfdMath.calculateExactMaxProfit(lots, entryCostAssetAtoms, CfdTypes.Side.SHORT, 2e8);
         snap.position = CfdTypes.Position({
             size: size,
-            margin: pnlPledgeUsdc,
+            margin: pnlPledgeAssets,
             entryPrice: entryPrice,
-            maxProfitUsdc: maxProfitUsdc,
+            maxProfitAssets: maxProfitAssets,
             side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
-        snap.positionEntryCostUsdcAtoms = entryCostUsdcAtoms;
+        snap.positionEntryCostAssetAtoms = entryCostAssetAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
-        snap.shortSide.maxProfitUsdc = maxProfitUsdc;
+        snap.shortSide.maxProfitAssets = maxProfitAssets;
         snap.shortSide.openInterest = size;
-        snap.shortSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
-        snap.shortSide.totalMargin = pnlPledgeUsdc;
-        snap.poolAssetsUsdc = 1_000_000e6;
-        snap.poolCashUsdc = 1;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: pnlPledgeUsdc,
-            totalLockedMarginUsdc: pnlPledgeUsdc,
-            activePositionMarginUsdc: pnlPledgeUsdc,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: 0
+        snap.shortSide.entryNotional = entryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE;
+        snap.shortSide.totalMargin = pnlPledgeAssets;
+        snap.poolAssets = 1_000_000e6;
+        snap.poolCashAssets = 1;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: pnlPledgeAssets,
+            totalLockedMarginAssets: pnlPledgeAssets,
+            activePositionMarginAssets: pnlPledgeAssets,
+            otherLockedMarginAssets: 0,
+            freeSettlementAssets: 0
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: pnlPledgeUsdc,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: pnlPledgeUsdc
+            positionMarginAssets: pnlPledgeAssets,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: 0,
+            totalLockedMarginAssets: pnlPledgeAssets
         });
-        snap.totalTraderClaimBalanceUsdc = traderClaimBalanceUsdc;
-        snap.traderClaimBalanceForAccount = traderClaimBalanceUsdc;
+        snap.totalTraderClaimBalanceAssets = traderClaimBalanceAssets;
+        snap.traderClaimBalanceForAccount = traderClaimBalanceAssets;
         snap.capPrice = 2e8;
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -124,7 +124,7 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -136,53 +136,53 @@ contract CfdEnginePlanLibHarness {
     }
 
     function planLiquidationWithUnsettledCarry(
-        uint256 pnlPledgeUsdc,
-        uint256 freeSettlementUsdc,
-        uint256 traderClaimBalanceUsdc,
-        uint256 unsettledCarryUsdc,
+        uint256 pnlPledgeAssets,
+        uint256 freeSettlementAssets,
+        uint256 traderClaimBalanceAssets,
+        uint256 unsettledCarryAssets,
         uint256 size,
         uint256 entryPrice,
         uint256 oraclePrice
     ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
         CfdEnginePlanTypes.RawSnapshot memory snap;
         uint256 lots = CfdMath.sizeToLots(size);
-        uint256 entryCostUsdcAtoms = lots * entryPrice;
-        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.SHORT, 2e8);
+        uint256 entryCostAssetAtoms = lots * entryPrice;
+        uint256 maxProfitAssets = CfdMath.calculateExactMaxProfit(lots, entryCostAssetAtoms, CfdTypes.Side.SHORT, 2e8);
         snap.position = CfdTypes.Position({
             size: size,
-            margin: pnlPledgeUsdc,
+            margin: pnlPledgeAssets,
             entryPrice: entryPrice,
-            maxProfitUsdc: maxProfitUsdc,
+            maxProfitAssets: maxProfitAssets,
             side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 1,
             vpiAccrued: 0
         });
-        snap.positionEntryCostUsdcAtoms = entryCostUsdcAtoms;
+        snap.positionEntryCostAssetAtoms = entryCostAssetAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
-        snap.shortSide.maxProfitUsdc = maxProfitUsdc;
+        snap.shortSide.maxProfitAssets = maxProfitAssets;
         snap.shortSide.openInterest = size;
-        snap.shortSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
-        snap.shortSide.totalMargin = pnlPledgeUsdc;
-        snap.poolAssetsUsdc = 1_000_000e6;
-        snap.poolCashUsdc = 1;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: pnlPledgeUsdc + freeSettlementUsdc,
-            totalLockedMarginUsdc: pnlPledgeUsdc,
-            activePositionMarginUsdc: pnlPledgeUsdc,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: freeSettlementUsdc
+        snap.shortSide.entryNotional = entryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE;
+        snap.shortSide.totalMargin = pnlPledgeAssets;
+        snap.poolAssets = 1_000_000e6;
+        snap.poolCashAssets = 1;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: pnlPledgeAssets + freeSettlementAssets,
+            totalLockedMarginAssets: pnlPledgeAssets,
+            activePositionMarginAssets: pnlPledgeAssets,
+            otherLockedMarginAssets: 0,
+            freeSettlementAssets: freeSettlementAssets
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: pnlPledgeUsdc,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: pnlPledgeUsdc
+            positionMarginAssets: pnlPledgeAssets,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: 0,
+            totalLockedMarginAssets: pnlPledgeAssets
         });
-        snap.totalTraderClaimBalanceUsdc = traderClaimBalanceUsdc;
-        snap.traderClaimBalanceForAccount = traderClaimBalanceUsdc;
+        snap.totalTraderClaimBalanceAssets = traderClaimBalanceAssets;
+        snap.traderClaimBalanceForAccount = traderClaimBalanceAssets;
         snap.capPrice = 2e8;
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -191,66 +191,66 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
-        snap.unsettledCarryUsdc = unsettledCarryUsdc;
+        snap.unsettledCarryAssets = unsettledCarryAssets;
         snap.executionFeeBps = 4;
         return CfdEnginePlanLib.planLiquidation(snap, oraclePrice);
     }
 
     function planLiquidationWithVpiAccrued(
-        uint256 settlementReachableUsdc,
-        uint256 traderClaimBalanceUsdc,
+        uint256 settlementReachableAssets,
+        uint256 traderClaimBalanceAssets,
         uint256 size,
         uint256 entryPrice,
         uint256 oraclePrice,
         int256 vpiAccrued
     ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
         CfdEnginePlanTypes.RawSnapshot memory snap;
-        uint256 entryCostUsdcAtoms = CfdMath.sizeToLots(size) * entryPrice;
-        uint256 maxProfitUsdc =
-            CfdMath.calculateExactMaxProfit(CfdMath.sizeToLots(size), entryCostUsdcAtoms, CfdTypes.Side.SHORT, 2e8);
-        uint256 vpiReserveUsdc = vpiAccrued < 0 ? uint256(-(vpiAccrued + 1)) + 1 : 0;
+        uint256 entryCostAssetAtoms = CfdMath.sizeToLots(size) * entryPrice;
+        uint256 maxProfitAssets =
+            CfdMath.calculateExactMaxProfit(CfdMath.sizeToLots(size), entryCostAssetAtoms, CfdTypes.Side.SHORT, 2e8);
+        uint256 vpiReserveAssets = vpiAccrued < 0 ? uint256(-(vpiAccrued + 1)) + 1 : 0;
         snap.position = CfdTypes.Position({
             size: size,
-            margin: settlementReachableUsdc,
+            margin: settlementReachableAssets,
             entryPrice: entryPrice,
-            maxProfitUsdc: maxProfitUsdc,
+            maxProfitAssets: maxProfitAssets,
             side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: vpiAccrued
         });
-        snap.positionEntryCostUsdcAtoms = entryCostUsdcAtoms;
+        snap.positionEntryCostAssetAtoms = entryCostAssetAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = oraclePrice;
         snap.lastMarkTime = 1;
-        snap.shortSide.maxProfitUsdc = maxProfitUsdc;
+        snap.shortSide.maxProfitAssets = maxProfitAssets;
         snap.shortSide.openInterest = size;
-        snap.shortSide.entryNotional = entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
-        snap.shortSide.totalMargin = settlementReachableUsdc;
-        snap.poolAssetsUsdc = 1_000_000e6;
-        snap.poolCashUsdc = 1;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: settlementReachableUsdc + vpiReserveUsdc,
-            totalLockedMarginUsdc: settlementReachableUsdc + vpiReserveUsdc,
-            activePositionMarginUsdc: settlementReachableUsdc,
-            otherLockedMarginUsdc: vpiReserveUsdc,
-            freeSettlementUsdc: 0
+        snap.shortSide.entryNotional = entryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE;
+        snap.shortSide.totalMargin = settlementReachableAssets;
+        snap.poolAssets = 1_000_000e6;
+        snap.poolCashAssets = 1;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: settlementReachableAssets + vpiReserveAssets,
+            totalLockedMarginAssets: settlementReachableAssets + vpiReserveAssets,
+            activePositionMarginAssets: settlementReachableAssets,
+            otherLockedMarginAssets: vpiReserveAssets,
+            freeSettlementAssets: 0
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: settlementReachableUsdc,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: vpiReserveUsdc,
-            totalLockedMarginUsdc: settlementReachableUsdc + vpiReserveUsdc
+            positionMarginAssets: settlementReachableAssets,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: vpiReserveAssets,
+            totalLockedMarginAssets: settlementReachableAssets + vpiReserveAssets
         });
-        snap.actionReserveUsdc = vpiReserveUsdc;
-        snap.vpiRebateReserveUsdc = vpiReserveUsdc;
-        snap.totalTraderClaimBalanceUsdc = traderClaimBalanceUsdc;
-        snap.traderClaimBalanceForAccount = traderClaimBalanceUsdc;
+        snap.actionReserveAssets = vpiReserveAssets;
+        snap.vpiRebateReserveAssets = vpiReserveAssets;
+        snap.totalTraderClaimBalanceAssets = traderClaimBalanceAssets;
+        snap.traderClaimBalanceForAccount = traderClaimBalanceAssets;
         snap.capPrice = 2e8;
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -259,7 +259,7 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -293,60 +293,60 @@ contract CfdEnginePlanLibHarness {
         OpenWithExistingVpiParams calldata params
     ) private pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         uint256 currentLots = CfdMath.sizeToLots(params.currentSize);
-        uint256 currentEntryCostUsdcAtoms = currentLots * params.currentEntryPrice;
-        uint256 currentMaxProfitUsdc =
-            CfdMath.calculateExactMaxProfit(currentLots, currentEntryCostUsdcAtoms, CfdTypes.Side.LONG, 2e8);
-        uint256 vpiReserveUsdc = params.vpiAccrued < 0 ? uint256(-(params.vpiAccrued + 1)) + 1 : 0;
-        uint256 liquidationReserveUsdc = (currentLots * params.price * 10) / 10_000;
-        if (liquidationReserveUsdc < 1e6) {
-            liquidationReserveUsdc = 1e6;
+        uint256 currentEntryCostAssetAtoms = currentLots * params.currentEntryPrice;
+        uint256 currentMaxProfitAssets =
+            CfdMath.calculateExactMaxProfit(currentLots, currentEntryCostAssetAtoms, CfdTypes.Side.LONG, 2e8);
+        uint256 vpiReserveAssets = params.vpiAccrued < 0 ? uint256(-(params.vpiAccrued + 1)) + 1 : 0;
+        uint256 liquidationReserveAssets = (currentLots * params.price * 10) / 10_000;
+        if (liquidationReserveAssets < 1e6) {
+            liquidationReserveAssets = 1e6;
         }
-        uint256 totalSettlementUsdc = params.settlementBalanceUsdc + vpiReserveUsdc + liquidationReserveUsdc;
-        uint256 totalLockedUsdc = params.positionMarginUsdc + vpiReserveUsdc + liquidationReserveUsdc;
+        uint256 totalSettlementAssets = params.settlementBalanceAssets + vpiReserveAssets + liquidationReserveAssets;
+        uint256 totalLockedAssets = params.positionMarginAssets + vpiReserveAssets + liquidationReserveAssets;
         snap.account = address(uint160(0x1234));
         snap.position = CfdTypes.Position({
             size: params.currentSize,
-            margin: params.positionMarginUsdc,
+            margin: params.positionMarginAssets,
             entryPrice: params.currentEntryPrice,
-            maxProfitUsdc: currentMaxProfitUsdc,
+            maxProfitAssets: currentMaxProfitAssets,
             side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: params.vpiAccrued
         });
-        snap.positionEntryCostUsdcAtoms = currentEntryCostUsdcAtoms;
+        snap.positionEntryCostAssetAtoms = currentEntryCostAssetAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = params.price;
         snap.lastMarkTime = 1;
         snap.longSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: currentMaxProfitUsdc,
+            maxProfitAssets: currentMaxProfitAssets,
             openInterest: params.currentSize,
-            entryNotional: currentEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
-            totalMargin: params.positionMarginUsdc,
-            borrowBaseUsdc: 0,
+            entryNotional: currentEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
+            totalMargin: params.positionMarginAssets,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
         snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseUsdc: 0, carryIndex: 0
+            maxProfitAssets: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseAssets: 0, carryIndex: 0
         });
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: totalSettlementUsdc,
-            totalLockedMarginUsdc: totalLockedUsdc,
-            activePositionMarginUsdc: params.positionMarginUsdc,
-            otherLockedMarginUsdc: vpiReserveUsdc + liquidationReserveUsdc,
-            freeSettlementUsdc: params.settlementBalanceUsdc > params.positionMarginUsdc
-                ? params.settlementBalanceUsdc - params.positionMarginUsdc
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: totalSettlementAssets,
+            totalLockedMarginAssets: totalLockedAssets,
+            activePositionMarginAssets: params.positionMarginAssets,
+            otherLockedMarginAssets: vpiReserveAssets + liquidationReserveAssets,
+            freeSettlementAssets: params.settlementBalanceAssets > params.positionMarginAssets
+                ? params.settlementBalanceAssets - params.positionMarginAssets
                 : 0
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: params.positionMarginUsdc,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: vpiReserveUsdc,
-            totalLockedMarginUsdc: totalLockedUsdc
+            positionMarginAssets: params.positionMarginAssets,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: vpiReserveAssets,
+            totalLockedMarginAssets: totalLockedAssets
         });
-        snap.liquidationReserveUsdc = liquidationReserveUsdc;
-        snap.actionReserveUsdc = vpiReserveUsdc;
-        snap.vpiRebateReserveUsdc = vpiReserveUsdc;
+        snap.liquidationReserveAssets = liquidationReserveAssets;
+        snap.actionReserveAssets = vpiReserveAssets;
+        snap.vpiRebateReserveAssets = vpiReserveAssets;
         snap.capPrice = 2e8;
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -355,42 +355,44 @@ contract CfdEnginePlanLibHarness {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
-        snap.poolAssetsUsdc = 1_000_000e6;
-        snap.poolCashUsdc = 1_000_000e6;
+        snap.poolAssets = 1_000_000e6;
+        snap.poolCashAssets = 1_000_000e6;
     }
 
 }
 
 abstract contract CfdEngineTestBase is BasePerpTest {
 
-    event FrozenCloseSpreadSettled(address indexed account, uint256 assessedUsdc, uint256 paidUsdc, uint256 waivedUsdc);
-    event PriceLossWrittenOff(address indexed account, uint256 amountUsdc);
+    event FrozenCloseSpreadSettled(
+        address indexed account, uint256 assessedAssets, uint256 paidAssets, uint256 waivedAssets
+    );
+    event PriceLossWrittenOff(address indexed account, uint256 amountAssets);
     event ClaimantInflowAccounted(
         address indexed caller,
         IHousePool.ClaimantInflowKind kind,
         IHousePool.ClaimantInflowCashMode cashMode,
-        uint256 amountUsdc
+        uint256 amountAssets
     );
 
     using stdStorage for StdStorage;
 
     function _seedAuthenticatedTraderClaim(
         address account,
-        uint256 claimUsdc
+        uint256 claimAssets
     ) internal {
         bytes32 oldCurveHash = terminalNavBook.curveHashOf(account);
-        uint256 oldAccountClaimUsdc = engine.traderClaimBalanceUsdc(account);
-        uint256 oldTotalClaimUsdc = engine.totalTraderClaimBalanceUsdc();
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
-            .checked_write(claimUsdc);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()")
-            .checked_write(oldTotalClaimUsdc - oldAccountClaimUsdc + claimUsdc);
+        uint256 oldAccountClaimAssets = engine.traderClaimBalanceAssets(account);
+        uint256 oldTotalClaimAssets = engine.totalTraderClaimBalanceAssets();
+        stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(account)
+            .checked_write(claimAssets);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()")
+            .checked_write(oldTotalClaimAssets - oldAccountClaimAssets + claimAssets);
         vm.prank(address(engine));
         terminalNavBook.syncFromEngine(account, oldCurveHash);
         vm.prank(address(engine));
@@ -414,14 +416,14 @@ abstract contract CfdEngineTestBase is BasePerpTest {
 
     function _maxLiabilityAfterClose(
         CfdTypes.Side side,
-        uint256 maxProfitReductionUsdc
+        uint256 maxProfitReductionAssets
     ) internal view returns (uint256) {
         uint256 longMaxProfit = _sideMaxProfit(CfdTypes.Side.LONG);
         uint256 shortMaxProfit = _sideMaxProfit(CfdTypes.Side.SHORT);
         if (side == CfdTypes.Side.LONG) {
-            longMaxProfit -= maxProfitReductionUsdc;
+            longMaxProfit -= maxProfitReductionAssets;
         } else {
-            shortMaxProfit -= maxProfitReductionUsdc;
+            shortMaxProfit -= maxProfitReductionAssets;
         }
         return longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
     }
@@ -433,12 +435,12 @@ abstract contract CfdEngineTestBase is BasePerpTest {
         if (size == 0) {
             return 0;
         }
-        (uint256 borrowBaseUsdc, uint256 startIndex,) = engine.positionCarryState(account);
+        (uint256 borrowBaseAssets, uint256 startIndex,) = engine.positionCarryState(account);
         uint256 endIndex = _currentSideCarryIndex(side);
         if (endIndex <= startIndex) {
             return 0;
         }
-        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, endIndex - startIndex);
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
@@ -449,7 +451,7 @@ abstract contract CfdEngineTestBase is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -516,19 +518,19 @@ abstract contract CfdEngineTestBase is BasePerpTest {
     ) internal {
         bytes32 oldCurveHash = terminalNavBook.curveHashOf(account);
         IMarginClearinghouse.LockedMarginBuckets memory lockedBefore = clearinghouse.getLockedMarginBuckets(account);
-        uint256 nonPnlLockedUsdc = lockedBefore.totalLockedMarginUsdc - lockedBefore.positionMarginUsdc;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(account)
-            .checked_write(nonPnlLockedUsdc);
+        uint256 nonPnlLockedAssets = lockedBefore.totalLockedMarginAssets - lockedBefore.positionMarginAssets;
+        stdstore.target(address(clearinghouse)).sig("balanceAssets(address)").with_key(account)
+            .checked_write(nonPnlLockedAssets);
         bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(3)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
         vm.prank(address(engine));
         terminalNavBook.syncFromEngine(account, oldCurveHash);
 
         IMarginClearinghouse.LockedMarginBuckets memory locked = clearinghouse.getLockedMarginBuckets(account);
-        assertEq(locked.positionMarginUsdc, 0, "Test must reduce reachable collateral below the terminal close fee");
+        assertEq(locked.positionMarginAssets, 0, "Test must reduce reachable collateral below the terminal close fee");
         assertEq(
-            clearinghouse.balanceUsdc(account),
-            locked.totalLockedMarginUsdc,
+            clearinghouse.balanceAssets(account),
+            locked.totalLockedMarginAssets,
             "Synthetic shortfall must preserve backing for every non-PnL locked bucket"
         );
     }
@@ -567,9 +569,9 @@ abstract contract CfdEngineTestBase is BasePerpTest {
 
 }
 
-contract VpiMockUSDC6 is ERC20 {
+contract VpiMockSettlementToken6 is ERC20 {
 
-    constructor() ERC20("Mock USDC", "USDC") {}
+    constructor() ERC20("Mock Settlement Token", "SETTLEMENT") {}
 
     function decimals() public pure override returns (uint8) {
         return 6;

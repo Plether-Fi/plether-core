@@ -1,6 +1,6 @@
 {
   "name": "@plether-fi/perps-aa-client",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": false,
   "license": "AGPL-3.0-only",
   "repository": {
@@ -29,6 +29,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"

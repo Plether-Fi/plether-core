@@ -21,7 +21,7 @@ import {
 
 const owner = "0x1111111111111111111111111111111111111111" as Address;
 const account = "0x2222222222222222222222222222222222222222" as Address;
-const usdc = "0x3333333333333333333333333333333333333333" as Address;
+const settlementToken = "0x3333333333333333333333333333333333333333" as Address;
 const clearinghouse = "0x4444444444444444444444444444444444444444" as Address;
 const router = "0x5555555555555555555555555555555555555555" as Address;
 const engine = "0x6666666666666666666666666666666666666666" as Address;
@@ -32,7 +32,7 @@ describe("perps action builders", () => {
   it("builds the atomic authorized-deposit batch", () => {
     const action = buildAuthorizedDepositAction({
       account,
-      usdc,
+      settlementToken,
       clearinghouse,
       authorization: {
         from: owner,
@@ -48,7 +48,7 @@ describe("perps action builders", () => {
     expect(action.kind).toBe("deposit");
     expect(action.account).toBe(account);
     expect(action.calls).toHaveLength(3);
-    expect(action.calls.map((item) => item.to)).toEqual([usdc, usdc, clearinghouse]);
+    expect(action.calls.map((item) => item.to)).toEqual([settlementToken, settlementToken, clearinghouse]);
     expect(action.calls.every((item) => item.value === 0n)).toBe(true);
 
     const receive = decodeFunctionData({
@@ -84,7 +84,7 @@ describe("perps action builders", () => {
     expect(() =>
       buildAuthorizedDepositAction({
         account,
-        usdc,
+        settlementToken,
         clearinghouse,
         authorization: {
           from: owner,
@@ -99,13 +99,13 @@ describe("perps action builders", () => {
     ).toThrow(/recipient must be the canonical smart account/i);
   });
 
-  it("builds the Circle-compatible typed data without assuming token domain values", () => {
+  it("builds typed data using the configured token domain", () => {
     const typedData = buildReceiveWithAuthorizationTypedData(
       {
-        name: "USD Coin",
+        name: "Example Settlement Token",
         version: "2",
         chainId: 421614,
-        verifyingContract: usdc,
+        verifyingContract: settlementToken,
       },
       {
         from: owner,
@@ -118,7 +118,7 @@ describe("perps action builders", () => {
     );
 
     expect(typedData.primaryType).toBe("ReceiveWithAuthorization");
-    expect(typedData.domain.verifyingContract).toBe(usdc);
+    expect(typedData.domain.verifyingContract).toBe(settlementToken);
     expect(typedData.message.to).toBe(account);
   });
 
@@ -173,7 +173,7 @@ describe("perps action builders", () => {
     const action = buildWithdrawToOwnerAction({
       account,
       owner,
-      usdc,
+      settlementToken,
       clearinghouse,
       amount: 12_345_678n,
     });
@@ -181,7 +181,7 @@ describe("perps action builders", () => {
     expect(action.kind).toBe("withdraw-to-owner");
     expect(action.calls).toHaveLength(2);
     expect(action.calls.map((item) => item.value)).toEqual([0n, 0n]);
-    expect(action.calls.map((item) => item.to)).toEqual([clearinghouse, usdc]);
+    expect(action.calls.map((item) => item.to)).toEqual([clearinghouse, settlementToken]);
     expect(
       decodeFunctionData({
         abi: marginClearinghouseTraderAbi,
@@ -198,7 +198,7 @@ describe("perps action builders", () => {
       buildWithdrawToOwnerAction({
         account,
         owner: account,
-        usdc,
+        settlementToken,
         clearinghouse,
         amount: 1n,
       }),

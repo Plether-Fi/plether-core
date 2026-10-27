@@ -173,13 +173,13 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         OrderV3Types.OrderReceipt memory twin,
         uint256 startingState
     ) private {
-        uint256 gross = twin.economics.grossAccountDebitUsdc;
-        uint256 custody = clearinghouse.balanceUsdc(ACCOUNT);
-        uint256 boundary = row.action == 0 ? custody - gross : twin.economics.postSettlementBalanceUsdc;
+        uint256 gross = twin.economics.grossAccountDebitAssets;
+        uint256 custody = clearinghouse.balanceAssets(ACCOUNT);
+        uint256 boundary = row.action == 0 ? custody - gross : twin.economics.postSettlementBalanceAssets;
         for (uint8 adjacent; adjacent < 3; adjacent++) {
             OrderV3Types.OrderRequest memory request = _request(row);
-            request.bounds.maxGrossAccountDebitUsdc = gross;
-            request.bounds.minPostSettlementBalanceUsdc =
+            request.bounds.maxGrossAccountDebitAssets = gross;
+            request.bounds.minPostSettlementBalanceAssets =
                 adjacent == 0 ? boundary : adjacent == 1 ? boundary + 1 : boundary - 1;
             State memory before_ = _state();
             if (row.action != 0) {
@@ -193,7 +193,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                         IOrderRouterErrors.OrderRouter__SettlementFloorFunding.selector,
                         router.nextCommitId(),
                         custody,
-                        request.bounds.minPostSettlementBalanceUsdc,
+                        request.bounds.minPostSettlementBalanceAssets,
                         gross
                     )
                 );
@@ -230,7 +230,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
             assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "Public seed must execute");
             (uint256 size,,,,,,) = engine.positions(ACCOUNT);
             assertEq(size, request.sizeDelta);
-            assertEq(engine.positionEntryCostUsdcAtoms(ACCOUNT), row.action == 1 ? NOTIONAL : 2 * NOTIONAL);
+            assertEq(engine.positionEntryCostAssetAtoms(ACCOUNT), row.action == 1 ? NOTIONAL : 2 * NOTIONAL);
         }
         if (row.regime != 0) {
             vm.warp(BEFORE_FAD);
@@ -253,14 +253,14 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
             executionWindowSeconds: 3600,
             allowedExecutionModes: 7,
             expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
-            maxExecutionBountyUsdc: type(uint256).max,
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max,
+            maxExecutionBountyAssets: type(uint256).max,
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max,
             maxPostPositionSize: type(uint256).max,
-            minPostSettlementBalanceUsdc: 0,
-            minPostPositionEquityUsdc: 0,
+            minPostSettlementBalanceAssets: 0,
+            minPostPositionEquityAssets: 0,
             maxPostLeverageBps: type(uint32).max
         });
     }
@@ -284,7 +284,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         uint64 id = router.commitOrder(request);
         // Close commitment can mutate carry: rollback assertions deliberately start AFTER commitment.
         State memory before_ = _state();
-        uint256 bounty = router.lifecycleBook().pendingIntent(id).executionBountyUsdc;
+        uint256 bounty = router.lifecycleBook().pendingIntent(id).executionBountyAssets;
         if (executionDelay != 0) {
             vm.warp(vm.getBlockTimestamp() + executionDelay);
         }
@@ -311,45 +311,50 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         assertEq(result.receiptHash, router.lifecycleBook().terminalOutcome(id).receiptHash);
         assertEq(uint8(receipt.executionMode), row.regime + 1);
         assertEq(receipt.executor, row.self ? ACCOUNT : KEEPER);
-        assertEq(receipt.bountyRecipient, receipt.bountyUsdc == 0 ? address(0) : row.self ? ACCOUNT : KEEPER);
+        assertEq(receipt.bountyRecipient, receipt.bountyAssets == 0 ? address(0) : row.self ? ACCOUNT : KEEPER);
         assertEq(
             uint8(receipt.bountyDisposition),
-            uint8(receipt.bountyUsdc == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
+            uint8(receipt.bountyAssets == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
         );
-        assertEq(receipt.bountyUsdc, bounty);
-        assertEq(clearinghouse.balanceUsdc(KEEPER), before_.keeper + (row.self ? 0 : bounty));
+        assertEq(receipt.bountyAssets, bounty);
+        assertEq(clearinghouse.balanceAssets(KEEPER), before_.keeper + (row.self ? 0 : bounty));
         assertEq(router.pendingOrderCounts(ACCOUNT), 0);
         assertEq(router.nextExecuteId(), 0);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+        assertEq(clearinghouse.totalBountyReservationsAssets(ACCOUNT), 0);
         IOrderRouterAccounting.AccountReservationView memory reservations = router.getAccountReservations(ACCOUNT);
-        assertEq(reservations.committedMarginUsdc, 0);
-        assertEq(reservations.executionBountyUsdc, 0);
+        assertEq(reservations.committedMarginAssets, 0);
+        assertEq(reservations.executionBountyAssets, 0);
         assertEq(router.lifecycleBook().pendingIntent(id).account, address(0));
         if (attempt.rejected) {
             _assertFailure(receipt, request, attempt.kind, attempt.actual);
             _assertExecutionRollback(before_, row.self ? 0 : bounty);
-            assertEq(receipt.economics.postSettlementBalanceUsdc, clearinghouse.balanceUsdc(ACCOUNT));
+            assertEq(receipt.economics.postSettlementBalanceAssets, clearinghouse.balanceAssets(ACCOUNT));
             assertEq(receipt.economics.postPositionSize, before_.size);
-            assertEq(receipt.economics.postPositionMarginUsdc, before_.pledge);
-            assertEq(receipt.economics.postTraderClaimBalanceUsdc, before_.claim);
-            assertEq(receipt.economics.executionNotionalUsdc, 0);
-            assertEq(receipt.economics.realizedPnlUsdc, 0);
-            assertEq(receipt.economics.vpiUsdc, 0);
-            assertEq(receipt.economics.executionFeeUsdc, 0);
-            assertEq(receipt.economics.frozenSpreadUsdc, 0);
+            assertEq(receipt.economics.postPositionMarginAssets, before_.pledge);
+            assertEq(receipt.economics.postTraderClaimBalanceAssets, before_.claim);
+            assertEq(receipt.economics.executionNotionalAssets, 0);
+            assertEq(receipt.economics.realizedPnlAssets, 0);
+            assertEq(receipt.economics.vpiAssets, 0);
+            assertEq(receipt.economics.executionFeeAssets, 0);
+            assertEq(receipt.economics.frozenSpreadAssets, 0);
         } else {
             assertEq(uint8(receipt.reason), uint8(OrderV3Types.TerminalReason.Executed));
-            assertEq(clearinghouse.balanceUsdc(ACCOUNT), receipt.economics.postSettlementBalanceUsdc);
+            assertEq(clearinghouse.balanceAssets(ACCOUNT), receipt.economics.postSettlementBalanceAssets);
             (uint256 size, uint256 margin,,,,,) = engine.positions(ACCOUNT);
             assertEq(size, receipt.economics.postPositionSize);
-            assertEq(margin, receipt.economics.postPositionMarginUsdc);
+            assertEq(margin, receipt.economics.postPositionMarginAssets);
             if (attempt.simple) {
                 assertEq(
-                    clearinghouse.balanceUsdc(engine.protocolTreasury()),
-                    before_.treasury + receipt.economics.executionFeeUsdc
+                    clearinghouse.balanceAssets(engine.protocolTreasury()),
+                    before_.treasury + receipt.economics.executionFeeAssets
                 );
-                assertEq(usdc.balanceOf(address(pool)), before_.poolCash + receipt.economics.frozenSpreadUsdc);
-                assertEq(usdc.balanceOf(address(clearinghouse)), before_.custody - receipt.economics.frozenSpreadUsdc);
+                assertEq(
+                    settlementToken.balanceOf(address(pool)), before_.poolCash + receipt.economics.frozenSpreadAssets
+                );
+                assertEq(
+                    settlementToken.balanceOf(address(clearinghouse)),
+                    before_.custody - receipt.economics.frozenSpreadAssets
+                );
             }
         }
     }
@@ -393,28 +398,30 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         uint256 remaining = row.action == 3 ? 0 : row.action == 1 ? 2 * SIZE : SIZE;
         uint256 pledge = row.action == 3 ? 0 : row.action == 1 ? 3_977_600_000 : 1_988_800_000;
         assertEq(receipt.executionPrice, MARK);
-        assertEq(receipt.bountyUsdc, bounty, "$0.80 golden bounty");
+        assertEq(receipt.bountyAssets, bounty, "$0.80 golden bounty");
         OrderV3Types.OrderEconomics memory e = receipt.economics;
-        assertEq(e.executionNotionalUsdc, multiplicity * NOTIONAL);
-        assertEq(e.executionFeeUsdc, fee);
-        assertEq(e.frozenSpreadUsdc, spread);
-        assertEq(e.grossAccountDebitUsdc, fee + spread + bounty);
-        assertEq(e.actionChargeAssessedUsdc, fee + spread);
-        assertEq(e.actionChargeCollectedUsdc, fee + spread);
+        assertEq(e.executionNotionalAssets, multiplicity * NOTIONAL);
+        assertEq(e.executionFeeAssets, fee);
+        assertEq(e.frozenSpreadAssets, spread);
+        assertEq(e.grossAccountDebitAssets, fee + spread + bounty);
+        assertEq(e.actionChargeAssessedAssets, fee + spread);
+        assertEq(e.actionChargeCollectedAssets, fee + spread);
         assertEq(e.postPositionSize, remaining);
-        assertEq(e.postPositionMarginUsdc, pledge);
-        assertEq(e.postPositionEquityUsdc, int256(pledge));
+        assertEq(e.postPositionMarginAssets, pledge);
+        assertEq(e.postPositionEquityAssets, int256(pledge));
         assertEq(e.postLeverageBps, row.action == 3 ? 0 : 40_226);
-        assertEq(e.postSettlementBalanceUsdc, FUNDING - seedFees - seedBounty - fee - spread - (row.self ? 0 : bounty));
-        assertEq(e.realizedPnlUsdc, 0);
-        assertEq(e.vpiUsdc, 0);
-        assertEq(e.carryUsdc, 0);
-        assertEq(e.postTraderClaimBalanceUsdc, 0);
-        assertEq(engine.positionEntryCostUsdcAtoms(ACCOUNT), remaining / 1e20 * MARK);
+        assertEq(
+            e.postSettlementBalanceAssets, FUNDING - seedFees - seedBounty - fee - spread - (row.self ? 0 : bounty)
+        );
+        assertEq(e.realizedPnlAssets, 0);
+        assertEq(e.vpiAssets, 0);
+        assertEq(e.carryAssets, 0);
+        assertEq(e.postTraderClaimBalanceAssets, 0);
+        assertEq(engine.positionEntryCostAssetAtoms(ACCOUNT), remaining / 1e20 * MARK);
     }
 
-    /// @dev Offline rational potential vectors: C(S)=S²/(100D), D starts at 1,002,000 USDC.
-    /// Seed: 80,000-USDC skew costs 63.872255; at D=1,002,063.872255, moving to 88,000 costs
+    /// @dev Offline rational potential vectors: C(S)=S²/(100D), D starts at 1,002,000 settlement token.
+    /// Seed: 80,000-settlement token skew costs 63.872255; at D=1,002,063.872255, moving to 88,000 costs
     /// 13.412318 and moving to 72,000 rebates 12.134955. These are constants, not evaluator outputs.
     struct VpiGolden {
         int256 vpi;
@@ -444,7 +451,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         _setRiskParams(params);
         _fundTrader(address(0xB0A3), 100_000e6);
         _open(address(0xB0A3), CfdTypes.Side.LONG, 100_000e18, 20_000e6, MARK);
-        assertEq(usdc.balanceOf(address(pool)), 1_002_063_872_255, "Independent seed potential");
+        assertEq(settlementToken.balanceOf(address(pool)), 1_002_063_872_255, "Independent seed potential");
         Row memory row = Row(0, 0, healing ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG, self);
         _prepare(row);
         VpiGolden memory golden;
@@ -477,7 +484,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
             OrderV3Types.OrderRequest memory request = _request(row);
             _setLimit(request, kind, limit);
             if (kind == 7) {
-                request.bounds.maxGrossAccountDebitUsdc = golden.gross;
+                request.bounds.maxGrossAccountDebitAssets = golden.gross;
                 if (adjacent == 1) {
                     State memory before_ = _state();
                     vm.expectRevert(
@@ -512,15 +519,15 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
             OrderV3Types.OrderReceipt memory receipt =
                 _run(row, request, Attempt(adjacent == 1, kind, actual, MARK, false));
             if (adjacent != 1) {
-                assertEq(receipt.economics.vpiUsdc, golden.vpi);
-                assertEq(receipt.economics.executionFeeUsdc, FEE);
-                assertEq(receipt.economics.grossAccountDebitUsdc, golden.gross);
-                assertEq(receipt.economics.actionChargeAssessedUsdc, golden.charge);
-                assertEq(receipt.economics.postSettlementBalanceUsdc, golden.settlement);
+                assertEq(receipt.economics.vpiAssets, golden.vpi);
+                assertEq(receipt.economics.executionFeeAssets, FEE);
+                assertEq(receipt.economics.grossAccountDebitAssets, golden.gross);
+                assertEq(receipt.economics.actionChargeAssessedAssets, golden.charge);
+                assertEq(receipt.economics.postSettlementBalanceAssets, golden.settlement);
                 assertEq(receipt.economics.postPositionSize, SIZE);
-                assertEq(receipt.economics.realizedPnlUsdc, 0);
-                assertEq(receipt.economics.carryUsdc, 0);
-                assertEq(clearinghouse.vpiRebateReserveUsdc(ACCOUNT), golden.vpi < 0 ? uint256(-golden.vpi) : 0);
+                assertEq(receipt.economics.realizedPnlAssets, 0);
+                assertEq(receipt.economics.carryAssets, 0);
+                assertEq(clearinghouse.vpiRebateReserveAssets(ACCOUNT), golden.vpi < 0 ? uint256(-golden.vpi) : 0);
             }
             assertTrue(vm.revertToState(startingState));
         }
@@ -531,11 +538,11 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         // A real partial close realizes $1,000 profit with no pool cash and leaves a $997.20 same-account claim after its $2.80 fee.
         Row memory row = Row(2, 0, CfdTypes.Side.LONG, false);
         _prepare(row);
-        uint256 cashShock = usdc.balanceOf(address(pool));
-        usdc.burn(address(pool), cashShock);
+        uint256 cashShock = settlementToken.balanceOf(address(pool));
+        settlementToken.burn(address(pool), cashShock);
         _close(ACCOUNT, CfdTypes.Side.LONG, SIZE, 70_000_000);
-        assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 997_200_000);
-        usdc.mint(address(pool), cashShock);
+        assertEq(engine.traderClaimBalanceAssets(ACCOUNT), 997_200_000);
+        settlementToken.mint(address(pool), cashShock);
         vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
         engine.updateMarkPrice(90_000_000, uint64(vm.getBlockTimestamp()));
@@ -548,18 +555,18 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
             OrderV3Types.OrderRequest memory request = _request(row);
             request.sizeDelta = SIZE;
             request.targetPrice = 90_000_000;
-            request.bounds.maxGrossAccountDebitUsdc = adjacent == 0 ? actual : adjacent == 1 ? actual - 1 : actual + 1;
-            uint256 settlement = clearinghouse.balanceUsdc(ACCOUNT);
+            request.bounds.maxGrossAccountDebitAssets = adjacent == 0 ? actual : adjacent == 1 ? actual - 1 : actual + 1;
+            uint256 settlement = clearinghouse.balanceAssets(ACCOUNT);
             OrderV3Types.OrderReceipt memory receipt =
                 _run(row, request, Attempt(adjacent == 1, 3, actual, 90_000_000, false));
             if (adjacent != 1) {
-                assertEq(receipt.economics.realizedPnlUsdc, -1000e6);
-                assertEq(receipt.economics.close.pricePnlClaimConsumedUsdc, 997_200_000);
-                assertEq(receipt.economics.close.pricePnlPledgeConsumedUsdc, 2_800_000);
-                assertEq(receipt.economics.grossAccountDebitUsdc, actual);
-                assertEq(receipt.economics.actionChargeAssessedUsdc, 3_600_000);
-                assertEq(receipt.economics.postSettlementBalanceUsdc, settlement - 6_400_000);
-                assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 0);
+                assertEq(receipt.economics.realizedPnlAssets, -1000e6);
+                assertEq(receipt.economics.close.pricePnlClaimConsumedAssets, 997_200_000);
+                assertEq(receipt.economics.close.pricePnlPledgeConsumedAssets, 2_800_000);
+                assertEq(receipt.economics.grossAccountDebitAssets, actual);
+                assertEq(receipt.economics.actionChargeAssessedAssets, 3_600_000);
+                assertEq(receipt.economics.postSettlementBalanceAssets, settlement - 6_400_000);
+                assertEq(engine.traderClaimBalanceAssets(ACCOUNT), 0);
                 assertEq(receipt.economics.postPositionSize, 0);
             }
             assertTrue(vm.revertToState(startingState));
@@ -621,20 +628,22 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                 OrderV3Types.OrderReceipt memory receipt =
                     _run(row, request, Attempt(adjacent == 1, kind, actual, MARK, false));
                 assertEq(
-                    receipt.commitment.carryCollectedUsdc, commitmentCarry, "Commitment pays historical carry once"
+                    receipt.commitment.carryCollectedAssets, commitmentCarry, "Commitment pays historical carry once"
                 );
                 if (adjacent != 1) {
-                    assertEq(receipt.economics.carryUsdc, int256(commitmentCarry + delayedCarry));
-                    assertEq(receipt.economics.actionChargeAssessedUsdc, FEE + commitmentCarry + delayedCarry);
-                    assertEq(receipt.economics.grossAccountDebitUsdc, FEE + commitmentCarry + delayedCarry);
+                    assertEq(receipt.economics.carryAssets, int256(commitmentCarry + delayedCarry));
+                    assertEq(receipt.economics.actionChargeAssessedAssets, FEE + commitmentCarry + delayedCarry);
+                    assertEq(receipt.economics.grossAccountDebitAssets, FEE + commitmentCarry + delayedCarry);
                     assertEq(
-                        receipt.economics.postSettlementBalanceUsdc,
+                        receipt.economics.postSettlementBalanceAssets,
                         before_.settlement - FEE - commitmentCarry - delayedCarry
                     );
-                    assertEq(usdc.balanceOf(address(pool)), before_.poolCash + commitmentCarry + delayedCarry);
+                    assertEq(
+                        settlementToken.balanceOf(address(pool)), before_.poolCash + commitmentCarry + delayedCarry
+                    );
                     assertEq(receipt.economics.postPositionSize, SIZE);
-                    assertEq(receipt.economics.realizedPnlUsdc, 0);
-                    assertEq(receipt.economics.vpiUsdc, 0);
+                    assertEq(receipt.economics.realizedPnlAssets, 0);
+                    assertEq(receipt.economics.vpiAssets, 0);
                 }
                 assertTrue(vm.revertToState(startingState));
             }
@@ -648,7 +657,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
     ) private {
         OrderV3Types.OrderRequest memory request = _request(row);
         if (kind == 8) {
-            request.bounds.minPostPositionEquityUsdc = type(uint256).max;
+            request.bounds.minPostPositionEquityAssets = type(uint256).max;
         } else {
             request.bounds.maxPostLeverageBps = 1;
         }
@@ -694,14 +703,14 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
     }
 
     function _state() private view returns (State memory s) {
-        s.settlement = clearinghouse.balanceUsdc(ACCOUNT);
-        s.keeper = clearinghouse.balanceUsdc(KEEPER);
-        s.poolCash = usdc.balanceOf(address(pool));
-        s.custody = usdc.balanceOf(address(clearinghouse));
-        s.treasury = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        s.settlement = clearinghouse.balanceAssets(ACCOUNT);
+        s.keeper = clearinghouse.balanceAssets(KEEPER);
+        s.poolCash = settlementToken.balanceOf(address(pool));
+        s.custody = settlementToken.balanceOf(address(clearinghouse));
+        s.treasury = clearinghouse.balanceAssets(engine.protocolTreasury());
         (s.size, s.pledge,,,,,) = engine.positions(ACCOUNT);
-        s.entryCost = engine.positionEntryCostUsdcAtoms(ACCOUNT);
-        s.claim = engine.traderClaimBalanceUsdc(ACCOUNT);
+        s.entryCost = engine.positionEntryCostAssetAtoms(ACCOUNT);
+        s.claim = engine.traderClaimBalanceAssets(ACCOUNT);
         s.curve = terminalNavBook.curveHashOf(ACCOUNT);
         (bool ok, bytes memory position) =
             address(engine).staticcall(abi.encodeWithSignature("positions(address)", ACCOUNT));
@@ -709,9 +718,9 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         s.economicState = keccak256(
             abi.encode(
                 position,
-                engine.unsettledCarryUsdc(ACCOUNT),
-                clearinghouse.liquidationReserveUsdc(ACCOUNT),
-                clearinghouse.vpiRebateReserveUsdc(ACCOUNT)
+                engine.unsettledCarryAssets(ACCOUNT),
+                clearinghouse.liquidationReserveAssets(ACCOUNT),
+                clearinghouse.vpiRebateReserveAssets(ACCOUNT)
             )
         );
         (uint256 borrowBase, uint256 index, uint64 timestamp) = engine.positionCarryState(ACCOUNT);
@@ -727,9 +736,9 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         assertEq(_state().carryState, before_.carryState);
         assertEq(router.nextCommitId(), before_.nextCommit);
         assertEq(router.nextExecuteId(), before_.nextExecute);
-        assertEq(clearinghouse.balanceUsdc(KEEPER), before_.keeper);
+        assertEq(clearinghouse.balanceAssets(KEEPER), before_.keeper);
         assertEq(router.pendingOrderCounts(ACCOUNT), 0);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+        assertEq(clearinghouse.totalBountyReservationsAssets(ACCOUNT), 0);
     }
 
     function _assertExecutionRollback(
@@ -764,28 +773,28 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
     ) private pure returns (uint256) {
         OrderV3Types.OrderEconomics memory e = receipt.economics;
         if (kind == 1) {
-            return receipt.bountyUsdc;
+            return receipt.bountyAssets;
         }
         if (kind == 2) {
-            return e.executionNotionalUsdc;
+            return e.executionNotionalAssets;
         }
         if (kind == 3) {
-            return e.grossAccountDebitUsdc;
+            return e.grossAccountDebitAssets;
         }
         if (kind == 4) {
-            return e.actionChargeAssessedUsdc;
+            return e.actionChargeAssessedAssets;
         }
         if (kind == 5) {
-            return e.executionFeeUsdc + e.frozenSpreadUsdc;
+            return e.executionFeeAssets + e.frozenSpreadAssets;
         }
         if (kind == 6) {
             return e.postPositionSize;
         }
         if (kind == 7) {
-            return e.postSettlementBalanceUsdc;
+            return e.postSettlementBalanceAssets;
         }
         if (kind == 8) {
-            return uint256(e.postPositionEquityUsdc);
+            return uint256(e.postPositionEquityAssets);
         }
         return e.postLeverageBps;
     }
@@ -796,21 +805,21 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         uint256 n
     ) private pure {
         if (k == 1) {
-            r.bounds.maxExecutionBountyUsdc = n;
+            r.bounds.maxExecutionBountyAssets = n;
         } else if (k == 2) {
-            r.bounds.maxExecutionNotionalUsdc = n;
+            r.bounds.maxExecutionNotionalAssets = n;
         } else if (k == 3) {
-            r.bounds.maxGrossAccountDebitUsdc = n;
+            r.bounds.maxGrossAccountDebitAssets = n;
         } else if (k == 4) {
-            r.bounds.maxActionChargeUsdc = n;
+            r.bounds.maxActionChargeAssets = n;
         } else if (k == 5) {
-            r.bounds.maxExplicitFeesUsdc = n;
+            r.bounds.maxExplicitFeesAssets = n;
         } else if (k == 6) {
             r.bounds.maxPostPositionSize = n;
         } else if (k == 7) {
-            r.bounds.minPostSettlementBalanceUsdc = n;
+            r.bounds.minPostSettlementBalanceAssets = n;
         } else if (k == 8) {
-            r.bounds.minPostPositionEquityUsdc = n;
+            r.bounds.minPostPositionEquityAssets = n;
         } else {
             r.bounds.maxPostLeverageBps = uint32(n);
         }
@@ -821,28 +830,28 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         uint8 k
     ) private pure returns (uint256) {
         if (k == 1) {
-            return r.bounds.maxExecutionBountyUsdc;
+            return r.bounds.maxExecutionBountyAssets;
         }
         if (k == 2) {
-            return r.bounds.maxExecutionNotionalUsdc;
+            return r.bounds.maxExecutionNotionalAssets;
         }
         if (k == 3) {
-            return r.bounds.maxGrossAccountDebitUsdc;
+            return r.bounds.maxGrossAccountDebitAssets;
         }
         if (k == 4) {
-            return r.bounds.maxActionChargeUsdc;
+            return r.bounds.maxActionChargeAssets;
         }
         if (k == 5) {
-            return r.bounds.maxExplicitFeesUsdc;
+            return r.bounds.maxExplicitFeesAssets;
         }
         if (k == 6) {
             return r.bounds.maxPostPositionSize;
         }
         if (k == 7) {
-            return r.bounds.minPostSettlementBalanceUsdc;
+            return r.bounds.minPostSettlementBalanceAssets;
         }
         if (k == 8) {
-            return r.bounds.minPostPositionEquityUsdc;
+            return r.bounds.minPostPositionEquityAssets;
         }
         return r.bounds.maxPostLeverageBps;
     }

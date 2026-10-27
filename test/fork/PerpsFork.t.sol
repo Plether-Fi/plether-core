@@ -79,12 +79,12 @@ contract ControllablePyth {
 }
 
 /// @title Perps Fork Tests
-/// @notice Validates perps against real USDC, real gas economics, and real Pyth ABI on a mainnet fork.
+/// @notice Validates perps against a real settlement token, real gas economics, and real Pyth ABI on a mainnet fork.
 contract PerpsForkTest is Test {
 
     using SafeERC20 for IERC20;
 
-    address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address constant settlementToken = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant REAL_PYTH = 0x4305FB66699C3B2702D4d05CF36551390A4c69C6;
     bytes32 constant EUR_USD_FEED_ID = 0xa995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30b;
     uint256 constant FORK_BLOCK = 24_136_062;
@@ -121,25 +121,27 @@ contract PerpsForkTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
 
-        clearinghouse = new MarginClearinghouse(USDC);
+        clearinghouse = new MarginClearinghouse(settlementToken);
 
-        engine = new CfdEngine(USDC, address(clearinghouse), CAP_PRICE, params, 50);
+        engine = new CfdEngine(settlementToken, address(clearinghouse), CAP_PRICE, params, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(USDC, address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(settlementToken, address(engine), address(new HousePoolRedemptionMathSidecar()));
 
-        seniorVault = new TrancheVault(IERC20(USDC), address(pool), true, "Senior LP", "senUSDC", 0, address(0));
-        juniorVault = new TrancheVault(IERC20(USDC), address(pool), false, "Junior LP", "junUSDC", 0, address(0));
+        seniorVault =
+            new TrancheVault(IERC20(settlementToken), address(pool), true, "Senior LP", "senAssets", 0, address(0));
+        juniorVault =
+            new TrancheVault(IERC20(settlementToken), address(pool), false, "Junior LP", "junAssets", 0, address(0));
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));
@@ -182,23 +184,23 @@ contract PerpsForkTest is Test {
                 markStalenessLimit: pool.markStalenessLimit(),
                 seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
                 juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
-                maxSeniorExposureUsdc: type(uint256).max - 1,
+                maxSeniorExposureAssets: type(uint256).max - 1,
                 maxSeniorShareBps: 9999
             })
         );
         vm.warp(t0 + 144 hours + 3);
         pool.finalizePoolConfig();
 
-        deal(USDC, address(this), 2000e6);
-        IERC20(USDC).approve(address(pool), 2000e6);
+        deal(settlementToken, address(this), 2000e6);
+        IERC20(settlementToken).approve(address(pool), 2000e6);
         pool.initializeSeedPosition(false, 1000e6, address(this));
         pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
 
         // LP deposits $1M to junior tranche
-        deal(USDC, lp, 1_000_000e6);
+        deal(settlementToken, lp, 1_000_000e6);
         vm.startPrank(lp);
-        IERC20(USDC).approve(address(juniorVault), type(uint256).max);
+        IERC20(settlementToken).approve(address(juniorVault), type(uint256).max);
         juniorVault.deposit(1_000_000e6, lp);
         vm.stopPrank();
     }
@@ -211,9 +213,9 @@ contract PerpsForkTest is Test {
         address trader,
         uint256 amount
     ) internal {
-        deal(USDC, trader, IERC20(USDC).balanceOf(trader) + amount);
+        deal(settlementToken, trader, IERC20(settlementToken).balanceOf(trader) + amount);
         vm.startPrank(trader);
-        IERC20(USDC).approve(address(clearinghouse), amount);
+        IERC20(settlementToken).approve(address(clearinghouse), amount);
         clearinghouse.deposit(trader, amount);
         vm.stopPrank();
     }
@@ -271,11 +273,11 @@ contract PerpsForkTest is Test {
         config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.minOpenNotionalAssets = router.minOpenNotionalAssets();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.minOpenOrderExecutionBountyAssets = router.minOpenOrderExecutionBountyAssets();
+        config.maxOpenOrderExecutionBountyAssets = router.maxOpenOrderExecutionBountyAssets();
+        config.positionProtectionTriggerBountyAssets = router.positionProtectionTriggerBountyAssets();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();
         config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
@@ -329,14 +331,14 @@ contract PerpsForkTest is Test {
                 ),
                 allowedExecutionModes: 7,
                 expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
-                maxExecutionBountyUsdc: type(uint256).max,
-                maxExecutionNotionalUsdc: type(uint256).max,
-                maxGrossAccountDebitUsdc: type(uint256).max,
-                maxActionChargeUsdc: type(uint256).max,
-                maxExplicitFeesUsdc: type(uint256).max,
+                maxExecutionBountyAssets: type(uint256).max,
+                maxExecutionNotionalAssets: type(uint256).max,
+                maxGrossAccountDebitAssets: type(uint256).max,
+                maxActionChargeAssets: type(uint256).max,
+                maxExplicitFeesAssets: type(uint256).max,
                 maxPostPositionSize: type(uint256).max,
-                minPostSettlementBalanceUsdc: 0,
-                minPostPositionEquityUsdc: 0,
+                minPostSettlementBalanceAssets: 0,
+                minPostPositionEquityAssets: 0,
                 maxPostLeverageBps: type(uint32).max
             })
         });
@@ -355,7 +357,7 @@ contract PerpsForkTest is Test {
             uint256 initMarginBps,
             uint256 fadMarginBps,
             uint256 baseCarryBps,
-            uint256 minBountyUsdc,
+            uint256 minBountyAssets,
             uint256 bountyBps,
             uint256 keeperShareBps,
             uint256 protocolShareBps
@@ -367,7 +369,7 @@ contract PerpsForkTest is Test {
             initMarginBps: initMarginBps,
             fadMarginBps: fadMarginBps,
             baseCarryBps: baseCarryBps,
-            minBountyUsdc: minBountyUsdc,
+            minBountyAssets: minBountyAssets,
             bountyBps: bountyBps,
             keeperShareBps: keeperShareBps,
             protocolShareBps: protocolShareBps
@@ -375,16 +377,16 @@ contract PerpsForkTest is Test {
     }
 
     // ==========================================
-    // TEST 1: Full Lifecycle with Real USDC
+    // TEST 1: Full Lifecycle with Real settlementToken
     // ==========================================
 
-    function test_FullLifecycle_RealUsdc() public {
+    function test_FullLifecycle_RealAssets() public {
         _depositToClearinghouse(alice, 10_000e6);
 
-        uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
-        uint256 poolBefore = IERC20(USDC).balanceOf(address(pool));
-        uint256 clearinghouseBefore = IERC20(USDC).balanceOf(address(clearinghouse));
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 aliceAssetsBefore = IERC20(settlementToken).balanceOf(alice);
+        uint256 poolBefore = IERC20(settlementToken).balanceOf(address(pool));
+        uint256 clearinghouseBefore = IERC20(settlementToken).balanceOf(address(clearinghouse));
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
 
         // Open LONG $50k at $1.00
         this._commitAndExecute(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8, int64(100_000_000), false);
@@ -400,12 +402,12 @@ contract PerpsForkTest is Test {
         (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Position should be closed");
 
-        // Verify USDC conservation across all contracts
-        uint256 totalAfter = IERC20(USDC).balanceOf(alice) + IERC20(USDC).balanceOf(address(pool))
-            + IERC20(USDC).balanceOf(address(clearinghouse)) + IERC20(USDC).balanceOf(keeper);
-        uint256 totalBefore = aliceUsdcBefore + poolBefore + clearinghouseBefore + keeperBefore;
+        // Verify Settlement asset conservation across all contracts
+        uint256 totalAfter = IERC20(settlementToken).balanceOf(alice) + IERC20(settlementToken).balanceOf(address(pool))
+            + IERC20(settlementToken).balanceOf(address(clearinghouse)) + IERC20(settlementToken).balanceOf(keeper);
+        uint256 totalBefore = aliceAssetsBefore + poolBefore + clearinghouseBefore + keeperBefore;
 
-        assertEq(totalAfter, totalBefore, "USDC conservation violated");
+        assertEq(totalAfter, totalBefore, "Settlement asset conservation violated");
     }
 
     // ==========================================
@@ -552,10 +554,10 @@ contract PerpsForkTest is Test {
     }
 
     // ==========================================
-    // TEST 4: Liquidation E2E with Real USDC
+    // TEST 4: Liquidation E2E with Real settlementToken
     // ==========================================
 
-    function test_LiquidationE2E_RealUsdcSettlement() public {
+    function test_LiquidationE2E_RealAssetsSettlement() public {
         _depositToClearinghouse(alice, 10_000e6);
 
         // Open LONG $100k at $1.00
@@ -565,9 +567,9 @@ contract PerpsForkTest is Test {
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should exist");
 
-        uint256 poolBefore = IERC20(USDC).balanceOf(address(pool));
-        uint256 chBefore = IERC20(USDC).balanceOf(address(clearinghouse));
-        uint256 keeperBefore = IERC20(USDC).balanceOf(keeper);
+        uint256 poolBefore = IERC20(settlementToken).balanceOf(address(pool));
+        uint256 chBefore = IERC20(settlementToken).balanceOf(address(clearinghouse));
+        uint256 keeperBefore = IERC20(settlementToken).balanceOf(keeper);
 
         // Price rises to $1.10 → LONG PnL = -$10k, equity turns liquidatable
         uint256 liqTs = block.timestamp + 60;
@@ -581,18 +583,18 @@ contract PerpsForkTest is Test {
         (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Position should be liquidated");
 
-        uint256 keeperGain = clearinghouse.balanceUsdc(keeper) - keeperBefore;
+        uint256 keeperGain = clearinghouse.balanceAssets(keeper) - keeperBefore;
         CfdTypes.RiskParams memory params = _getRiskParams();
-        uint256 minimumKeeperShare = (params.minBountyUsdc * params.keeperShareBps) / 10_000;
+        uint256 minimumKeeperShare = (params.minBountyAssets * params.keeperShareBps) / 10_000;
         assertGe(
             keeperGain, minimumKeeperShare, "Keeper should get at least the configured share of the minimum charge"
         );
 
-        // USDC conservation: pool + clearinghouse + keeper == before totals
-        uint256 totalAfter = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse))
-            + IERC20(USDC).balanceOf(keeper);
+        // Settlement asset conservation: pool + clearinghouse + keeper == before totals
+        uint256 totalAfter = IERC20(settlementToken).balanceOf(address(pool))
+            + IERC20(settlementToken).balanceOf(address(clearinghouse)) + IERC20(settlementToken).balanceOf(keeper);
         uint256 totalBefore = poolBefore + chBefore + keeperBefore;
-        assertEq(totalAfter, totalBefore, "USDC conservation across liquidation");
+        assertEq(totalAfter, totalBefore, "Settlement asset conservation across liquidation");
     }
 
     // ==========================================
@@ -642,7 +644,7 @@ contract PerpsForkTest is Test {
         uint256 gasCostWei = maxGas * 100 gwei;
         uint256 gasCostUsd6 = (gasCostWei * 2000) / 1e18;
 
-        emit log_named_uint("max gas cost (USDC 6-dec)", gasCostUsd6);
+        emit log_named_uint("max gas cost (settlement assets, 6 decimals)", gasCostUsd6);
         assertLt(gasCostUsd6, 5e6, "Gas cost should be less than min bounty ($5)");
     }
 
@@ -656,8 +658,8 @@ contract PerpsForkTest is Test {
         _depositToClearinghouse(bob, 20_000e6);
         _depositToClearinghouse(carol, 20_000e6);
 
-        uint256 totalUsdcBefore = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse))
-            + IERC20(USDC).balanceOf(keeper);
+        uint256 totalAssetsBefore = IERC20(settlementToken).balanceOf(address(pool))
+            + IERC20(settlementToken).balanceOf(address(clearinghouse)) + IERC20(settlementToken).balanceOf(keeper);
 
         // Alice LONG $100k, Bob SHORT $80k, Carol LONG $50k — all at $1.00
         this._commitAndExecute(alice, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, int64(100_000_000), false);
@@ -684,10 +686,10 @@ contract PerpsForkTest is Test {
         assertEq(_sideOpenInterest(CfdTypes.Side.LONG), 0, "Long OI should be 0 after all close");
         assertEq(_sideOpenInterest(CfdTypes.Side.SHORT), 0, "Short OI should be 0 after all close");
 
-        // USDC conservation
-        uint256 totalUsdcAfter = IERC20(USDC).balanceOf(address(pool)) + IERC20(USDC).balanceOf(address(clearinghouse))
-            + IERC20(USDC).balanceOf(keeper);
-        assertEq(totalUsdcAfter, totalUsdcBefore, "USDC conservation across multi-trader");
+        // Settlement asset conservation
+        uint256 totalAssetsAfter = IERC20(settlementToken).balanceOf(address(pool))
+            + IERC20(settlementToken).balanceOf(address(clearinghouse)) + IERC20(settlementToken).balanceOf(keeper);
+        assertEq(totalAssetsAfter, totalAssetsBefore, "Settlement asset conservation across multi-trader");
     }
 
     // ==========================================
@@ -731,13 +733,13 @@ contract PerpsForkTest is Test {
 
     function test_PoolSolvency_LargePnlPayout() public {
         // Add senior LP: $500k
-        deal(USDC, lp, 500_000e6);
+        deal(settlementToken, lp, 500_000e6);
         vm.startPrank(lp);
-        IERC20(USDC).approve(address(seniorVault), type(uint256).max);
+        IERC20(settlementToken).approve(address(seniorVault), type(uint256).max);
         seniorVault.deposit(500_000e6, lp);
         vm.stopPrank();
 
-        uint256 poolTotalBefore = IERC20(USDC).balanceOf(address(pool));
+        uint256 poolTotalBefore = IERC20(settlementToken).balanceOf(address(pool));
         assertEq(poolTotalBefore, 1_500_000e6, "Pool should have $1.5M");
 
         _depositToClearinghouse(alice, 50_000e6);
@@ -763,30 +765,30 @@ contract PerpsForkTest is Test {
         assertLt(juniorAfter, juniorBefore, "Junior should absorb the loss");
         assertGe(seniorAfter, seniorBefore, "Senior should not lose principal");
 
-        // Verify Alice got her profit in real USDC
-        uint256 aliceBalance = clearinghouse.balanceUsdc(_account(alice));
+        // Verify Alice got her profit in a real settlement token
+        uint256 aliceBalance = clearinghouse.balanceAssets(_account(alice));
         assertGt(aliceBalance, 50_000e6, "Alice should have profit");
 
-        // Verify real USDC withdrawal from clearinghouse
-        uint256 aliceUsdcBefore = IERC20(USDC).balanceOf(alice);
+        // Verify a real settlement token withdrawal from clearinghouse
+        uint256 aliceAssetsBefore = IERC20(settlementToken).balanceOf(alice);
         vm.prank(alice);
         clearinghouse.withdraw(_account(alice), aliceBalance);
-        uint256 aliceUsdcAfter = IERC20(USDC).balanceOf(alice);
-        assertEq(aliceUsdcAfter - aliceUsdcBefore, aliceBalance, "Real USDC withdrawal should match");
+        uint256 aliceAssetsAfter = IERC20(settlementToken).balanceOf(alice);
+        assertEq(aliceAssetsAfter - aliceAssetsBefore, aliceBalance, "Real settlementToken withdrawal should match");
     }
 
-    function test_TraderClaimSettlementFlow_RealUsdc() public {
+    function test_TraderClaimSettlementFlow_RealAssets() public {
         _depositToClearinghouse(alice, 11_000e6);
 
         this._commitAndExecute(alice, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8, int64(100_000_000), false);
 
         address aliceAccount = _account(alice);
-        uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
+        uint256 poolAssets = IERC20(settlementToken).balanceOf(address(pool));
         vm.prank(address(pool));
-        IERC20(USDC).safeTransfer(address(0xDEAD), poolAssets - 9000e6);
+        IERC20(settlementToken).safeTransfer(address(0xDEAD), poolAssets - 9000e6);
 
-        uint256 chBefore = clearinghouse.balanceUsdc(aliceAccount);
-        uint256 closeBountyUsdc = 1e6;
+        uint256 chBefore = clearinghouse.balanceAssets(aliceAccount);
+        uint256 closeBountyAssets = 1e6;
 
         uint256 commitTime = block.timestamp;
         vm.prank(alice);
@@ -797,11 +799,11 @@ contract PerpsForkTest is Test {
         vm.prank(keeper);
         router.executeOrder(2, _pythUpdateData());
 
-        uint256 traderClaim = engine.traderClaimBalanceUsdc(aliceAccount);
+        uint256 traderClaim = engine.traderClaimBalanceAssets(aliceAccount);
         assertGt(traderClaim, 0, "Illiquid profitable close should record a trader claim");
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "Position should be closed even when payout becomes a trader claim");
-        uint256 chAfterClose = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 chAfterClose = clearinghouse.balanceAssets(aliceAccount);
         assertLt(
             chAfterClose,
             chBefore,
@@ -809,34 +811,34 @@ contract PerpsForkTest is Test {
         );
         assertEq(
             chBefore - chAfterClose,
-            closeBountyUsdc + 66_590,
+            closeBountyAssets + 66_590,
             "Only the close bounty and realized carry should move before claim"
         );
 
-        deal(USDC, address(pool), IERC20(USDC).balanceOf(address(pool)) + traderClaim);
+        deal(settlementToken, address(pool), IERC20(settlementToken).balanceOf(address(pool)) + traderClaim);
         vm.prank(pool.owner());
         pool.accountExcess();
 
         vm.prank(alice);
         engine.settleTraderClaim(aliceAccount);
 
-        assertEq(engine.traderClaimBalanceUsdc(aliceAccount), 0, "Claim should clear trader claim state");
+        assertEq(engine.traderClaimBalanceAssets(aliceAccount), 0, "Claim should clear trader claim state");
         assertEq(
-            clearinghouse.balanceUsdc(aliceAccount),
+            clearinghouse.balanceAssets(aliceAccount),
             chAfterClose + traderClaim,
-            "Claim settlement should credit owed USDC on top of the post-close settlement balance"
+            "Claim settlement should credit owed settlementToken on top of the post-close settlement balance"
         );
     }
 
-    function test_TraderClaimBatchDoesNotBlockTailOrder_RealUsdc() public {
+    function test_TraderClaimBatchDoesNotBlockTailOrder_RealAssets() public {
         _depositToClearinghouse(alice, 20_000e6);
 
         this._commitAndExecute(alice, CfdTypes.Side.LONG, 100_000e18, 8000e6, 1e8, int64(100_000_000), false);
 
         address aliceAccount = _account(alice);
-        uint256 poolAssets = IERC20(USDC).balanceOf(address(pool));
+        uint256 poolAssets = IERC20(settlementToken).balanceOf(address(pool));
         vm.prank(address(pool));
-        IERC20(USDC).safeTransfer(address(0xDEAD), poolAssets - 8000e6);
+        IERC20(settlementToken).safeTransfer(address(0xDEAD), poolAssets - 8000e6);
 
         vm.prank(alice);
         router.commitOrder(_orderRequest(alice, CfdTypes.Side.LONG, 100_000e18, 0, 0, true));
@@ -857,7 +859,9 @@ contract PerpsForkTest is Test {
             0,
             "Batch execution should continue past a trader-claim close and clear the queue when exhausted"
         );
-        assertGt(engine.traderClaimBalanceUsdc(aliceAccount), 0, "Trader claim should remain recorded after the batch");
+        assertGt(
+            engine.traderClaimBalanceAssets(aliceAccount), 0, "Trader claim should remain recorded after the batch"
+        );
 
         (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(aliceAccount);
         assertEq(

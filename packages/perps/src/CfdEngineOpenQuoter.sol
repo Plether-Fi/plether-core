@@ -46,7 +46,7 @@ contract CfdEngineOpenQuoter {
         uint256 selectedLiability;
         uint256 opposingLiability;
         uint256 profitPerLot;
-        uint256 netDepthUsdc;
+        uint256 netDepthAssets;
         int256 pricePnl;
         int256 preSkewCost;
     }
@@ -102,7 +102,7 @@ contract CfdEngineOpenQuoter {
         uint256 currentLots = raw.position.size / CfdTypes.SIZE_QUANTUM;
         uint256 minimumLots = price == 0
             ? currentLots + 1
-            : Math.mulDiv(raw.riskParams.minBountyUsdc, 10_000, price * raw.riskParams.bountyBps, Math.Rounding.Ceil);
+            : Math.mulDiv(raw.riskParams.minBountyAssets, 10_000, price * raw.riskParams.bountyBps, Math.Rounding.Ceil);
         uint256 low = minimumLots > currentLots ? minimumLots - currentLots : 1;
 
         // Calldata-to-memory copies isolate the bound projection from every canonical planner probe.
@@ -110,10 +110,10 @@ contract CfdEngineOpenQuoter {
         bool carryCollectible = CfdEnginePlanLib.projectOpenCarry(projected);
         if (
             price == 0 || !carryCollectible || projected.degradedMode
-                || PositionRiskAccountingLib.computeNetPoolDepthUsdc(
-                        projected.poolAssetsUsdc, projected.totalTraderClaimBalanceUsdc
+                || PositionRiskAccountingLib.computeNetPoolDepthAssets(
+                        projected.poolAssets, projected.totalTraderClaimBalanceAssets
                     ) == 0 || (projected.position.size > 0 && projected.position.side != probe.order.side)
-                || projected.vpiRebateReserveUsdc < _negativeReserve(projected.position.vpiAccrued)
+                || projected.vpiRebateReserveAssets < _negativeReserve(projected.position.vpiAccrued)
         ) {
             delta = _probe(raw, probe, low);
             return (0, delta, delta.revertCode);
@@ -189,8 +189,8 @@ contract CfdEngineOpenQuoter {
         uint256 price
     ) private pure returns (Context memory ctx) {
         ctx.snap = snap;
-        ctx.netDepthUsdc =
-            PositionRiskAccountingLib.computeNetPoolDepthUsdc(snap.poolAssetsUsdc, snap.totalTraderClaimBalanceUsdc);
+        ctx.netDepthAssets =
+            PositionRiskAccountingLib.computeNetPoolDepthAssets(snap.poolAssets, snap.totalTraderClaimBalanceAssets);
         ctx.price = price;
         ctx.marginDelta = order.marginDelta;
         ctx.currentLots = snap.position.size / CfdTypes.SIZE_QUANTUM;
@@ -199,11 +199,11 @@ contract CfdEngineOpenQuoter {
         CfdEnginePlanTypes.SideSnapshot memory opposing = isLong ? snap.shortSide : snap.longSide;
         ctx.selectedLots = selected.openInterest / CfdTypes.SIZE_QUANTUM;
         ctx.opposingLots = opposing.openInterest / CfdTypes.SIZE_QUANTUM;
-        ctx.selectedLiability = selected.maxProfitUsdc;
-        ctx.opposingLiability = opposing.maxProfitUsdc;
+        ctx.selectedLiability = selected.maxProfitAssets;
+        ctx.opposingLiability = opposing.maxProfitAssets;
         ctx.profitPerLot = isLong ? price : snap.capPrice - price;
         (bool profit, uint256 pnl) = CfdMath.calculateExactPnl(
-            ctx.currentLots, snap.positionEntryCostUsdcAtoms, order.side, price, snap.capPrice
+            ctx.currentLots, snap.positionEntryCostAssetAtoms, order.side, price, snap.capPrice
         );
         ctx.pricePnl = profit ? SafeCast.toInt256(pnl) : -SafeCast.toInt256(pnl);
         ctx.preSkewCost = SafeCast.toInt256(_skewCost(ctx, _skew(ctx, 0)));
@@ -230,7 +230,7 @@ contract CfdEngineOpenQuoter {
             return 0;
         }
         high = Math.min(maxTotalLots - ctx.currentLots, type(uint256).max / CfdTypes.SIZE_QUANTUM - ctx.currentLots);
-        uint256 maxSkew = Math.mulDiv(ctx.netDepthUsdc, ctx.snap.riskParams.maxSkewRatio, 1e18);
+        uint256 maxSkew = Math.mulDiv(ctx.netDepthAssets, ctx.snap.riskParams.maxSkewRatio, 1e18);
         uint256 maxSelectedLots = ctx.opposingLots + maxSkew / ctx.price;
         if (maxSelectedLots <= ctx.selectedLots) {
             return 0;
@@ -254,7 +254,7 @@ contract CfdEngineOpenQuoter {
             return false;
         }
 
-        uint256 maxCash = ctx.snap.poolCashUsdc;
+        uint256 maxCash = ctx.snap.poolCashAssets;
         if (maxVpi >= 0) {
             maxCash += uint256(maxVpi);
         } else {
@@ -262,7 +262,7 @@ contract CfdEngineOpenQuoter {
             maxCash = maxCash > debit ? maxCash - debit : 0;
         }
         uint256 maxEffective =
-            maxCash > ctx.snap.totalTraderClaimBalanceUsdc ? maxCash - ctx.snap.totalTraderClaimBalanceUsdc : 0;
+            maxCash > ctx.snap.totalTraderClaimBalanceAssets ? maxCash - ctx.snap.totalTraderClaimBalanceAssets : 0;
         uint256 minLiability = Math.max(ctx.selectedLiability + low * ctx.profitPerLot, ctx.opposingLiability);
         return
             SolvencyAccountingLib.hasRequiredSettlementBuffer(maxEffective, minLiability, ctx.snap.settlementBufferBps);
@@ -278,15 +278,15 @@ contract CfdEngineOpenQuoter {
         int256 minCost = minVpi + SafeCast.toInt256(feeFloor);
         minVpiReserve = _negativeReserve(ctx.snap.position.vpiAccrued + maxVpi);
         uint256 maxRelease =
-            ctx.snap.vpiRebateReserveUsdc > minVpiReserve ? ctx.snap.vpiRebateReserveUsdc - minVpiReserve : 0;
+            ctx.snap.vpiRebateReserveAssets > minVpiReserve ? ctx.snap.vpiRebateReserveAssets - minVpiReserve : 0;
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = ctx.snap.accountBuckets;
+        IMarginClearinghouse.AccountAssetBuckets memory buckets = ctx.snap.accountBuckets;
         // Copy this nested struct before changing it: memory assignment alone aliases the search context.
-        buckets = abi.decode(abi.encode(buckets), (IMarginClearinghouse.AccountUsdcBuckets));
-        buckets.otherLockedMarginUsdc -= maxRelease;
-        buckets.totalLockedMarginUsdc -= maxRelease;
-        buckets.freeSettlementUsdc = buckets.settlementBalanceUsdc > buckets.totalLockedMarginUsdc
-            ? buckets.settlementBalanceUsdc - buckets.totalLockedMarginUsdc
+        buckets = abi.decode(abi.encode(buckets), (IMarginClearinghouse.AccountAssetBuckets));
+        buckets.otherLockedMarginAssets -= maxRelease;
+        buckets.totalLockedMarginAssets -= maxRelease;
+        buckets.freeSettlementAssets = buckets.settlementBalanceAssets > buckets.totalLockedMarginAssets
+            ? buckets.settlementBalanceAssets - buckets.totalLockedMarginAssets
             : 0;
         cost = MarginClearinghouseAccountingLib.planOpenCostApplication(buckets, ctx.marginDelta, minCost);
     }
@@ -305,7 +305,7 @@ contract CfdEngineOpenQuoter {
         int256 maxEquity = SafeCast.toInt256(maxMargin + ctx.snap.traderClaimBalanceForAccount) + ctx.pricePnl;
         uint256 minInitial = Math.max(
             Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.initMarginBps, 10_000),
-            ctx.snap.riskParams.minBountyUsdc
+            ctx.snap.riskParams.minBountyAssets
         );
         uint256 activeMarginBps =
             ctx.snap.isFadWindow ? ctx.snap.riskParams.fadMarginBps : ctx.snap.riskParams.maintMarginBps;
@@ -326,21 +326,22 @@ contract CfdEngineOpenQuoter {
         }
 
         uint256 minVpiIncrease =
-            minVpiReserve > ctx.snap.vpiRebateReserveUsdc ? minVpiReserve - ctx.snap.vpiRebateReserveUsdc : 0;
-        uint256 minVpiFromPledge =
-            minVpiIncrease > cost.resultingFreeSettlementUsdc ? minVpiIncrease - cost.resultingFreeSettlementUsdc : 0;
+            minVpiReserve > ctx.snap.vpiRebateReserveAssets ? minVpiReserve - ctx.snap.vpiRebateReserveAssets : 0;
+        uint256 minVpiFromPledge = minVpiIncrease > cost.resultingFreeSettlementAssets
+            ? minVpiIncrease - cost.resultingFreeSettlementAssets
+            : 0;
         totalNotionalFloor = (ctx.currentLots + low) * ctx.price;
         uint256 minLiquidationReserve = Math.max(
-            Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.bountyBps, 10_000), ctx.snap.riskParams.minBountyUsdc
+            Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.bountyBps, 10_000), ctx.snap.riskParams.minBountyAssets
         );
-        uint256 minReserveIncrease = minLiquidationReserve > ctx.snap.liquidationReserveUsdc
-            ? minLiquidationReserve - ctx.snap.liquidationReserveUsdc
+        uint256 minReserveIncrease = minLiquidationReserve > ctx.snap.liquidationReserveAssets
+            ? minLiquidationReserve - ctx.snap.liquidationReserveAssets
             : 0;
-        uint256 maxNewPledge = cost.resultingPositionMarginUsdc - ctx.snap.position.margin;
+        uint256 maxNewPledge = cost.resultingPositionMarginAssets - ctx.snap.position.margin;
         if (minVpiFromPledge > maxNewPledge || minReserveIncrease > maxNewPledge - minVpiFromPledge) {
             return (false, 0, totalNotionalFloor);
         }
-        maxMargin = cost.resultingPositionMarginUsdc - minVpiFromPledge - minReserveIncrease;
+        maxMargin = cost.resultingPositionMarginAssets - minVpiFromPledge - minReserveIncrease;
         return (true, maxMargin, totalNotionalFloor);
     }
 
@@ -371,7 +372,7 @@ contract CfdEngineOpenQuoter {
         Context memory ctx,
         uint256 skew
     ) private pure returns (uint256) {
-        return CfdMath.getSkewCost(skew, ctx.netDepthUsdc, ctx.snap.riskParams.vpiFactor);
+        return CfdMath.getSkewCost(skew, ctx.netDepthAssets, ctx.snap.riskParams.vpiFactor);
     }
 
     function _negativeReserve(

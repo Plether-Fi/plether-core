@@ -18,7 +18,7 @@ import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccounting
 /// @notice Pure accounting and validation plans for the CfdEngine plan-to-apply architecture.
 /// @dev The primary planners consume a caller-built `RawSnapshot` and return typed deltas for a separate settlement
 ///      sidecar to apply. No function authenticates snapshots, reads storage, or makes external calls. Unless noted,
-///      USDC uses 6 decimals, prices use 8 decimals, sizes/open interest use 18 decimals, raw entry notional uses
+///      settlement token uses 6 decimals, prices use 8 decimals, sizes/open interest use 18 decimals, raw entry notional uses
 ///      26 decimals, ratios use 1e18 WAD, rates use a 10,000 basis-point denominator, and timestamps use Unix seconds.
 library CfdEnginePlanLib {
 
@@ -46,26 +46,26 @@ library CfdEnginePlanLib {
 
     /// @notice Returns the exact nonwithdrawable backing required by a signed lifetime-VPI balance.
     function _negativeVpiReserveTarget(
-        int256 vpiAccruedUsdc
-    ) private pure returns (uint256 targetUsdc) {
-        if (vpiAccruedUsdc < 0) {
+        int256 vpiAccruedAssets
+    ) private pure returns (uint256 targetAssets) {
+        if (vpiAccruedAssets < 0) {
             // This form also supports `type(int256).min` without negating it directly.
-            targetUsdc = uint256(-(vpiAccruedUsdc + 1)) + 1;
+            targetAssets = uint256(-(vpiAccruedAssets + 1)) + 1;
         }
     }
 
     /// @notice Projects release of no-longer-required VPI backing into an account-bucket snapshot.
     function _accountBucketsAfterVpiReserveRelease(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
-        uint256 releaseUsdc
-    ) private pure returns (IMarginClearinghouse.AccountUsdcBuckets memory) {
-        if (releaseUsdc == 0) {
+        IMarginClearinghouse.AccountAssetBuckets memory buckets,
+        uint256 releaseAssets
+    ) private pure returns (IMarginClearinghouse.AccountAssetBuckets memory) {
+        if (releaseAssets == 0) {
             return buckets;
         }
-        buckets.otherLockedMarginUsdc -= releaseUsdc;
-        buckets.totalLockedMarginUsdc -= releaseUsdc;
-        buckets.freeSettlementUsdc = buckets.settlementBalanceUsdc > buckets.totalLockedMarginUsdc
-            ? buckets.settlementBalanceUsdc - buckets.totalLockedMarginUsdc
+        buckets.otherLockedMarginAssets -= releaseAssets;
+        buckets.totalLockedMarginAssets -= releaseAssets;
+        buckets.freeSettlementAssets = buckets.settlementBalanceAssets > buckets.totalLockedMarginAssets
+            ? buckets.settlementBalanceAssets - buckets.totalLockedMarginAssets
             : 0;
         return buckets;
     }
@@ -176,58 +176,58 @@ library CfdEnginePlanLib {
     }
 
     /// @notice Computes all carry currently payable by the snapshot position.
-    /// @dev Starts with checkpointed `unsettledCarryUsdc`. Indexed carry is added only for a nonzero position and borrow
+    /// @dev Starts with checkpointed `unsettledCarryAssets`. Indexed carry is added only for a nonzero position and borrow
     ///      base whose selected-side carry index exceeds the position checkpoint. Index conversion rounds down.
     /// @param snap Position, side-index, borrow-base, and unsettled-carry snapshot.
-    /// @return Pending carry in 6-decimal USDC.
-    function _pendingCarryUsdc(
+    /// @return Pending carry in 6-decimal settlement token.
+    function _pendingCarryAssets(
         CfdEnginePlanTypes.RawSnapshot memory snap
     ) private pure returns (uint256) {
-        if (snap.position.size == 0 || snap.positionBorrowBaseUsdc == 0) {
-            return snap.unsettledCarryUsdc;
+        if (snap.position.size == 0 || snap.positionBorrowBaseAssets == 0) {
+            return snap.unsettledCarryAssets;
         }
         CfdEnginePlanTypes.SideSnapshot memory side = _selectedSide(snap, snap.position.side);
         if (side.carryIndex <= snap.positionLastCarryIndex) {
-            return snap.unsettledCarryUsdc;
+            return snap.unsettledCarryAssets;
         }
-        return snap.unsettledCarryUsdc
-            + PositionRiskAccountingLib.computeIndexedCarryUsdc(
-            snap.positionBorrowBaseUsdc, side.carryIndex - snap.positionLastCarryIndex
+        return snap.unsettledCarryAssets
+            + PositionRiskAccountingLib.computeIndexedCarryAssets(
+            snap.positionBorrowBaseAssets, side.carryIndex - snap.positionLastCarryIndex
         );
     }
 
     /// @notice Computes absolute directional open-interest skew at a price.
-    /// @dev Each side is independently converted from size to USDC with floor division before taking the difference.
+    /// @dev Each side is independently converted from size to settlement token with floor division before taking the difference.
     /// @param long LONG aggregate side snapshot.
     /// @param short SHORT aggregate side snapshot.
     /// @param price Price used to value both sides.
-    /// @return Absolute LONG-versus-SHORT skew in 6-decimal USDC.
-    function _absSkewUsdc(
+    /// @return Absolute LONG-versus-SHORT skew in 6-decimal settlement token.
+    function _absSkewAssets(
         CfdEnginePlanTypes.SideSnapshot memory long,
         CfdEnginePlanTypes.SideSnapshot memory short,
         uint256 price
     ) private pure returns (uint256) {
-        uint256 longUsdc = (long.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 shortUsdc = (short.openInterest * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        return longUsdc > shortUsdc ? longUsdc - shortUsdc : shortUsdc - longUsdc;
+        uint256 longAssets = (long.openInterest * price) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        uint256 shortAssets = (short.openInterest * price) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        return longAssets > shortAssets ? longAssets - shortAssets : shortAssets - longAssets;
     }
 
     /// @notice Computes skew state after adding an order's size to one side.
-    /// @dev Each post-trade side notional is independently rounded down to USDC before taking the difference.
+    /// @dev Each post-trade side notional is independently rounded down to settlement token before taking the difference.
     /// @param long LONG aggregate state before the open.
     /// @param short SHORT aggregate state before the open.
     /// @param side Side receiving the size increase.
     /// @param sizeDelta Size added to the selected side.
     /// @param price Price used to value open interest.
-    /// @return postSkewUsdc Post-open absolute skew in 6-decimal USDC.
+    /// @return postSkewAssets Post-open absolute skew in 6-decimal settlement token.
     /// @return orderSideIsPostOpenHeavy Whether the side receiving the open is heavier after the trade.
-    function _postOpenSkewUsdc(
+    function _postOpenSkewAssets(
         CfdEnginePlanTypes.SideSnapshot memory long,
         CfdEnginePlanTypes.SideSnapshot memory short,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 price
-    ) private pure returns (uint256 postSkewUsdc, bool orderSideIsPostOpenHeavy) {
+    ) private pure returns (uint256 postSkewAssets, bool orderSideIsPostOpenHeavy) {
         uint256 longOi = long.openInterest;
         uint256 shortOi = short.openInterest;
         if (side == CfdTypes.Side.LONG) {
@@ -235,27 +235,28 @@ library CfdEnginePlanLib {
         } else {
             shortOi += sizeDelta;
         }
-        uint256 postLongUsdc = (longOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 postShortUsdc = (shortOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        postSkewUsdc = postLongUsdc > postShortUsdc ? postLongUsdc - postShortUsdc : postShortUsdc - postLongUsdc;
+        uint256 postLongAssets = (longOi * price) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        uint256 postShortAssets = (shortOi * price) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        postSkewAssets =
+            postLongAssets > postShortAssets ? postLongAssets - postShortAssets : postShortAssets - postLongAssets;
         orderSideIsPostOpenHeavy =
-            side == CfdTypes.Side.LONG ? postLongUsdc > postShortUsdc : postShortUsdc > postLongUsdc;
+            side == CfdTypes.Side.LONG ? postLongAssets > postShortAssets : postShortAssets > postLongAssets;
     }
 
     /// @notice Computes absolute skew from explicit LONG and SHORT open-interest values.
-    /// @dev Each side is independently rounded down to USDC before taking the difference.
+    /// @dev Each side is independently rounded down to settlement token before taking the difference.
     /// @param longOi LONG open interest, with 18 decimals.
     /// @param shortOi SHORT open interest, with 18 decimals.
     /// @param price Price used to value both sides, with 8 decimals.
-    /// @return Absolute directional skew in 6-decimal USDC.
-    function _skewUsdc(
+    /// @return Absolute directional skew in 6-decimal settlement token.
+    function _skewAssets(
         uint256 longOi,
         uint256 shortOi,
         uint256 price
     ) private pure returns (uint256) {
-        uint256 longUsdc = (longOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        uint256 shortUsdc = (shortOi * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        return longUsdc > shortUsdc ? longUsdc - shortUsdc : shortUsdc - longUsdc;
+        uint256 longAssets = (longOi * price) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        uint256 shortAssets = (shortOi * price) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        return longAssets > shortAssets ? longAssets - shortAssets : shortAssets - longAssets;
     }
 
     // ──────────────────────────────────────────────
@@ -298,12 +299,12 @@ library CfdEnginePlanLib {
         ) {
             return _numericOpenFailure(delta);
         }
-        delta.pendingCarryUsdc = _pendingCarryUsdc(effectiveSnap);
+        delta.pendingCarryAssets = _pendingCarryAssets(effectiveSnap);
 
         if (
             effectiveSnap.position.size > 0
-                && _applyPendingCarryRealizationToSnapshot(effectiveSnap, delta.pendingCarryUsdc)
-                    != delta.pendingCarryUsdc
+                && _applyPendingCarryRealizationToSnapshot(effectiveSnap, delta.pendingCarryAssets)
+                    != delta.pendingCarryAssets
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
             return delta;
@@ -327,34 +328,35 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.SideSnapshot memory selected = _selectedSide(effectiveSnap, order.side);
         delta.sideTotalMarginBefore = selected.totalMargin;
 
-        delta.tradeCostUsdc = openState.tradeCostUsdc;
-        delta.marginDeltaUsdc = order.marginDelta;
-        delta.poolRebatePayoutUsdc = openState.tradeCostUsdc < 0 ? uint256(-openState.tradeCostUsdc) : 0;
+        delta.tradeCostAssets = openState.tradeCostAssets;
+        delta.marginDeltaAssets = order.marginDelta;
+        delta.poolRebatePayoutAssets = openState.tradeCostAssets < 0 ? uint256(-openState.tradeCostAssets) : 0;
 
         if (
-            !_lifetimeVpiAdditionFits(effectiveSnap.position.vpiAccrued, openState.vpiUsdc)
-                || delta.poolRebatePayoutUsdc > type(uint256).max - effectiveSnap.accountBuckets.settlementBalanceUsdc
+            !_lifetimeVpiAdditionFits(effectiveSnap.position.vpiAccrued, openState.vpiAssets)
+                || delta.poolRebatePayoutAssets
+                    > type(uint256).max - effectiveSnap.accountBuckets.settlementBalanceAssets
         ) {
             return _numericOpenFailure(delta);
         }
 
-        delta.vpiRebateReserveBeforeUsdc = effectiveSnap.vpiRebateReserveUsdc;
-        if (delta.vpiRebateReserveBeforeUsdc < _negativeVpiReserveTarget(effectiveSnap.position.vpiAccrued)) {
+        delta.vpiRebateReserveBeforeAssets = effectiveSnap.vpiRebateReserveAssets;
+        if (delta.vpiRebateReserveBeforeAssets < _negativeVpiReserveTarget(effectiveSnap.position.vpiAccrued)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED;
             return delta;
         }
-        delta.vpiRebateReserveAfterUsdc =
-            _negativeVpiReserveTarget(effectiveSnap.position.vpiAccrued + openState.vpiUsdc);
+        delta.vpiRebateReserveAfterAssets =
+            _negativeVpiReserveTarget(effectiveSnap.position.vpiAccrued + openState.vpiAssets);
         {
-            uint256 vpiReserveReleaseUsdc = delta.vpiRebateReserveBeforeUsdc > delta.vpiRebateReserveAfterUsdc
-                ? delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc
+            uint256 vpiReserveReleaseAssets = delta.vpiRebateReserveBeforeAssets > delta.vpiRebateReserveAfterAssets
+                ? delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
                 : 0;
-            IMarginClearinghouse.AccountUsdcBuckets memory openCostBuckets =
-                _accountBucketsAfterVpiReserveRelease(effectiveSnap.accountBuckets, vpiReserveReleaseUsdc);
+            IMarginClearinghouse.AccountAssetBuckets memory openCostBuckets =
+                _accountBucketsAfterVpiReserveRelease(effectiveSnap.accountBuckets, vpiReserveReleaseAssets);
 
             MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan =
                 MarginClearinghouseAccountingLib.planOpenCostApplication(
-                    openCostBuckets, delta.marginDeltaUsdc, delta.tradeCostUsdc
+                    openCostBuckets, delta.marginDeltaAssets, delta.tradeCostAssets
                 );
             if (openCostPlan.insufficientFreeEquity) {
                 delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
@@ -373,7 +375,7 @@ library CfdEnginePlanLib {
                 || delta.positionMarginAfterOpen
                     > type(uint256).max - (delta.sideTotalMarginBefore - effectiveSnap.position.margin)
                 || openState.newEntryNotional - openState.oldEntryNotional > type(uint256).max - selected.entryNotional
-                || openState.addedMaxProfitUsdc > type(uint256).max - selected.maxProfitUsdc
+                || openState.addedMaxProfitAssets > type(uint256).max - selected.maxProfitAssets
         ) {
             return _numericOpenFailure(delta);
         }
@@ -381,9 +383,9 @@ library CfdEnginePlanLib {
 
         delta.newPosSize = openState.newSize;
         delta.newPosEntryPrice = openState.newEntryPrice;
-        delta.newPosEntryCostUsdcAtoms = openState.newEntryCostUsdcAtoms;
-        delta.posVpiAccruedDelta = openState.vpiUsdc;
-        delta.posMaxProfitIncrease = openState.addedMaxProfitUsdc;
+        delta.newPosEntryCostAssetAtoms = openState.newEntryCostAssetAtoms;
+        delta.posVpiAccruedDelta = openState.vpiAssets;
+        delta.posMaxProfitIncrease = openState.addedMaxProfitAssets;
         delta.netMarginChange = int256(delta.positionMarginAfterOpen) - int256(effectiveSnap.position.margin);
 
         delta.sideOiIncrease = order.sizeDelta;
@@ -392,25 +394,25 @@ library CfdEnginePlanLib {
         } else {
             delta.sideEntryNotionalDelta = -int256(openState.oldEntryNotional - openState.newEntryNotional);
         }
-        delta.sideMaxProfitIncrease = openState.addedMaxProfitUsdc;
+        delta.sideMaxProfitIncrease = openState.addedMaxProfitAssets;
 
-        delta.executionFeeUsdc = openState.executionFeeUsdc;
+        delta.executionFeeAssets = openState.executionFeeAssets;
         delta.sideTotalMarginAfterOpen = computeSideTotalMarginAfterOpen(
             delta.sideTotalMarginBefore, effectiveSnap.position.margin, delta.positionMarginAfterOpen
         );
 
         {
-            uint256 projectedLiability = selected.maxProfitUsdc + delta.sideMaxProfitIncrease;
+            uint256 projectedLiability = selected.maxProfitAssets + delta.sideMaxProfitIncrease;
             uint256 oppositeLiability = order.side == CfdTypes.Side.LONG
-                ? effectiveSnap.shortSide.maxProfitUsdc
-                : effectiveSnap.longSide.maxProfitUsdc;
+                ? effectiveSnap.shortSide.maxProfitAssets
+                : effectiveSnap.longSide.maxProfitAssets;
             if (oppositeLiability > projectedLiability) {
                 projectedLiability = oppositeLiability;
             }
             if (
-                projectedLiability > type(uint256).max - effectiveSnap.totalTraderClaimBalanceUsdc
-                    || (openState.vpiUsdc > 0
-                        && uint256(openState.vpiUsdc) > type(uint256).max - effectiveSnap.poolCashUsdc)
+                projectedLiability > type(uint256).max - effectiveSnap.totalTraderClaimBalanceAssets
+                    || (openState.vpiAssets > 0
+                        && uint256(openState.vpiAssets) > type(uint256).max - effectiveSnap.poolCashAssets)
             ) {
                 return _numericOpenFailure(delta);
             }
@@ -423,12 +425,12 @@ library CfdEnginePlanLib {
 
         (bool riskFits, PositionRiskAccountingLib.PositionRiskState memory postOpenRiskState) =
             _buildPostOpenRiskState(effectiveSnap, delta);
-        if (!riskFits || openState.initialMarginRequirementUsdc > uint256(type(int256).max)) {
+        if (!riskFits || openState.initialMarginRequirementAssets > uint256(type(int256).max)) {
             return _numericOpenFailure(delta);
         }
         if (
             postOpenRiskState.liquidatable
-                || postOpenRiskState.equityUsdc <= int256(openState.initialMarginRequirementUsdc)
+                || postOpenRiskState.equityAssets <= int256(openState.initialMarginRequirementAssets)
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN;
             return delta;
@@ -443,9 +445,9 @@ library CfdEnginePlanLib {
         CfdTypes.Order memory order,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) private pure {
-        uint256 netDepthUsdc =
-            PositionRiskAccountingLib.computeNetPoolDepthUsdc(snap.poolAssetsUsdc, snap.totalTraderClaimBalanceUsdc);
-        if (netDepthUsdc == 0) {
+        uint256 netDepthAssets =
+            PositionRiskAccountingLib.computeNetPoolDepthAssets(snap.poolAssets, snap.totalTraderClaimBalanceAssets);
+        if (netDepthAssets == 0) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
             return;
         }
@@ -464,35 +466,36 @@ library CfdEnginePlanLib {
             return;
         }
         OpenAccountingLib.OpenInputs memory inputs;
-        inputs.preSkewUsdc = _absSkewUsdc(snap.longSide, snap.shortSide, delta.price);
+        inputs.preSkewAssets = _absSkewAssets(snap.longSide, snap.shortSide, delta.price);
         bool orderSideIsPostOpenHeavy;
-        (inputs.postSkewUsdc, orderSideIsPostOpenHeavy) =
-            _postOpenSkewUsdc(snap.longSide, snap.shortSide, order.side, order.sizeDelta, delta.price);
-        uint256 maxSkewUsdc = Math.mulDiv(netDepthUsdc, snap.riskParams.maxSkewRatio, CfdMath.WAD);
+        (inputs.postSkewAssets, orderSideIsPostOpenHeavy) =
+            _postOpenSkewAssets(snap.longSide, snap.shortSide, order.side, order.sizeDelta, delta.price);
+        uint256 maxSkewAssets = Math.mulDiv(netDepthAssets, snap.riskParams.maxSkewRatio, CfdMath.WAD);
         if (
-            inputs.postSkewUsdc > maxSkewUsdc && (inputs.postSkewUsdc >= inputs.preSkewUsdc || orderSideIsPostOpenHeavy)
+            inputs.postSkewAssets > maxSkewAssets
+                && (inputs.postSkewAssets >= inputs.preSkewAssets || orderSideIsPostOpenHeavy)
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
             return;
         }
         inputs.currentSize = snap.position.size;
-        inputs.currentEntryCostUsdcAtoms = snap.positionEntryCostUsdcAtoms;
+        inputs.currentEntryCostAssetAtoms = snap.positionEntryCostAssetAtoms;
         inputs.side = order.side;
         inputs.sizeDelta = order.sizeDelta;
         inputs.price = delta.price;
         inputs.capPrice = snap.capPrice;
-        inputs.poolDepthUsdc = netDepthUsdc;
+        inputs.poolDepthAssets = netDepthAssets;
         inputs.executionFeeBps = snap.executionFeeBps;
         inputs.riskParams = snap.riskParams;
         bool valid;
-        uint256 rawLiquidationRequirementUsdc;
-        (valid, delta.openState, rawLiquidationRequirementUsdc) = OpenAccountingLib.tryBuildOpenState(inputs);
+        uint256 rawLiquidationRequirementAssets;
+        (valid, delta.openState, rawLiquidationRequirementAssets) = OpenAccountingLib.tryBuildOpenState(inputs);
         if (!valid) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
             return;
         }
         // floor(notional*bps/10_000) >= minimum is equivalent to the original cross-product comparison.
-        if (rawLiquidationRequirementUsdc < snap.riskParams.minBountyUsdc) {
+        if (rawLiquidationRequirementAssets < snap.riskParams.minBountyAssets) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL;
         }
     }
@@ -513,7 +516,7 @@ library CfdEnginePlanLib {
         if (longLots > maxLots || shortLots > maxLots - longLots || addedLots > maxLots - longLots - shortLots) {
             return false;
         }
-        uint256 shortEntry = snap.shortSide.entryNotional / CfdMath.USDC_TO_TOKEN_SCALE;
+        uint256 shortEntry = snap.shortSide.entryNotional / CfdMath.ASSETS_TO_TOKEN_SCALE;
         if (order.side == CfdTypes.Side.LONG) {
             longLots += addedLots;
         } else {
@@ -545,35 +548,35 @@ library CfdEnginePlanLib {
         MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) private pure {
-        delta.liquidationReserveBeforeUsdc = snap.liquidationReserveUsdc;
-        delta.liquidationReserveAfterUsdc = delta.openState.liquidationReserveTargetUsdc;
-        if (delta.liquidationReserveAfterUsdc < delta.liquidationReserveBeforeUsdc) {
-            delta.liquidationReserveAfterUsdc = delta.liquidationReserveBeforeUsdc;
+        delta.liquidationReserveBeforeAssets = snap.liquidationReserveAssets;
+        delta.liquidationReserveAfterAssets = delta.openState.liquidationReserveTargetAssets;
+        if (delta.liquidationReserveAfterAssets < delta.liquidationReserveBeforeAssets) {
+            delta.liquidationReserveAfterAssets = delta.liquidationReserveBeforeAssets;
         }
-        uint256 reserveIncreaseUsdc = delta.liquidationReserveAfterUsdc - delta.liquidationReserveBeforeUsdc;
+        uint256 reserveIncreaseAssets = delta.liquidationReserveAfterAssets - delta.liquidationReserveBeforeAssets;
 
-        uint256 newPledgeAvailableUsdc = openCostPlan.resultingPositionMarginUsdc > snap.position.margin
-            ? openCostPlan.resultingPositionMarginUsdc - snap.position.margin
+        uint256 newPledgeAvailableAssets = openCostPlan.resultingPositionMarginAssets > snap.position.margin
+            ? openCostPlan.resultingPositionMarginAssets - snap.position.margin
             : 0;
-        uint256 vpiReserveIncreaseUsdc = delta.vpiRebateReserveAfterUsdc > delta.vpiRebateReserveBeforeUsdc
-            ? delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveBeforeUsdc
+        uint256 vpiReserveIncreaseAssets = delta.vpiRebateReserveAfterAssets > delta.vpiRebateReserveBeforeAssets
+            ? delta.vpiRebateReserveAfterAssets - delta.vpiRebateReserveBeforeAssets
             : 0;
-        uint256 vpiReserveFromFreeUsdc = vpiReserveIncreaseUsdc < openCostPlan.resultingFreeSettlementUsdc
-            ? vpiReserveIncreaseUsdc
-            : openCostPlan.resultingFreeSettlementUsdc;
-        delta.vpiRebateReserveFromPledgeUsdc = vpiReserveIncreaseUsdc - vpiReserveFromFreeUsdc;
-        if (delta.vpiRebateReserveFromPledgeUsdc > newPledgeAvailableUsdc) {
+        uint256 vpiReserveFromFreeAssets = vpiReserveIncreaseAssets < openCostPlan.resultingFreeSettlementAssets
+            ? vpiReserveIncreaseAssets
+            : openCostPlan.resultingFreeSettlementAssets;
+        delta.vpiRebateReserveFromPledgeAssets = vpiReserveIncreaseAssets - vpiReserveFromFreeAssets;
+        if (delta.vpiRebateReserveFromPledgeAssets > newPledgeAvailableAssets) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED;
             return;
         }
 
-        newPledgeAvailableUsdc -= delta.vpiRebateReserveFromPledgeUsdc;
-        if (reserveIncreaseUsdc > newPledgeAvailableUsdc) {
+        newPledgeAvailableAssets -= delta.vpiRebateReserveFromPledgeAssets;
+        if (reserveIncreaseAssets > newPledgeAvailableAssets) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED;
             return;
         }
         delta.positionMarginAfterOpen =
-            openCostPlan.resultingPositionMarginUsdc - delta.vpiRebateReserveFromPledgeUsdc - reserveIncreaseUsdc;
+            openCostPlan.resultingPositionMarginAssets - delta.vpiRebateReserveFromPledgeAssets - reserveIncreaseAssets;
     }
 
     /// @notice Projects the same size-independent carry collection used by open planning, in place.
@@ -587,7 +590,7 @@ library CfdEnginePlanLib {
         if (snap.position.size == 0) {
             return true;
         }
-        uint256 pending = _pendingCarryUsdc(snap);
+        uint256 pending = _pendingCarryAssets(snap);
         return _applyPendingCarryRealizationToSnapshot(snap, pending) == pending;
     }
 
@@ -596,8 +599,8 @@ library CfdEnginePlanLib {
     ///      is not charged twice. The live engine checkpoints its index/timestamp even when no carry is due.
     function projectCloseCommitCarry(
         CfdEnginePlanTypes.RawSnapshot memory snap
-    ) internal pure returns (uint256 collectedUsdc) {
-        collectedUsdc = _applyPendingCarryRealizationToSnapshot(snap, _pendingCarryUsdc(snap));
+    ) internal pure returns (uint256 collectedAssets) {
+        collectedAssets = _applyPendingCarryRealizationToSnapshot(snap, _pendingCarryAssets(snap));
         snap.positionLastCarryIndex = _selectedSide(snap, snap.position.side).carryIndex;
         snap.position.lastCarryTimestamp = uint64(snap.currentTimestamp);
     }
@@ -606,42 +609,42 @@ library CfdEnginePlanLib {
     /// @dev Mutates the existing local snapshot in place, including custody, pledge, side margin, borrow base, and
     ///      pool depth. Uncovered carry remains available for existing terminal recovery/waiver rules.
     /// @param snap Canonical, internally consistent snapshot to mutate.
-    /// @param pendingCarryUsdc Carry requested for realization.
-    /// @return realizedCarryUsdc Carry covered by active position margin and free settlement.
+    /// @param pendingCarryAssets Carry requested for realization.
+    /// @return realizedCarryAssets Carry covered by active position margin and free settlement.
     function _applyPendingCarryRealizationToSnapshot(
         CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 pendingCarryUsdc
-    ) private pure returns (uint256 realizedCarryUsdc) {
-        if (pendingCarryUsdc == 0 || snap.position.size == 0) {
+        uint256 pendingCarryAssets
+    ) private pure returns (uint256 realizedCarryAssets) {
+        if (pendingCarryAssets == 0 || snap.position.size == 0) {
             return 0;
         }
         (
             MarginClearinghouseAccountingLib.SettlementConsumption memory consumption,
-            IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets
-        ) = MarginClearinghouseAccountingLib.projectCarryLoss(snap.accountBuckets, pendingCarryUsdc);
-        realizedCarryUsdc = consumption.totalConsumedUsdc;
+            IMarginClearinghouse.AccountAssetBuckets memory afterBuckets
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(snap.accountBuckets, pendingCarryAssets);
+        realizedCarryAssets = consumption.totalConsumedAssets;
         snap.accountBuckets = afterBuckets;
-        snap.position.margin = afterBuckets.activePositionMarginUsdc;
-        snap.lockedBuckets.positionMarginUsdc = afterBuckets.activePositionMarginUsdc;
-        snap.lockedBuckets.totalLockedMarginUsdc = afterBuckets.totalLockedMarginUsdc;
+        snap.position.margin = afterBuckets.activePositionMarginAssets;
+        snap.lockedBuckets.positionMarginAssets = afterBuckets.activePositionMarginAssets;
+        snap.lockedBuckets.totalLockedMarginAssets = afterBuckets.totalLockedMarginAssets;
         CfdEnginePlanTypes.SideSnapshot memory selected = _selectedSide(snap, snap.position.side);
-        selected.totalMargin -= consumption.activeMarginConsumedUsdc;
-        uint256 borrowBaseAfterUsdc =
-            PositionRiskAccountingLib.computeBorrowBaseUsdc(snap.position.maxProfitUsdc, snap.position.margin);
-        selected.borrowBaseUsdc = selected.borrowBaseUsdc - snap.positionBorrowBaseUsdc + borrowBaseAfterUsdc;
-        snap.positionBorrowBaseUsdc = borrowBaseAfterUsdc;
+        selected.totalMargin -= consumption.activeMarginConsumedAssets;
+        uint256 borrowBaseAfterAssets =
+            PositionRiskAccountingLib.computeBorrowBaseAssets(snap.position.maxProfitAssets, snap.position.margin);
+        selected.borrowBaseAssets = selected.borrowBaseAssets - snap.positionBorrowBaseAssets + borrowBaseAfterAssets;
+        snap.positionBorrowBaseAssets = borrowBaseAfterAssets;
         snap.positionLastCarryIndex = selected.carryIndex;
-        snap.unsettledCarryUsdc = consumption.uncoveredUsdc;
-        snap.poolAssetsUsdc += realizedCarryUsdc;
-        snap.poolCashUsdc += realizedCarryUsdc;
+        snap.unsettledCarryAssets = consumption.uncoveredAssets;
+        snap.poolAssets += realizedCarryAssets;
+        snap.poolCashAssets += realizedCarryAssets;
         if (snap.poolQueuesTradingRevenue) {
-            snap.poolAdditionalReservedUsdc += realizedCarryUsdc;
+            snap.poolAdditionalReservedAssets += realizedCarryAssets;
         }
     }
 
     /// @notice Builds risk state for the position projected by a successful open-cost plan.
     /// @dev Canonical PnL pledge already excludes action charges, rebates, and the liquidation-reserve carve-out, so it
-    ///      is used directly without reapplying `tradeCostUsdc`. The active threshold is FAD margin during the FAD
+    ///      is used directly without reapplying `tradeCostAssets`. The active threshold is FAD margin during the FAD
     ///      window and maintenance margin otherwise.
     /// @param snap Carry-adjusted snapshot before applying the new open.
     /// @param delta Partially built open delta containing resulting position and trade-cost values.
@@ -661,31 +664,31 @@ library CfdEnginePlanLib {
         if (snap.traderClaimBalanceForAccount > uint256(type(int256).max) - delta.positionMarginAfterOpen) {
             return (false, riskState);
         }
-        uint256 reachableCollateralUsdc = delta.positionMarginAfterOpen + snap.traderClaimBalanceForAccount;
+        uint256 reachableCollateralAssets = delta.positionMarginAfterOpen + snap.traderClaimBalanceForAccount;
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculateExactPnl(
             delta.newPosSize / CfdTypes.SIZE_QUANTUM,
-            delta.newPosEntryCostUsdcAtoms,
+            delta.newPosEntryCostAssetAtoms,
             delta.posSide,
             delta.price,
             snap.capPrice
         );
-        if (isProfit && reachableCollateralUsdc > uint256(type(int256).max) - pnlAbs) {
+        if (isProfit && reachableCollateralAssets > uint256(type(int256).max) - pnlAbs) {
             return (false, riskState);
         }
 
         riskState = PositionRiskAccountingLib.buildExactPriceRiskState(
             projectedPosition,
-            delta.newPosEntryCostUsdcAtoms,
+            delta.newPosEntryCostAssetAtoms,
             delta.price,
             snap.capPrice,
-            reachableCollateralUsdc,
+            reachableCollateralAssets,
             snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps
         );
         return (true, riskState);
     }
 
     /// @notice Applies the effective-asset requirement when a planned open preserves protected settlement headroom.
-    /// @dev The selected side copies are increased by the delta. Current assets use `snap.poolCashUsdc`; the physical
+    /// @dev The selected side copies are increased by the delta. Current assets use `snap.poolCashAssets`; the physical
     ///      asset delta reflects the fee actually credited from trade cost and affordable post-open pool cash. Trader
     ///      claims and pending payouts are unchanged. The protected buffer is liability-scaled and rounded up. This
     ///      helper writes the required effective-asset target into `delta` on success.
@@ -702,71 +705,75 @@ library CfdEnginePlanLib {
             CfdEnginePlanTypes.SideSnapshot memory short = snap.shortSide;
             if (delta.posSide == CfdTypes.Side.LONG) {
                 long.openInterest += delta.sideOiIncrease;
-                long.maxProfitUsdc += delta.sideMaxProfitIncrease;
+                long.maxProfitAssets += delta.sideMaxProfitIncrease;
                 long.totalMargin = delta.sideTotalMarginAfterOpen;
             } else {
                 short.openInterest += delta.sideOiIncrease;
-                short.maxProfitUsdc += delta.sideMaxProfitIncrease;
+                short.maxProfitAssets += delta.sideMaxProfitIncrease;
                 short.totalMargin = delta.sideTotalMarginAfterOpen;
             }
-            postMaxLiability = SolvencyAccountingLib.getMaxLiability(long.maxProfitUsdc, short.maxProfitUsdc);
+            postMaxLiability = SolvencyAccountingLib.getMaxLiability(long.maxProfitAssets, short.maxProfitAssets);
         }
 
-        uint256 directlyCreditedUsdc =
-            delta.tradeCostUsdc > 0 ? Math.min(uint256(delta.tradeCostUsdc), delta.executionFeeUsdc) : 0;
-        int256 cashDeltaBeforeTopUp = delta.tradeCostUsdc - int256(directlyCreditedUsdc);
+        uint256 directlyCreditedAssets =
+            delta.tradeCostAssets > 0 ? Math.min(uint256(delta.tradeCostAssets), delta.executionFeeAssets) : 0;
+        int256 cashDeltaBeforeTopUp = delta.tradeCostAssets - int256(directlyCreditedAssets);
         uint256 poolCashBeforeTopUp;
         if (cashDeltaBeforeTopUp >= 0) {
-            (bool fits, uint256 cash) = Math.tryAdd(snap.poolCashUsdc, uint256(cashDeltaBeforeTopUp));
+            (bool fits, uint256 cash) = Math.tryAdd(snap.poolCashAssets, uint256(cashDeltaBeforeTopUp));
             if (!fits) {
                 return false;
             }
             poolCashBeforeTopUp = cash;
         } else {
-            uint256 rebateUsdc = uint256(-cashDeltaBeforeTopUp);
-            if (rebateUsdc > snap.poolCashUsdc) {
+            uint256 rebateAssets = uint256(-cashDeltaBeforeTopUp);
+            if (rebateAssets > snap.poolCashAssets) {
                 return false;
             }
-            poolCashBeforeTopUp = snap.poolCashUsdc - rebateUsdc;
+            poolCashBeforeTopUp = snap.poolCashAssets - rebateAssets;
         }
-        uint256 newRevenueReserveUsdc =
+        uint256 newRevenueReserveAssets =
             snap.poolQueuesTradingRevenue && cashDeltaBeforeTopUp > 0 ? uint256(cashDeltaBeforeTopUp) : 0;
-        uint256 feeShortfallUsdc = delta.executionFeeUsdc - directlyCreditedUsdc;
-        uint256 topUpUsdc = feeShortfallUsdc == 0
+        uint256 feeShortfallAssets = delta.executionFeeAssets - directlyCreditedAssets;
+        uint256 topUpAssets = feeShortfallAssets == 0
             ? 0
             : Math.min(
-                feeShortfallUsdc,
+                feeShortfallAssets,
                 _freePoolCashAfterLiabilityReserves(
-                    snap, poolCashBeforeTopUp, postMaxLiability, snap.totalTraderClaimBalanceUsdc, newRevenueReserveUsdc
+                    snap,
+                    poolCashBeforeTopUp,
+                    postMaxLiability,
+                    snap.totalTraderClaimBalanceAssets,
+                    newRevenueReserveAssets
                 )
             );
-        if (cashDeltaBeforeTopUp < type(int256).min + int256(topUpUsdc)) {
+        if (cashDeltaBeforeTopUp < type(int256).min + int256(topUpAssets)) {
             return false;
         }
-        int256 physicalAssetsDeltaUsdc = cashDeltaBeforeTopUp - int256(topUpUsdc);
+        int256 physicalAssetsDeltaAssets = cashDeltaBeforeTopUp - int256(topUpAssets);
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
-            snap.poolCashUsdc,
-            SolvencyAccountingLib.getMaxLiability(snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc),
-            snap.totalTraderClaimBalanceUsdc
+            snap.poolCashAssets,
+            SolvencyAccountingLib.getMaxLiability(snap.longSide.maxProfitAssets, snap.shortSide.maxProfitAssets),
+            snap.totalTraderClaimBalanceAssets
         );
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
             currentState,
             SolvencyAccountingLib.PreviewDelta({
-                physicalAssetsDeltaUsdc: physicalAssetsDeltaUsdc,
-                maxLiabilityAfterUsdc: postMaxLiability,
-                traderClaimDeltaUsdc: 0,
-                pendingPoolPayoutUsdc: 0
+                physicalAssetsDeltaAssets: physicalAssetsDeltaAssets,
+                maxLiabilityAfterAssets: postMaxLiability,
+                traderClaimDeltaAssets: 0,
+                pendingPoolPayoutAssets: 0
             }),
             snap.degradedMode
         );
         satisfied = SolvencyAccountingLib.hasRequiredSettlementBuffer(
-            result.effectiveAssetsAfterUsdc, result.maxLiabilityAfterUsdc, snap.settlementBufferBps
+            result.effectiveAssetsAfterAssets, result.maxLiabilityAfterAssets, snap.settlementBufferBps
         );
         if (satisfied) {
-            delta.requiredEffectiveAssetsAfterUsdc = result.maxLiabilityAfterUsdc
-                + SolvencyAccountingLib.settlementBufferTargetUsdc(
-                    result.maxLiabilityAfterUsdc, snap.settlementBufferBps
+            delta.requiredEffectiveAssetsAfterAssets = result.maxLiabilityAfterAssets
+                + SolvencyAccountingLib.settlementBufferTargetAssets(
+                    result.maxLiabilityAfterAssets, snap.settlementBufferBps
                 );
         }
     }
@@ -804,8 +811,8 @@ library CfdEnginePlanLib {
             delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.SIDE_MISMATCH;
             return delta;
         }
-        delta.pendingCarryUsdc = _pendingCarryUsdc(snap);
-        delta.realizedCarryUsdc = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryUsdc);
+        delta.pendingCarryAssets = _pendingCarryAssets(snap);
+        delta.realizedCarryAssets = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryAssets);
 
         CfdTypes.Position memory pos = snap.position;
         delta.side = pos.side;
@@ -820,7 +827,7 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        if (snap.vpiRebateReserveUsdc < _negativeVpiReserveTarget(pos.vpiAccrued)) {
+        if (snap.vpiRebateReserveAssets < _negativeVpiReserveTarget(pos.vpiAccrued)) {
             delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.VPI_REBATE_RESERVE_UNDERFUNDED;
             return delta;
         }
@@ -841,44 +848,44 @@ library CfdEnginePlanLib {
 
         CloseAccountingLib.CloseState memory cs = delta.closeState;
         delta.posSizeDelta = delta.sizeDelta;
-        delta.posEntryCostAfterUsdcAtoms = cs.remainingEntryCostUsdcAtoms;
+        delta.posEntryCostAfterAssetAtoms = cs.remainingEntryCostAssetAtoms;
         if (cs.remainingSize > 0) {
-            delta.posEntryPriceAfter = cs.remainingEntryCostUsdcAtoms / CfdMath.sizeToLots(cs.remainingSize);
+            delta.posEntryPriceAfter = cs.remainingEntryCostAssetAtoms / CfdMath.sizeToLots(cs.remainingSize);
         }
-        delta.posMaxProfitReduction = cs.maxProfitReductionUsdc;
-        delta.posVpiAccruedReduction = cs.proportionalAccrualUsdc;
+        delta.posMaxProfitReduction = cs.maxProfitReductionAssets;
+        delta.posVpiAccruedReduction = cs.proportionalAccrualAssets;
         delta.deletePosition = pos.size == delta.sizeDelta;
 
         delta.sideOiDecrease = delta.sizeDelta;
-        delta.sideEntryNotionalReduction = cs.closedEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
-        delta.sideMaxProfitReduction = cs.maxProfitReductionUsdc;
+        delta.sideEntryNotionalReduction = cs.closedEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE;
+        delta.sideMaxProfitReduction = cs.maxProfitReductionAssets;
 
-        delta.unlockMarginUsdc = cs.marginToFreeUsdc;
+        delta.unlockMarginAssets = cs.marginToFreeAssets;
 
         uint256 remainingSize = pos.size - delta.sizeDelta;
-        uint256 reserveTargetUsdc;
+        uint256 reserveTargetAssets;
         if (remainingSize > 0) {
-            reserveTargetUsdc = (CfdMath.sizeToLots(remainingSize) * delta.price * snap.riskParams.bountyBps) / 10_000;
-            if (reserveTargetUsdc < snap.riskParams.minBountyUsdc) {
-                reserveTargetUsdc = snap.riskParams.minBountyUsdc;
+            reserveTargetAssets = (CfdMath.sizeToLots(remainingSize) * delta.price * snap.riskParams.bountyBps) / 10_000;
+            if (reserveTargetAssets < snap.riskParams.minBountyAssets) {
+                reserveTargetAssets = snap.riskParams.minBountyAssets;
             }
         }
-        if (snap.liquidationReserveUsdc > reserveTargetUsdc) {
-            delta.liquidationReserveReleaseUsdc = snap.liquidationReserveUsdc - reserveTargetUsdc;
+        if (snap.liquidationReserveAssets > reserveTargetAssets) {
+            delta.liquidationReserveReleaseAssets = snap.liquidationReserveAssets - reserveTargetAssets;
         }
-        delta.realizedPnlUsdc = cs.realizedPnlUsdc;
+        delta.realizedPnlAssets = cs.realizedPnlAssets;
         delta = _planIsolatedCloseSettlement(snap, delta, cs);
         if (delta.revertCode != CfdEnginePlanTypes.CloseRevertCode.OK) {
             return delta;
         }
 
-        if (remainingSize > 0 && delta.actionChargeWaivedUsdc > 0) {
+        if (remainingSize > 0 && delta.actionChargeWaivedAssets > 0) {
             delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.PARTIAL_ACTION_CHARGE_UNCOLLECTIBLE;
             return delta;
         }
 
         if (remainingSize > 0 && delta.pricePayoutIsImmediate) {
-            delta.posMarginAfter += delta.pricePayoutUsdc;
+            delta.posMarginAfter += delta.pricePayoutAssets;
         }
 
         if (remainingSize > 0 && !_postCloseHealthy(snap, delta, cs)) {
@@ -901,85 +908,87 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.CloseDelta memory delta,
         CloseAccountingLib.CloseState memory cs
     ) private pure returns (CfdEnginePlanTypes.CloseDelta memory) {
-        if (cs.realizedPnlUsdc >= 0) {
-            delta.priceGainUsdc = uint256(cs.realizedPnlUsdc);
+        if (cs.realizedPnlAssets >= 0) {
+            delta.priceGainAssets = uint256(cs.realizedPnlAssets);
         } else {
-            delta.priceLossUsdc = uint256(-cs.realizedPnlUsdc);
-            delta.lossUsdc = delta.priceLossUsdc;
-            delta.pricePnlClaimConsumedUsdc = snap.traderClaimBalanceForAccount < delta.priceLossUsdc
+            delta.priceLossAssets = uint256(-cs.realizedPnlAssets);
+            delta.lossAssets = delta.priceLossAssets;
+            delta.pricePnlClaimConsumedAssets = snap.traderClaimBalanceForAccount < delta.priceLossAssets
                 ? snap.traderClaimBalanceForAccount
-                : delta.priceLossUsdc;
-            uint256 lossAfterClaimUsdc = delta.priceLossUsdc - delta.pricePnlClaimConsumedUsdc;
-            delta.pricePnlPledgeConsumedUsdc =
-                cs.marginToFreeUsdc < lossAfterClaimUsdc ? cs.marginToFreeUsdc : lossAfterClaimUsdc;
-            uint256 minimumRecoveryUsdc = _minimumPartialLossRecoveryPreservingTerminalCap(snap, cs, delta.price);
-            uint256 minimumPledgeConsumptionUsdc = minimumRecoveryUsdc > delta.pricePnlClaimConsumedUsdc
-                ? minimumRecoveryUsdc - delta.pricePnlClaimConsumedUsdc
+                : delta.priceLossAssets;
+            uint256 lossAfterClaimAssets = delta.priceLossAssets - delta.pricePnlClaimConsumedAssets;
+            delta.pricePnlPledgeConsumedAssets =
+                cs.marginToFreeAssets < lossAfterClaimAssets ? cs.marginToFreeAssets : lossAfterClaimAssets;
+            uint256 minimumRecoveryAssets = _minimumPartialLossRecoveryPreservingTerminalCap(snap, cs, delta.price);
+            uint256 minimumPledgeConsumptionAssets = minimumRecoveryAssets > delta.pricePnlClaimConsumedAssets
+                ? minimumRecoveryAssets - delta.pricePnlClaimConsumedAssets
                 : 0;
-            uint256 maximumPledgeConsumptionUsdc =
-                lossAfterClaimUsdc < snap.position.margin ? lossAfterClaimUsdc : snap.position.margin;
-            if (minimumPledgeConsumptionUsdc > maximumPledgeConsumptionUsdc) {
-                minimumPledgeConsumptionUsdc = maximumPledgeConsumptionUsdc;
+            uint256 maximumPledgeConsumptionAssets =
+                lossAfterClaimAssets < snap.position.margin ? lossAfterClaimAssets : snap.position.margin;
+            if (minimumPledgeConsumptionAssets > maximumPledgeConsumptionAssets) {
+                minimumPledgeConsumptionAssets = maximumPledgeConsumptionAssets;
             }
-            if (minimumPledgeConsumptionUsdc > delta.pricePnlPledgeConsumedUsdc) {
-                delta.pricePnlPledgeConsumedUsdc = minimumPledgeConsumptionUsdc;
+            if (minimumPledgeConsumptionAssets > delta.pricePnlPledgeConsumedAssets) {
+                delta.pricePnlPledgeConsumedAssets = minimumPledgeConsumptionAssets;
             }
-            delta.priceLossWrittenOffUsdc = lossAfterClaimUsdc - delta.pricePnlPledgeConsumedUsdc;
+            delta.priceLossWrittenOffAssets = lossAfterClaimAssets - delta.pricePnlPledgeConsumedAssets;
         }
 
-        delta.unlockMarginUsdc = _maxPricePledgeUnlockPreservingTerminalCap(snap, delta, cs);
+        delta.unlockMarginAssets = _maxPricePledgeUnlockPreservingTerminalCap(snap, delta, cs);
         if (cs.remainingSize > 0 && !_limitCloseReleaseByHealth(snap, delta, cs)) {
             delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNHEALTHY;
             return delta;
         }
-        delta.safeMarginReleaseUsdc = delta.unlockMarginUsdc;
-        delta.posMarginAfter = snap.position.margin - delta.pricePnlPledgeConsumedUsdc - delta.unlockMarginUsdc;
-        delta.existingTraderClaimConsumedUsdc = delta.pricePnlClaimConsumedUsdc;
-        delta.existingTraderClaimRemainingUsdc = snap.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedUsdc;
+        delta.safeMarginReleaseAssets = delta.unlockMarginAssets;
+        delta.posMarginAfter = snap.position.margin - delta.pricePnlPledgeConsumedAssets - delta.unlockMarginAssets;
+        delta.existingTraderClaimConsumedAssets = delta.pricePnlClaimConsumedAssets;
+        delta.existingTraderClaimRemainingAssets = snap.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedAssets;
 
-        delta.vpiRebateReserveBeforeUsdc = snap.vpiRebateReserveUsdc;
-        delta.vpiRebateReserveAfterUsdc =
-            _negativeVpiReserveTarget(snap.position.vpiAccrued - cs.proportionalAccrualUsdc);
+        delta.vpiRebateReserveBeforeAssets = snap.vpiRebateReserveAssets;
+        delta.vpiRebateReserveAfterAssets =
+            _negativeVpiReserveTarget(snap.position.vpiAccrued - cs.proportionalAccrualAssets);
 
         _planCloseActionSettlement(snap, delta, cs);
 
-        delta.pricePayoutUsdc = delta.priceGainUsdc - delta.actionChargeWithheldUsdc;
-        uint256 claimsAfterPriceNettingUsdc = snap.totalTraderClaimBalanceUsdc - delta.pricePnlClaimConsumedUsdc;
-        uint256 poolCashAfterCollectionsUsdc = snap.poolCashUsdc + delta.pricePnlPledgeConsumedUsdc
-            + delta.actionChargeCollectedUsdc - delta.actionProtocolFeeCreditedUsdc;
-        uint256 freePoolCashUsdc =
-            CashPriorityLib.reserveFreshPayouts(poolCashAfterCollectionsUsdc, claimsAfterPriceNettingUsdc).freeCashUsdc;
-        if (delta.pricePayoutUsdc > 0) {
-            delta.pricePayoutIsImmediate = freePoolCashUsdc >= delta.pricePayoutUsdc;
+        delta.pricePayoutAssets = delta.priceGainAssets - delta.actionChargeWithheldAssets;
+        uint256 claimsAfterPriceNettingAssets = snap.totalTraderClaimBalanceAssets - delta.pricePnlClaimConsumedAssets;
+        uint256 poolCashAfterCollectionsAssets = snap.poolCashAssets + delta.pricePnlPledgeConsumedAssets
+            + delta.actionChargeCollectedAssets - delta.actionProtocolFeeCreditedAssets;
+        uint256 freePoolCashAssets =
+            CashPriorityLib.reserveFreshPayouts(poolCashAfterCollectionsAssets, claimsAfterPriceNettingAssets)
+        .freeCashAssets;
+        if (delta.pricePayoutAssets > 0) {
+            delta.pricePayoutIsImmediate = freePoolCashAssets >= delta.pricePayoutAssets;
             delta.pricePayoutCreatesClaim = !delta.pricePayoutIsImmediate;
             if (delta.pricePayoutIsImmediate) {
-                poolCashAfterCollectionsUsdc -= delta.pricePayoutUsdc;
+                poolCashAfterCollectionsAssets -= delta.pricePayoutAssets;
             } else {
-                claimsAfterPriceNettingUsdc += delta.pricePayoutUsdc;
+                claimsAfterPriceNettingAssets += delta.pricePayoutAssets;
             }
         }
 
-        freePoolCashUsdc =
-        CashPriorityLib.reserveFreshPayouts(poolCashAfterCollectionsUsdc, claimsAfterPriceNettingUsdc).freeCashUsdc;
-        if (delta.actionRebateUsdc > 0) {
-            delta.actionRebatePaidUsdc =
-                delta.actionRebateUsdc < freePoolCashUsdc ? delta.actionRebateUsdc : freePoolCashUsdc;
-            delta.actionRebateWaivedUsdc = delta.actionRebateUsdc - delta.actionRebatePaidUsdc;
-            poolCashAfterCollectionsUsdc -= delta.actionRebatePaidUsdc;
+        freePoolCashAssets =
+        CashPriorityLib.reserveFreshPayouts(poolCashAfterCollectionsAssets, claimsAfterPriceNettingAssets)
+        .freeCashAssets;
+        if (delta.actionRebateAssets > 0) {
+            delta.actionRebatePaidAssets =
+                delta.actionRebateAssets < freePoolCashAssets ? delta.actionRebateAssets : freePoolCashAssets;
+            delta.actionRebateWaivedAssets = delta.actionRebateAssets - delta.actionRebatePaidAssets;
+            poolCashAfterCollectionsAssets -= delta.actionRebatePaidAssets;
         }
 
-        delta.freshTraderPayoutUsdc = delta.pricePayoutUsdc + delta.actionRebatePaidUsdc;
+        delta.freshTraderPayoutAssets = delta.pricePayoutAssets + delta.actionRebatePaidAssets;
         delta.freshPayoutIsImmediate = !delta.pricePayoutCreatesClaim;
         delta.freshPayoutCreatesClaim = delta.pricePayoutCreatesClaim;
 
-        uint256 feeTopUpUsdc = delta.executionFeeUsdc - delta.actionProtocolFeeCreditedUsdc;
-        freePoolCashUsdc =
-            _freePoolCashForProtocolFee(snap, delta, poolCashAfterCollectionsUsdc, claimsAfterPriceNettingUsdc);
-        delta.protocolFeeTopUpUsdc = feeTopUpUsdc < freePoolCashUsdc ? feeTopUpUsdc : freePoolCashUsdc;
+        uint256 feeTopUpAssets = delta.executionFeeAssets - delta.actionProtocolFeeCreditedAssets;
+        freePoolCashAssets =
+            _freePoolCashForProtocolFee(snap, delta, poolCashAfterCollectionsAssets, claimsAfterPriceNettingAssets);
+        delta.protocolFeeTopUpAssets = feeTopUpAssets < freePoolCashAssets ? feeTopUpAssets : freePoolCashAssets;
 
-        if (delta.pricePayoutUsdc > 0 || delta.actionRebatePaidUsdc > 0) {
+        if (delta.pricePayoutAssets > 0 || delta.actionRebatePaidAssets > 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.GAIN;
-        } else if (delta.priceLossUsdc > 0 || delta.actionChargeCollectedUsdc > 0) {
+        } else if (delta.priceLossAssets > 0 || delta.actionChargeCollectedAssets > 0) {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
         }
         return delta;
@@ -990,37 +999,37 @@ library CfdEnginePlanLib {
     function _freePoolCashForProtocolFee(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.CloseDelta memory delta,
-        uint256 poolCashUsdc,
-        uint256 traderClaimsUsdc
+        uint256 poolCashAssets,
+        uint256 traderClaimsAssets
     ) private pure returns (uint256) {
-        uint256 maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc, delta.side, delta.posMaxProfitReduction
+        uint256 maxLiabilityAssets = SolvencyAccountingLib.getMaxLiabilityAfterClose(
+            snap.longSide.maxProfitAssets, snap.shortSide.maxProfitAssets, delta.side, delta.posMaxProfitReduction
         );
-        uint256 newRevenueReserveUsdc;
+        uint256 newRevenueReserveAssets;
         if (snap.poolQueuesTradingRevenue) {
-            uint256 cashArrivedRevenueUsdc = delta.pricePnlPledgeConsumedUsdc + delta.actionChargeCollectedUsdc
-                - delta.actionProtocolFeeCreditedUsdc;
-            uint256 retainedRevenueUsdc =
-                delta.actionChargeWithheldUsdc - (delta.executionFeeUsdc - delta.actionProtocolFeeCreditedUsdc);
-            newRevenueReserveUsdc = cashArrivedRevenueUsdc + retainedRevenueUsdc;
+            uint256 cashArrivedRevenueAssets = delta.pricePnlPledgeConsumedAssets + delta.actionChargeCollectedAssets
+                - delta.actionProtocolFeeCreditedAssets;
+            uint256 retainedRevenueAssets =
+                delta.actionChargeWithheldAssets - (delta.executionFeeAssets - delta.actionProtocolFeeCreditedAssets);
+            newRevenueReserveAssets = cashArrivedRevenueAssets + retainedRevenueAssets;
         }
         return _freePoolCashAfterLiabilityReserves(
-            snap, poolCashUsdc, maxLiabilityUsdc, traderClaimsUsdc, newRevenueReserveUsdc
+            snap, poolCashAssets, maxLiabilityAssets, traderClaimsAssets, newRevenueReserveAssets
         );
     }
 
     /// @dev Matches HousePool's settlement-free cash reserve after a projected side update and queued revenue.
     function _freePoolCashAfterLiabilityReserves(
         CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 poolCashUsdc,
-        uint256 maxLiabilityUsdc,
-        uint256 traderClaimsUsdc,
-        uint256 newRevenueReserveUsdc
+        uint256 poolCashAssets,
+        uint256 maxLiabilityAssets,
+        uint256 traderClaimsAssets,
+        uint256 newRevenueReserveAssets
     ) private pure returns (uint256) {
-        uint256 reservedUsdc = maxLiabilityUsdc + traderClaimsUsdc
-            + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, snap.settlementBufferBps)
-            + snap.poolAdditionalReservedUsdc + newRevenueReserveUsdc;
-        return poolCashUsdc > reservedUsdc ? poolCashUsdc - reservedUsdc : 0;
+        uint256 reservedAssets = maxLiabilityAssets + traderClaimsAssets
+            + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, snap.settlementBufferBps)
+            + snap.poolAdditionalReservedAssets + newRevenueReserveAssets;
+        return poolCashAssets > reservedAssets ? poolCashAssets - reservedAssets : 0;
     }
 
     /// @notice Separates close action charges and rebates from price PnL and allocates the collected execution fee.
@@ -1029,36 +1038,39 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.CloseDelta memory delta,
         CloseAccountingLib.CloseState memory cs
     ) private pure {
-        int256 actionNetUsdc = cs.vpiDeltaUsdc
-            + int256(cs.executionFeeUsdc + cs.frozenSpreadUsdc + delta.pendingCarryUsdc - delta.realizedCarryUsdc);
-        uint256 vpiClawbackWithheldUsdc;
-        if (actionNetUsdc > 0) {
-            delta.actionChargeAssessedUsdc = uint256(actionNetUsdc);
-            delta.actionChargeWithheldUsdc = delta.priceGainUsdc < delta.actionChargeAssessedUsdc
-                ? delta.priceGainUsdc
-                : delta.actionChargeAssessedUsdc;
-            delta.actionChargeToCollectUsdc = delta.actionChargeAssessedUsdc - delta.actionChargeWithheldUsdc;
-            uint256 vpiClawbackUsdc =
-                _negativeVpiReserveTarget(snap.position.vpiAccrued) - delta.vpiRebateReserveAfterUsdc;
-            vpiClawbackWithheldUsdc =
-                delta.actionChargeWithheldUsdc < vpiClawbackUsdc ? delta.actionChargeWithheldUsdc : vpiClawbackUsdc;
-            delta.vpiRebateReserveConsumedUsdc = vpiClawbackUsdc - vpiClawbackWithheldUsdc;
+        int256 actionNetAssets = cs.vpiDeltaAssets
+            + int256(
+                cs.executionFeeAssets + cs.frozenSpreadAssets + delta.pendingCarryAssets - delta.realizedCarryAssets
+            );
+        uint256 vpiClawbackWithheldAssets;
+        if (actionNetAssets > 0) {
+            delta.actionChargeAssessedAssets = uint256(actionNetAssets);
+            delta.actionChargeWithheldAssets = delta.priceGainAssets < delta.actionChargeAssessedAssets
+                ? delta.priceGainAssets
+                : delta.actionChargeAssessedAssets;
+            delta.actionChargeToCollectAssets = delta.actionChargeAssessedAssets - delta.actionChargeWithheldAssets;
+            uint256 vpiClawbackAssets =
+                _negativeVpiReserveTarget(snap.position.vpiAccrued) - delta.vpiRebateReserveAfterAssets;
+            vpiClawbackWithheldAssets = delta.actionChargeWithheldAssets < vpiClawbackAssets
+                ? delta.actionChargeWithheldAssets
+                : vpiClawbackAssets;
+            delta.vpiRebateReserveConsumedAssets = vpiClawbackAssets - vpiClawbackWithheldAssets;
             _planCloseCashSources(snap, delta, cs.remainingSize == 0);
-        } else if (actionNetUsdc < 0) {
-            delta.actionRebateUsdc = uint256(-actionNetUsdc);
+        } else if (actionNetAssets < 0) {
+            delta.actionRebateAssets = uint256(-actionNetAssets);
         }
 
-        delta.netReleasedMarginUsdc = delta.unlockMarginUsdc - delta.actionChargeFromReleasedMarginUsdc;
-        uint256 nonClawbackWithheldUsdc = delta.actionChargeWithheldUsdc - vpiClawbackWithheldUsdc;
-        uint256 nonVpiReserveCollectedUsdc = delta.actionChargeCollectedUsdc - delta.vpiRebateReserveConsumedUsdc;
-        uint256 executionFeeEligibleUsdc = nonClawbackWithheldUsdc + nonVpiReserveCollectedUsdc;
-        delta.executionFeeUsdc =
-            cs.executionFeeUsdc < executionFeeEligibleUsdc ? cs.executionFeeUsdc : executionFeeEligibleUsdc;
-        uint256 feeWithheldUsdc =
-            delta.executionFeeUsdc < nonClawbackWithheldUsdc ? delta.executionFeeUsdc : nonClawbackWithheldUsdc;
-        uint256 feeToCollectUsdc = delta.executionFeeUsdc - feeWithheldUsdc;
-        delta.actionProtocolFeeCreditedUsdc =
-            feeToCollectUsdc < nonVpiReserveCollectedUsdc ? feeToCollectUsdc : nonVpiReserveCollectedUsdc;
+        delta.netReleasedMarginAssets = delta.unlockMarginAssets - delta.actionChargeFromReleasedMarginAssets;
+        uint256 nonClawbackWithheldAssets = delta.actionChargeWithheldAssets - vpiClawbackWithheldAssets;
+        uint256 nonVpiReserveCollectedAssets = delta.actionChargeCollectedAssets - delta.vpiRebateReserveConsumedAssets;
+        uint256 executionFeeEligibleAssets = nonClawbackWithheldAssets + nonVpiReserveCollectedAssets;
+        delta.executionFeeAssets =
+            cs.executionFeeAssets < executionFeeEligibleAssets ? cs.executionFeeAssets : executionFeeEligibleAssets;
+        uint256 feeWithheldAssets =
+            delta.executionFeeAssets < nonClawbackWithheldAssets ? delta.executionFeeAssets : nonClawbackWithheldAssets;
+        uint256 feeToCollectAssets = delta.executionFeeAssets - feeWithheldAssets;
+        delta.actionProtocolFeeCreditedAssets =
+            feeToCollectAssets < nonVpiReserveCollectedAssets ? feeToCollectAssets : nonVpiReserveCollectedAssets;
     }
 
     function _postCloseHealthy(
@@ -1070,10 +1082,10 @@ library CfdEnginePlanLib {
         remaining.side = snap.position.side;
         remaining.size = cs.remainingSize;
         uint256 claims =
-            delta.existingTraderClaimRemainingUsdc + (delta.pricePayoutCreatesClaim ? delta.pricePayoutUsdc : 0);
+            delta.existingTraderClaimRemainingAssets + (delta.pricePayoutCreatesClaim ? delta.pricePayoutAssets : 0);
         uint256 bps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
         return !PositionRiskAccountingLib.buildExactPriceRiskState(
-            remaining, cs.remainingEntryCostUsdcAtoms, delta.price, snap.capPrice, delta.posMarginAfter + claims, bps
+            remaining, cs.remainingEntryCostAssetAtoms, delta.price, snap.capPrice, delta.posMarginAfter + claims, bps
         )
         .liquidatable;
     }
@@ -1083,39 +1095,42 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.CloseDelta memory delta,
         bool terminal
     ) private pure {
-        uint256 remainingActionChargeToCollectUsdc =
-            delta.actionChargeToCollectUsdc - delta.vpiRebateReserveConsumedUsdc;
-        uint256 protectedActionReserveUsdc = snap.protectedExecutionBountyUsdc + snap.vpiRebateReserveUsdc;
-        uint256 spendableActionReserveUsdc = snap.actionReserveUsdc > protectedActionReserveUsdc
-            ? snap.actionReserveUsdc - protectedActionReserveUsdc
+        uint256 remainingActionChargeToCollectAssets =
+            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
+        uint256 protectedActionReserveAssets = snap.protectedExecutionBountyAssets + snap.vpiRebateReserveAssets;
+        uint256 spendableActionReserveAssets = snap.actionReserveAssets > protectedActionReserveAssets
+            ? snap.actionReserveAssets - protectedActionReserveAssets
             : 0;
-        delta.actionReserveConsumedUsdc = remainingActionChargeToCollectUsdc < spendableActionReserveUsdc
-            ? remainingActionChargeToCollectUsdc
-            : spendableActionReserveUsdc;
-        uint256 actionChargeAfterReserveUsdc = remainingActionChargeToCollectUsdc - delta.actionReserveConsumedUsdc;
-        uint256 releasedVpiReserveUsdc =
-            delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc;
-        uint256 collectibleFreeSettlementUsdc = snap.accountBuckets.freeSettlementUsdc + releasedVpiReserveUsdc;
+        delta.actionReserveConsumedAssets = remainingActionChargeToCollectAssets < spendableActionReserveAssets
+            ? remainingActionChargeToCollectAssets
+            : spendableActionReserveAssets;
+        uint256 actionChargeAfterReserveAssets =
+            remainingActionChargeToCollectAssets - delta.actionReserveConsumedAssets;
+        uint256 releasedVpiReserveAssets = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
+            - delta.vpiRebateReserveConsumedAssets;
+        uint256 collectibleFreeSettlementAssets = snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets;
         if (terminal) {
             // The full-close reserve is released before pledge attribution and cash collection.
-            collectibleFreeSettlementUsdc += delta.liquidationReserveReleaseUsdc;
+            collectibleFreeSettlementAssets += delta.liquidationReserveReleaseAssets;
         }
-        uint256 freeConsumedUsdc = actionChargeAfterReserveUsdc < collectibleFreeSettlementUsdc
-            ? actionChargeAfterReserveUsdc
-            : collectibleFreeSettlementUsdc;
-        uint256 actionChargeAfterFreeUsdc = actionChargeAfterReserveUsdc - freeConsumedUsdc;
-        delta.actionChargeFromReleasedMarginUsdc =
-            actionChargeAfterFreeUsdc < delta.unlockMarginUsdc ? actionChargeAfterFreeUsdc : delta.unlockMarginUsdc;
-        actionChargeAfterFreeUsdc -= delta.actionChargeFromReleasedMarginUsdc;
+        uint256 freeConsumedAssets = actionChargeAfterReserveAssets < collectibleFreeSettlementAssets
+            ? actionChargeAfterReserveAssets
+            : collectibleFreeSettlementAssets;
+        uint256 actionChargeAfterFreeAssets = actionChargeAfterReserveAssets - freeConsumedAssets;
+        delta.actionChargeFromReleasedMarginAssets = actionChargeAfterFreeAssets < delta.unlockMarginAssets
+            ? actionChargeAfterFreeAssets
+            : delta.unlockMarginAssets;
+        actionChargeAfterFreeAssets -= delta.actionChargeFromReleasedMarginAssets;
         if (terminal) {
-            delta.actionCommittedMarginConsumedUsdc = actionChargeAfterFreeUsdc
-                < snap.lockedBuckets.committedOrderMarginUsdc
-                ? actionChargeAfterFreeUsdc
-                : snap.lockedBuckets.committedOrderMarginUsdc;
+            delta.actionCommittedMarginConsumedAssets = actionChargeAfterFreeAssets
+                < snap.lockedBuckets.committedOrderMarginAssets
+                ? actionChargeAfterFreeAssets
+                : snap.lockedBuckets.committedOrderMarginAssets;
         }
-        delta.actionChargeCollectedUsdc = delta.vpiRebateReserveConsumedUsdc + delta.actionReserveConsumedUsdc
-            + freeConsumedUsdc + delta.actionChargeFromReleasedMarginUsdc + delta.actionCommittedMarginConsumedUsdc;
-        delta.actionChargeWaivedUsdc = delta.actionChargeToCollectUsdc - delta.actionChargeCollectedUsdc;
+        delta.actionChargeCollectedAssets = delta.vpiRebateReserveConsumedAssets + delta.actionReserveConsumedAssets
+            + freeConsumedAssets + delta.actionChargeFromReleasedMarginAssets
+            + delta.actionCommittedMarginConsumedAssets;
+        delta.actionChargeWaivedAssets = delta.actionChargeToCollectAssets - delta.actionChargeCollectedAssets;
     }
 
     /// @dev Claims are health collateral, never cash funding. Net gains contribute once whether paid or deferred.
@@ -1124,36 +1139,38 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.CloseDelta memory delta,
         CloseAccountingLib.CloseState memory cs
     ) private pure returns (bool) {
-        uint256 pledge = snap.position.margin - delta.pricePnlPledgeConsumedUsdc;
-        uint256 claims = snap.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedUsdc;
+        uint256 pledge = snap.position.margin - delta.pricePnlPledgeConsumedAssets;
+        uint256 claims = snap.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedAssets;
         PositionRiskAccountingLib.PositionRiskState memory risk;
         {
-            int256 actionNet = cs.vpiDeltaUsdc
-                + int256(cs.executionFeeUsdc + cs.frozenSpreadUsdc + delta.pendingCarryUsdc - delta.realizedCarryUsdc);
+            int256 actionNet = cs.vpiDeltaAssets
+                + int256(
+                    cs.executionFeeAssets + cs.frozenSpreadAssets + delta.pendingCarryAssets - delta.realizedCarryAssets
+                );
             uint256 withheld = actionNet > 0 ? uint256(actionNet) : 0;
-            if (withheld > delta.priceGainUsdc) {
-                withheld = delta.priceGainUsdc;
+            if (withheld > delta.priceGainAssets) {
+                withheld = delta.priceGainAssets;
             }
-            uint256 gain = delta.priceGainUsdc - withheld;
+            uint256 gain = delta.priceGainAssets - withheld;
             CfdTypes.Position memory remaining;
             remaining.side = snap.position.side;
             remaining.size = cs.remainingSize;
             uint256 bps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
             risk = PositionRiskAccountingLib.buildExactPriceRiskState(
-                remaining, cs.remainingEntryCostUsdcAtoms, delta.price, snap.capPrice, pledge + claims + gain, bps
+                remaining, cs.remainingEntryCostAssetAtoms, delta.price, snap.capPrice, pledge + claims + gain, bps
             );
         }
         if (risk.liquidatable) {
             return false;
         }
-        uint256 headroom = uint256(risk.equityUsdc) - risk.maintenanceMarginUsdc - 1;
-        if (delta.unlockMarginUsdc > headroom) {
-            delta.unlockMarginUsdc = headroom;
+        uint256 headroom = uint256(risk.equityAssets) - risk.maintenanceMarginAssets - 1;
+        if (delta.unlockMarginAssets > headroom) {
+            delta.unlockMarginAssets = headroom;
         }
-        (bool profit, uint256 terminalTarget) = _requiredPostCloseTerminalCapUsdc(snap, delta, cs);
-        if (!profit && risk.unrealizedPnlUsdc < 0) {
-            uint256 rawLoss = uint256(-risk.unrealizedPnlUsdc);
-            uint256 cap = pledge - delta.unlockMarginUsdc + claims;
+        (bool profit, uint256 terminalTarget) = _requiredPostCloseTerminalCapAssets(snap, delta, cs);
+        if (!profit && risk.unrealizedPnlAssets < 0) {
+            uint256 rawLoss = uint256(-risk.unrealizedPnlAssets);
+            uint256 cap = pledge - delta.unlockMarginAssets + claims;
             if ((rawLoss < cap ? rawLoss : cap) != terminalTarget) {
                 return false;
             }
@@ -1170,58 +1187,62 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.CloseDelta memory delta,
         CloseAccountingLib.CloseState memory cs
-    ) private pure returns (uint256 unlockUsdc) {
-        uint256 unusedCloseAllocationUsdc = cs.marginToFreeUsdc > delta.pricePnlPledgeConsumedUsdc
-            ? cs.marginToFreeUsdc - delta.pricePnlPledgeConsumedUsdc
+    ) private pure returns (uint256 unlockAssets) {
+        uint256 unusedCloseAllocationAssets = cs.marginToFreeAssets > delta.pricePnlPledgeConsumedAssets
+            ? cs.marginToFreeAssets - delta.pricePnlPledgeConsumedAssets
             : 0;
-        if (cs.remainingSize == 0 || unusedCloseAllocationUsdc == 0) {
-            return unusedCloseAllocationUsdc;
+        if (cs.remainingSize == 0 || unusedCloseAllocationAssets == 0) {
+            return unusedCloseAllocationAssets;
         }
 
-        (bool remainingTraderProfit, uint256 requiredPostCapUsdc) = _requiredPostCloseTerminalCapUsdc(snap, delta, cs);
+        (bool remainingTraderProfit, uint256 requiredPostCapAssets) =
+            _requiredPostCloseTerminalCapAssets(snap, delta, cs);
         if (remainingTraderProfit) {
-            return unusedCloseAllocationUsdc;
+            return unusedCloseAllocationAssets;
         }
 
-        uint256 remainingClaimUsdc = snap.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedUsdc;
-        uint256 requiredPledgeUsdc =
-            requiredPostCapUsdc > remainingClaimUsdc ? requiredPostCapUsdc - remainingClaimUsdc : 0;
-        uint256 pledgeBeforeUnlockUsdc = snap.position.margin - delta.pricePnlPledgeConsumedUsdc;
-        uint256 capPreservingUnlockUsdc =
-            pledgeBeforeUnlockUsdc > requiredPledgeUsdc ? pledgeBeforeUnlockUsdc - requiredPledgeUsdc : 0;
-        return unusedCloseAllocationUsdc < capPreservingUnlockUsdc ? unusedCloseAllocationUsdc : capPreservingUnlockUsdc;
+        uint256 remainingClaimAssets = snap.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedAssets;
+        uint256 requiredPledgeAssets =
+            requiredPostCapAssets > remainingClaimAssets ? requiredPostCapAssets - remainingClaimAssets : 0;
+        uint256 pledgeBeforeUnlockAssets = snap.position.margin - delta.pricePnlPledgeConsumedAssets;
+        uint256 capPreservingUnlockAssets =
+            pledgeBeforeUnlockAssets > requiredPledgeAssets ? pledgeBeforeUnlockAssets - requiredPledgeAssets : 0;
+        return unusedCloseAllocationAssets < capPreservingUnlockAssets
+            ? unusedCloseAllocationAssets
+            : capPreservingUnlockAssets;
     }
 
     /// @notice Computes the post-close collectible cap required to preserve the pre-close terminal price curve.
-    function _requiredPostCloseTerminalCapUsdc(
+    function _requiredPostCloseTerminalCapAssets(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.CloseDelta memory delta,
         CloseAccountingLib.CloseState memory cs
-    ) private pure returns (bool remainingTraderProfit, uint256 requiredPostCapUsdc) {
-        (bool traderProfit, uint256 traderPnlAbsUsdc) = CfdMath.calculateExactPnl(
+    ) private pure returns (bool remainingTraderProfit, uint256 requiredPostCapAssets) {
+        (bool traderProfit, uint256 traderPnlAbsAssets) = CfdMath.calculateExactPnl(
             CfdMath.sizeToLots(snap.position.size),
-            snap.positionEntryCostUsdcAtoms,
+            snap.positionEntryCostAssetAtoms,
             snap.position.side,
             delta.price,
             snap.capPrice
         );
-        int256 preTraderPnlUsdc = traderProfit ? int256(traderPnlAbsUsdc) : -int256(traderPnlAbsUsdc);
-        int256 preRawLpDeltaUsdc = -preTraderPnlUsdc;
-        int256 remainingRawLpDeltaUsdc = preRawLpDeltaUsdc + cs.realizedPnlUsdc;
+        int256 preTraderPnlAssets = traderProfit ? int256(traderPnlAbsAssets) : -int256(traderPnlAbsAssets);
+        int256 preRawLpDeltaAssets = -preTraderPnlAssets;
+        int256 remainingRawLpDeltaAssets = preRawLpDeltaAssets + cs.realizedPnlAssets;
 
         // A negative LP curve (remaining trader profit) is not limited by collectible collateral.
-        if (remainingRawLpDeltaUsdc <= 0) {
+        if (remainingRawLpDeltaAssets <= 0) {
             return (true, 0);
         }
 
-        uint256 preCollectibleCapUsdc = snap.position.margin + snap.traderClaimBalanceForAccount;
-        int256 preTerminalLpDeltaUsdc =
-            preRawLpDeltaUsdc > int256(preCollectibleCapUsdc) ? int256(preCollectibleCapUsdc) : preRawLpDeltaUsdc;
-        int256 realizedLpDeltaUsdc = cs.realizedPnlUsdc < 0
-            ? int256(delta.pricePnlClaimConsumedUsdc + delta.pricePnlPledgeConsumedUsdc)
-            : -int256(delta.priceGainUsdc);
-        int256 targetPostTerminalLpDeltaUsdc = preTerminalLpDeltaUsdc - realizedLpDeltaUsdc;
-        requiredPostCapUsdc = targetPostTerminalLpDeltaUsdc > 0 ? uint256(targetPostTerminalLpDeltaUsdc) : 0;
+        uint256 preCollectibleCapAssets = snap.position.margin + snap.traderClaimBalanceForAccount;
+        int256 preTerminalLpDeltaAssets = preRawLpDeltaAssets > int256(preCollectibleCapAssets)
+            ? int256(preCollectibleCapAssets)
+            : preRawLpDeltaAssets;
+        int256 realizedLpDeltaAssets = cs.realizedPnlAssets < 0
+            ? int256(delta.pricePnlClaimConsumedAssets + delta.pricePnlPledgeConsumedAssets)
+            : -int256(delta.priceGainAssets);
+        int256 targetPostTerminalLpDeltaAssets = preTerminalLpDeltaAssets - realizedLpDeltaAssets;
+        requiredPostCapAssets = targetPostTerminalLpDeltaAssets > 0 ? uint256(targetPostTerminalLpDeltaAssets) : 0;
     }
 
     /// @notice Computes the minimum collectible loss that must be realized before removing a partial price curve.
@@ -1233,31 +1254,32 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CloseAccountingLib.CloseState memory cs,
         uint256 price
-    ) private pure returns (uint256 minimumRecoveryUsdc) {
-        if (cs.remainingSize == 0 || cs.realizedPnlUsdc >= 0) {
+    ) private pure returns (uint256 minimumRecoveryAssets) {
+        if (cs.remainingSize == 0 || cs.realizedPnlAssets >= 0) {
             return 0;
         }
 
-        (bool traderProfit, uint256 traderPnlAbsUsdc) = CfdMath.calculateExactPnl(
+        (bool traderProfit, uint256 traderPnlAbsAssets) = CfdMath.calculateExactPnl(
             CfdMath.sizeToLots(snap.position.size),
-            snap.positionEntryCostUsdcAtoms,
+            snap.positionEntryCostAssetAtoms,
             snap.position.side,
             price,
             snap.capPrice
         );
-        int256 preRawLpDeltaUsdc = traderProfit ? -int256(traderPnlAbsUsdc) : int256(traderPnlAbsUsdc);
-        int256 remainingRawLpDeltaUsdc = preRawLpDeltaUsdc + cs.realizedPnlUsdc;
-        uint256 preCollectibleCapUsdc = snap.position.margin + snap.traderClaimBalanceForAccount;
-        int256 preTerminalLpDeltaUsdc =
-            preRawLpDeltaUsdc > int256(preCollectibleCapUsdc) ? int256(preCollectibleCapUsdc) : preRawLpDeltaUsdc;
-        if (preTerminalLpDeltaUsdc <= 0) {
+        int256 preRawLpDeltaAssets = traderProfit ? -int256(traderPnlAbsAssets) : int256(traderPnlAbsAssets);
+        int256 remainingRawLpDeltaAssets = preRawLpDeltaAssets + cs.realizedPnlAssets;
+        uint256 preCollectibleCapAssets = snap.position.margin + snap.traderClaimBalanceForAccount;
+        int256 preTerminalLpDeltaAssets = preRawLpDeltaAssets > int256(preCollectibleCapAssets)
+            ? int256(preCollectibleCapAssets)
+            : preRawLpDeltaAssets;
+        if (preTerminalLpDeltaAssets <= 0) {
             return 0;
         }
 
-        uint256 remainingRawLossUsdc = remainingRawLpDeltaUsdc > 0 ? uint256(remainingRawLpDeltaUsdc) : 0;
-        uint256 preTerminalLossUsdc = uint256(preTerminalLpDeltaUsdc);
-        minimumRecoveryUsdc =
-            preTerminalLossUsdc > remainingRawLossUsdc ? preTerminalLossUsdc - remainingRawLossUsdc : 0;
+        uint256 remainingRawLossAssets = remainingRawLpDeltaAssets > 0 ? uint256(remainingRawLpDeltaAssets) : 0;
+        uint256 preTerminalLossAssets = uint256(preTerminalLpDeltaAssets);
+        minimumRecoveryAssets =
+            preTerminalLossAssets > remainingRawLossAssets ? preTerminalLossAssets - remainingRawLossAssets : 0;
     }
 
     /// @notice Projects side open interest after removing close size from the selected side.
@@ -1303,19 +1325,19 @@ library CfdEnginePlanLib {
         uint256 postLongOi,
         uint256 postShortOi
     ) private pure returns (CloseAccountingLib.CloseState memory) {
-        uint256 preSkewUsdc = _absSkewUsdc(snap.longSide, snap.shortSide, price);
-        uint256 postSkewUsdc = _skewUsdc(postLongOi, postShortOi, price);
+        uint256 preSkewAssets = _absSkewAssets(snap.longSide, snap.shortSide, price);
+        uint256 postSkewAssets = _skewAssets(postLongOi, postShortOi, price);
         return CloseAccountingLib.buildCloseState(
             CloseAccountingLib.CloseInputs({
                 position: pos,
-                positionEntryCostUsdcAtoms: snap.positionEntryCostUsdcAtoms,
+                positionEntryCostAssetAtoms: snap.positionEntryCostAssetAtoms,
                 sizeDelta: sizeDelta,
                 oraclePrice: price,
                 capPrice: snap.capPrice,
-                preSkewUsdc: preSkewUsdc,
-                postSkewUsdc: postSkewUsdc,
-                poolDepthUsdc: PositionRiskAccountingLib.computeNetPoolDepthUsdc(
-                    snap.poolAssetsUsdc, snap.totalTraderClaimBalanceUsdc
+                preSkewAssets: preSkewAssets,
+                postSkewAssets: postSkewAssets,
+                poolDepthAssets: PositionRiskAccountingLib.computeNetPoolDepthAssets(
+                    snap.poolAssets, snap.totalTraderClaimBalanceAssets
                 ),
                 vpiFactor: snap.riskParams.vpiFactor,
                 frozenCloseSpreadBps: snap.frozenCloseSpreadBps,
@@ -1338,31 +1360,31 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.CloseDelta memory delta
     ) private pure returns (CfdEnginePlanTypes.SolvencyPreview memory sp) {
         uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc, delta.side, delta.posMaxProfitReduction
+            snap.longSide.maxProfitAssets, snap.shortSide.maxProfitAssets, delta.side, delta.posMaxProfitReduction
         );
 
         int256 physicalAssetsDelta = _closePoolPhysicalAssetsDelta(delta);
 
-        uint256 traderClaimIncrease = delta.pricePayoutCreatesClaim ? delta.pricePayoutUsdc : 0;
+        uint256 traderClaimIncrease = delta.pricePayoutCreatesClaim ? delta.pricePayoutAssets : 0;
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
-            snap.poolAssetsUsdc,
-            SolvencyAccountingLib.getMaxLiability(snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc),
-            snap.totalTraderClaimBalanceUsdc
+            snap.poolAssets,
+            SolvencyAccountingLib.getMaxLiability(snap.longSide.maxProfitAssets, snap.shortSide.maxProfitAssets),
+            snap.totalTraderClaimBalanceAssets
         );
 
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
             currentState,
             SolvencyAccountingLib.PreviewDelta({
-                physicalAssetsDeltaUsdc: physicalAssetsDelta,
-                maxLiabilityAfterUsdc: postMaxLiability,
-                traderClaimDeltaUsdc: int256(traderClaimIncrease) - int256(delta.existingTraderClaimConsumedUsdc),
-                pendingPoolPayoutUsdc: 0
+                physicalAssetsDeltaAssets: physicalAssetsDelta,
+                maxLiabilityAfterAssets: postMaxLiability,
+                traderClaimDeltaAssets: int256(traderClaimIncrease) - int256(delta.existingTraderClaimConsumedAssets),
+                pendingPoolPayoutAssets: 0
             }),
             snap.degradedMode
         );
-        sp.effectiveAssetsAfterUsdc = result.effectiveAssetsAfterUsdc;
-        sp.maxLiabilityAfterUsdc = result.maxLiabilityAfterUsdc;
+        sp.effectiveAssetsAfterAssets = result.effectiveAssetsAfterAssets;
+        sp.maxLiabilityAfterAssets = result.maxLiabilityAfterAssets;
         sp.triggersDegradedMode = result.triggersDegradedMode;
         sp.postOpDegradedMode = result.postOpDegradedMode;
     }
@@ -1371,15 +1393,15 @@ library CfdEnginePlanLib {
     /// @dev Adds price-PnL pledge and non-protocol action cash collected into the pool. It subtracts protocol-fee
     ///      top-up, immediate price payout, and the actually paid (never claim-backed) action rebate.
     /// @param delta Planned close settlement values.
-    /// @return Signed physical asset delta in 6-decimal USDC.
+    /// @return Signed physical asset delta in 6-decimal settlement token.
     function _closePoolPhysicalAssetsDelta(
         CfdEnginePlanTypes.CloseDelta memory delta
     ) private pure returns (int256) {
-        uint256 cashInflowUsdc =
-            delta.pricePnlPledgeConsumedUsdc + delta.actionChargeCollectedUsdc - delta.actionProtocolFeeCreditedUsdc;
-        uint256 cashOutflowUsdc = delta.protocolFeeTopUpUsdc + delta.actionRebatePaidUsdc
-            + (delta.pricePayoutIsImmediate ? delta.pricePayoutUsdc : 0);
-        return int256(cashInflowUsdc) - int256(cashOutflowUsdc);
+        uint256 cashInflowAssets = delta.pricePnlPledgeConsumedAssets + delta.actionChargeCollectedAssets
+            - delta.actionProtocolFeeCreditedAssets;
+        uint256 cashOutflowAssets = delta.protocolFeeTopUpAssets + delta.actionRebatePaidAssets
+            + (delta.pricePayoutIsImmediate ? delta.pricePayoutAssets : 0);
+        return int256(cashInflowAssets) - int256(cashOutflowAssets);
     }
 
     // ──────────────────────────────────────────────
@@ -1411,36 +1433,36 @@ library CfdEnginePlanLib {
         if (pos.size == 0) {
             return delta;
         }
-        if (snap.vpiRebateReserveUsdc < _negativeVpiReserveTarget(pos.vpiAccrued)) {
+        if (snap.vpiRebateReserveAssets < _negativeVpiReserveTarget(pos.vpiAccrued)) {
             revert CfdEnginePlanLib__VpiRebateReserveUnderfunded();
         }
 
-        delta.pendingCarryUsdc = _pendingCarryUsdc(snap);
-        delta.realizedCarryUsdc = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryUsdc);
+        delta.pendingCarryAssets = _pendingCarryAssets(snap);
+        delta.realizedCarryAssets = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryAssets);
         pos = snap.position;
         delta.side = pos.side;
         delta.posSize = pos.size;
         delta.posMargin = pos.margin;
-        delta.posMaxProfit = pos.maxProfitUsdc;
+        delta.posMaxProfit = pos.maxProfitAssets;
         delta.posEntryPrice = pos.entryPrice;
-        delta.posEntryCostUsdcAtoms = snap.positionEntryCostUsdcAtoms;
+        delta.posEntryCostAssetAtoms = snap.positionEntryCostAssetAtoms;
 
         uint256 maintMarginBps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
         // Terminal settlement can reach the dedicated VPI reserve only for its matching clawback; exact price health
         // below deliberately uses PnL pledge plus same-account claim only.
-        uint256 settlementReachableUsdc = pos.margin + snap.traderClaimBalanceForAccount + snap.vpiRebateReserveUsdc;
-        delta.liquidationReachableCollateralUsdc = settlementReachableUsdc;
+        uint256 settlementReachableAssets = pos.margin + snap.traderClaimBalanceForAccount + snap.vpiRebateReserveAssets;
+        delta.liquidationReachableCollateralAssets = settlementReachableAssets;
 
         delta.riskState = PositionRiskAccountingLib.buildExactPriceRiskState(
             pos,
-            snap.positionEntryCostUsdcAtoms,
+            snap.positionEntryCostAssetAtoms,
             price,
             snap.capPrice,
             pos.margin + snap.traderClaimBalanceForAccount,
             maintMarginBps
         );
 
-        if (!delta.riskState.liquidatable && delta.pendingCarryUsdc == delta.realizedCarryUsdc) {
+        if (!delta.riskState.liquidatable && delta.pendingCarryAssets == delta.realizedCarryAssets) {
             return delta;
         }
         delta.riskState.liquidatable = true;
@@ -1452,7 +1474,7 @@ library CfdEnginePlanLib {
 
     /// @notice Separates full-liquidation price PnL, action charges, and the dedicated liquidation reserve.
     /// @dev Price loss consumes only the same-account claim and PnL pledge; excess is a diagnostic write-off. The
-    ///      keeper/protocol/LP charge is capped by `liquidationReserveUsdc`. Still-unpaid carry and negative lifetime VPI
+    ///      keeper/protocol/LP charge is capped by `liquidationReserveAssets`. Still-unpaid carry and negative lifetime VPI
     ///      are action charges recovered from new price gain first, dedicated VPI backing for its clawback, spendable
     ///      action reserve, pre-existing free settlement (including released VPI backing), then committed order margin.
     ///      Any remainder is waived. These action charges cannot consume PnL pledge, liquidation reserve, or protected
@@ -1471,54 +1493,60 @@ library CfdEnginePlanLib {
         uint256 maintMarginBps
     ) private pure returns (CfdEnginePlanTypes.LiquidationDelta memory) {
         delta.liquidationState = _buildLiquidationState(
-            snap.riskParams, pos.size, price, snap.liquidationReserveUsdc, delta.riskState.equityUsdc, maintMarginBps
+            snap.riskParams,
+            pos.size,
+            price,
+            snap.liquidationReserveAssets,
+            delta.riskState.equityAssets,
+            maintMarginBps
         );
-        delta.liquidationChargeUsdc = delta.liquidationState.liquidationChargeUsdc;
-        delta.keeperBountyUsdc = delta.liquidationState.keeperBountyUsdc;
-        delta.protocolLiquidationFeeUsdc = delta.liquidationState.protocolLiquidationFeeUsdc;
-        delta.lpLiquidationFeeUsdc = delta.liquidationState.lpLiquidationFeeUsdc;
+        delta.liquidationChargeAssets = delta.liquidationState.liquidationChargeAssets;
+        delta.keeperBountyAssets = delta.liquidationState.keeperBountyAssets;
+        delta.protocolLiquidationFeeAssets = delta.liquidationState.protocolLiquidationFeeAssets;
+        delta.lpLiquidationFeeAssets = delta.liquidationState.lpLiquidationFeeAssets;
 
         delta.sideOiDecrease = pos.size;
-        delta.sideMaxProfitDecrease = pos.maxProfitUsdc;
-        delta.sideEntryNotionalReduction = snap.positionEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
+        delta.sideMaxProfitDecrease = pos.maxProfitAssets;
+        delta.sideEntryNotionalReduction = snap.positionEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE;
 
-        if (delta.riskState.unrealizedPnlUsdc >= 0) {
-            delta.priceGainUsdc = uint256(delta.riskState.unrealizedPnlUsdc);
+        if (delta.riskState.unrealizedPnlAssets >= 0) {
+            delta.priceGainAssets = uint256(delta.riskState.unrealizedPnlAssets);
         } else {
-            delta.priceLossUsdc = uint256(-delta.riskState.unrealizedPnlUsdc);
-            delta.pricePnlClaimConsumedUsdc = snap.traderClaimBalanceForAccount < delta.priceLossUsdc
+            delta.priceLossAssets = uint256(-delta.riskState.unrealizedPnlAssets);
+            delta.pricePnlClaimConsumedAssets = snap.traderClaimBalanceForAccount < delta.priceLossAssets
                 ? snap.traderClaimBalanceForAccount
-                : delta.priceLossUsdc;
-            uint256 lossAfterClaimUsdc = delta.priceLossUsdc - delta.pricePnlClaimConsumedUsdc;
-            delta.pricePnlPledgeConsumedUsdc = pos.margin < lossAfterClaimUsdc ? pos.margin : lossAfterClaimUsdc;
-            delta.priceLossWrittenOffUsdc = lossAfterClaimUsdc - delta.pricePnlPledgeConsumedUsdc;
+                : delta.priceLossAssets;
+            uint256 lossAfterClaimAssets = delta.priceLossAssets - delta.pricePnlClaimConsumedAssets;
+            delta.pricePnlPledgeConsumedAssets = pos.margin < lossAfterClaimAssets ? pos.margin : lossAfterClaimAssets;
+            delta.priceLossWrittenOffAssets = lossAfterClaimAssets - delta.pricePnlPledgeConsumedAssets;
         }
 
-        delta.existingTraderClaimConsumedUsdc = delta.pricePnlClaimConsumedUsdc;
-        delta.existingTraderClaimRemainingUsdc = snap.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedUsdc;
+        delta.existingTraderClaimConsumedAssets = delta.pricePnlClaimConsumedAssets;
+        delta.existingTraderClaimRemainingAssets = snap.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedAssets;
 
         _planLiquidationActionSettlement(snap, pos, delta);
 
-        delta.freshTraderPayoutUsdc = delta.priceGainUsdc - delta.actionChargeWithheldUsdc;
-        delta.settlementSeizedUsdc = delta.pricePnlPledgeConsumedUsdc + delta.lpLiquidationFeeUsdc;
-        delta.residualUsdc = delta.riskState.equityUsdc - int256(delta.liquidationChargeUsdc);
-        delta.residualPlan.mutation.positionMarginUnlockedUsdc = pos.margin;
+        delta.freshTraderPayoutAssets = delta.priceGainAssets - delta.actionChargeWithheldAssets;
+        delta.settlementSeizedAssets = delta.pricePnlPledgeConsumedAssets + delta.lpLiquidationFeeAssets;
+        delta.residualAssets = delta.riskState.equityAssets - int256(delta.liquidationChargeAssets);
+        delta.residualPlan.mutation.positionMarginUnlockedAssets = pos.margin;
 
-        if (delta.freshTraderPayoutUsdc > 0) {
-            uint256 claimsAfterPriceNettingUsdc = snap.totalTraderClaimBalanceUsdc - delta.pricePnlClaimConsumedUsdc;
-            uint256 poolCashAfterCollectionsUsdc =
-                snap.poolCashUsdc + delta.settlementSeizedUsdc + delta.actionChargeCollectedUsdc;
+        if (delta.freshTraderPayoutAssets > 0) {
+            uint256 claimsAfterPriceNettingAssets =
+                snap.totalTraderClaimBalanceAssets - delta.pricePnlClaimConsumedAssets;
+            uint256 poolCashAfterCollectionsAssets =
+                snap.poolCashAssets + delta.settlementSeizedAssets + delta.actionChargeCollectedAssets;
             delta.freshPayoutIsImmediate = CashPriorityLib.reserveFreshPayouts(
-                    poolCashAfterCollectionsUsdc, claimsAfterPriceNettingUsdc
+                    poolCashAfterCollectionsAssets, claimsAfterPriceNettingAssets
                 )
-                .freeCashUsdc >= delta.freshTraderPayoutUsdc;
+                .freeCashAssets >= delta.freshTraderPayoutAssets;
             delta.freshPayoutCreatesClaim = !delta.freshPayoutIsImmediate;
         }
 
-        uint256 settlementAfterDebitsUsdc = snap.accountBuckets.settlementBalanceUsdc - delta.pricePnlPledgeConsumedUsdc
-            - delta.actionChargeCollectedUsdc - delta.liquidationChargeUsdc;
-        delta.settlementRetainedUsdc =
-            settlementAfterDebitsUsdc + (delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
+        uint256 settlementAfterDebitsAssets = snap.accountBuckets.settlementBalanceAssets
+            - delta.pricePnlPledgeConsumedAssets - delta.actionChargeCollectedAssets - delta.liquidationChargeAssets;
+        delta.settlementRetainedAssets =
+            settlementAfterDebitsAssets + (delta.freshPayoutIsImmediate ? delta.freshTraderPayoutAssets : 0);
         return delta;
     }
 
@@ -1528,16 +1556,17 @@ library CfdEnginePlanLib {
         CfdTypes.Position memory pos,
         CfdEnginePlanTypes.LiquidationDelta memory delta
     ) private pure {
-        uint256 vpiClawbackUsdc = _negativeVpiReserveTarget(pos.vpiAccrued);
-        delta.vpiRebateReserveBeforeUsdc = snap.vpiRebateReserveUsdc;
-        delta.vpiRebateReserveAfterUsdc = 0;
-        delta.actionChargeAssessedUsdc = delta.pendingCarryUsdc - delta.realizedCarryUsdc + vpiClawbackUsdc;
-        delta.actionChargeWithheldUsdc =
-            delta.priceGainUsdc < delta.actionChargeAssessedUsdc ? delta.priceGainUsdc : delta.actionChargeAssessedUsdc;
-        delta.actionChargeToCollectUsdc = delta.actionChargeAssessedUsdc - delta.actionChargeWithheldUsdc;
-        uint256 vpiClawbackWithheldUsdc =
-            delta.actionChargeWithheldUsdc < vpiClawbackUsdc ? delta.actionChargeWithheldUsdc : vpiClawbackUsdc;
-        delta.vpiRebateReserveConsumedUsdc = vpiClawbackUsdc - vpiClawbackWithheldUsdc;
+        uint256 vpiClawbackAssets = _negativeVpiReserveTarget(pos.vpiAccrued);
+        delta.vpiRebateReserveBeforeAssets = snap.vpiRebateReserveAssets;
+        delta.vpiRebateReserveAfterAssets = 0;
+        delta.actionChargeAssessedAssets = delta.pendingCarryAssets - delta.realizedCarryAssets + vpiClawbackAssets;
+        delta.actionChargeWithheldAssets = delta.priceGainAssets < delta.actionChargeAssessedAssets
+            ? delta.priceGainAssets
+            : delta.actionChargeAssessedAssets;
+        delta.actionChargeToCollectAssets = delta.actionChargeAssessedAssets - delta.actionChargeWithheldAssets;
+        uint256 vpiClawbackWithheldAssets =
+            delta.actionChargeWithheldAssets < vpiClawbackAssets ? delta.actionChargeWithheldAssets : vpiClawbackAssets;
+        delta.vpiRebateReserveConsumedAssets = vpiClawbackAssets - vpiClawbackWithheldAssets;
         _collectLiquidationActionCharge(snap, delta);
     }
 
@@ -1546,57 +1575,59 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.LiquidationDelta memory delta
     ) private pure {
-        uint256 remainingActionChargeToCollectUsdc =
-            delta.actionChargeToCollectUsdc - delta.vpiRebateReserveConsumedUsdc;
+        uint256 remainingActionChargeToCollectAssets =
+            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
         {
-            uint256 protectedActionReserveUsdc = snap.protectedExecutionBountyUsdc + snap.vpiRebateReserveUsdc;
-            uint256 spendableActionReserveUsdc = snap.actionReserveUsdc > protectedActionReserveUsdc
-                ? snap.actionReserveUsdc - protectedActionReserveUsdc
+            uint256 protectedActionReserveAssets = snap.protectedExecutionBountyAssets + snap.vpiRebateReserveAssets;
+            uint256 spendableActionReserveAssets = snap.actionReserveAssets > protectedActionReserveAssets
+                ? snap.actionReserveAssets - protectedActionReserveAssets
                 : 0;
-            delta.actionReserveConsumedUsdc = remainingActionChargeToCollectUsdc < spendableActionReserveUsdc
-                ? remainingActionChargeToCollectUsdc
-                : spendableActionReserveUsdc;
+            delta.actionReserveConsumedAssets = remainingActionChargeToCollectAssets < spendableActionReserveAssets
+                ? remainingActionChargeToCollectAssets
+                : spendableActionReserveAssets;
         }
-        uint256 actionChargeAfterReserveUsdc = remainingActionChargeToCollectUsdc - delta.actionReserveConsumedUsdc;
-        uint256 freeConsumedUsdc;
+        uint256 actionChargeAfterReserveAssets =
+            remainingActionChargeToCollectAssets - delta.actionReserveConsumedAssets;
+        uint256 freeConsumedAssets;
         {
-            uint256 releasedVpiReserveUsdc =
-                delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc;
-            uint256 collectibleFreeSettlementUsdc = snap.accountBuckets.freeSettlementUsdc + releasedVpiReserveUsdc;
-            freeConsumedUsdc = actionChargeAfterReserveUsdc;
-            if (freeConsumedUsdc > collectibleFreeSettlementUsdc) {
-                freeConsumedUsdc = collectibleFreeSettlementUsdc;
+            uint256 releasedVpiReserveAssets = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
+                - delta.vpiRebateReserveConsumedAssets;
+            uint256 collectibleFreeSettlementAssets =
+                snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets;
+            freeConsumedAssets = actionChargeAfterReserveAssets;
+            if (freeConsumedAssets > collectibleFreeSettlementAssets) {
+                freeConsumedAssets = collectibleFreeSettlementAssets;
             }
         }
-        uint256 actionChargeAfterFreeUsdc = actionChargeAfterReserveUsdc - freeConsumedUsdc;
-        delta.actionCommittedMarginConsumedUsdc = actionChargeAfterFreeUsdc
-            < snap.lockedBuckets.committedOrderMarginUsdc
-            ? actionChargeAfterFreeUsdc
-            : snap.lockedBuckets.committedOrderMarginUsdc;
-        delta.actionChargeCollectedUsdc = delta.vpiRebateReserveConsumedUsdc + delta.actionReserveConsumedUsdc
-            + freeConsumedUsdc + delta.actionCommittedMarginConsumedUsdc;
-        delta.actionChargeWaivedUsdc = delta.actionChargeToCollectUsdc - delta.actionChargeCollectedUsdc;
+        uint256 actionChargeAfterFreeAssets = actionChargeAfterReserveAssets - freeConsumedAssets;
+        delta.actionCommittedMarginConsumedAssets = actionChargeAfterFreeAssets
+            < snap.lockedBuckets.committedOrderMarginAssets
+            ? actionChargeAfterFreeAssets
+            : snap.lockedBuckets.committedOrderMarginAssets;
+        delta.actionChargeCollectedAssets = delta.vpiRebateReserveConsumedAssets + delta.actionReserveConsumedAssets
+            + freeConsumedAssets + delta.actionCommittedMarginConsumedAssets;
+        delta.actionChargeWaivedAssets = delta.actionChargeToCollectAssets - delta.actionChargeCollectedAssets;
     }
 
     function _buildLiquidationState(
         CfdTypes.RiskParams memory riskParams,
         uint256 size,
         uint256 price,
-        uint256 settlementReachableUsdc,
-        int256 liquidationEquityUsdc,
+        uint256 settlementReachableAssets,
+        int256 liquidationEquityAssets,
         uint256 maintMarginBps
     ) private pure returns (LiquidationAccountingLib.LiquidationState memory) {
         return LiquidationAccountingLib.buildLiquidationState(
             size,
             price,
-            settlementReachableUsdc,
-            liquidationEquityUsdc,
+            settlementReachableAssets,
+            liquidationEquityAssets,
             maintMarginBps,
-            riskParams.minBountyUsdc,
+            riskParams.minBountyAssets,
             riskParams.bountyBps,
             riskParams.keeperShareBps,
             riskParams.protocolShareBps,
-            CfdMath.USDC_TO_TOKEN_SCALE
+            CfdMath.ASSETS_TO_TOKEN_SCALE
         );
     }
 
@@ -1614,32 +1645,32 @@ library CfdEnginePlanLib {
         CfdTypes.Position memory pos
     ) private pure returns (CfdEnginePlanTypes.SolvencyPreview memory sp) {
         uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiabilityAfterClose(
-            snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc, pos.side, pos.maxProfitUsdc
+            snap.longSide.maxProfitAssets, snap.shortSide.maxProfitAssets, pos.side, pos.maxProfitAssets
         );
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
-            snap.poolAssetsUsdc,
-            SolvencyAccountingLib.getMaxLiability(snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc),
-            snap.totalTraderClaimBalanceUsdc
+            snap.poolAssets,
+            SolvencyAccountingLib.getMaxLiability(snap.longSide.maxProfitAssets, snap.shortSide.maxProfitAssets),
+            snap.totalTraderClaimBalanceAssets
         );
 
-        int256 physicalAssetsDelta = int256(delta.settlementSeizedUsdc + delta.actionChargeCollectedUsdc)
-            - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0);
+        int256 physicalAssetsDelta = int256(delta.settlementSeizedAssets + delta.actionChargeCollectedAssets)
+            - int256(delta.freshPayoutIsImmediate ? delta.freshTraderPayoutAssets : 0);
 
         SolvencyAccountingLib.PreviewResult memory result = SolvencyAccountingLib.previewPostOpSolvency(
             currentState,
             SolvencyAccountingLib.PreviewDelta({
-                physicalAssetsDeltaUsdc: physicalAssetsDelta,
-                maxLiabilityAfterUsdc: postMaxLiability,
-                traderClaimDeltaUsdc: int256(delta.freshPayoutCreatesClaim ? delta.freshTraderPayoutUsdc : 0)
-                - int256(delta.existingTraderClaimConsumedUsdc),
-                pendingPoolPayoutUsdc: 0
+                physicalAssetsDeltaAssets: physicalAssetsDelta,
+                maxLiabilityAfterAssets: postMaxLiability,
+                traderClaimDeltaAssets: int256(delta.freshPayoutCreatesClaim ? delta.freshTraderPayoutAssets : 0)
+                - int256(delta.existingTraderClaimConsumedAssets),
+                pendingPoolPayoutAssets: 0
             }),
             snap.degradedMode
         );
 
-        sp.effectiveAssetsAfterUsdc = result.effectiveAssetsAfterUsdc;
-        sp.maxLiabilityAfterUsdc = result.maxLiabilityAfterUsdc;
+        sp.effectiveAssetsAfterAssets = result.effectiveAssetsAfterAssets;
+        sp.maxLiabilityAfterAssets = result.maxLiabilityAfterAssets;
         sp.triggersDegradedMode = result.triggersDegradedMode;
         sp.postOpDegradedMode = result.postOpDegradedMode;
     }

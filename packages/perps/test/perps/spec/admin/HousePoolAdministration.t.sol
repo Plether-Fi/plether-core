@@ -175,7 +175,7 @@ contract HousePoolAdministrationTest is HousePoolTestBase {
 
     function test_RecordClaimantRevenue_OnlyEngineCanAccountRawExcess() public {
         _fundJunior(bob, 500_000e6);
-        usdc.mint(address(pool), 25_000e6);
+        settlementToken.mint(address(pool), 25_000e6);
 
         vm.prank(alice);
         vm.expectRevert(IHousePool.HousePool__Unauthorized.selector);
@@ -198,7 +198,7 @@ contract HousePoolAdministrationTest is HousePoolTestBase {
 
     function test_RecordClaimantRevenue_OrderRouterCannotAccountRawExcess() public {
         _fundJunior(bob, 500_000e6);
-        usdc.mint(address(pool), 25_000e6);
+        settlementToken.mint(address(pool), 25_000e6);
 
         vm.prank(address(router));
         vm.expectRevert(IHousePool.HousePool__Unauthorized.selector);

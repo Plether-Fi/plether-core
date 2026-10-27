@@ -30,15 +30,15 @@ contract TerminalNavCloseConservationTest is Test {
 
         assertTrue(firstHalf.valid, "split close must be valid");
         assertTrue(oneShot.valid, "one-shot close must be valid");
-        assertEq(firstHalf.priceLossUsdc, 90, "first half must realize its exact basis loss");
-        assertEq(firstHalf.pricePnlClaimConsumedUsdc, 90, "same-account claim must net first");
-        assertEq(firstHalf.pricePnlPledgeConsumedUsdc, 0, "claim fully covers first-half loss");
+        assertEq(firstHalf.priceLossAssets, 90, "first half must realize its exact basis loss");
+        assertEq(firstHalf.pricePnlClaimConsumedAssets, 90, "same-account claim must net first");
+        assertEq(firstHalf.pricePnlPledgeConsumedAssets, 0, "claim fully covers first-half loss");
         assertEq(firstHalf.posMarginAfter, 81, "strict residual health retains one additional atom");
-        assertEq(firstHalf.unlockMarginUsdc, 19, "only surplus pledge above strict health may unlock");
+        assertEq(firstHalf.unlockMarginAssets, 19, "only surplus pledge above strict health may unlock");
 
-        uint256 splitRecovery =
-            firstHalf.pricePnlClaimConsumedUsdc + firstHalf.pricePnlPledgeConsumedUsdc + _postTerminalLoss(firstHalf);
-        uint256 oneShotRecovery = oneShot.pricePnlClaimConsumedUsdc + oneShot.pricePnlPledgeConsumedUsdc;
+        uint256 splitRecovery = firstHalf.pricePnlClaimConsumedAssets + firstHalf.pricePnlPledgeConsumedAssets
+            + _postTerminalLoss(firstHalf);
+        uint256 oneShotRecovery = oneShot.pricePnlClaimConsumedAssets + oneShot.pricePnlPledgeConsumedAssets;
         assertEq(splitRecovery, 180, "split recovery must preserve the pre-close terminal value");
         assertEq(splitRecovery, oneShotRecovery, "split and one-shot recovery must be identical");
         _assertTerminalConservation(snap, firstHalf, 100);
@@ -75,14 +75,14 @@ contract TerminalNavCloseConservationTest is Test {
         CfdEnginePlanTypes.CloseDelta memory delta = _plan(snap, closeLots, price);
 
         assertTrue(delta.valid, "isolated partial price loss must remain valid");
-        assertLt(delta.realizedPnlUsdc, 0, "fuzz domain must realize a trader price loss");
+        assertLt(delta.realizedPnlAssets, 0, "fuzz domain must realize a trader price loss");
         assertEq(
-            delta.pricePnlClaimConsumedUsdc + delta.pricePnlPledgeConsumedUsdc + delta.priceLossWrittenOffUsdc,
-            delta.priceLossUsdc,
+            delta.pricePnlClaimConsumedAssets + delta.pricePnlPledgeConsumedAssets + delta.priceLossWrittenOffAssets,
+            delta.priceLossAssets,
             "every price-loss atom must be recovered or explicitly written off"
         );
         assertEq(
-            delta.posMarginAfter + delta.pricePnlPledgeConsumedUsdc + delta.unlockMarginUsdc,
+            delta.posMarginAfter + delta.pricePnlPledgeConsumedAssets + delta.unlockMarginAssets,
             pledge,
             "pledge consumption, retention, and unlock must conserve collateral"
         );
@@ -91,31 +91,31 @@ contract TerminalNavCloseConservationTest is Test {
 
     function _snapshot(
         uint256 lots,
-        uint256 entryCostUsdcAtoms,
+        uint256 entryCostAssetAtoms,
         CfdTypes.Side side,
-        uint256 pledgeUsdc,
-        uint256 claimUsdc
+        uint256 pledgeAssets,
+        uint256 claimAssets
     ) private pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         uint256 size = lots * CfdTypes.SIZE_QUANTUM;
-        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, side, CAP_PRICE);
+        uint256 maxProfitAssets = CfdMath.calculateExactMaxProfit(lots, entryCostAssetAtoms, side, CAP_PRICE);
         snap.position = CfdTypes.Position({
             size: size,
-            margin: pledgeUsdc,
-            entryPrice: entryCostUsdcAtoms / lots,
-            maxProfitUsdc: maxProfitUsdc,
+            margin: pledgeAssets,
+            entryPrice: entryCostAssetAtoms / lots,
+            maxProfitAssets: maxProfitAssets,
             side: side,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
-        snap.positionEntryCostUsdcAtoms = entryCostUsdcAtoms;
+        snap.positionEntryCostAssetAtoms = entryCostAssetAtoms;
         snap.account = ACCOUNT;
         CfdEnginePlanTypes.SideSnapshot memory selected = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: maxProfitUsdc,
+            maxProfitAssets: maxProfitAssets,
             openInterest: size,
-            entryNotional: entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
-            totalMargin: pledgeUsdc,
-            borrowBaseUsdc: 0,
+            entryNotional: entryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
+            totalMargin: pledgeAssets,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
         if (side == CfdTypes.Side.LONG) {
@@ -123,23 +123,23 @@ contract TerminalNavCloseConservationTest is Test {
         } else {
             snap.shortSide = selected;
         }
-        snap.poolAssetsUsdc = POOL_LIQUIDITY;
-        snap.poolCashUsdc = POOL_LIQUIDITY;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: pledgeUsdc,
-            totalLockedMarginUsdc: pledgeUsdc,
-            activePositionMarginUsdc: pledgeUsdc,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: 0
+        snap.poolAssets = POOL_LIQUIDITY;
+        snap.poolCashAssets = POOL_LIQUIDITY;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: pledgeAssets,
+            totalLockedMarginAssets: pledgeAssets,
+            activePositionMarginAssets: pledgeAssets,
+            otherLockedMarginAssets: 0,
+            freeSettlementAssets: 0
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: pledgeUsdc,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: pledgeUsdc
+            positionMarginAssets: pledgeAssets,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: 0,
+            totalLockedMarginAssets: pledgeAssets
         });
-        snap.totalTraderClaimBalanceUsdc = claimUsdc;
-        snap.traderClaimBalanceForAccount = claimUsdc;
+        snap.totalTraderClaimBalanceAssets = claimAssets;
+        snap.traderClaimBalanceForAccount = claimAssets;
         snap.capPrice = CAP_PRICE;
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -148,7 +148,7 @@ contract TerminalNavCloseConservationTest is Test {
             initMarginBps: 0,
             fadMarginBps: 0,
             baseCarryBps: 0,
-            minBountyUsdc: 0,
+            minBountyAssets: 0,
             bountyBps: 0,
             keeperShareBps: 0,
             protocolShareBps: 0
@@ -180,10 +180,10 @@ contract TerminalNavCloseConservationTest is Test {
         uint256 price
     ) private pure {
         uint256 lots = CfdMath.sizeToLots(snap.position.size);
-        uint256 rawPreLoss = _rawLpLoss(lots, snap.positionEntryCostUsdcAtoms, snap.position.side, price);
+        uint256 rawPreLoss = _rawLpLoss(lots, snap.positionEntryCostAssetAtoms, snap.position.side, price);
         uint256 preCap = snap.position.margin + snap.traderClaimBalanceForAccount;
         uint256 preTerminalLoss = rawPreLoss < preCap ? rawPreLoss : preCap;
-        uint256 realizedRecovery = delta.pricePnlClaimConsumedUsdc + delta.pricePnlPledgeConsumedUsdc;
+        uint256 realizedRecovery = delta.pricePnlClaimConsumedAssets + delta.pricePnlPledgeConsumedAssets;
         assertEq(
             realizedRecovery + _postTerminalLoss(delta),
             preTerminalLoss,
@@ -199,22 +199,22 @@ contract TerminalNavCloseConservationTest is Test {
             return 0;
         }
         uint256 rawLoss =
-            _rawLpLoss(remainingLots, delta.closeState.remainingEntryCostUsdcAtoms, delta.side, delta.price);
-        uint256 remainingCap = delta.posMarginAfter + delta.existingTraderClaimRemainingUsdc;
+            _rawLpLoss(remainingLots, delta.closeState.remainingEntryCostAssetAtoms, delta.side, delta.price);
+        uint256 remainingCap = delta.posMarginAfter + delta.existingTraderClaimRemainingAssets;
         terminalLoss = rawLoss < remainingCap ? rawLoss : remainingCap;
     }
 
     function _rawLpLoss(
         uint256 lots,
-        uint256 entryCostUsdcAtoms,
+        uint256 entryCostAssetAtoms,
         CfdTypes.Side side,
         uint256 price
-    ) private pure returns (uint256 lossUsdc) {
-        uint256 exitValueUsdcAtoms = lots * price;
+    ) private pure returns (uint256 lossAssets) {
+        uint256 exitValueAssetAtoms = lots * price;
         if (side == CfdTypes.Side.LONG) {
-            lossUsdc = exitValueUsdcAtoms - entryCostUsdcAtoms;
+            lossAssets = exitValueAssetAtoms - entryCostAssetAtoms;
         } else {
-            lossUsdc = entryCostUsdcAtoms - exitValueUsdcAtoms;
+            lossAssets = entryCostAssetAtoms - exitValueAssetAtoms;
         }
     }
 

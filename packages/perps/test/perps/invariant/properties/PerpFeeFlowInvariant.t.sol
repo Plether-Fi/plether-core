@@ -16,7 +16,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpFeeHandler(usdc, mockPyth, engine, clearinghouse, router);
+        handler = new PerpFeeHandler(settlementToken, mockPyth, engine, clearinghouse, router);
         handler.seedActors();
 
         bytes4[] memory selectors = new bytes4[](4);
@@ -36,13 +36,13 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
 
     function _assertInvariant_FeeModelTracksTreasuryBalanceAndWithdrawals() internal view {
         assertEq(
-            handler.ghostTrackedFeesUsdc(),
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            handler.ghostTrackedFeesAssets(),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             "Independent expected fees must match treasury settlement"
         );
         assertEq(
-            handler.ghostAccruedFeesUsdc(),
-            handler.ghostTrackedFeesUsdc() + handler.ghostWithdrawnFeesUsdc(),
+            handler.ghostAccruedFeesAssets(),
+            handler.ghostTrackedFeesAssets() + handler.ghostWithdrawnFeesAssets(),
             "Accrued fees must decompose into tracked plus withdrawn fees"
         );
     }
@@ -51,33 +51,35 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         assertEq(
-            snapshot.protocolTreasuryBalanceUsdc,
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            snapshot.protocolTreasuryBalanceAssets,
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             "Protocol snapshot treasury mismatch"
         );
         assertEq(
-            snapshot.protocolTreasuryBalanceUsdc,
-            handler.ghostTrackedFeesUsdc(),
+            snapshot.protocolTreasuryBalanceAssets,
+            handler.ghostTrackedFeesAssets(),
             "Fee model and protocol snapshot must agree"
         );
     }
 
     function _assertInvariant_FeeBalanceRemainsClearinghouseCustodied() internal view {
         assertEq(
-            usdc.balanceOf(engine.protocolTreasury()),
-            handler.initialTreasuryWalletUsdc() + handler.ghostWithdrawnFeesUsdc(),
+            settlementToken.balanceOf(engine.protocolTreasury()),
+            handler.initialTreasuryWalletAssets() + handler.ghostWithdrawnFeesAssets(),
             "Only modeled withdrawals may move treasury fees to its wallet"
         );
         uint256 knownSettlement =
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) + clearinghouse.balanceUsdc(address(handler)); // The handler is the execution-bounty recipient.
+            clearinghouse.balanceAssets(engine.protocolTreasury()) + clearinghouse.balanceAssets(address(handler)); // The handler is the execution-bounty recipient.
         for (uint256 i; i < handler.actorCount(); ++i) {
             address actor = handler.actorAt(i);
-            knownSettlement += clearinghouse.balanceUsdc(actor);
+            knownSettlement += clearinghouse.balanceAssets(actor);
             (uint256 size,,,,,,) = engine.positions(actor);
             assertEq(size, handler.ghostHasPosition(actor) ? handler.POSITION_SIZE() : 0, "Modeled position mismatch");
         }
         assertEq(
-            knownSettlement, usdc.balanceOf(address(clearinghouse)), "All settlement credits need physical USDC backing"
+            knownSettlement,
+            settlementToken.balanceOf(address(clearinghouse)),
+            "All settlement credits need physical settlementToken backing"
         );
     }
 
@@ -87,7 +89,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         handler.openPosition(1, 10_000e6);
         handler.closePosition(0, 0.98e8); // Fee withheld from a gain and funded by pool cash.
         handler.closePosition(1, 1.02e8); // Fee collected from trader cash on a losing close.
-        assertEq(handler.ghostAccruedFeesUsdc(), 80e6);
+        assertEq(handler.ghostAccruedFeesAssets(), 80e6);
         _assertAllInvariants();
 
         handler.withdrawTreasuryFees();
@@ -101,8 +103,8 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         assertEq(handler.successfulWithdrawals(), 2);
         assertEq(handler.expectedRejections(), 1);
         assertEq(handler.skippedActions(), 1);
-        assertEq(handler.ghostAccruedFeesUsdc(), 120e6);
-        assertEq(handler.ghostWithdrawnFeesUsdc(), 120e6);
+        assertEq(handler.ghostAccruedFeesAssets(), 120e6);
+        assertEq(handler.ghostWithdrawnFeesAssets(), 120e6);
         _assertAllInvariants();
     }
 
@@ -110,10 +112,10 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         handler.openPosition(0, 2000e6);
         handler.openPosition(1, 2000e6);
         handler.closePosition(0, 98_000_004);
-        assertEq(handler.ghostAccruedFeesUsdc(), 59_600_000);
+        assertEq(handler.ghostAccruedFeesAssets(), 59_600_000);
         _assertAllInvariants();
         handler.closePosition(1, 98_000_005);
-        assertEq(handler.ghostAccruedFeesUsdc(), 79_200_001);
+        assertEq(handler.ghostAccruedFeesAssets(), 79_200_001);
         _assertAllInvariants();
     }
 
@@ -121,7 +123,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         handler.openPosition(0, 2000e6);
         _assertAllInvariants();
         _replaceTreasuryCredit(20e6 + 1);
-        assertEq(handler.ghostTrackedFeesUsdc(), 20e6, "Injected credit must not repair the ghost");
+        assertEq(handler.ghostTrackedFeesAssets(), 20e6, "Injected credit must not repair the ghost");
         vm.expectRevert();
         this.invariant_IndependentFeeModelMatchesCustodyAndWithdrawals();
     }
@@ -130,7 +132,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         handler.openPosition(0, 2000e6);
         _assertAllInvariants();
         _replaceTreasuryCredit(20e6 - 1);
-        assertEq(handler.ghostTrackedFeesUsdc(), 20e6, "Injected debit must not repair the ghost");
+        assertEq(handler.ghostTrackedFeesAssets(), 20e6, "Injected debit must not repair the ghost");
         vm.expectRevert();
         this.invariant_IndependentFeeModelMatchesCustodyAndWithdrawals();
     }
@@ -139,23 +141,23 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         handler.openPosition(0, 2000e6);
         _assertAllInvariants();
         address trader = handler.actorAt(0);
-        uint256 custody = usdc.balanceOf(address(clearinghouse));
-        uint256 traderCredit = clearinghouse.balanceUsdc(trader);
-        uint256 keeperCredit = clearinghouse.balanceUsdc(address(handler));
-        uint256 otherTraderCredit = clearinghouse.balanceUsdc(handler.actorAt(1));
+        uint256 custody = settlementToken.balanceOf(address(clearinghouse));
+        uint256 traderCredit = clearinghouse.balanceAssets(trader);
+        uint256 keeperCredit = clearinghouse.balanceAssets(address(handler));
+        uint256 otherTraderCredit = clearinghouse.balanceAssets(handler.actorAt(1));
 
         // Simulate charging the trader one atom too much and routing it correctly to treasury. Total custody and
         // aggregate credits still agree; only the independently accrued economic fee exposes the overcharge.
         _replaceTreasuryCredit(20e6 + 1);
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(trader)
+        stdstore.target(address(clearinghouse)).sig("balanceAssets(address)").with_key(trader)
             .checked_write(traderCredit - 1);
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) + clearinghouse.balanceUsdc(trader) + keeperCredit
+            clearinghouse.balanceAssets(engine.protocolTreasury()) + clearinghouse.balanceAssets(trader) + keeperCredit
                 + otherTraderCredit,
             custody,
             "Injected fee error must conserve clearinghouse custody"
         );
-        assertEq(handler.ghostTrackedFeesUsdc(), 20e6, "Corruption must not repair independently accrued fees");
+        assertEq(handler.ghostTrackedFeesAssets(), 20e6, "Corruption must not repair independently accrued fees");
         vm.expectRevert();
         this.invariant_IndependentFeeModelMatchesCustodyAndWithdrawals();
     }
@@ -164,7 +166,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         handler.openPosition(0, 2000e6);
         handler.withdrawTreasuryFees();
         _assertAllInvariants();
-        usdc.burn(engine.protocolTreasury(), 1);
+        settlementToken.burn(engine.protocolTreasury(), 1);
         vm.expectRevert();
         this.invariant_IndependentFeeModelMatchesCustodyAndWithdrawals();
     }
@@ -189,7 +191,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         uint256 amount
     ) internal {
         // Deliberate test-only mutation: prove an incorrect protocol fee credit cannot satisfy the independent model.
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(engine.protocolTreasury())
+        stdstore.target(address(clearinghouse)).sig("balanceAssets(address)").with_key(engine.protocolTreasury())
             .checked_write(amount);
     }
 

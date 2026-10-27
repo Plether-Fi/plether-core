@@ -31,29 +31,29 @@ contract PerpsReadParityTest is BasePerpTest {
         );
         assertEq(preview.executionPrice, price, "Execution price should match");
         assertEq(preview.sizeDelta, size, "Size delta should match");
-        assertEq(preview.notionalUsdc, 100_000e6, "Notional should match");
-        assertEq(preview.marginDeltaUsdc, margin, "Margin delta should match");
-        assertEq(preview.executionFeeUsdc, _engineExecutionFeeUsdc(size, price), "Execution fee should match");
-        assertEq(preview.tradeCostUsdc, int256(preview.executionFeeUsdc), "Trade cost should match fee");
-        assertEq(preview.initialMarginRequirementUsdc, 1500e6, "Initial margin should match");
-        assertEq(preview.maintenanceMarginUsdc, 1000e6, "Maintenance margin should match");
+        assertEq(preview.notionalAssets, 100_000e6, "Notional should match");
+        assertEq(preview.marginDeltaAssets, margin, "Margin delta should match");
+        assertEq(preview.executionFeeAssets, _engineExecutionFeeAssets(size, price), "Execution fee should match");
+        assertEq(preview.tradeCostAssets, int256(preview.executionFeeAssets), "Trade cost should match fee");
+        assertEq(preview.initialMarginRequirementAssets, 1500e6, "Initial margin should match");
+        assertEq(preview.maintenanceMarginAssets, 1000e6, "Maintenance margin should match");
         assertEq(preview.postSize, size, "Post size should match");
         assertEq(preview.postEntryPrice, price, "Post entry should match");
         CfdTypes.RiskParams memory params = _riskParams();
-        uint256 liquidationReserveTargetUsdc = (preview.notionalUsdc * params.bountyBps) / 10_000;
-        if (liquidationReserveTargetUsdc < params.minBountyUsdc) {
-            liquidationReserveTargetUsdc = params.minBountyUsdc;
+        uint256 liquidationReserveTargetAssets = (preview.notionalAssets * params.bountyBps) / 10_000;
+        if (liquidationReserveTargetAssets < params.minBountyAssets) {
+            liquidationReserveTargetAssets = params.minBountyAssets;
         }
         assertEq(
-            preview.postMarginUsdc + liquidationReserveTargetUsdc,
-            margin - preview.executionFeeUsdc,
+            preview.postMarginAssets + liquidationReserveTargetAssets,
+            margin - preview.executionFeeAssets,
             "Post pledge plus dedicated liquidation reserve should net the fee"
         );
         assertEq(preview.postVpiAccrued, 0, "Default VPI should be zero");
-        assertEq(preview.postUnrealizedPnlUsdc, 0, "Post PnL at entry should be zero");
+        assertEq(preview.postUnrealizedPnlAssets, 0, "Post PnL at entry should be zero");
         assertEq(
-            preview.postEquityUsdc,
-            int256(preview.postMarginUsdc) + preview.postUnrealizedPnlUsdc,
+            preview.postEquityAssets,
+            int256(preview.postMarginAssets) + preview.postUnrealizedPnlAssets,
             "Post equity should contain only pledged price equity"
         );
         assertFalse(preview.postLiquidatable, "Post position should be healthy");
@@ -64,19 +64,19 @@ contract PerpsReadParityTest is BasePerpTest {
         ICfdEngineTypes.OpenPreview memory capped =
             engineLens.previewOpen(account, CfdTypes.Side.LONG, size, margin, CAP_PRICE + 1);
         assertEq(capped.executionPrice, CAP_PRICE, "Execution price should cap");
-        assertEq(capped.notionalUsdc, 200_000e6, "Capped notional should use cap price");
+        assertEq(capped.notionalAssets, 200_000e6, "Capped notional should use cap price");
 
         _open(account, CfdTypes.Side.LONG, size, margin, price);
 
         (uint256 liveSize, uint256 liveMargin, uint256 liveEntryPrice,,, int256 liveVpiAccrued) =
             _livePositionPreviewFields(account);
         assertEq(liveSize, preview.postSize, "Live size should match preview");
-        assertEq(liveMargin, preview.postMarginUsdc, "Live margin should match preview");
+        assertEq(liveMargin, preview.postMarginAssets, "Live margin should match preview");
         assertEq(liveEntryPrice, preview.postEntryPrice, "Live entry should match preview");
         assertEq(liveVpiAccrued, preview.postVpiAccrued, "Live VPI accrued should match preview");
         assertEq(
-            clearinghouse.liquidationReserveUsdc(account),
-            liquidationReserveTargetUsdc,
+            clearinghouse.liquidationReserveAssets(account),
+            liquidationReserveTargetAssets,
             "Live liquidation reserve should match the previewed reserve carve-out"
         );
     }
@@ -104,8 +104,8 @@ contract PerpsReadParityTest is BasePerpTest {
         assertTrue(increase.valid, "Same-side increase should be valid");
         assertEq(increase.postSize, firstSize + secondSize, "Increase post size should add");
         assertEq(increase.postEntryPrice, 104_000_000, "Increase post entry should weighted-average");
-        assertEq(increase.notionalUsdc, 24_000e6, "Increase notional should use execution price");
-        assertEq(increase.executionFeeUsdc, _engineExecutionFeeUsdc(secondSize, 120_000_000), "Increase fee");
+        assertEq(increase.notionalAssets, 24_000e6, "Increase notional should use execution price");
+        assertEq(increase.executionFeeAssets, _engineExecutionFeeAssets(secondSize, 120_000_000), "Increase fee");
     }
 
     function test_OpenPreview_VpiChargeAndRebate() public {
@@ -123,17 +123,17 @@ contract PerpsReadParityTest is BasePerpTest {
         ICfdEngineTypes.OpenPreview memory skewing =
             engineLens.previewOpen(longTrader, CfdTypes.Side.LONG, size, 10_000e6, price);
         assertTrue(skewing.valid, "Skewing open should be valid");
-        assertTrue(skewing.vpiUsdc > 0, "Skewing open should pay VPI");
-        assertEq(skewing.tradeCostUsdc, skewing.vpiUsdc + int256(skewing.executionFeeUsdc), "Charge trade cost");
+        assertTrue(skewing.vpiAssets > 0, "Skewing open should pay VPI");
+        assertEq(skewing.tradeCostAssets, skewing.vpiAssets + int256(skewing.executionFeeAssets), "Charge trade cost");
 
         _open(longTrader, CfdTypes.Side.LONG, size, 10_000e6, price);
 
         ICfdEngineTypes.OpenPreview memory healing =
             engineLens.previewOpen(shortTrader, CfdTypes.Side.SHORT, size, 10_000e6, price);
         assertTrue(healing.valid, "Healing open should be valid");
-        assertTrue(healing.vpiUsdc < 0, "Healing open should receive VPI rebate");
-        assertEq(healing.tradeCostUsdc, healing.vpiUsdc + int256(healing.executionFeeUsdc), "Rebate trade cost");
-        assertEq(healing.poolRebatePayoutUsdc, 0, "Fee-limited rebate should not create pool payout");
+        assertTrue(healing.vpiAssets < 0, "Healing open should receive VPI rebate");
+        assertEq(healing.tradeCostAssets, healing.vpiAssets + int256(healing.executionFeeAssets), "Rebate trade cost");
+        assertEq(healing.poolRebatePayoutAssets, 0, "Fee-limited rebate should not create pool payout");
     }
 
     function test_OpenPreview_InvalidReasonMatchesLegacyPreviewMethods() public {
@@ -265,51 +265,53 @@ contract PerpsReadParityTest is BasePerpTest {
         (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(account);
 
         assertEq(
-            snapshot.settlementBalanceUsdc,
-            clearinghouse.balanceUsdc(account),
+            snapshot.settlementBalanceAssets,
+            clearinghouse.balanceAssets(account),
             "Account lens settlement should match clearinghouse"
         );
         assertEq(
-            snapshot.activePositionMarginUsdc,
-            collateralView.activePositionMarginUsdc,
+            snapshot.activePositionMarginAssets,
+            collateralView.activePositionMarginAssets,
             "Active position margin should match collateral view"
         );
         assertEq(
-            snapshot.otherLockedMarginUsdc,
-            collateralView.otherLockedMarginUsdc,
+            snapshot.otherLockedMarginAssets,
+            collateralView.otherLockedMarginAssets,
             "Other locked margin should match collateral view"
         );
         assertEq(
-            snapshot.freeSettlementUsdc,
-            collateralView.freeSettlementUsdc,
+            snapshot.freeSettlementAssets,
+            collateralView.freeSettlementAssets,
             "Free settlement should match collateral view"
         );
         assertEq(
-            snapshot.liquidationReachableSettlementUsdc,
-            collateralView.liquidationReachableSettlementUsdc,
+            snapshot.liquidationReachableSettlementAssets,
+            collateralView.liquidationReachableSettlementAssets,
             "Liquidation-reachable settlement should match collateral view"
         );
         assertEq(
-            snapshot.terminalPriceCollectibleCapUsdc,
-            collateralView.terminalPriceCollectibleCapUsdc,
+            snapshot.terminalPriceCollectibleCapAssets,
+            collateralView.terminalPriceCollectibleCapAssets,
             "Terminal price cap should match collateral view"
         );
         assertEq(
-            snapshot.terminalPriceCollectibleCapUsdc,
-            terminalNavBook.curveOf(account).effectiveCapUsdcAtoms,
+            snapshot.terminalPriceCollectibleCapAssets,
+            terminalNavBook.curveOf(account).effectiveCapAssetAtoms,
             "Terminal price cap should match the canonical book curve"
         );
         assertEq(
-            snapshot.accountEquityUsdc, collateralView.accountEquityUsdc, "Account equity should match collateral view"
+            snapshot.accountEquityAssets,
+            collateralView.accountEquityAssets,
+            "Account equity should match collateral view"
         );
         assertEq(
-            snapshot.freeBuyingPowerUsdc,
-            collateralView.freeBuyingPowerUsdc,
+            snapshot.freeBuyingPowerAssets,
+            collateralView.freeBuyingPowerAssets,
             "Buying power should match collateral view"
         );
         assertEq(
-            snapshot.traderClaimBalanceUsdc,
-            engine.traderClaimBalanceUsdc(account),
+            snapshot.traderClaimBalanceAssets,
+            engine.traderClaimBalanceAssets(account),
             "Trader claim should match engine state"
         );
         assertEq(snapshot.size, size, "Account lens size should match engine position");
@@ -337,25 +339,25 @@ contract PerpsReadParityTest is BasePerpTest {
         ICfdEngineTypes.OpenPreview memory carryProjection =
             engineLens.previewOpen(account, CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 0, 1e8);
 
-        assertGt(carryProjection.pendingCarryUsdc, 0, "Setup should accrue a nonzero action-side carry charge");
+        assertGt(carryProjection.pendingCarryAssets, 0, "Setup should accrue a nonzero action-side carry charge");
         assertGe(
-            snapshot.freeSettlementUsdc,
-            carryProjection.pendingCarryUsdc,
+            snapshot.freeSettlementAssets,
+            carryProjection.pendingCarryAssets,
             "Free settlement should fully fund projected carry"
         );
         assertEq(
-            snapshot.netEquityUsdc,
-            beforeCarry.netEquityUsdc - int256(carryProjection.pendingCarryUsdc),
+            snapshot.netEquityAssets,
+            beforeCarry.netEquityAssets - int256(carryProjection.pendingCarryAssets),
             "Margin-funded carry reduces projected price equity exactly once"
         );
         assertEq(
-            traderView.equityUsdc,
-            snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0,
+            traderView.equityAssets,
+            snapshot.netEquityAssets > 0 ? uint256(snapshot.netEquityAssets) : 0,
             "Public trader equity should match account lens net equity"
         );
         assertEq(
-            traderView.withdrawableUsdc,
-            engineAccountLens.getWithdrawableUsdc(account),
+            traderView.withdrawableAssets,
+            engineAccountLens.getWithdrawableAssets(account),
             "Public withdrawable should match account lens"
         );
         assertEq(
@@ -364,9 +366,9 @@ contract PerpsReadParityTest is BasePerpTest {
         assertEq(traderView.liquidatable, snapshot.liquidatable, "Public liquidatable flag should match account lens");
         assertEq(positionView.exists, snapshot.hasPosition, "Public position existence should match account lens");
         assertEq(positionView.size, snapshot.size, "Public position size should match account lens");
-        assertEq(positionView.marginUsdc, snapshot.margin, "Public position margin should match account lens");
+        assertEq(positionView.marginAssets, snapshot.margin, "Public position margin should match account lens");
         assertEq(positionView.entryPrice, snapshot.entryPrice, "Public position entry price should match account lens");
-        assertEq(positionView.unrealizedPnlUsdc, snapshot.unrealizedPnlUsdc, "Public pnl should match account lens");
+        assertEq(positionView.unrealizedPnlAssets, snapshot.unrealizedPnlAssets, "Public pnl should match account lens");
         assertEq(positionView.liquidatable, snapshot.liquidatable, "Public liquidatable should match account lens");
     }
 
@@ -379,7 +381,7 @@ contract PerpsReadParityTest is BasePerpTest {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
@@ -387,22 +389,20 @@ contract PerpsReadParityTest is BasePerpTest {
             engineProtocolLens.getProtocolAccountingSnapshot();
         ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
 
+        assertEq(protocolSnapshot.poolAssets, pool.totalAssets(), "Protocol lens pool assets should match pool assets");
         assertEq(
-            protocolSnapshot.poolAssetsUsdc, pool.totalAssets(), "Protocol lens pool assets should match pool assets"
-        );
-        assertEq(
-            protocolSnapshot.withdrawalReservedUsdc,
-            _withdrawalReservedUsdc(),
+            protocolSnapshot.withdrawalReservedAssets,
+            _withdrawalReservedAssets(),
             "Protocol lens reserved cash should match live reservation state"
         );
         assertEq(
-            protocolSnapshot.protocolTreasuryBalanceUsdc,
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            protocolSnapshot.protocolTreasuryBalanceAssets,
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             "Protocol lens fees should match engine state"
         );
         assertEq(
-            protocolSnapshot.totalTraderClaimBalanceUsdc,
-            terminalSnapshot.totalTraderClaimsUsdc,
+            protocolSnapshot.totalTraderClaimBalanceAssets,
+            terminalSnapshot.totalTraderClaimsAssets,
             "Protocol claims should match the authenticated terminal snapshot"
         );
         assertEq(
@@ -411,12 +411,12 @@ contract PerpsReadParityTest is BasePerpTest {
             "Protocol lens degraded mode should match engine state"
         );
         assertEq(
-            protocolSnapshot.maxLiabilityUsdc,
-            terminalSnapshot.maxDirectionalLiabilityUsdc,
+            protocolSnapshot.maxLiabilityAssets,
+            terminalSnapshot.maxDirectionalLiabilityAssets,
             "Protocol liability should match the authenticated terminal snapshot"
         );
         assertFalse(terminalSnapshot.hasOpenPositions, "Full close should clear terminal price exposure");
-        assertEq(terminalSnapshot.terminalLpPriceDeltaUsdc, 0, "Closed terminal book should have zero marked delta");
+        assertEq(terminalSnapshot.terminalLpPriceDeltaAssets, 0, "Closed terminal book should have zero marked delta");
         _assertTerminalCurveMatchesEngine(account);
         _assertTerminalNavSnapshotMatchesBook();
     }
@@ -430,12 +430,12 @@ contract PerpsReadParityTest is BasePerpTest {
             uint256 size,
             uint256 margin,
             uint256 entryPrice,
-            uint256 maxProfitUsdc,
+            uint256 maxProfitAssets,
             CfdTypes.Side side,
             int256 vpiAccrued
         )
     {
-        (size, margin, entryPrice, maxProfitUsdc, side,, vpiAccrued) = engine.positions(account);
+        (size, margin, entryPrice, maxProfitAssets, side,, vpiAccrued) = engine.positions(account);
     }
 
 }

@@ -25,7 +25,7 @@ contract VpiDepthTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -45,8 +45,8 @@ contract VpiDepthTest is BasePerpTest {
         }
 
         uint256 ownerAssets = juniorVault.estimateRedeemAssets(maxShares);
-        (,,, uint256 maxJuniorWithdrawUsdc) = pool.getPendingTrancheState();
-        uint256 targetAssets = ownerAssets < maxJuniorWithdrawUsdc ? ownerAssets : maxJuniorWithdrawUsdc;
+        (,,, uint256 maxJuniorWithdrawAssets) = pool.getPendingTrancheState();
+        uint256 targetAssets = ownerAssets < maxJuniorWithdrawAssets ? ownerAssets : maxJuniorWithdrawAssets;
         if (targetAssets == 0) {
             return 0;
         }
@@ -83,7 +83,7 @@ contract VpiDepthTest is BasePerpTest {
 
         _fundTrader(alice, 50_000 * 1e6);
         address aliceAccount = alice;
-        uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 aliceBalBefore = clearinghouse.balanceAssets(aliceAccount);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
@@ -99,7 +99,7 @@ contract VpiDepthTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(3, closePrice);
 
-        uint256 aliceBalAfter = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 aliceBalAfter = clearinghouse.balanceAssets(aliceAccount);
 
         assertLe(aliceBalAfter, aliceBalBefore, "Minority VPI depth attack must not be profitable");
     }
@@ -109,7 +109,7 @@ contract VpiDepthTest is BasePerpTest {
         _fundTrader(alice, 50_000 * 1e6);
 
         address aliceAccount = alice;
-        uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 aliceBalBefore = clearinghouse.balanceAssets(aliceAccount);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 5000 * 1e6, 1e8, false);
@@ -136,7 +136,7 @@ contract VpiDepthTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(3, closePrice);
 
-        uint256 aliceBalAfter = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 aliceBalAfter = clearinghouse.balanceAssets(aliceAccount);
 
         assertLe(aliceBalAfter, aliceBalBefore, "Size addition VPI bypass must not be profitable");
     }
@@ -145,7 +145,7 @@ contract VpiDepthTest is BasePerpTest {
         address skewTrader,
         address rebateTrader,
         address deepLp
-    ) internal returns (address rebateAccount, uint256 reserveTargetUsdc) {
+    ) internal returns (address rebateAccount, uint256 reserveTargetAssets) {
         _fundJunior(deepLp, 10_000_000e6);
         _fundTrader(skewTrader, 100_000e6);
         _fundTrader(rebateTrader, 20_000e6);
@@ -157,16 +157,16 @@ contract VpiDepthTest is BasePerpTest {
 
         (,,,,,, int256 storedVpi) = engine.positions(rebateAccount);
         assertLt(storedVpi, 0, "Fixture must create a negative lifetime VPI obligation");
-        reserveTargetUsdc = uint256(-(storedVpi + 1)) + 1;
+        reserveTargetAssets = uint256(-(storedVpi + 1)) + 1;
         assertEq(
-            clearinghouse.vpiRebateReserveUsdc(rebateAccount),
-            reserveTargetUsdc,
+            clearinghouse.vpiRebateReserveAssets(rebateAccount),
+            reserveTargetAssets,
             "Fixture must exactly fund the mandatory VPI reserve"
         );
     }
 
     function test_VpiReserveOverfund_DoesNotImproveExactPriceHealth() public {
-        (address account, uint256 reserveTargetUsdc) =
+        (address account, uint256 reserveTargetAssets) =
             _openNegativeVpiIsolationFixture(address(0x7111), address(0x7112), address(0x7113));
         AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
             engineAccountLens.getAccountLedgerSnapshot(account);
@@ -178,13 +178,13 @@ contract VpiDepthTest is BasePerpTest {
         AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot =
             engineAccountLens.getAccountLedgerSnapshot(account);
         assertEq(
-            clearinghouse.vpiRebateReserveUsdc(account),
-            reserveTargetUsdc + 1e6,
+            clearinghouse.vpiRebateReserveAssets(account),
+            reserveTargetAssets + 1e6,
             "Fixture must overfund the independent VPI reserve"
         );
         assertEq(
-            afterSnapshot.netEquityUsdc,
-            beforeSnapshot.netEquityUsdc,
+            afterSnapshot.netEquityAssets,
+            beforeSnapshot.netEquityAssets,
             "VPI reserve overfund must never count as exact price collateral"
         );
         assertEq(
@@ -201,7 +201,7 @@ contract VpiDepthTest is BasePerpTest {
     }
 
     function test_VpiReserveUnderfund_FailsClosedAsIndependentDelinquency() public {
-        (address account, uint256 reserveTargetUsdc) =
+        (address account, uint256 reserveTargetAssets) =
             _openNegativeVpiIsolationFixture(address(0x7121), address(0x7122), address(0x7123));
         AccountLensViewTypes.AccountLedgerSnapshot memory fundedSnapshot =
             engineAccountLens.getAccountLedgerSnapshot(account);
@@ -213,17 +213,17 @@ contract VpiDepthTest is BasePerpTest {
         AccountLensViewTypes.AccountLedgerSnapshot memory underfundedSnapshot =
             engineAccountLens.getAccountLedgerSnapshot(account);
         assertEq(
-            clearinghouse.vpiRebateReserveUsdc(account),
-            reserveTargetUsdc - 1,
+            clearinghouse.vpiRebateReserveAssets(account),
+            reserveTargetAssets - 1,
             "Fixture must leave exactly one VPI-reserve atom uncovered"
         );
         assertEq(
-            underfundedSnapshot.netEquityUsdc,
-            fundedSnapshot.netEquityUsdc,
+            underfundedSnapshot.netEquityAssets,
+            fundedSnapshot.netEquityAssets,
             "Independent VPI delinquency must not distort exact price equity"
         );
         assertTrue(underfundedSnapshot.liquidatable, "One uncovered VPI-reserve atom must fail closed");
-        assertEq(engineAccountLens.getWithdrawableUsdc(account), 0, "Underfunded VPI reserve must block withdrawal");
+        assertEq(engineAccountLens.getWithdrawableAssets(account), 0, "Underfunded VPI reserve must block withdrawal");
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         vm.prank(address(clearinghouse));
@@ -235,18 +235,18 @@ contract VpiDepthTest is BasePerpTest {
         address rebateTrader = address(0x666);
         VpiRebateExtractionSnapshot memory beforeOpen = _openVpiRebateExtractionFixture(rebateTrader);
 
-        uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(rebateTrader).freeSettlementUsdc;
+        uint256 freeSettlementAssets = clearinghouse.getAccountAssetBuckets(rebateTrader).freeSettlementAssets;
         assertEq(
-            engineAccountLens.getWithdrawableUsdc(rebateTrader),
-            freeSettlementUsdc,
+            engineAccountLens.getWithdrawableAssets(rebateTrader),
+            freeSettlementAssets,
             "Dedicated backing should leave genuinely free settlement withdrawable"
         );
         vm.prank(rebateTrader);
-        clearinghouse.withdraw(rebateTrader, freeSettlementUsdc);
+        clearinghouse.withdraw(rebateTrader, freeSettlementAssets);
 
         assertEq(
-            clearinghouse.vpiRebateReserveUsdc(rebateTrader),
-            beforeOpen.rebateReserveUsdc,
+            clearinghouse.vpiRebateReserveAssets(rebateTrader),
+            beforeOpen.rebateReserveAssets,
             "Withdrawing free cash must not touch rebate backing"
         );
 
@@ -254,10 +254,10 @@ contract VpiDepthTest is BasePerpTest {
 
         (uint256 sizeAfter,,,,,,) = engine.positions(rebateTrader);
         assertEq(sizeAfter, 0, "The terminal close should complete");
-        assertEq(clearinghouse.vpiRebateReserveUsdc(rebateTrader), 0, "Terminal clawback must consume the reserve");
+        assertEq(clearinghouse.vpiRebateReserveAssets(rebateTrader), 0, "Terminal clawback must consume the reserve");
         assertGe(pool.totalAssets(), beforeOpen.poolAssetsBeforeOpen, "The round trip must not extract LP cash");
         assertLe(
-            usdc.balanceOf(rebateTrader) + clearinghouse.balanceUsdc(rebateTrader),
+            settlementToken.balanceOf(rebateTrader) + clearinghouse.balanceAssets(rebateTrader),
             beforeOpen.walletBeforeOpen + beforeOpen.settlementBeforeOpen,
             "Withdrawal plus terminal close must not turn the rebate into trader profit"
         );
@@ -287,8 +287,8 @@ contract VpiDepthTest is BasePerpTest {
             smallDepth = pool.totalAssets();
             assertLt(smallDepth, largeDepth, "LP withdrawal should shrink live pool depth");
         }
-        beforeOpen.settlementBeforeOpen = clearinghouse.balanceUsdc(rebateTrader);
-        beforeOpen.walletBeforeOpen = usdc.balanceOf(rebateTrader);
+        beforeOpen.settlementBeforeOpen = clearinghouse.balanceAssets(rebateTrader);
+        beforeOpen.walletBeforeOpen = settlementToken.balanceOf(rebateTrader);
         beforeOpen.poolAssetsBeforeOpen = smallDepth;
 
         uint64 rebatePublishTime = engine.lastMarkTime();
@@ -312,19 +312,19 @@ contract VpiDepthTest is BasePerpTest {
 
         (,,,,,, int256 storedVpi) = engine.positions(rebateTrader);
         assertLt(storedVpi, 0, "Setup must create negative accrued VPI on the rebate-bearing leg");
-        beforeOpen.rebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(rebateTrader);
+        beforeOpen.rebateReserveAssets = clearinghouse.vpiRebateReserveAssets(rebateTrader);
         assertEq(
-            beforeOpen.rebateReserveUsdc,
+            beforeOpen.rebateReserveAssets,
             uint256(-storedVpi),
             "The gross lifetime rebate must be backed one-for-one inside action reserve"
         );
         assertGe(
-            clearinghouse.actionReserveUsdc(rebateTrader),
-            beforeOpen.rebateReserveUsdc,
+            clearinghouse.actionReserveAssets(rebateTrader),
+            beforeOpen.rebateReserveAssets,
             "The VPI sub-ledger must remain a floor inside action reserve"
         );
         assertGt(
-            clearinghouse.balanceUsdc(rebateTrader),
+            clearinghouse.balanceAssets(rebateTrader),
             beforeOpen.settlementBeforeOpen,
             "Skew-healing open should credit net rebate into settlement balance"
         );

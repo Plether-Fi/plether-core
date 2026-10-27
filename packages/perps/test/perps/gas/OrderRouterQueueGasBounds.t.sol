@@ -17,15 +17,15 @@ contract OrderRouterQueueGasBoundsTest is OrderRouterTestBase {
         address carol = address(0x555);
         address carolAccount = carol;
 
-        usdc.mint(spammer, 100_000 * 1e6);
+        settlementToken.mint(spammer, 100_000 * 1e6);
         vm.startPrank(spammer);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(spammer, 100_000 * 1e6);
         vm.stopPrank();
 
-        usdc.mint(carol, 20_000 * 1e6);
+        settlementToken.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(carolAccount, 20_000 * 1e6);
         vm.stopPrank();
 
@@ -58,9 +58,9 @@ contract OrderRouterQueueGasBoundsTest is OrderRouterTestBase {
         address aliceAccount = alice;
         address carolAccount = carol;
 
-        usdc.mint(carol, 20_000 * 1e6);
+        settlementToken.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(carolAccount, 20_000 * 1e6);
         vm.stopPrank();
 
@@ -115,9 +115,9 @@ contract OrderRouterQueueGasBoundsTest is OrderRouterTestBase {
         address spammer = address(0x557);
         address aliceAccount = alice;
 
-        usdc.mint(spammer, 100_000 * 1e6);
+        settlementToken.mint(spammer, 100_000 * 1e6);
         vm.startPrank(spammer);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(spammer, 100_000 * 1e6);
         vm.stopPrank();
 

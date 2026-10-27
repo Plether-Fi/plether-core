@@ -47,7 +47,7 @@ contract ClearinghouseReservationOwnershipTest is BasePerpTest {
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidBountyReservation.selector);
         vm.prank(address(router));
         clearinghouse.recordBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1, 1e6);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 3e6);
+        assertEq(clearinghouse.totalBountyReservationsAssets(ACCOUNT), 3e6);
     }
 
     function test_BountyReservationCannotBeTakenForAnotherAccountOrTwice() public {
@@ -64,15 +64,15 @@ contract ClearinghouseReservationOwnershipTest is BasePerpTest {
         vm.prank(ACCOUNT);
         clearinghouse.takeBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1);
 
-        uint256 balance = clearinghouse.balanceUsdc(ACCOUNT);
+        uint256 balance = clearinghouse.balanceAssets(ACCOUNT);
         vm.startPrank(address(router));
         assertEq(clearinghouse.takeBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1), 3e6);
         assertEq(clearinghouse.takeBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1), 0);
         clearinghouse.releaseReservedExecutionBountyToSource(ACCOUNT, 3e6);
         vm.stopPrank();
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), balance, "self-refund changes no custody");
-        assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc, 0);
+        assertEq(clearinghouse.totalBountyReservationsAssets(ACCOUNT), 0);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), balance, "self-refund changes no custody");
+        assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementAssets, 0);
     }
 
     function test_ZeroOrderReservationStillAuthenticatesIdentityAndCannotBeReused() public {
@@ -105,7 +105,7 @@ contract ClearinghouseReservationOwnershipTest is BasePerpTest {
             address(router), abi.encodeWithSignature("getMarginReservationIds(address)", ACCOUNT), "no router index"
         );
 
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 3e6);
+        assertEq(clearinghouse.totalBountyReservationsAssets(ACCOUNT), 3e6);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__ActionReserveMismatch.selector);
         vm.prank(address(engine));
         clearinghouse.unlockReservedSettlement(ACCOUNT, 1);
@@ -113,7 +113,7 @@ contract ClearinghouseReservationOwnershipTest is BasePerpTest {
         (uint256 collected,) = clearinghouse.consumeActionCharge(ACCOUNT, 10e6, 0, 10e6, OTHER, address(0), 0);
         assertEq(collected, 10e6);
         assertEq(clearinghouse.getMarginReservationIds(ACCOUNT).length, 0);
-        assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc, 3e6);
+        assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementAssets, 3e6);
     }
 
     function test_MarginReservationsUnlinkMiddleHeadAndTailAtomically() public {
@@ -131,19 +131,19 @@ contract ClearinghouseReservationOwnershipTest is BasePerpTest {
         assertEq(clearinghouse.getOrderReservation(1).nextOrderId, 3);
         assertEq(clearinghouse.getOrderReservation(3).previousOrderId, 1);
         vm.prank(address(engine));
-        // The released middle reservation provides 20 USDC of free settlement, consumed before FIFO margin.
+        // The released middle reservation provides 20 settlement token of free settlement, consumed before FIFO margin.
         (uint256 collected,) = clearinghouse.consumeActionCharge(ACCOUNT, 35e6, 0, 15e6, OTHER, address(0), 0);
         assertEq(collected, 35e6);
         assertEq(clearinghouse.marginReservationHead(ACCOUNT), 3);
         assertEq(clearinghouse.marginReservationTail(ACCOUNT), 3);
-        assertEq(clearinghouse.getOrderReservation(3).remainingAmountUsdc, 25e6);
+        assertEq(clearinghouse.getOrderReservation(3).remainingAmountAssets, 25e6);
         assertEq(clearinghouse.getOrderReservation(3).previousOrderId, 0);
         vm.prank(address(router));
         clearinghouse.releaseOrderReservationForTerminalCleanup(3);
         assertEq(clearinghouse.marginReservationHead(ACCOUNT), 0);
         assertEq(clearinghouse.marginReservationTail(ACCOUNT), 0);
         assertEq(clearinghouse.getAccountReservationSummary(ACCOUNT).activeReservationCount, 0);
-        assertEq(clearinghouse.getAccountReservationSummary(ACCOUNT).activeCommittedOrderMarginUsdc, 0);
+        assertEq(clearinghouse.getAccountReservationSummary(ACCOUNT).activeCommittedOrderMarginAssets, 0);
     }
 
 }

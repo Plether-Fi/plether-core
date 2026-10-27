@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -13,7 +14,6 @@ import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 
@@ -67,7 +67,7 @@ contract OracleSynchronizationHandler is Test {
     CfdEngine internal immutable engine;
     MarginClearinghouse internal immutable clearinghouse;
     MockPyth internal immutable pyth;
-    MockUSDC internal immutable usdc;
+    MockSettlementToken internal immutable settlementToken;
     bytes32[] internal ids;
     uint256 public attempts;
     uint256 public resolutions;
@@ -85,14 +85,14 @@ contract OracleSynchronizationHandler is Test {
         CfdEngine e,
         MarginClearinghouse c,
         MockPyth p,
-        MockUSDC u,
+        MockSettlementToken u,
         bytes32[] memory feeds
     ) {
         router = r;
         engine = e;
         clearinghouse = c;
         pyth = p;
-        usdc = u;
+        settlementToken = u;
         ids = feeds;
         _check(feeds.length == 2, "two-feed-fixture");
     }
@@ -114,10 +114,10 @@ contract OracleSynchronizationHandler is Test {
         a.rawPrice = 99_000_000 + priceSeed % 2_000_001;
         // Each equal-weight component rounds separately, including odd raw prices.
         a.price = 2 * (a.rawPrice / 2);
-        a.poolCash = usdc.balanceOf(address(engine.pool()));
-        usdc.mint(a.trader, 2000e6);
+        a.poolCash = settlementToken.balanceOf(address(engine.pool()));
+        settlementToken.mint(a.trader, 2000e6);
         vm.startPrank(a.trader);
-        usdc.approve(address(clearinghouse), 2000e6);
+        settlementToken.approve(address(clearinghouse), 2000e6);
         clearinghouse.deposit(a.trader, 2000e6);
         vm.stopPrank();
         if (!_commit(a)) {
@@ -127,9 +127,9 @@ contract OracleSynchronizationHandler is Test {
         vm.warp(a.tick);
         vm.roll(vm.getBlockNumber() + 1);
         a.admitted = _admitted(a.side, a.price, a.poolCash);
-        a.keeperBefore = clearinghouse.balanceUsdc(address(this));
-        a.treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
-        a.clearingCash = usdc.balanceOf(address(clearinghouse));
+        a.keeperBefore = clearinghouse.balanceAssets(address(this));
+        a.treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
+        a.clearingCash = settlementToken.balanceOf(address(clearinghouse));
         a.parses = pyth.parseUniqueCallCount();
         a.writes = pyth.updatePriceFeedsCallCount();
         bytes[] memory data = _payload(a);
@@ -194,17 +194,17 @@ contract OracleSynchronizationHandler is Test {
             return false;
         }
         a.bounty = (20 * mark * router.openOrderExecutionBountyBps()) / 10_000;
-        if (a.bounty < router.minOpenOrderExecutionBountyUsdc()) {
-            a.bounty = router.minOpenOrderExecutionBountyUsdc();
+        if (a.bounty < router.minOpenOrderExecutionBountyAssets()) {
+            a.bounty = router.minOpenOrderExecutionBountyAssets();
         }
-        if (a.bounty > router.maxOpenOrderExecutionBountyUsdc()) {
-            a.bounty = router.maxOpenOrderExecutionBountyUsdc();
+        if (a.bounty > router.maxOpenOrderExecutionBountyAssets()) {
+            a.bounty = router.maxOpenOrderExecutionBountyAssets();
         }
-        _check(clearinghouse.getOrderReservation(a.id).remainingAmountUsdc == 500e6, "committed-margin");
+        _check(clearinghouse.getOrderReservation(a.id).remainingAmountAssets == 500e6, "committed-margin");
         IMarginClearinghouse.BountyReservation memory bounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, a.id);
         _check(
-            bounty.account == a.trader && bounty.amountUsdc == a.bounty
+            bounty.account == a.trader && bounty.amountAssets == a.bounty
                 && bounty.state == IMarginClearinghouse.BountyReservationState.Active,
             "committed-bounty"
         );
@@ -258,8 +258,8 @@ contract OracleSynchronizationHandler is Test {
             "receipt-oracle-evidence"
         );
         _check(
-            receipt.bountyUsdc == a.bounty && receipt.bounty.bountyPaidUsdc == a.bounty
-                && receipt.bounty.bountyEntitlementUsdc == a.bounty
+            receipt.bountyAssets == a.bounty && receipt.bounty.bountyPaidAssets == a.bounty
+                && receipt.bounty.bountyEntitlementAssets == a.bounty
                 && receipt.bountyDisposition == OrderV3Types.BountyDisposition.Paid
                 && receipt.bountyRecipient == address(this) && receipt.executor == address(this),
             "receipt-bounty"
@@ -354,12 +354,12 @@ contract OracleSynchronizationHandler is Test {
         Action memory a
     ) private view {
         uint256 fee = a.admitted ? (20 * a.price * 4) / 10_000 : 0;
-        _check(clearinghouse.balanceUsdc(a.trader) == 2000e6 - a.bounty - fee, "trader-custody");
-        _check(clearinghouse.balanceUsdc(address(this)) == a.keeperBefore + a.bounty, "keeper-credit");
-        _check(clearinghouse.balanceUsdc(engine.protocolTreasury()) == a.treasuryBefore + fee, "treasury-credit");
+        _check(clearinghouse.balanceAssets(a.trader) == 2000e6 - a.bounty - fee, "trader-custody");
+        _check(clearinghouse.balanceAssets(address(this)) == a.keeperBefore + a.bounty, "keeper-credit");
+        _check(clearinghouse.balanceAssets(engine.protocolTreasury()) == a.treasuryBefore + fee, "treasury-credit");
         _check(
-            usdc.balanceOf(address(engine.pool())) == a.poolCash
-                && usdc.balanceOf(address(clearinghouse)) == a.clearingCash,
+            settlementToken.balanceOf(address(engine.pool())) == a.poolCash
+                && settlementToken.balanceOf(address(clearinghouse)) == a.clearingCash,
             "physical-cash"
         );
         _check(
@@ -369,13 +369,13 @@ contract OracleSynchronizationHandler is Test {
         );
         _check(
             clearinghouse.getOrderReservation(a.id).status == IMarginClearinghouse.ReservationStatus.Released
-                && clearinghouse.getOrderReservation(a.id).remainingAmountUsdc == 0,
+                && clearinghouse.getOrderReservation(a.id).remainingAmountAssets == 0,
             "released-margin"
         );
         IMarginClearinghouse.BountyReservation memory bounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, a.id);
         _check(
-            bounty.state == IMarginClearinghouse.BountyReservationState.Settled && bounty.amountUsdc == 0,
+            bounty.state == IMarginClearinghouse.BountyReservationState.Settled && bounty.amountAssets == 0,
             "settled-bounty"
         );
         PositionView memory position =
@@ -394,7 +394,7 @@ contract OracleSynchronizationHandler is Test {
         } else {
             _check(position.size == 0, "rejected-position-empty");
         }
-        _check(engine.traderClaimBalanceUsdc(a.trader) == 0, "no-orphan-claim");
+        _check(engine.traderClaimBalanceAssets(a.trader) == 0, "no-orphan-claim");
         (uint256 longMax,,,) = engine.sides(0);
         (uint256 shortMax,,,) = engine.sides(1);
         _check(longMax == ghostLongMaxProfit && shortMax == ghostShortMaxProfit, "independent-liabilities");
@@ -427,12 +427,12 @@ contract OracleSynchronizationHandler is Test {
         CfdTypes.RiskParams memory risk =
             abi.decode(_read(address(engine), abi.encodeCall(engine.riskParams, ())), (CfdTypes.RiskParams));
         _check(
-            risk.vpiFactor == 0 && risk.bountyBps == 10 && risk.minBountyUsdc == 1e6 && engine.CAP_PRICE() == 2e8
+            risk.vpiFactor == 0 && risk.bountyBps == 10 && risk.minBountyAssets == 1e6 && engine.CAP_PRICE() == 2e8
                 && engine.executionFeeBps() == 4 && engine.settlementBufferBps() == 25,
             "model-configuration"
         );
         _check(!engine.isFadWindow() && !engine.isOracleFrozen(), "live-calendar-fixture");
-        _check(engine.totalTraderClaimBalanceUsdc() == 0 && pyth.mockFee() == 0, "no-external-liabilities");
+        _check(engine.totalTraderClaimBalanceAssets() == 0 && pyth.mockFee() == 0, "no-external-liabilities");
     }
 
     function _stateHash(
@@ -462,11 +462,11 @@ contract OracleSynchronizationHandler is Test {
         );
         bytes32 account = keccak256(
             abi.encode(
-                clearinghouse.getAccountUsdcBuckets(trader),
+                clearinghouse.getAccountAssetBuckets(trader),
                 clearinghouse.getAccountReservationSummary(trader),
-                clearinghouse.balanceUsdc(address(this)),
-                clearinghouse.balanceUsdc(engine.protocolTreasury()),
-                engine.traderClaimBalanceUsdc(trader),
+                clearinghouse.balanceAssets(address(this)),
+                clearinghouse.balanceAssets(engine.protocolTreasury()),
+                engine.traderClaimBalanceAssets(trader),
                 _read(address(engine), abi.encodeCall(engine.positions, (trader)))
             )
         );
@@ -475,10 +475,10 @@ contract OracleSynchronizationHandler is Test {
                 oracle,
                 lifecycle,
                 account,
-                usdc.balanceOf(trader),
-                usdc.balanceOf(address(router)),
-                usdc.balanceOf(address(engine.pool())),
-                usdc.balanceOf(address(clearinghouse))
+                settlementToken.balanceOf(trader),
+                settlementToken.balanceOf(address(router)),
+                settlementToken.balanceOf(address(engine.pool())),
+                settlementToken.balanceOf(address(clearinghouse))
             )
         );
     }

@@ -9,7 +9,7 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 /// @notice Stateless authoritative planning, normalization, and financial-policy checks for V3 delayed orders.
 /// @dev `assessCommittedOrder` resolves authenticated lifecycle authority. `assessOrder` is non-authoritative simulation. The pure entrypoints accept a supplied snapshot and delta for
 ///      deterministic simulation. Planner business-rule failures retain the existing `CfdEngine__TypedOrderFailure`
-///      selector so Router classification remains stable. USDC values use 6 decimals, prices use 8 decimals, and
+///      selector so Router classification remains stable. settlement token values use 6 decimals, prices use 8 decimals, and
 ///      position sizes use 18 decimals.
 interface ICfdOrderPolicyEvaluator {
 
@@ -28,7 +28,7 @@ interface ICfdOrderPolicyEvaluator {
 
     /// @notice Planned settlement cannot back the terminal bounty debit, including self-execution.
     /// @dev An accounting invariant failure, not a terminal user-policy failure. Routers must leave the order pending.
-    error CfdOrderPolicyEvaluator__InsufficientBountyBacking(uint256 settlementUsdc, uint256 bountyUsdc);
+    error CfdOrderPolicyEvaluator__InsufficientBountyBacking(uint256 settlementAssets, uint256 bountyAssets);
 
     /// @notice Authoritative market state selected a regime outside the order's allowed mode mask.
     /// @param mode Actual execution regime.
@@ -58,9 +58,9 @@ interface ICfdOrderPolicyEvaluator {
         CfdTypes.Order calldata order,
         address executor,
         uint256 currentOraclePrice,
-        uint256 poolDepthUsdc,
+        uint256 poolDepthAssets,
         OrderV3Types.ExecutionBounds calldata bounds,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) external view returns (OrderV3Types.ExecutionAssessment memory assessment);
 
     /// @notice Normalizes and validates a successful open/increase plan.
@@ -69,7 +69,7 @@ interface ICfdOrderPolicyEvaluator {
         CfdEnginePlanTypes.RawSnapshot calldata snapshot,
         CfdEnginePlanTypes.OpenDelta calldata delta,
         OrderV3Types.ExecutionBounds calldata bounds,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) external pure returns (OrderV3Types.ExecutionAssessment memory assessment);
 
     /// @notice Normalizes and validates a successful close/decrease plan.
@@ -78,7 +78,7 @@ interface ICfdOrderPolicyEvaluator {
         CfdEnginePlanTypes.RawSnapshot calldata snapshot,
         CfdEnginePlanTypes.CloseDelta calldata delta,
         OrderV3Types.ExecutionBounds calldata bounds,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) external pure returns (OrderV3Types.ExecutionAssessment memory assessment);
 
 }

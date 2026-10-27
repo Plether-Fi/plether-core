@@ -23,7 +23,7 @@ contract SyntheticFutureStoredMarkTest is BasePerpTest {
         _open(aliceAccount, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
         // Synthetic trusted-router state: external oracle preparation rejects future publications.
-        uint256 balanceBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 balanceBefore = clearinghouse.balanceAssets(aliceAccount);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp + 5));
 
@@ -34,7 +34,7 @@ contract SyntheticFutureStoredMarkTest is BasePerpTest {
         pool.reconcile();
 
         assertEq(
-            clearinghouse.balanceUsdc(aliceAccount), balanceBefore, "Guard and reconciliation preserve trader custody"
+            clearinghouse.balanceAssets(aliceAccount), balanceBefore, "Guard and reconciliation preserve trader custody"
         );
         assertEq(engine.lastMarkTime(), block.timestamp + 5);
         assertEq(pool.lastReconcileTime(), block.timestamp, "Reconcile uses current time without underflow");
@@ -116,9 +116,9 @@ contract StaleMarkDepositAdmissionTest is BasePerpTest {
 
         _warpForward(200);
 
-        usdc.mint(attacker, 100_000e6);
+        settlementToken.mint(attacker, 100_000e6);
         vm.startPrank(attacker);
-        usdc.approve(address(seniorVault), 100_000e6);
+        settlementToken.approve(address(seniorVault), 100_000e6);
 
         assertEq(seniorVault.maxRequestDeposit(attacker), 0, "stale mark should zero senior request capacity");
         vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
@@ -139,9 +139,9 @@ contract StaleMarkDepositAdmissionTest is BasePerpTest {
 
         _warpForward(200);
 
-        usdc.mint(attacker, 100_000e6);
+        settlementToken.mint(attacker, 100_000e6);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), 100_000e6);
+        settlementToken.approve(address(juniorVault), 100_000e6);
 
         assertEq(juniorVault.maxRequestDeposit(attacker), 0, "stale mark should zero junior request capacity");
         vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
@@ -198,10 +198,10 @@ contract LiveFadFreshnessTest is BasePerpTest {
 
         // FAD alone does not relax mark age: the stale live-market mark blocks a new LP request.
         address lp = address(0x1111);
-        uint256 depositAmount = pool.minTrancheDepositUsdc();
-        usdc.mint(lp, depositAmount);
+        uint256 depositAmount = pool.minTrancheDepositAssets();
+        settlementToken.mint(lp, depositAmount);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), depositAmount);
+        settlementToken.approve(address(juniorVault), depositAmount);
         assertEq(juniorVault.maxRequestDeposit(lp), 0, "stale mark should zero junior request capacity");
         vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
         juniorVault.requestDeposit(depositAmount, lp);

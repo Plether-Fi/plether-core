@@ -49,7 +49,7 @@ interface IOrderLifecycleBook {
     /// @notice An order id already has a pending or terminal lifecycle record.
     error OrderLifecycleBook__OrderIdAlreadyUsed(uint64 orderId);
     /// @notice The actual quoted bounty exceeds the user's committed maximum.
-    error OrderLifecycleBook__ExecutionBountyAboveBound(uint256 actualBountyUsdc, uint256 maximumBountyUsdc);
+    error OrderLifecycleBook__ExecutionBountyAboveBound(uint256 actualBountyAssets, uint256 maximumBountyAssets);
     /// @notice A finalization referenced an order that is not pending.
     error OrderLifecycleBook__OrderNotPending(uint64 orderId);
     /// @notice A protection-attempt marker referenced a missing or externally pinned pending intent.
@@ -69,7 +69,7 @@ interface IOrderLifecycleBook {
         address indexed account,
         bytes32 indexed clientOrderId,
         bytes32 intentHash,
-        uint256 executionBountyUsdc,
+        uint256 executionBountyAssets,
         OrderV3Types.OrderRequest request,
         OrderV3Types.OrderTiming timing
     );
@@ -125,7 +125,7 @@ interface IOrderLifecycleBook {
         address account,
         uint64 proposedOrderId,
         OrderV3Types.OrderRequest calldata request,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) external returns (uint64 resolvedOrderId, bytes32 intentHash, bool replayed);
 
     /// @notice Marks a pending internal intent as a position-protection execution attempt.

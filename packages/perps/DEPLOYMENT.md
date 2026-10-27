@@ -1,11 +1,12 @@
 # Perps deployment and operation
 
-The checked-in scripts deploy a fresh Arbitrum Sepolia stack with mock USDC, a six-feed Pyth basket, and separate
+The checked-in scripts deploy a fresh Arbitrum Sepolia stack with mock USDG, a six-feed Pyth basket, and separate
 deployment, seeding, and activation phases. Paths to scripts, environment files, and release artifacts below are
 relative to the repository root; run commands there.
 
-**The current oracle-synchronization candidate stops at deployed and inactive.** Its record is
-`deployments/releases/atomic-oracle-sync-candidate/`. Complete the qualification gates in
+The earlier oracle-synchronization candidate is recorded as deployed and inactive under
+`deployments/releases/atomic-oracle-sync-candidate/`. The new USDG release is prepared but not deployed.
+Complete the qualification gates in
 [Oracle synchronization](ORACLE_SYNCHRONIZATION.md) before considering a separate activation release. The bootstrap
 instructions below describe the later supported phases; they are not part of candidate qualification.
 
@@ -23,6 +24,24 @@ Generate consumer ABIs from the release build. Current requests and client-inten
 configuration hashes use V5. Pin the manifest and runtime hashes with those ABIs. Keep historical manifests, decoders,
 and services available until their positions and pending work are resolved; do not redirect old requests or receipt
 processing to a new stack. See [Reservation ledger](ACCOUNTING_SPEC.md#reservation-ownership-and-queues) for the current custody classifications.
+
+## Settlement-token release metadata
+
+New manifests use schema version `4`. The canonical contract entry is `contracts.settlementToken`, with artifact
+`script/DeployPerpsArbitrumSepolia.s.sol:MockUSDG`, an address, and a runtime code hash. Top-level `settlementToken`
+metadata records `name: "Mock USDG"`, `symbol: "USDG"`, `decimals: 6`, `isMock: true`,
+`supportsReceiveWithAuthorization: false`, and `supportsBridgeFunding: false`. Applications should display
+`USDG`, use the manifest address for balances and approvals, and gate funding routes by those capabilities.
+Do not relabel an address from an older USDC deployment or route it through the new ABI. Historical
+`contracts.mockUsdc` manifests and their ABI exports remain historical evidence. The current runtime uses a fresh
+schema-4 prepared manifest with addresses unset and funding disabled until a reviewed deployment is supplied.
+Export new artifacts into a fresh directory from the reviewed source revision.
+
+Bootstrap and verification read `PERPS_SETTLEMENT_TOKEN`; seed inputs are `SENIOR_SEED_ASSETS` and
+`JUNIOR_SEED_ASSETS`. Do not put the new token into `PERPS_USDC`: spot scripts may inherit that old setting.
+The verifier checks code, six decimals, expected mock name/symbol, and matching asset bindings. Metadata checks
+identify this test release and do not authenticate official USDG. Prepared manifests keep unknown addresses and
+transaction evidence unset and must not be marked deployed or active.
 
 ## Scripts and artifacts
 
@@ -46,7 +65,7 @@ comparison of every deployed bytecode artifact with the release build.
 
 The deploy script performs creation and one-time wiring in this order:
 
-1. Deploy MockUSDC, MarginClearinghouse, CfdEngine, and the empty Engine-bound TerminalNavBookV2. Wire the Book before
+1. Deploy MockUSDG, MarginClearinghouse, CfdEngine, and the empty Engine-bound TerminalNavBookV2. Wire the Book before
    any exposure. Deploy and wire the Engine planner, settlement sidecar, and admin.
 2. Deploy HousePoolRedemptionMathSidecar, then the release HousePool. The Pool constructor also creates
    CfdEngineProtocolLens. Deploy Senior with a zero maintenance fee and zero recipient, register it, snapshot
@@ -101,7 +120,7 @@ creation evidence. Bootstrap's supplied-sidecar check proves code and
 
 ## Initial release parameters
 
-These are the checked-in script and constructor defaults, not a claim about any live deployment. USDC values use
+These are the checked-in script and constructor defaults, not a claim about any live deployment. USDG values use
 six decimals; basis points use `10,000 = 100%`.
 
 | Parameter | Value |
@@ -114,7 +133,7 @@ six decimals; basis points use `10,000 = 100%`.
 | `initMarginBps` | `20` |
 | `fadMarginBps` | `300` |
 | `baseCarryBps` | `500` |
-| `minBountyUsdc` | `1e6` |
+| `minBountyAssets` | `1e6` |
 | `bountyBps` | `10` total liquidation-charge rate |
 | `keeperShareBps` | `5_000` (50% of collected charge to keeper) |
 | `protocolShareBps` | `0` (protocol liquidation fee disabled; remaining 50% goes to LPs) |
@@ -124,13 +143,13 @@ six decimals; basis points use `10,000 = 100%`.
 | `fadRunwaySeconds` | `1 hours` |
 | `basketMaxConfidenceRatioBps` | `10` |
 | `adverseConfidenceMultiplierBps` | `2_500` (release-oracle constructor initialization) |
-| `minOpenNotionalUsdc` | `1_000e6` (release-Router constructor initialization) |
+| `minOpenNotionalAssets` | `1_000e6` (release-Router constructor initialization) |
 | `maxPendingOrders` | `5` |
 | Close execution bounty | Always zero; no configuration field or getter |
-| `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDC`) |
+| `positionProtectionTriggerBountyAssets` | `200_000` (`0.20 USDG`) |
 | `juniorMaintenanceFeeAprBps` | `0` nominal APR (disabled at deployment) |
 | `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
-| `maxSeniorExposureUsdc` | `40_000_000e6` (release-HousePool constructor initialization) |
+| `maxSeniorExposureAssets` | `40_000_000e6` (release-HousePool constructor initialization) |
 | `maxSeniorShareBps` | `8_000` (release-HousePool constructor initialization) |
 | Senior / Junior seed | `1e6` each |
 
@@ -212,20 +231,20 @@ required because the release constructors set those values.
 The required bootstrap inputs, in addition to the private key and RPC, are:
 
 ```bash
-PERPS_USDC=0x...
+PERPS_SETTLEMENT_TOKEN=0x...
 PERPS_HOUSE_POOL=0x...
 PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR=0x...
 PERPS_ORDER_ROUTER=0x...
 PERPS_EMERGENCY_COORDINATOR=0x...
 PERPS_GUARDIAN=0x...
-SENIOR_SEED_USDC=1000000
-JUNIOR_SEED_USDC=1000000
+SENIOR_SEED_ASSETS=1000000
+JUNIOR_SEED_ASSETS=1000000
 SENIOR_SEED_RECEIVER=0x...
 JUNIOR_SEED_RECEIVER=0x...
 ACTIVATE_TRADING=false
 ```
 
-Both seed amounts must be exactly 1 mock USDC (`1e6`). Both receivers and the guardian must be explicitly set and
+Both seed amounts must be exactly 1 mock USDG (`1e6`). Both receivers and the guardian must be explicitly set and
 nonzero. The deployment template contains the other addresses needed by the standalone verifier.
 
 1. Reload the environment using `set -a`, `source`, and `set +a` after editing it.
@@ -259,7 +278,7 @@ differs. It never unpauses components or resets the risk-off cutoff. First activ
 correct coordinator pauser bindings, and all restrictions released.
 
 Optional `TEST_USER_RECIPIENTS` and `TEST_USER_AMOUNTS` are comma-separated arrays of equal length. Every ready-state
-rerun mints those mock-USDC amounts again, so remove them after the intended funding run. Bootstrap does not fund ETH;
+rerun mints those mock-USDG amounts again, so remove them after the intended funding run. Bootstrap does not fund ETH;
 test users and keepers need their own Arbitrum Sepolia gas funds.
 
 ## Verify integrations before broader use
@@ -280,6 +299,58 @@ test users and keepers need their own Arbitrum Sepolia gas funds.
 
 Ownership-bearing contracts use `Ownable2Step`: a proposed new owner must call `acceptOwnership()`. Record the final
 owners and guardian in the release; do not confuse pending ownership with effective authority.
+
+## Repeat testnet funding
+
+After a separately authorized deployment, fund a tester directly without rerunning deployment, bootstrap, or
+activation. Resolve and check the tester's canonical trading smart-account address for that release, then mint to
+that address. An owner EOA and its trading account are different beneficiaries. For example, to mint 1,000 Mock USDG:
+
+```bash
+# Future operator command: submits a transaction and requires Arbitrum Sepolia ETH.
+PERPS_TRADING_ACCOUNT=0x...
+cast send "$PERPS_SETTLEMENT_TOKEN" 'mint(address,uint256)' "$PERPS_TRADING_ACCOUNT" 1000000000 \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" --account testnet-funder
+```
+
+`testnet-funder` is a locally configured Foundry keystore account. Any gas-funded account may mint; no token-owner
+role, faucet allowance, daily limit, or deployment rerun is required. Minting adds tokens only to the recipient's
+wallet balance, not its clearinghouse margin balance. Use `buildSmartAccountBalanceDepositAction` with the
+configured token passed through its `settlementToken` input to approve and call `depositMargin` from the trading
+account. If tokens were minted to an owner EOA instead, transfer them to the canonical trading account first.
+Do not mint or transfer directly to the clearinghouse to fund an account.
+
+MockUSDG cannot execute the signed owner-wallet `receiveWithAuthorization` first-deposit route. Keep that route
+disabled while allowing the ordinary account-balance deposit; gas sponsorship may cover that supported flow when
+configured and simulated against this exact stack. Update sponsor token targets and code hashes with the new
+release. External bridge funding remains disabled; an old USDC bridge manifest is not a MockUSDG route.
+
+## Future rewards readiness
+
+Top-level manifest `rewards` records `status: "not_applicable"`,
+`holdingContracts: ["marginClearinghouse", "housePool"]`, `payoutAddress: null`, and `payoutController: null`.
+The holding entries resolve through the same manifest's contract inventory; the manifest's chain id supplies the
+network. MockUSDG has no reward entitlement or accrual, and leaving the destination unconfigured is intentional.
+
+For a future production USDG deployment, onboarding is a separate operator task:
+
+1. Confirm the supported network, token, eligible holding contracts/balances, registration requirements, and claim
+   authority with the production Paxos configuration. Register the actual clearinghouse and HousePool addresses
+   only after eligibility and control verification are established.
+2. Choose a separate treasury or multisig payout address. Record its address and controlling party; verify that the
+   controller can move received tokens. Reject a destination equal to the clearinghouse, Engine, HousePool, or either
+   tranche vault, and check it against the complete deployment inventory before configuring production payouts.
+3. Configure that destination with the reward provider, record registration status and verification evidence, and
+   monitor receipts. Reconfirm the provider's current payout and claim process at activation.
+4. Decide and implement any subsequent reward allocation separately. An external distributor can pay traders or LPs
+   without adding a reward claim hook or settlement-token rescue authority to the clearinghouse.
+
+Unsolicited transfers to the clearinghouse credit no account and cannot be rescued as settlement assets. HousePool
+excess becomes accounted capital only through its explicit owner-controlled recognition path. Therefore rewards
+should not be sent to collateral custody contracts. Unclaimed rewards never increase margin or LP NAV; receipts in
+the separate treasury also have no accounting effect until deliberately allocated through supported protocol flows.
+This readiness metadata introduces no reward contract, principal-withdrawal permission, APY promise, or change to
+the tranche waterfall.
 
 ## Order keeper operations
 
@@ -357,7 +428,7 @@ SimpleAccount.execute(Router, 0, abi.encodeCall(Router.commitOrder, request))
 ```
 
 The Router sees the smart account as the trader. A direct `commitOrder` from its owner EOA would address a different
-account. This path needs no USDC approval or deposit for a close bounty. The SDK's `buildOwnerAccountClose` encodes
+account. This path needs no USDG approval or deposit for a close bounty. The SDK's `buildOwnerAccountClose` encodes
 the call, but the client must independently verify the owner, factory/predicted address, EntryPoint, implementation,
 and release bindings before signing. The request still needs valid timing, financial bounds, execution modes, and
 the current configuration hash.

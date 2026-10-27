@@ -14,7 +14,7 @@ are the source of exact tuple layouts; internal host callbacks and sidecar selec
 | Read compact product state | `PerpsPublicLens` |
 | Choose and preflight LP settlement | `SettlementMonitorLens`, then the selected Pool/Router route |
 
-USDC asset amounts use 6 decimals, LP shares use 9 decimals, prices use 8 decimals, and position sizes use 18 decimals
+USDG asset amounts use 6 decimals, LP shares use 9 decimals, prices use 8 decimals, and position sizes use 18 decimals
 in multiples of `CfdTypes.SIZE_QUANTUM` (`1e20`, or 100 position units). `LONG` profits when the basket mark falls; `SHORT` profits
 when it rises. See [README](README.md) before interpreting direction or slippage.
 
@@ -28,11 +28,11 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 ### Funding and orders
 
 - Owner margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`.
-  Approve the Clearinghouse to pull USDC before depositing. A deposit credits custody and checkpoints carry; it does
+  Approve the Clearinghouse to pull USDG before depositing. A deposit credits custody and checkpoints carry; it does
   not automatically add isolated position margin. Withdrawal applies carry and safety checks as well as reserve locks.
 - Add isolated margin without increasing size: `CfdEngine.addMargin(address account,uint256 amount)`; caller must be
   the account owner, have an open position and sufficient free settlement after carry collection.
-- Credit-only funding: `MarginClearinghouse.depositFor(address,uint256)` pulls the payer's exact USDC amount and
+- Credit-only funding: `MarginClearinghouse.depositFor(address,uint256)` pulls the payer's exact USDG amount and
   credits the beneficiary's free settlement without a carry checkpoint or position-margin allocation. Funding gives
   the payer no authority over the beneficiary. `DepositFor` is payer metadata for the same credit recorded by
   `Deposit`; indexers must not count both. See [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md) for the Across
@@ -47,7 +47,7 @@ For autonomous trading-account and AI-agent integration, including bounded autho
   `executionWindowSeconds`. A close has zero `marginDelta` and zero execution bounty. Fresh requests require nonzero
   `maxPostLeverageBps` even when full-close post-position checks will be skipped. See
   [Order timing](#order-timing) and [Trading-agent integration](WORKING_WITH_AI_AGENTS.md) for field-level rules.
-- A positive `minPostSettlementBalanceUsdc` is supported only for an opening order on a flat account with no pending
+- A positive `minPostSettlementBalanceAssets` is supported only for an opening order on a flat account with no pending
   orders. It protects total internal settlement custody, including locked value. It is not a general close or
   withdrawable-balance floor; closes and increases must set it to zero.
 - Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner. Payment is
@@ -119,8 +119,8 @@ successful cleanup transaction does not by itself establish that the position cl
 - Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV3Types.OrderRequest,PositionProtectionParams)`
 - Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
 - A protection request must explicitly supply `PositionProtectionParams.closeLimits` with four close financial limits:
-  `maxExecutionNotionalUsdc`, `maxGrossAccountDebitUsdc`, `maxActionChargeUsdc`, and `maxExplicitFeesUsdc`. Each is a
-  `uint256` ceiling in 6-decimal USDC units for future triggered or retried close attempts. Set the limits from the trader's intended
+  `maxExecutionNotionalAssets`, `maxGrossAccountDebitAssets`, `maxActionChargeAssets`, and `maxExplicitFeesAssets`. Each is a
+  `uint256` ceiling in 6-decimal USDG units for future triggered or retried close attempts. Set the limits from the trader's intended
   close policy; integrations must not assume an implicit unlimited default. Zero is a zero allowance;
   `type(uint256).max` is an explicit unlimited allowance. The separately reserved trigger bounty is paid when the
   protection fires; these ceilings apply to its generated close attempt.
@@ -225,8 +225,8 @@ beneficiary checks, allowance cleanup and fixture limitations are in [Bridge fun
   but remains blocked by Oracle policy until a valid price path is available.
 - Compact reads: `PerpsPublicLens`; use `getTrancheQueues(bool)` for matured heads/backlog and
   `getLpRequestState(bool,uint256,address)` for controller-specific pending/claimable balances.
-  `TrancheView.maxWithdrawUsdc` means current pool-level queue-funding capacity, not synchronous holder withdrawal capacity.
-- Capacity-specific reads: `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
+  `TrancheView.maxWithdrawAssets` means current pool-level queue-funding capacity, not synchronous holder withdrawal capacity.
+- Capacity-specific reads: `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssets()`, and
   `areSeniorDepositReservationsWithinLimits()`; these intentionally are not added to the compact liquidity lens
 
 Use these interfaces:

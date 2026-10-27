@@ -5,7 +5,7 @@ import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTyp
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
 /// @notice Rich per-account diagnostic lens for audits, tests, and operator tooling.
-/// @dev Monetary fields returned by this interface use 6-decimal USDC.
+/// @dev Monetary fields returned by this interface use 6-decimal settlement token.
 interface ICfdEngineAccountLens {
 
     /// @notice Returns detailed clearinghouse buckets, liquidation reachability, and terminal price-cap state.
@@ -17,7 +17,7 @@ interface ICfdEngineAccountLens {
         address account
     ) external view returns (ICfdEngineTypes.AccountCollateralView memory viewData);
 
-    /// @notice Returns a conservative upper bound on currently withdrawable USDC under engine-side guards.
+    /// @notice Returns a conservative upper bound on currently withdrawable settlement token under engine-side guards.
     /// @dev Flat accounts return free settlement above any pending funded floor, without degraded-mode or freshness
     ///      gates. For open
     ///      positions the view projects carry from active margin first, then free settlement. Price health uses the
@@ -26,10 +26,10 @@ interface ICfdEngineAccountLens {
     ///      freshness. Because live withdrawal rejects equality at the collateral boundary, withdrawing the exact
     ///      reported headroom can still revert; callers should leave a small safety buffer.
     /// @param account Account to inspect
-    /// @return withdrawableUsdc Conservative withdrawal upper bound in USDC
-    function getWithdrawableUsdc(
+    /// @return withdrawableAssets Conservative withdrawal upper bound in settlement token
+    function getWithdrawableAssets(
         address account
-    ) external view returns (uint256 withdrawableUsdc);
+    ) external view returns (uint256 withdrawableAssets);
 
     /// @notice Returns a compact accounting split for account custody, reservation, and trader claims.
     /// @param account Account to inspect

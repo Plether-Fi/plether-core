@@ -24,8 +24,9 @@ contract OracleSynchronizationHandlerTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
         baseMockPyth.setSynchronizeLegacyUniquePrices(false);
-        handler =
-            new OracleSynchronizationHandler(router, engine, clearinghouse, baseMockPyth, usdc, _basePythFeedIds());
+        handler = new OracleSynchronizationHandler(
+            router, engine, clearinghouse, baseMockPyth, settlementToken, _basePythFeedIds()
+        );
     }
 
     function test_HealthyExecutionSettlesCustodyAndBountyOnce() public {
@@ -61,7 +62,7 @@ contract OracleSynchronizationHandlerTest is BasePerpTest {
         assertEq(entry, basket);
         assertEq(uint8(side), uint8(CfdTypes.Side.SHORT));
         assertEq(maxProfit, 20 * (CAP_PRICE - basket));
-        assertEq(engine.positionEntryCostUsdcAtoms(FIRST_HANDLER_TRADER), 20 * basket);
+        assertEq(engine.positionEntryCostAssetAtoms(FIRST_HANDLER_TRADER), 20 * basket);
         assertEq(handler.executed(), 1);
         assertEq(handler.resolutions(), 1);
     }
@@ -153,7 +154,7 @@ contract OracleSynchronizationHandlerTest is BasePerpTest {
     }
 
     function test_FourPersistentActionsEachReachOneTerminalExecution() public {
-        uint256 cashBefore = usdc.balanceOf(address(clearinghouse));
+        uint256 cashBefore = settlementToken.balanceOf(address(clearinghouse));
         handler.execute(PAR_PRICE_SEED, 0, false, false);
         handler.execute(PAR_PRICE_SEED, 1, false, true);
         handler.execute(PAR_PRICE_SEED, 2, true, false);
@@ -168,14 +169,14 @@ contract OracleSynchronizationHandlerTest is BasePerpTest {
         assertEq(handler.commitRejected(), 0);
         assertEq(baseMockPyth.parseUniqueCallCount(), 4);
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), 4);
-        assertEq(clearinghouse.balanceUsdc(address(handler)), 4 * 200_000);
-        assertEq(usdc.balanceOf(address(clearinghouse)), cashBefore + 4 * 2000e6);
+        assertEq(clearinghouse.balanceAssets(address(handler)), 4 * 200_000);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), cashBefore + 4 * 2000e6);
         assertEq(router.nextExecuteId(), 0);
         for (uint64 id = 1; id <= 4; ++id) {
             assertEq(uint8(router.lifecycleBook().lifecycleStatus(id)), uint8(OrderV3Types.LifecycleStatus.Executed));
             address trader = address(uint160(100_000 + id));
             assertEq(clearinghouse.getAccountReservationSummary(trader).activeReservationCount, 0);
-            assertEq(clearinghouse.totalBountyReservationsUsdc(trader), 0);
+            assertEq(clearinghouse.totalBountyReservationsAssets(trader), 0);
         }
     }
 
@@ -186,9 +187,9 @@ contract OracleSynchronizationHandlerTest is BasePerpTest {
         uint256 expectedCoverageFailures,
         uint256 expectedRetries
     ) internal {
-        uint256 poolCashBefore = usdc.balanceOf(address(pool));
-        uint256 custodyBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(PROTOCOL_TREASURY_ACCOUNT);
+        uint256 poolCashBefore = settlementToken.balanceOf(address(pool));
+        uint256 custodyBefore = settlementToken.balanceOf(address(clearinghouse));
+        uint256 treasuryBefore = clearinghouse.balanceAssets(PROTOCOL_TREASURY_ACCOUNT);
         handler.execute(PAR_PRICE_SEED, 0, skipWrite, failWrite);
         assertEq(handler.attempts(), 1);
         assertEq(handler.executed(), 1);
@@ -204,32 +205,32 @@ contract OracleSynchronizationHandlerTest is BasePerpTest {
         assertEq(router.nextCommitId(), 2);
         assertEq(uint8(router.lifecycleBook().lifecycleStatus(1)), uint8(OrderV3Types.LifecycleStatus.Executed));
 
-        // 20 lots at $1: the 4-bps execution fee is 0.8 USDC and the 1-bps bounty is 0.2 USDC.
+        // 20 lots at $1: the 4-bps execution fee is 0.8 settlement token and the 1-bps bounty is 0.2 settlement token.
         // Both recipients receive internal custody credits; no wallet transfer or pool inflow is expected.
         assertEq(engine.executionFeeBps(), 4);
         assertEq(router.openOrderExecutionBountyBps(), 1);
-        assertEq(clearinghouse.balanceUsdc(FIRST_HANDLER_TRADER), 2000e6 - 800_000 - 200_000);
-        assertEq(clearinghouse.balanceUsdc(address(handler)), 200_000);
-        assertEq(clearinghouse.balanceUsdc(PROTOCOL_TREASURY_ACCOUNT), treasuryBefore + 800_000);
-        assertEq(usdc.balanceOf(address(clearinghouse)), custodyBefore + 2000e6);
-        assertEq(usdc.balanceOf(address(pool)), poolCashBefore);
-        assertEq(usdc.balanceOf(FIRST_HANDLER_TRADER), 0);
-        assertEq(usdc.balanceOf(address(handler)), 0);
-        assertEq(clearinghouse.getOrderReservation(1).remainingAmountUsdc, 0);
+        assertEq(clearinghouse.balanceAssets(FIRST_HANDLER_TRADER), 2000e6 - 800_000 - 200_000);
+        assertEq(clearinghouse.balanceAssets(address(handler)), 200_000);
+        assertEq(clearinghouse.balanceAssets(PROTOCOL_TREASURY_ACCOUNT), treasuryBefore + 800_000);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), custodyBefore + 2000e6);
+        assertEq(settlementToken.balanceOf(address(pool)), poolCashBefore);
+        assertEq(settlementToken.balanceOf(FIRST_HANDLER_TRADER), 0);
+        assertEq(settlementToken.balanceOf(address(handler)), 0);
+        assertEq(clearinghouse.getOrderReservation(1).remainingAmountAssets, 0);
         assertEq(clearinghouse.getAccountReservationSummary(FIRST_HANDLER_TRADER).activeReservationCount, 0);
         IMarginClearinghouse.BountyReservation memory bounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, 1);
         assertEq(bounty.account, FIRST_HANDLER_TRADER);
-        assertEq(bounty.amountUsdc, 0);
+        assertEq(bounty.amountAssets, 0);
         assertEq(uint8(bounty.state), uint8(IMarginClearinghouse.BountyReservationState.Settled));
-        assertEq(clearinghouse.totalBountyReservationsUsdc(FIRST_HANDLER_TRADER), 0);
+        assertEq(clearinghouse.totalBountyReservationsAssets(FIRST_HANDLER_TRADER), 0);
 
         vm.prank(address(handler));
         vm.expectPartialRevert(IOrderRouterErrors.OrderRouter__NoOrdersToExecute.selector);
         router.executeOrder(1, new bytes[](0));
-        assertEq(clearinghouse.balanceUsdc(address(handler)), 200_000, "terminal replay cannot pay again");
-        assertEq(clearinghouse.balanceUsdc(FIRST_HANDLER_TRADER), 2000e6 - 800_000 - 200_000);
-        assertEq(usdc.balanceOf(address(clearinghouse)), custodyBefore + 2000e6);
+        assertEq(clearinghouse.balanceAssets(address(handler)), 200_000, "terminal replay cannot pay again");
+        assertEq(clearinghouse.balanceAssets(FIRST_HANDLER_TRADER), 2000e6 - 800_000 - 200_000);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), custodyBefore + 2000e6);
     }
 
     function _assertUnexpectedOracleRevert(
@@ -286,8 +287,9 @@ abstract contract OracleSynchronizationAdmissionBase is BasePerpTest {
     function setUp() public override {
         super.setUp();
         baseMockPyth.setSynchronizeLegacyUniquePrices(false);
-        handler =
-            new OracleSynchronizationHandler(router, engine, clearinghouse, baseMockPyth, usdc, _basePythFeedIds());
+        handler = new OracleSynchronizationHandler(
+            router, engine, clearinghouse, baseMockPyth, settlementToken, _basePythFeedIds()
+        );
     }
 
     function _initialJuniorDeposit() internal pure virtual override returns (uint256) {
@@ -312,9 +314,9 @@ contract OracleSynchronizationExactAdmissionTest is OracleSynchronizationAdmissi
 
     function test_IndependentAdmissionAcceptsExactLiabilityAndBufferCash() public {
         _fourBalancedOpens();
-        // Two positions per side owe at most 4,000 USDC. The next SHORT owes 2,000 more;
-        // 6,000 liability plus its 25-bps buffer exactly equals the 6,015 USDC physical pool cash.
-        assertEq(usdc.balanceOf(address(pool)), 6015e6);
+        // Two positions per side owe at most 4,000 settlement token. The next SHORT owes 2,000 more;
+        // 6,000 liability plus its 25-bps buffer exactly equals the 6,015 settlement token physical pool cash.
+        assertEq(settlementToken.balanceOf(address(pool)), 6015e6);
         handler.execute(1_000_000, 0, false, false);
         assertEq(handler.attempts(), 5);
         assertEq(handler.executed(), 5);
@@ -331,10 +333,10 @@ contract OracleSynchronizationExactAdmissionTest is OracleSynchronizationAdmissi
 
     function test_IndependentAdmissionAuthenticatesExecutionPriceRejection() public {
         _fourBalancedOpens();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(address(handler));
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(PROTOCOL_TREASURY_ACCOUNT);
+        uint256 keeperBefore = clearinghouse.balanceAssets(address(handler));
+        uint256 treasuryBefore = clearinghouse.balanceAssets(PROTOCOL_TREASURY_ACCOUNT);
         // Commit at the covered $1 mark is valid. The $0.99 fill raises SHORT maximum profit
-        // to 6,020 USDC before the buffer, exceeding 6,015 cash: a guarded terminal rejection.
+        // to 6,020 settlement token before the buffer, exceeding 6,015 cash: a guarded terminal rejection.
         handler.execute(0, 0, false, false);
         assertEq(handler.attempts(), 5);
         assertEq(handler.executed(), 4);
@@ -348,14 +350,14 @@ contract OracleSynchronizationExactAdmissionTest is OracleSynchronizationAdmissi
         assertEq(engine.lastMarkPrice(), 99_000_000);
         (uint256 size,,,,,,) = engine.positions(address(100_005));
         assertEq(size, 0);
-        assertEq(clearinghouse.balanceUsdc(address(100_005)), 2000e6 - 200_000);
-        assertEq(clearinghouse.balanceUsdc(address(handler)), keeperBefore + 200_000);
-        assertEq(clearinghouse.balanceUsdc(PROTOCOL_TREASURY_ACCOUNT), treasuryBefore);
+        assertEq(clearinghouse.balanceAssets(address(100_005)), 2000e6 - 200_000);
+        assertEq(clearinghouse.balanceAssets(address(handler)), keeperBefore + 200_000);
+        assertEq(clearinghouse.balanceAssets(PROTOCOL_TREASURY_ACCOUNT), treasuryBefore);
         assertEq(clearinghouse.getAccountReservationSummary(address(100_005)).activeReservationCount, 0);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(address(100_005)), 0);
+        assertEq(clearinghouse.totalBountyReservationsAssets(address(100_005)), 0);
         assertEq(router.nextCommitId(), 6);
         assertEq(router.nextExecuteId(), 0);
-        assertEq(usdc.balanceOf(address(pool)), 6015e6);
+        assertEq(settlementToken.balanceOf(address(pool)), 6015e6);
     }
 
 }
@@ -368,8 +370,8 @@ contract OracleSynchronizationInsufficientAdmissionTest is OracleSynchronization
 
     function test_IndependentAdmissionRejectsOneAtomBelowLiabilityAndBuffer() public {
         _fourBalancedOpens();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(address(handler));
-        assertEq(usdc.balanceOf(address(pool)), 6015e6 - 1);
+        uint256 keeperBefore = clearinghouse.balanceAssets(address(handler));
+        assertEq(settlementToken.balanceOf(address(pool)), 6015e6 - 1);
         handler.execute(1_000_000, 0, false, false);
         assertEq(handler.attempts(), 5);
         assertEq(handler.executed(), 4);
@@ -379,10 +381,10 @@ contract OracleSynchronizationInsufficientAdmissionTest is OracleSynchronization
         assertEq(router.nextCommitId(), 5, "rejected commit must not consume a new id");
         assertEq(router.nextExecuteId(), 0);
         assertEq(uint8(router.lifecycleBook().lifecycleStatus(5)), uint8(OrderV3Types.LifecycleStatus.None));
-        assertEq(clearinghouse.balanceUsdc(address(100_005)), 2000e6);
-        assertEq(clearinghouse.balanceUsdc(address(handler)), keeperBefore);
+        assertEq(clearinghouse.balanceAssets(address(100_005)), 2000e6);
+        assertEq(clearinghouse.balanceAssets(address(handler)), keeperBefore);
         assertEq(clearinghouse.getAccountReservationSummary(address(100_005)).activeReservationCount, 0);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(address(100_005)), 0);
+        assertEq(clearinghouse.totalBountyReservationsAssets(address(100_005)), 0);
         (uint256 size,,,,,,) = engine.positions(address(100_005));
         assertEq(size, 0);
     }

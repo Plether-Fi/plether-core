@@ -18,7 +18,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -56,7 +56,7 @@ contract PlanApplyRegressionTest is BasePerpTest {
         assertEq(_sideEntryNotional(CfdTypes.Side.SHORT), 0);
         assertEq(terminalNavBook.curveHashOf(longAccount), bytes32(0));
         assertEq(terminalNavBook.curveHashOf(shortAccount), bytes32(0));
-        assertEq(engine.terminalNavSnapshot().terminalLpPriceDeltaUsdc, 0);
+        assertEq(engine.terminalNavSnapshot().terminalLpPriceDeltaAssets, 0);
     }
 
     function test_PartialClose_PreviewMatchesExecution_WithCarryAccrual() public {
@@ -109,14 +109,14 @@ contract PlanApplyRegressionTest is BasePerpTest {
         uint256 expectedMaxLiability = longMaxAfter > shortMax ? longMaxAfter : shortMax;
 
         assertEq(
-            preview.maxLiabilityAfterUsdc,
+            preview.maxLiabilityAfterAssets,
             expectedMaxLiability,
             "Post-liquidation max liability must reflect removed position"
         );
 
         assertEq(
             preview.postOpDegradedMode,
-            preview.effectiveAssetsAfterUsdc < preview.maxLiabilityAfterUsdc || engine.degradedMode(),
+            preview.effectiveAssetsAfterAssets < preview.maxLiabilityAfterAssets || engine.degradedMode(),
             "postOpDegradedMode must equal (effectiveAssets < maxLiability || alreadyDegraded)"
         );
     }
@@ -150,18 +150,20 @@ contract PlanApplyRegressionTest is BasePerpTest {
             ? _sideMaxProfit(CfdTypes.Side.LONG)
             : _sideMaxProfit(CfdTypes.Side.SHORT);
 
-        assertEq(preview.maxLiabilityAfterUsdc, postMaxLiability, "Preview max liability must match post-close storage");
+        assertEq(
+            preview.maxLiabilityAfterAssets, postMaxLiability, "Preview max liability must match post-close storage"
+        );
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snap =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(
-            preview.effectiveAssetsAfterUsdc >= preview.maxLiabilityAfterUsdc,
+            preview.effectiveAssetsAfterAssets >= preview.maxLiabilityAfterAssets,
             !engine.degradedMode(),
             "Preview solvency assessment must agree with post-close degraded mode"
         );
 
-        assertEq(preview.effectiveAssetsAfterUsdc, snap.effectiveSolvencyAssetsUsdc);
+        assertEq(preview.effectiveAssetsAfterAssets, snap.effectiveSolvencyAssets);
         assertEq(preview.postOpDegradedMode, snap.degradedMode);
     }
 
@@ -190,7 +192,9 @@ contract PlanApplyRegressionTest is BasePerpTest {
             : _sideMaxProfit(CfdTypes.Side.SHORT);
 
         assertEq(
-            preview.maxLiabilityAfterUsdc, postMaxLiability, "Preview max liability must match post-liquidation storage"
+            preview.maxLiabilityAfterAssets,
+            postMaxLiability,
+            "Preview max liability must match post-liquidation storage"
         );
 
         assertEq(

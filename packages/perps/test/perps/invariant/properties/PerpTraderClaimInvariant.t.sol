@@ -25,15 +25,15 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
+        handler = new PerpAccountingHandler(settlementToken, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
         // Every campaign begins with two actual deferred claims, so aggregate liquidity differs from own-claim cash.
         handler.createTraderClaim(0);
         handler.restoreSolvencyAndClearDegradedMode();
         handler.setPoolAssets(1_000_000_000e6);
         handler.createTraderClaim(1);
-        assertGt(engine.traderClaimBalanceUsdc(handler.actorAt(0)), 0, "First seed claim must execute");
-        assertGt(engine.traderClaimBalanceUsdc(handler.actorAt(1)), 0, "Second seed claim must execute");
+        assertGt(engine.traderClaimBalanceAssets(handler.actorAt(0)), 0, "First seed claim must execute");
+        assertGt(engine.traderClaimBalanceAssets(handler.actorAt(1)), 0, "Second seed claim must execute");
 
         bytes4[] memory selectors = new bytes4[](8);
         selectors[0] = handler.depositCollateral.selector;
@@ -68,11 +68,11 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         address account
     ) internal {
         ClaimCashSnapshot memory before = ClaimCashSnapshot({
-            claim: engine.traderClaimBalanceUsdc(account),
-            totalClaims: engine.totalTraderClaimBalanceUsdc(),
-            poolCash: usdc.balanceOf(address(housePool)),
-            clearinghouseCash: usdc.balanceOf(address(clearinghouse)),
-            settlement: clearinghouse.balanceUsdc(account)
+            claim: engine.traderClaimBalanceAssets(account),
+            totalClaims: engine.totalTraderClaimBalanceAssets(),
+            poolCash: settlementToken.balanceOf(address(housePool)),
+            clearinghouseCash: settlementToken.balanceOf(address(clearinghouse)),
+            settlement: clearinghouse.balanceAssets(account)
         });
         bool shouldSettle = before.claim > 0 && before.poolCash >= before.totalClaims;
         uint256 snapshot = vm.snapshotState();
@@ -81,21 +81,21 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         bool outcomeMatches = settled == shouldSettle;
         bool cashMatches;
         if (settled && shouldSettle) {
-            cashMatches = engine.traderClaimBalanceUsdc(account) == 0
-                && engine.totalTraderClaimBalanceUsdc() == before.totalClaims - before.claim
-                && clearinghouse.balanceUsdc(account) == before.settlement + before.claim
-                && usdc.balanceOf(address(clearinghouse)) == before.clearinghouseCash + before.claim
-                && usdc.balanceOf(address(housePool)) == before.poolCash - before.claim;
+            cashMatches = engine.traderClaimBalanceAssets(account) == 0
+                && engine.totalTraderClaimBalanceAssets() == before.totalClaims - before.claim
+                && clearinghouse.balanceAssets(account) == before.settlement + before.claim
+                && settlementToken.balanceOf(address(clearinghouse)) == before.clearinghouseCash + before.claim
+                && settlementToken.balanceOf(address(housePool)) == before.poolCash - before.claim;
         } else if (!settled) {
             bytes4 expectedError = before.claim == 0
                 ? ICfdEngineTypes.CfdEngine__NoTraderClaim.selector
                 : ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector;
             outcomeMatches = outcomeMatches && keccak256(reason) == keccak256(abi.encodeWithSelector(expectedError));
-            cashMatches = engine.traderClaimBalanceUsdc(account) == before.claim
-                && engine.totalTraderClaimBalanceUsdc() == before.totalClaims
-                && clearinghouse.balanceUsdc(account) == before.settlement
-                && usdc.balanceOf(address(clearinghouse)) == before.clearinghouseCash
-                && usdc.balanceOf(address(housePool)) == before.poolCash;
+            cashMatches = engine.traderClaimBalanceAssets(account) == before.claim
+                && engine.totalTraderClaimBalanceAssets() == before.totalClaims
+                && clearinghouse.balanceAssets(account) == before.settlement
+                && settlementToken.balanceOf(address(clearinghouse)) == before.clearinghouseCash
+                && settlementToken.balanceOf(address(housePool)) == before.poolCash;
         }
         // Restore even a faulty successful transaction before reporting failure; expectations stay in memory.
         assertTrue(vm.revertToStateAndDelete(snapshot), "Claim probe must restore the campaign");
@@ -109,22 +109,22 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
 
     function test_ClaimSettlementProbeCoversAggregateLiquidityBoundariesWithoutChangingState() public {
         address account = handler.actorAt(0);
-        uint256 claim = engine.traderClaimBalanceUsdc(account);
-        uint256 total = engine.totalTraderClaimBalanceUsdc();
+        uint256 claim = engine.traderClaimBalanceAssets(account);
+        uint256 total = engine.totalTraderClaimBalanceAssets();
         assertGt(total, claim, "Own-claim liquidity must differ from aggregate liquidity");
         uint256[5] memory cashLevels = [uint256(0), claim, total - 1, total, total + 1];
         for (uint256 i; i < cashLevels.length; ++i) {
             handler.setPoolAssets(cashLevels[i]);
             _assertAllInvariants();
-            assertEq(usdc.balanceOf(address(housePool)), cashLevels[i], "Probe must restore pool custody");
-            assertEq(engine.traderClaimBalanceUsdc(account), claim, "Probe must restore account claim");
-            assertEq(engine.totalTraderClaimBalanceUsdc(), total, "Probe must restore aggregate claims");
+            assertEq(settlementToken.balanceOf(address(housePool)), cashLevels[i], "Probe must restore pool custody");
+            assertEq(engine.traderClaimBalanceAssets(account), claim, "Probe must restore account claim");
+            assertEq(engine.totalTraderClaimBalanceAssets(), total, "Probe must restore aggregate claims");
         }
     }
 
     function test_ClaimInvariantDetectsSuccessDuringAggregateShortfall() public {
         address account = handler.actorAt(0);
-        handler.setPoolAssets(engine.traderClaimBalanceUsdc(account));
+        handler.setPoolAssets(engine.traderClaimBalanceAssets(account));
         vm.mockCall(address(engine), abi.encodeCall(engine.settleTraderClaim, (account)), bytes(""));
         vm.expectRevert(abi.encodeWithSelector(ClaimSettlementOutcomeMismatch.selector, account));
         this.invariant_ObservedClaimsAndLiquidityGatingReconcile();
@@ -134,7 +134,7 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
 
     function test_ClaimInvariantDetectsRejectionDespiteFullFunding() public {
         address account = handler.actorAt(0);
-        handler.setPoolAssets(engine.totalTraderClaimBalanceUsdc());
+        handler.setPoolAssets(engine.totalTraderClaimBalanceAssets());
         vm.mockCallRevert(
             address(engine),
             abi.encodeCall(engine.settleTraderClaim, (account)),
@@ -148,7 +148,7 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
 
     function test_ClaimInvariantDetectsSuccessfulNoOpSettlement() public {
         address account = handler.actorAt(0);
-        handler.setPoolAssets(engine.totalTraderClaimBalanceUsdc());
+        handler.setPoolAssets(engine.totalTraderClaimBalanceAssets());
         vm.mockCall(address(engine), abi.encodeCall(engine.settleTraderClaim, (account)), bytes(""));
         vm.expectRevert(abi.encodeWithSelector(ClaimSettlementCashMismatch.selector, account));
         this.invariant_ObservedClaimsAndLiquidityGatingReconcile();
@@ -157,26 +157,28 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
     }
 
     function _assertInvariant_ObservedClaimsReconcileAcrossTrackedAccounts() internal view {
-        uint256 observedTotalTraderClaimUsdc;
+        uint256 observedTotalTraderClaimAssets;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
-            uint256 observedTraderClaimUsdc = handler.traderClaimSnapshot(account);
-            uint256 liveTraderClaimUsdc = engine.traderClaimBalanceUsdc(account);
+            uint256 observedTraderClaimAssets = handler.traderClaimSnapshot(account);
+            uint256 liveTraderClaimAssets = engine.traderClaimBalanceAssets(account);
 
             assertEq(
-                observedTraderClaimUsdc, liveTraderClaimUsdc, "Observed trader claim balance must match engine state"
+                observedTraderClaimAssets,
+                liveTraderClaimAssets,
+                "Observed trader claim balance must match engine state"
             );
-            observedTotalTraderClaimUsdc += observedTraderClaimUsdc;
+            observedTotalTraderClaimAssets += observedTraderClaimAssets;
         }
 
         assertEq(
             handler.totalTraderClaimSnapshot(),
-            observedTotalTraderClaimUsdc,
+            observedTotalTraderClaimAssets,
             "Observed trader claim total must match tracked account sum"
         );
         assertEq(
-            engine.totalTraderClaimBalanceUsdc(), observedTotalTraderClaimUsdc, "Engine trader claim total mismatch"
+            engine.totalTraderClaimBalanceAssets(), observedTotalTraderClaimAssets, "Engine trader claim total mismatch"
         );
     }
 
@@ -195,29 +197,32 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            uint256 freshTraderClaimUsdc = preview.traderClaimBalanceUsdc > preview.existingTraderClaimRemainingUsdc
-                ? preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc
+            uint256 freshTraderClaimAssets = preview.traderClaimBalanceAssets
+                > preview.existingTraderClaimRemainingAssets
+                ? preview.traderClaimBalanceAssets - preview.existingTraderClaimRemainingAssets
                 : 0;
-            uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshTraderClaimUsdc;
-            if (totalFreshPayoutUsdc == 0) {
+            uint256 totalFreshPayoutAssets = preview.immediatePayoutAssets + freshTraderClaimAssets;
+            if (totalFreshPayoutAssets == 0) {
                 continue;
             }
 
             assertEq(
-                preview.immediatePayoutUsdc == 0,
-                freshTraderClaimUsdc > 0,
+                preview.immediatePayoutAssets == 0,
+                freshTraderClaimAssets > 0,
                 "Close preview must choose immediate or trader claim"
             );
             assertEq(
-                totalFreshPayoutUsdc, preview.freshTraderPayoutUsdc, "Close preview fresh payout split must reconcile"
+                totalFreshPayoutAssets,
+                preview.freshTraderPayoutAssets,
+                "Close preview fresh payout split must reconcile"
             );
             uint256 freeCashForFreshPayouts =
-                CashPriorityLib.reserveFreshPayouts(housePool.totalAssets(), engine.totalTraderClaimBalanceUsdc())
-            .freeCashUsdc;
-            if (freeCashForFreshPayouts >= totalFreshPayoutUsdc) {
-                assertEq(freshTraderClaimUsdc, 0, "Close preview must not defer when HousePool is liquid");
+                CashPriorityLib.reserveFreshPayouts(housePool.totalAssets(), engine.totalTraderClaimBalanceAssets())
+            .freeCashAssets;
+            if (freeCashForFreshPayouts >= totalFreshPayoutAssets) {
+                assertEq(freshTraderClaimAssets, 0, "Close preview must not defer when HousePool is liquid");
             } else {
-                assertEq(preview.immediatePayoutUsdc, 0, "Close preview must fully defer when HousePool is illiquid");
+                assertEq(preview.immediatePayoutAssets, 0, "Close preview must fully defer when HousePool is illiquid");
             }
         }
     }
@@ -228,29 +233,30 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
-            uint256 freshTraderClaimUsdc = preview.traderClaimBalanceUsdc > preview.existingTraderClaimRemainingUsdc
-                ? preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc
+            uint256 freshTraderClaimAssets = preview.traderClaimBalanceAssets
+                > preview.existingTraderClaimRemainingAssets
+                ? preview.traderClaimBalanceAssets - preview.existingTraderClaimRemainingAssets
                 : 0;
-            uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshTraderClaimUsdc;
+            uint256 totalFreshPayoutAssets = preview.immediatePayoutAssets + freshTraderClaimAssets;
 
-            if (totalFreshPayoutUsdc == 0) {
+            if (totalFreshPayoutAssets == 0) {
                 continue;
             }
 
             assertEq(
-                preview.immediatePayoutUsdc == 0,
-                freshTraderClaimUsdc > 0,
+                preview.immediatePayoutAssets == 0,
+                freshTraderClaimAssets > 0,
                 "Fresh liquidation payout must choose immediate settlement or trader claim balance"
             );
-            if (housePool.totalAssets() >= totalFreshPayoutUsdc) {
+            if (housePool.totalAssets() >= totalFreshPayoutAssets) {
                 assertEq(
-                    freshTraderClaimUsdc,
+                    freshTraderClaimAssets,
                     0,
                     "Liquidation preview must not defer the fresh payout when HousePool liquidity is sufficient"
                 );
             } else {
                 assertEq(
-                    preview.immediatePayoutUsdc,
+                    preview.immediatePayoutAssets,
                     0,
                     "Liquidation preview must fully defer the fresh payout when HousePool is illiquid"
                 );

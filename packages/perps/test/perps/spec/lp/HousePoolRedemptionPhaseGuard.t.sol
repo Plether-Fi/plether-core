@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {HousePoolRedemptionMathLib} from "@plether/perps/libraries/HousePoolRedemptionMathLib.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract HousePoolRedemptionPhaseHarness is HousePool {
 
     constructor(
-        address usdc
-    ) HousePool(usdc, address(0xE11E), address(new HousePoolRedemptionMathSidecar())) {}
+        address settlementToken
+    ) HousePool(settlementToken, address(0xE11E), address(new HousePoolRedemptionMathSidecar())) {}
 
     function runRedemptionPhase(
         address vault,
@@ -144,7 +144,7 @@ contract SingleHeadDepositQueueMock is ERC20 {
     address internal constant FEE_RECIPIENT = address(0xFEE);
 
     HousePoolRedemptionPhaseHarness internal immutable POOL;
-    MockUSDC internal immutable USDC;
+    MockSettlementToken internal immutable settlementToken;
     uint256 internal immutable EPOCH_ASSETS;
 
     bool internal _queued = true;
@@ -152,12 +152,12 @@ contract SingleHeadDepositQueueMock is ERC20 {
 
     constructor(
         HousePoolRedemptionPhaseHarness pool,
-        MockUSDC usdc,
+        MockSettlementToken settlementToken_,
         uint256 supply,
         uint256 epochAssets
     ) ERC20("Queue Share", "QSH") {
         POOL = pool;
-        USDC = usdc;
+        settlementToken = settlementToken_;
         EPOCH_ASSETS = epochAssets;
         _mint(address(0xBEEF), supply);
     }
@@ -206,7 +206,7 @@ contract SingleHeadDepositQueueMock is ERC20 {
             pendingAccruedShares = 0;
             _mint(FEE_RECIPIENT, accruedShares);
         }
-        require(USDC.transfer(address(POOL), assets), "transfer failed");
+        require(settlementToken.transfer(address(POOL), assets), "transfer failed");
         _mint(address(this), shares);
     }
 
@@ -220,15 +220,15 @@ contract HousePoolRedemptionPhaseGuardTest is Test {
     uint256 internal constant SECOND_HEAD_SHARES = 37_836_560;
     uint256 internal constant FEE_BPS = 360;
 
-    MockUSDC internal usdc;
+    MockSettlementToken internal settlementToken;
     HousePoolRedemptionPhaseHarness internal pool;
     TwoHeadRedemptionQueueMock internal vault;
 
     function setUp() public {
-        usdc = new MockUSDC();
-        pool = new HousePoolRedemptionPhaseHarness(address(usdc));
+        settlementToken = new MockSettlementToken();
+        pool = new HousePoolRedemptionPhaseHarness(address(settlementToken));
         vault = new TwoHeadRedemptionQueueMock(address(pool), SUPPLY, FIRST_HEAD_SHARES, SECOND_HEAD_SHARES);
-        usdc.mint(address(pool), 3);
+        settlementToken.mint(address(pool), 3);
     }
 
     function test_FrozenZeroHeadAfterBurnWaitsForCanonicalRepricing() public {
@@ -280,7 +280,7 @@ contract HousePoolRedemptionPhaseGuardTest is Test {
         uint256 principal = 1_100_000;
         TwoHeadRedemptionQueueMock feeVault = new TwoHeadRedemptionQueueMock(address(pool), rawSupply, redeemShares, 0);
         feeVault.setPendingAccruedShares(accruedShares);
-        usdc.mint(address(pool), principal);
+        settlementToken.mint(address(pool), principal);
 
         (uint256 fundedShares, uint256 fundedAssets, uint256 processedEpochs, bool backlog) =
             pool.runRedemptionPhase(address(feeVault), 1, principal, pricingSupply, principal, 0);
@@ -298,9 +298,10 @@ contract HousePoolRedemptionPhaseGuardTest is Test {
         uint256 accruedShares = 100_000_000;
         uint256 depositAssets = 1_000_000;
         uint256 expectedDepositShares = depositAssets * 1000;
-        SingleHeadDepositQueueMock feeVault = new SingleHeadDepositQueueMock(pool, usdc, rawSupply, depositAssets);
+        SingleHeadDepositQueueMock feeVault =
+            new SingleHeadDepositQueueMock(pool, settlementToken, rawSupply, depositAssets);
         feeVault.setPendingAccruedShares(accruedShares);
-        usdc.mint(address(feeVault), depositAssets);
+        settlementToken.mint(address(feeVault), depositAssets);
 
         (uint256 acceptedAssets, uint256 mintedShares, uint256 processedEpochs, bool backlog) =
             pool.runDepositPhase(address(feeVault), 1, depositAssets, rawSupply + accruedShares);

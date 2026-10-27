@@ -42,9 +42,9 @@ contract TimelockPauseTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
 
-        usdc.mint(alice, 50_000 * 1e6);
+        settlementToken.mint(alice, 50_000 * 1e6);
         vm.startPrank(alice);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(alice, 50_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
@@ -62,22 +62,24 @@ contract TimelockPauseTest is BasePerpTest {
         CfdTypes.RiskParams memory params = _riskParams();
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
-        new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 0);
+        new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, params, 0);
     }
 
     function test_CfdEngineConstructor_RevertsWhenFrozenCloseSpreadExceedsMaximum() public {
         CfdTypes.RiskParams memory params = _riskParams();
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
-        new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 1001);
+        new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, params, 1001);
     }
 
     function test_CfdEngineConstructor_AcceptsFrozenCloseSpreadBoundsIndependentOfVpiFactor() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.vpiFactor = 1e18;
 
-        CfdEngine minSpreadEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 1);
-        CfdEngine maxSpreadEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 1000);
+        CfdEngine minSpreadEngine =
+            new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, params, 1);
+        CfdEngine maxSpreadEngine =
+            new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, params, 1000);
 
         assertEq(minSpreadEngine.frozenCloseSpreadBps(), 1);
         assertEq(maxSpreadEngine.frozenCloseSpreadBps(), 1000);
@@ -88,7 +90,7 @@ contract TimelockPauseTest is BasePerpTest {
         params.keeperShareBps = 10_001;
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
-        new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 50);
+        new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, params, 50);
     }
 
     function test_CfdEngineConstructor_RevertsWhenLiquidationSharesExceedBpsDenominator() public {
@@ -96,7 +98,7 @@ contract TimelockPauseTest is BasePerpTest {
         params.protocolShareBps = 5001;
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
-        new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 50);
+        new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, params, 50);
     }
 
     function test_LiquidationShares_ChangeOnlyAfterRiskConfigTimelock() public {
@@ -221,7 +223,7 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             baseCarryBps: 500,
-            minBountyUsdc: 10 * 1e6,
+            minBountyAssets: 10 * 1e6,
             bountyBps: 20,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -243,7 +245,7 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             baseCarryBps: 500,
-            minBountyUsdc: 10 * 1e6,
+            minBountyAssets: 10 * 1e6,
             bountyBps: 20,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -267,7 +269,7 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             baseCarryBps: 500,
-            minBountyUsdc: 10 * 1e6,
+            minBountyAssets: 10 * 1e6,
             bountyBps: 20,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -330,7 +332,7 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 500,
             baseCarryBps: 500,
-            minBountyUsdc: 10 * 1e6,
+            minBountyAssets: 10 * 1e6,
             bountyBps: 20,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -358,7 +360,7 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -411,7 +413,7 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((200) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -433,7 +435,7 @@ contract TimelockPauseTest is BasePerpTest {
             initMarginBps: ((300) * 15) / 10,
             fadMarginBps: 500,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -586,11 +588,11 @@ contract TimelockPauseTest is BasePerpTest {
     function test_ProposeMaxExecutionWindowSeconds_TimelockFlow() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxExecutionWindowSeconds = 600;
-        config.minOpenNotionalUsdc = 150e6;
+        config.minOpenNotionalAssets = 150e6;
         config.openOrderExecutionBountyBps = 2;
-        config.minOpenOrderExecutionBountyUsdc = 200_000;
-        config.maxOpenOrderExecutionBountyUsdc = 300_000;
-        config.positionProtectionTriggerBountyUsdc = 300_000;
+        config.minOpenOrderExecutionBountyAssets = 200_000;
+        config.maxOpenOrderExecutionBountyAssets = 300_000;
+        config.positionProtectionTriggerBountyAssets = 300_000;
         config.maxPendingOrders = 7;
         config.minEngineGas = 700_000;
         config.maxPruneOrdersPerCall = 32;
@@ -603,11 +605,11 @@ contract TimelockPauseTest is BasePerpTest {
         routerAdmin.finalizeRouterConfig();
 
         assertEq(router.maxExecutionWindowSeconds(), 600);
-        assertEq(router.minOpenNotionalUsdc(), 150e6);
+        assertEq(router.minOpenNotionalAssets(), 150e6);
         assertEq(router.openOrderExecutionBountyBps(), 2);
-        assertEq(router.minOpenOrderExecutionBountyUsdc(), 200_000);
-        assertEq(router.maxOpenOrderExecutionBountyUsdc(), 300_000);
-        assertEq(router.positionProtectionTriggerBountyUsdc(), 300_000);
+        assertEq(router.minOpenOrderExecutionBountyAssets(), 200_000);
+        assertEq(router.maxOpenOrderExecutionBountyAssets(), 300_000);
+        assertEq(router.positionProtectionTriggerBountyAssets(), 300_000);
         assertEq(router.maxPendingOrders(), 7);
         assertEq(router.minEngineGas(), 700_000);
         assertEq(router.maxPruneOrdersPerCall(), 32);
@@ -712,24 +714,24 @@ contract TimelockPauseTest is BasePerpTest {
 
     function test_OrderRouter_InvalidOpenBountyRange_Reverts() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.minOpenOrderExecutionBountyUsdc = config.maxOpenOrderExecutionBountyUsdc + 1;
+        config.minOpenOrderExecutionBountyAssets = config.maxOpenOrderExecutionBountyAssets + 1;
 
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidExecutionBounty.selector);
         routerAdmin.proposeRouterConfig(config);
     }
 
     function test_OrderRouter_PositionProtectionConfig_Defaults() public view {
-        assertEq(router.positionProtectionTriggerBountyUsdc(), 200_000);
+        assertEq(router.positionProtectionTriggerBountyAssets(), 200_000);
     }
 
     function test_OrderRouter_InvalidPositionProtectionTriggerBounty_Reverts() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.positionProtectionTriggerBountyUsdc = 0;
+        config.positionProtectionTriggerBountyAssets = 0;
 
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidExecutionBounty.selector);
         routerAdmin.proposeRouterConfig(config);
 
-        config.positionProtectionTriggerBountyUsdc = 1_000_001;
+        config.positionProtectionTriggerBountyAssets = 1_000_001;
 
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidExecutionBounty.selector);
         routerAdmin.proposeRouterConfig(config);
@@ -762,14 +764,14 @@ contract TimelockPauseTest is BasePerpTest {
     // ==========================================
 
     function test_SetEngine_SucceedsOnce() public {
-        MarginClearinghouse fresh = new MarginClearinghouse(address(usdc));
+        MarginClearinghouse fresh = new MarginClearinghouse(address(settlementToken));
         fresh.setEngine(address(engine));
 
         assertEq(fresh.engine(), address(engine));
     }
 
     function test_SetEngine_OnlyOwner() public {
-        MarginClearinghouse fresh = new MarginClearinghouse(address(usdc));
+        MarginClearinghouse fresh = new MarginClearinghouse(address(settlementToken));
 
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
@@ -777,7 +779,7 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     function test_SetEngine_CannotBeChanged() public {
-        MarginClearinghouse fresh = new MarginClearinghouse(address(usdc));
+        MarginClearinghouse fresh = new MarginClearinghouse(address(settlementToken));
         fresh.setEngine(address(engine));
 
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__EngineAlreadySet.selector);
@@ -797,7 +799,7 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     function test_ExecuteOrder_RefundsPrePauseOpenWithoutOracleWhenPaused() public {
-        uint256 traderFreeSettlementBefore = _freeSettlementUsdc(alice);
+        uint256 traderFreeSettlementBefore = _freeSettlementAssets(alice);
         uint256 executorSettlementBefore = _settlementBalance(address(this));
 
         vm.prank(alice);
@@ -815,7 +817,7 @@ contract TimelockPauseTest is BasePerpTest {
             uint256(IOrderRouterAccounting.OrderStatus.Failed),
             "risk-off open should become terminally failed"
         );
-        assertEq(_freeSettlementUsdc(alice), traderFreeSettlementBefore, "trader should receive margin and bounty");
+        assertEq(_freeSettlementAssets(alice), traderFreeSettlementBefore, "trader should receive margin and bounty");
         assertEq(_settlementBalance(address(this)), executorSettlementBefore, "executor should receive no bounty");
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 0, "risk-off open must never reach the engine");
@@ -959,9 +961,9 @@ contract TimelockPauseTest is BasePerpTest {
     function test_DepositSenior_RevertsWhenHousePoolPaused() public {
         pool.pause();
 
-        usdc.mint(alice, 10_000 * 1e6);
+        settlementToken.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
-        usdc.approve(address(seniorVault), 10_000 * 1e6);
+        settlementToken.approve(address(seniorVault), 10_000 * 1e6);
         assertEq(seniorVault.maxRequestDeposit(alice), 0, "paused pool should zero senior request capacity");
         vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
         seniorVault.requestDeposit(10_000 * 1e6, alice, alice);
@@ -971,9 +973,9 @@ contract TimelockPauseTest is BasePerpTest {
     function test_DepositJunior_RevertsWhenHousePoolPaused() public {
         pool.pause();
 
-        usdc.mint(alice, 10_000 * 1e6);
+        settlementToken.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
-        usdc.approve(address(juniorVault), 10_000 * 1e6);
+        settlementToken.approve(address(juniorVault), 10_000 * 1e6);
         assertEq(juniorVault.maxRequestDeposit(alice), 0, "paused pool should zero junior request capacity");
         vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
         juniorVault.requestDeposit(10_000 * 1e6, alice, alice);
@@ -1021,9 +1023,9 @@ contract TimelockPauseTest is BasePerpTest {
     function test_HousePool_Unpause_RestoresDeposits() public {
         pool.pause();
 
-        usdc.mint(alice, 10_000 * 1e6);
+        settlementToken.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
-        usdc.approve(address(juniorVault), 10_000 * 1e6);
+        settlementToken.approve(address(juniorVault), 10_000 * 1e6);
         assertEq(juniorVault.maxRequestDeposit(alice), 0, "paused pool should zero junior request capacity");
         vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
         juniorVault.requestDeposit(10_000 * 1e6, alice, alice);
@@ -1094,9 +1096,9 @@ contract TimelockPauseTest is BasePerpTest {
         assertFalse(pool.paused(), "settlement-only hold must not engage entry pause");
 
         uint256 depositAssets = 10_000e6;
-        usdc.mint(alice, depositAssets);
+        settlementToken.mint(alice, depositAssets);
         vm.startPrank(alice);
-        usdc.approve(address(juniorVault), depositAssets);
+        settlementToken.approve(address(juniorVault), depositAssets);
         assertGe(juniorVault.maxRequestDeposit(alice), depositAssets, "settlement hold must retain request capacity");
         uint256 depositId = juniorVault.requestDeposit(depositAssets, alice, alice);
         assertEq(juniorVault.cancelPendingDeposit(depositId), depositAssets);
@@ -1119,9 +1121,9 @@ contract TimelockPauseTest is BasePerpTest {
         uint256 redeemId = juniorVault.requestRedeem(redeemShares, address(this), address(this));
 
         uint256 depositAssets = 10_000e6;
-        usdc.mint(alice, depositAssets);
+        settlementToken.mint(alice, depositAssets);
         vm.startPrank(alice);
-        usdc.approve(address(juniorVault), depositAssets);
+        settlementToken.approve(address(juniorVault), depositAssets);
         uint256 depositId = juniorVault.requestDeposit(depositAssets, alice, alice);
         vm.stopPrank();
         assertEq(depositId, redeemId, "fixture must fund entry and exit in one epoch");
@@ -1138,11 +1140,13 @@ contract TimelockPauseTest is BasePerpTest {
         uint256 mintedShares = juniorVault.deposit(claimableShares, alice);
         assertGt(mintedShares, 0, "funded deposit claim must remain callable");
 
-        uint256 balanceBefore = usdc.balanceOf(address(this));
+        uint256 balanceBefore = settlementToken.balanceOf(address(this));
         uint256 consumedShares = juniorVault.withdraw(claimableAssets, address(this), address(this));
         assertEq(consumedShares, redeemShares, "funded redemption must consume the reserved shares");
         assertEq(
-            usdc.balanceOf(address(this)), balanceBefore + claimableAssets, "funded redemption must remain payable"
+            settlementToken.balanceOf(address(this)),
+            balanceBefore + claimableAssets,
+            "funded redemption must remain payable"
         );
     }
 
@@ -1195,11 +1199,11 @@ contract TimelockPauseTest is BasePerpTest {
             vault.maxWithdraw(address(this)), claimableAssets, "funded assets should remain claimable while paused"
         );
 
-        uint256 balanceBefore = usdc.balanceOf(address(this));
+        uint256 balanceBefore = settlementToken.balanceOf(address(this));
         uint256 consumedShares = vault.withdraw(claimableAssets, address(this), address(this));
         assertEq(consumedShares, requestedShares, "withdraw claim should consume the requested shares");
         assertEq(
-            usdc.balanceOf(address(this)),
+            settlementToken.balanceOf(address(this)),
             balanceBefore + claimableAssets,
             "withdraw claim should pay assets while the pool is paused"
         );

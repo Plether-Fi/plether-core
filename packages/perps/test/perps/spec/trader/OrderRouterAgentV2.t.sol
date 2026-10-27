@@ -23,8 +23,8 @@ contract OrderRouterAgentV2Test is BasePerpTest {
 
     uint256 internal constant EXECUTION_PRICE = 1e8;
     uint256 internal constant OPEN_SIZE = 100_000e18;
-    uint256 internal constant OPEN_MARGIN_USDC = 10_000e6;
-    uint256 internal constant OPEN_NOTIONAL_USDC = 100_000e6;
+    uint256 internal constant OPEN_MARGIN_ASSETS = 10_000e6;
+    uint256 internal constant OPEN_NOTIONAL_ASSETS = 100_000e6;
 
     IOrderLifecycleBook internal book;
 
@@ -69,10 +69,10 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         if (mismatch) {
             // Fault injection changes the Book's entitlement while leaving actual custody/reservations intact.
             vm.record();
-            uint256 bounty = book.pendingIntent(orderId).executionBountyUsdc;
+            uint256 bounty = book.pendingIntent(orderId).executionBountyAssets;
             (bytes32[] memory slots,) = vm.accesses(address(book));
             vm.store(address(book), bytes32(uint256(slots[0]) + 3), bytes32(bounty + 1));
-            assertEq(book.pendingIntent(orderId).executionBountyUsdc, bounty + 1);
+            assertEq(book.pendingIntent(orderId).executionBountyAssets, bounty + 1);
         }
         vm.warp(uint256(book.orderTiming(orderId).executionDeadline) + 1);
         bytes32 digest = book.currentExecutionConfigHash();
@@ -100,7 +100,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         );
         assertEq(receipt.observedConfigHash, digest, "Expiry must retain observed configuration");
         assertEq(receipt.neutralMarkPrice, 0.8e8, "Recovery must retain the collected mark");
-        assertEq(receipt.poolDepthUsdc, depth, "Recovery must retain gross pool depth");
+        assertEq(receipt.poolDepthAssets, depth, "Recovery must retain gross pool depth");
         assertEq(receipt.executor, KEEPER);
         assertEq(receipt.executionPrice, 0, "Context is not an executed oracle price");
         assertEq(receipt.oraclePublishTime, 0);
@@ -188,9 +188,9 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         uint64 globalTailBefore = router.globalTailOrderId();
         uint64 accountHeadBefore = router.accountHeadOrderId(ALICE);
         uint256 pendingCountBefore = router.pendingOrderCounts(ALICE);
-        uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeSettlementBefore = _freeSettlementAssets(ALICE);
         uint256 marginBefore = _remainingCommittedMargin(orderId);
-        uint256 bountyBefore = book.pendingIntent(orderId).executionBountyUsdc;
+        uint256 bountyBefore = book.pendingIntent(orderId).executionBountyAssets;
         bytes32 pendingHashBefore = keccak256(abi.encode(book.pendingIntent(orderId)));
 
         _startRecordingLogs();
@@ -205,9 +205,9 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(router.globalTailOrderId(), globalTailBefore, "exact replay must not change the global tail");
         assertEq(router.accountHeadOrderId(ALICE), accountHeadBefore, "exact replay must not relink the account");
         assertEq(router.pendingOrderCounts(ALICE), pendingCountBefore, "exact replay must not add a live order");
-        assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "exact replay must not reserve twice");
+        assertEq(_freeSettlementAssets(ALICE), freeSettlementBefore, "exact replay must not reserve twice");
         assertEq(_remainingCommittedMargin(orderId), marginBefore, "exact replay must not reserve margin twice");
-        assertEq(book.pendingIntent(orderId).executionBountyUsdc, bountyBefore, "bounty must remain single-reserved");
+        assertEq(book.pendingIntent(orderId).executionBountyAssets, bountyBefore, "bounty must remain single-reserved");
         assertEq(
             keccak256(abi.encode(book.pendingIntent(orderId))), pendingHashBefore, "pending policy must be immutable"
         );
@@ -243,7 +243,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
 
         OrderV3Types.ClientIntent memory beforeIntent = book.clientIntent(ALICE, original.clientOrderId);
         OrderV3Types.OrderRequest memory conflicting = original;
-        conflicting.bounds.maxExplicitFeesUsdc -= 1;
+        conflicting.bounds.maxExplicitFeesAssets -= 1;
         bytes32 conflictingHash = book.hashOrderRequest(ALICE, conflicting);
 
         vm.prank(ALICE);
@@ -288,7 +288,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         bytes32 clientOrderId = OrderV3Types.protocolClientOrderId(keccak256("predictable-protection-id"));
         OrderV3Types.OrderRequest memory request = _openRequest(clientOrderId);
         uint64 nextCommitIdBefore = router.nextCommitId();
-        uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeSettlementBefore = _freeSettlementAssets(ALICE);
 
         vm.prank(ALICE);
         vm.expectRevert(
@@ -302,7 +302,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(book.pendingIntent(nextCommitIdBefore).account, address(0), "rejection must not create policy state");
         assertEq(router.nextCommitId(), nextCommitIdBefore, "rejection must not consume an order id");
         assertEq(router.pendingOrderCounts(ALICE), 0, "rejection must not append an account order");
-        assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "rejection must not reserve capital");
+        assertEq(_freeSettlementAssets(ALICE), freeSettlementBefore, "rejection must not reserve capital");
 
         request.bounds.expectedConfigHash = bytes32(0);
         bytes32 currentConfigHash = book.currentExecutionConfigHash();
@@ -320,8 +320,8 @@ contract OrderRouterAgentV2Test is BasePerpTest {
 
     function test_RevertedFirstAttemptDoesNotConsumeClientIdOrReservation() public {
         _startRecordingLogs();
-        uint256 quotedBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(OPEN_SIZE);
-        _fundTrader(CAROL, quotedBountyUsdc);
+        uint256 quotedBountyAssets = _quoteOpenOrderExecutionBountyAssets(OPEN_SIZE);
+        _fundTrader(CAROL, quotedBountyAssets);
         OrderV3Types.OrderRequest memory request = _openRequest(bytes32("retry-after-revert"));
 
         vm.prank(CAROL);
@@ -333,9 +333,9 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(router.nextCommitId(), 1, "revert must not consume the proposed order id");
         assertEq(router.pendingOrderCounts(CAROL), 0, "revert must not leave a queue node");
         assertEq(_remainingCommittedMargin(1), 0, "revert must not leave committed margin");
-        assertEq(_freeSettlementUsdc(CAROL), quotedBountyUsdc, "bounty lock must roll back with margin failure");
+        assertEq(_freeSettlementAssets(CAROL), quotedBountyAssets, "bounty lock must roll back with margin failure");
 
-        _fundTrader(CAROL, OPEN_MARGIN_USDC + 1000e6);
+        _fundTrader(CAROL, OPEN_MARGIN_ASSETS + 1000e6);
         vm.prank(CAROL);
         uint64 orderId = router.commitOrder(request);
 
@@ -347,7 +347,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     function test_ExecutionNotionalEqualityAndDeadlineEqualityExecuteWithCanonicalReceipt() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _openRequest(bytes32("inclusive-equality"));
-        request.bounds.maxExecutionNotionalUsdc = OPEN_NOTIONAL_USDC;
+        request.bounds.maxExecutionNotionalAssets = OPEN_NOTIONAL_ASSETS;
         request.bounds.submitBy = uint64(block.timestamp + 1);
         request.bounds.executionWindowSeconds = uint32(uint256(uint64(block.timestamp + 1)) - block.timestamp);
 
@@ -368,7 +368,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.None));
         assertTrue(result.receiptHash != bytes32(0));
         assertEq(_positionSize(ALICE), OPEN_SIZE, "equality at the notional bound must execute");
-        assertEq(_settlementBalance(KEEPER) - keeperBefore, pending.executionBountyUsdc);
+        assertEq(_settlementBalance(KEEPER) - keeperBefore, pending.executionBountyAssets);
         assertEq(router.pendingOrderCounts(ALICE), 0);
         assertEq(router.nextExecuteId(), 0);
         assertEq(_remainingCommittedMargin(orderId), 0);
@@ -386,7 +386,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(outcome.executor, KEEPER);
         assertEq(outcome.bountyRecipient, KEEPER);
         assertEq(outcome.executionPrice, EXECUTION_PRICE);
-        assertEq(outcome.bountyUsdc, pending.executionBountyUsdc);
+        assertEq(outcome.bountyAssets, pending.executionBountyAssets);
         assertEq(outcome.receiptHash, result.receiptHash);
 
         (
@@ -400,9 +400,9 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(receipt.account, ALICE);
         assertEq(receipt.clientOrderId, request.clientOrderId);
         assertEq(receipt.intentHash, pending.intentHash);
-        assertEq(receipt.economics.executionNotionalUsdc, OPEN_NOTIONAL_USDC);
+        assertEq(receipt.economics.executionNotionalAssets, OPEN_NOTIONAL_ASSETS);
         assertEq(receipt.economics.postPositionSize, OPEN_SIZE);
-        assertEq(receipt.economics.postSettlementBalanceUsdc, _settlementBalance(ALICE));
+        assertEq(receipt.economics.postSettlementBalanceAssets, _settlementBalance(ALICE));
         assertEq(
             eventReceiptHash,
             keccak256(
@@ -423,7 +423,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     function test_ExecutionNotionalOneAtomOverBoundFailsWithoutApplyingPosition() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _openRequest(bytes32("notional-one-atom"));
-        request.bounds.maxExecutionNotionalUsdc = OPEN_NOTIONAL_USDC - 1;
+        request.bounds.maxExecutionNotionalAssets = OPEN_NOTIONAL_ASSETS - 1;
 
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
@@ -438,8 +438,10 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed));
         assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.ConstraintViolation));
         assertEq(_positionSize(ALICE), 0, "constraint failure must not apply the planned position");
-        assertEq(aliceBefore - _settlementBalance(ALICE), pending.executionBountyUsdc, "only bounty may leave account");
-        assertEq(_settlementBalance(KEEPER) - keeperBefore, pending.executionBountyUsdc);
+        assertEq(
+            aliceBefore - _settlementBalance(ALICE), pending.executionBountyAssets, "only bounty may leave account"
+        );
+        assertEq(_settlementBalance(KEEPER) - keeperBefore, pending.executionBountyAssets);
         assertEq(_remainingCommittedMargin(orderId), 0);
         assertEq(router.pendingOrderCounts(ALICE), 0);
 
@@ -485,7 +487,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(outcome.executionPrice, 0);
         assertEq(outcome.oraclePublishTime, 0);
         assertEq(outcome.executor, KEEPER);
-        assertEq(outcome.bountyUsdc, pending.executionBountyUsdc);
+        assertEq(outcome.bountyAssets, pending.executionBountyAssets);
     }
 
     function test_FinalizedConfigDriftInvalidatesBeforeOracleWork() public {
@@ -566,7 +568,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Expired));
         assertEq(uint8(secondOutcome.reason), uint8(OrderV3Types.TerminalReason.Expired));
         assertEq(outcome.executor, KEEPER);
-        assertEq(_settlementBalance(KEEPER) - keeperBefore, outcome.bountyUsdc + secondOutcome.bountyUsdc);
+        assertEq(_settlementBalance(KEEPER) - keeperBefore, outcome.bountyAssets + secondOutcome.bountyAssets);
 
         vm.roll(block.number + 1);
         vm.prank(KEEPER);
@@ -690,7 +692,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         expected.executor = KEEPER;
         expected.observedConfigHash = book.currentExecutionConfigHash();
         expected.neutralMarkPrice = engine.lastMarkPrice();
-        expected.poolDepthUsdc = pool.totalAssets();
+        expected.poolDepthAssets = pool.totalAssets();
         expected.bountyAccountingPrice = cap;
         expected.bountyAccountingPublishTime = engine.lastMarkTime();
         bytes memory itemCall =
@@ -731,7 +733,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         );
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
         uint256 keeperBefore = _settlementBalance(KEEPER);
-        uint256 expectedBounty = book.pendingIntent(orderId).executionBountyUsdc;
+        uint256 expectedBounty = book.pendingIntent(orderId).executionBountyAssets;
         vm.prank(KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
         assertTrue(result.status != OrderV3Types.LifecycleStatus.Executed, "post-oracle policy must be checked");
@@ -766,7 +768,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
 
         OrderV3Types.PendingIntent memory pendingBefore = book.pendingIntent(orderId);
         uint256 marginBefore = _remainingCommittedMargin(orderId);
-        uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeSettlementBefore = _freeSettlementAssets(ALICE);
         uint256 keeperBefore = _settlementBalance(KEEPER);
         vm.mockCallRevert(
             address(engine),
@@ -788,7 +790,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(_verifiedOutcome(IOrderLifecycleBook(address(book)), orderId).receiptHash, bytes32(0));
         assertEq(keccak256(abi.encode(book.pendingIntent(orderId))), keccak256(abi.encode(pendingBefore)));
         assertEq(_remainingCommittedMargin(orderId), marginBefore, "item rollback must restore committed margin");
-        assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "item rollback must restore bucket classification");
+        assertEq(_freeSettlementAssets(ALICE), freeSettlementBefore, "item rollback must restore bucket classification");
         assertEq(_settlementBalance(KEEPER), keeperBefore, "retryable failure must pay no bounty");
         assertEq(router.pendingOrderCounts(ALICE), 1);
         assertEq(router.nextExecuteId(), orderId);
@@ -804,7 +806,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
 
         OrderV3Types.PendingIntent memory pendingBefore = book.pendingIntent(orderId);
         uint256 marginBefore = _remainingCommittedMargin(orderId);
-        uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeSettlementBefore = _freeSettlementAssets(ALICE);
         uint256 keeperBefore = _settlementBalance(KEEPER);
         vm.mockCallRevert(
             address(policyEvaluator),
@@ -828,7 +830,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(_verifiedOutcome(IOrderLifecycleBook(address(book)), orderId).receiptHash, bytes32(0));
         assertEq(keccak256(abi.encode(book.pendingIntent(orderId))), keccak256(abi.encode(pendingBefore)));
         assertEq(_remainingCommittedMargin(orderId), marginBefore, "item rollback must restore committed margin");
-        assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "item rollback must restore bucket classification");
+        assertEq(_freeSettlementAssets(ALICE), freeSettlementBefore, "item rollback must restore bucket classification");
         assertEq(_settlementBalance(KEEPER), keeperBefore, "retryable failure must pay no bounty");
         assertEq(router.pendingOrderCounts(ALICE), 1);
         assertEq(router.nextExecuteId(), orderId);
@@ -842,7 +844,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
         uint256 marginBefore = _remainingCommittedMargin(orderId);
-        uint256 bountyBefore = book.pendingIntent(orderId).executionBountyUsdc;
+        uint256 bountyBefore = book.pendingIntent(orderId).executionBountyAssets;
 
         vm.mockCall(address(engine), abi.encodeWithSelector(engine.processOrderTyped.selector), abi.encode(uint256(1)));
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
@@ -853,7 +855,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
         assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.EngineFailure));
         assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
-        assertEq(book.pendingIntent(orderId).executionBountyUsdc, bountyBefore);
+        assertEq(book.pendingIntent(orderId).executionBountyAssets, bountyBefore);
         assertEq(_remainingCommittedMargin(orderId), marginBefore);
         assertEq(router.pendingOrderCounts(ALICE), 1);
         assertEq(_positionSize(ALICE), 0);
@@ -862,13 +864,13 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     function test_ZeroBountyMaximumMeansZeroAllowance() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _openRequest(bytes32("zero-bounty-cap"));
-        request.bounds.maxExecutionBountyUsdc = 0;
-        uint256 quotedBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(OPEN_SIZE);
+        request.bounds.maxExecutionBountyAssets = 0;
+        uint256 quotedBountyAssets = _quoteOpenOrderExecutionBountyAssets(OPEN_SIZE);
 
         vm.prank(ALICE);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound.selector, quotedBountyUsdc, 0
+                IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound.selector, quotedBountyAssets, 0
             )
         );
         router.commitOrder(request);
@@ -894,7 +896,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.RiskOff));
         assertEq(outcome.executor, KEEPER, "receipt must retain the external cleaner");
-        assertEq(outcome.bountyUsdc, pending.executionBountyUsdc);
+        assertEq(outcome.bountyAssets, pending.executionBountyAssets);
         assertEq(outcome.bountyRecipient, ALICE);
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.RefundedToAccount));
         assertEq(uint8(outcome.priceSource), uint8(OrderV3Types.PriceSource.None));
@@ -911,7 +913,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         request.clientOrderId = clientOrderId;
         request.side = CfdTypes.Side.LONG;
         request.sizeDelta = OPEN_SIZE;
-        request.marginDelta = OPEN_MARGIN_USDC;
+        request.marginDelta = OPEN_MARGIN_ASSETS;
         request.targetPrice = 1;
         request.isClose = false;
         request.bounds = OrderV3Types.ExecutionBounds({
@@ -921,14 +923,14 @@ contract OrderRouterAgentV2Test is BasePerpTest {
             ),
             allowedExecutionModes: 7,
             expectedConfigHash: book.currentExecutionConfigHash(),
-            maxExecutionBountyUsdc: type(uint256).max,
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max,
+            maxExecutionBountyAssets: type(uint256).max,
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max,
             maxPostPositionSize: type(uint256).max,
-            minPostSettlementBalanceUsdc: 0,
-            minPostPositionEquityUsdc: 0,
+            minPostSettlementBalanceAssets: 0,
+            minPostPositionEquityAssets: 0,
             maxPostLeverageBps: type(uint32).max
         });
     }

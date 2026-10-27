@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {WaterfallReferenceMath} from "../ghost/WaterfallReferenceMath.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -8,7 +9,6 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 /// @notice Persistent waterfall reference campaign using real Engine, clearinghouse, pool, and tranche vaults.
@@ -22,7 +22,7 @@ import {Test} from "forge-std/Test.sol";
 ///      post-operation balance deltas. Every successful action leaves economic state for the following action.
 contract PerpWaterfallReferenceHandler is Test {
 
-    MockUSDC public immutable usdc;
+    MockSettlementToken public immutable settlementToken;
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
     HousePool public immutable pool;
@@ -49,14 +49,14 @@ contract PerpWaterfallReferenceHandler is Test {
     uint256 public quarantinedRecapSurplus;
 
     constructor(
-        MockUSDC usdc_,
+        MockSettlementToken settlementToken_,
         CfdEngine engine_,
         MarginClearinghouse clearinghouse_,
         HousePool pool_,
         address router_,
         address juniorVault_
     ) {
-        usdc = usdc_;
+        settlementToken = settlementToken_;
         engine = engine_;
         clearinghouse = clearinghouse_;
         pool = pool_;
@@ -101,9 +101,9 @@ contract PerpWaterfallReferenceHandler is Test {
     ) external {
         require(msg.sender == address(this), "handler only");
         uint256 margin = lots * 100e6;
-        usdc.mint(TRADER, margin + 1000e6);
+        settlementToken.mint(TRADER, margin + 1000e6);
         vm.startPrank(TRADER);
-        usdc.approve(address(clearinghouse), margin + 1000e6);
+        settlementToken.approve(address(clearinghouse), margin + 1000e6);
         clearinghouse.deposit(TRADER, margin + 1000e6);
         vm.stopPrank();
 
@@ -187,7 +187,7 @@ contract PerpWaterfallReferenceHandler is Test {
         uint256 amount
     ) external {
         require(msg.sender == address(this), "handler only");
-        usdc.mint(address(pool), amount);
+        settlementToken.mint(address(pool), amount);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             amount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -228,10 +228,11 @@ contract PerpWaterfallReferenceHandler is Test {
         if (
             pool.seniorPrincipal() != expectedSenior || pool.juniorPrincipal() != expectedJunior
                 || pool.seniorHighWaterMark() != expectedHwm || pool.accountedAssets() != expectedCash
-                || usdc.balanceOf(address(pool)) != expectedCash || pool.unassignedAssets() != expectedUnassigned
+                || settlementToken.balanceOf(address(pool)) != expectedCash
+                || pool.unassignedAssets() != expectedUnassigned
                 || pool.lastSeniorCouponCheckpointTime() != expectedCheckpoint
-                || pool.pendingRecapitalizationUsdc() != 0 || pool.pendingTradingRevenueUsdc() != 0
-                || engine.totalTraderClaimBalanceUsdc() != 0
+                || pool.pendingRecapitalizationAssets() != 0 || pool.pendingTradingRevenueAssets() != 0
+                || engine.totalTraderClaimBalanceAssets() != 0
         ) {
             mismatches++;
         }
@@ -257,8 +258,9 @@ contract PerpWaterfallReferenceInvariantTest is BasePerpTest {
 
     function setUp() public override {
         super.setUp();
-        handler =
-            new PerpWaterfallReferenceHandler(usdc, engine, clearinghouse, pool, address(router), address(juniorVault));
+        handler = new PerpWaterfallReferenceHandler(
+            settlementToken, engine, clearinghouse, pool, address(router), address(juniorVault)
+        );
         bytes4[] memory selectors = new bytes4[](3);
         selectors[0] = handler.trade.selector;
         selectors[1] = handler.accrueCoupon.selector;
@@ -331,10 +333,10 @@ contract PerpWaterfallReferenceInvariantTest is BasePerpTest {
 
     function test_ReferenceOracleDetectsUnmodeledPoolCashPerturbation() public {
         // Negative control for the test oracle: an out-of-model cash atom must not be absorbed by ghost resync.
-        usdc.mint(address(pool), 1);
+        settlementToken.mint(address(pool), 1);
         handler.accrueCoupon(1);
         assertEq(handler.expectedCash(), 600_000e6);
-        assertEq(usdc.balanceOf(address(pool)), 600_000e6 + 1);
+        assertEq(settlementToken.balanceOf(address(pool)), 600_000e6 + 1);
         assertEq(handler.mismatches(), 1);
         assertEq(handler.unexpectedReverts(), 0);
     }

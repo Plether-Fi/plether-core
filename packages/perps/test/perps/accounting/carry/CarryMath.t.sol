@@ -7,13 +7,13 @@ import {Test} from "forge-std/Test.sol";
 contract CarryMathTest is Test {
 
     function test_ComputeBorrowBase_ZeroWhenMarginCoversMaxProfit() public pure {
-        uint256 borrowBaseUsdc = PositionRiskAccountingLib.computeBorrowBaseUsdc(100_000e6, 200_000e6);
-        assertEq(borrowBaseUsdc, 0);
+        uint256 borrowBaseAssets = PositionRiskAccountingLib.computeBorrowBaseAssets(100_000e6, 200_000e6);
+        assertEq(borrowBaseAssets, 0);
     }
 
     function test_ComputeBorrowBase_GrowsWithLeverage() public pure {
-        uint256 lowLeverageCarryBase = PositionRiskAccountingLib.computeBorrowBaseUsdc(100_000e6, 50_000e6);
-        uint256 highLeverageCarryBase = PositionRiskAccountingLib.computeBorrowBaseUsdc(100_000e6, 10_000e6);
+        uint256 lowLeverageCarryBase = PositionRiskAccountingLib.computeBorrowBaseAssets(100_000e6, 50_000e6);
+        uint256 highLeverageCarryBase = PositionRiskAccountingLib.computeBorrowBaseAssets(100_000e6, 10_000e6);
         assertGt(highLeverageCarryBase, lowLeverageCarryBase);
         assertEq(lowLeverageCarryBase, 50_000e6);
         assertEq(highLeverageCarryBase, 90_000e6);
@@ -29,9 +29,9 @@ contract CarryMathTest is Test {
 
     function test_ComputeIndexedCarry_FullYearAtFivePercent() public pure {
         uint256 carryIndexDelta = PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 365 days, 1, 1, 500);
-        uint256 carryUsdc = PositionRiskAccountingLib.computeIndexedCarryUsdc(90_000e6, carryIndexDelta);
+        uint256 carryAssets = PositionRiskAccountingLib.computeIndexedCarryAssets(90_000e6, carryIndexDelta);
         assertEq(carryIndexDelta, 0.05e18);
-        assertEq(carryUsdc, 4500e6);
+        assertEq(carryAssets, 4500e6);
     }
 
     function test_ComputeCurrentCarryIndex_UsesSinglePassUtilizationFormula() public pure {

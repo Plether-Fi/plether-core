@@ -19,8 +19,8 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     uint256 public constant TIMELOCK_DELAY = 72 hours;
     /// @notice Upper bound for live pending orders per account.
     uint256 internal constant MAX_PENDING_ORDERS_LIMIT = 32;
-    /// @notice Upper bound for the fixed protection-trigger bounty (6-decimal USDC; $1).
-    uint256 internal constant MAX_POSITION_PROTECTION_TRIGGER_BOUNTY_USDC = 1_000_000;
+    /// @notice Upper bound for the fixed protection-trigger bounty (6-decimal settlement token; $1).
+    uint256 internal constant MAX_POSITION_PROTECTION_TRIGGER_BOUNTY_ASSETS = 1_000_000;
     /// @notice Lower bound for minimum engine-call gas.
     uint256 internal constant MIN_ENGINE_GAS_FLOOR = 100_000;
     /// @notice Upper bound for minimum engine-call gas.
@@ -144,7 +144,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
 
     /// @notice Proposes router queue, bounty, and execution bounds behind the timelock.
     /// @dev Owner only. A valid proposal replaces any pending router proposal and restarts its 72-hour delay.
-    ///      Time fields are seconds, monetary fields are 6-decimal USDC, gas fields are gas units, ratios are
+    ///      Time fields are seconds, monetary fields are 6-decimal settlement token, gas fields are gas units, ratios are
     ///      basis points except where the host struct specifies otherwise, and order ids/counts are unscaled.
     /// @param config Router configuration to validate and stage.
     function proposeRouterConfig(
@@ -371,19 +371,19 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     }
 
     /// @notice Validates open-notional, open-bounty, and protection-trigger bounty limits.
-    /// @param config Candidate router configuration; monetary values use 6-decimal USDC.
+    /// @param config Candidate router configuration; monetary values use 6-decimal settlement token.
     function _validateExecutionBountyConfig(
         IOrderRouterAdminHost.RouterConfig memory config
     ) private pure {
-        if (config.minOpenNotionalUsdc == 0) {
+        if (config.minOpenNotionalAssets == 0) {
             revert OrderRouterAdmin__InvalidExecutionBounty();
         }
         if (
             config.openOrderExecutionBountyBps == 0 || config.openOrderExecutionBountyBps > 10_000
-                || config.minOpenOrderExecutionBountyUsdc == 0 || config.maxOpenOrderExecutionBountyUsdc == 0
-                || config.positionProtectionTriggerBountyUsdc == 0
-                || config.positionProtectionTriggerBountyUsdc > MAX_POSITION_PROTECTION_TRIGGER_BOUNTY_USDC
-                || config.minOpenOrderExecutionBountyUsdc > config.maxOpenOrderExecutionBountyUsdc
+                || config.minOpenOrderExecutionBountyAssets == 0 || config.maxOpenOrderExecutionBountyAssets == 0
+                || config.positionProtectionTriggerBountyAssets == 0
+                || config.positionProtectionTriggerBountyAssets > MAX_POSITION_PROTECTION_TRIGGER_BOUNTY_ASSETS
+                || config.minOpenOrderExecutionBountyAssets > config.maxOpenOrderExecutionBountyAssets
         ) {
             revert OrderRouterAdmin__InvalidExecutionBounty();
         }

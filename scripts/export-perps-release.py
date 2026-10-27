@@ -28,10 +28,10 @@ def artifact_identifier(key, entry):
     if entry.get("artifact"):
         source, name = entry["artifact"].rsplit(":", 1)
         return Path(source).name + ":" + name
-    name = {"mockUsdc": "MockUSDC", "seniorVault": "TrancheVault", "juniorVault": "TrancheVault"}.get(
+    name = {"seniorVault": "TrancheVault", "juniorVault": "TrancheVault"}.get(
         key, key[0].upper() + key[1:]
     )
-    source = "DeployPerpsArbitrumSepolia.s.sol" if name == "MockUSDC" else name + ".sol"
+    source = name + ".sol"
     return source + ":" + name
 
 
@@ -42,8 +42,48 @@ def artifact_path(root, identifier):
     return Path(root) / "out" / source / (name + ".json")
 
 
+def validate_settlement_configuration(manifest):
+    """Check the new MockUSDG release's capabilities and separate rewards destination.
+
+    Fresh releases require the canonical settlement-token schema without legacy aliases.
+    This is a local configuration check, not proof of GDN eligibility or wallet control.
+    """
+    if manifest["schemaVersion"] != 4:
+        raise ValueError("Unsupported perps release manifest schema")
+    contracts = manifest["contracts"]
+    token = contracts.get("settlementToken", {})
+    if "mockUsdc" in contracts or token.get("artifact") != "script/DeployPerpsArbitrumSepolia.s.sol:MockUSDG":
+        raise ValueError("Schema 4 requires the explicit MockUSDG settlementToken artifact")
+    metadata = manifest.get("settlementToken", {})
+    if (metadata.get("name") != "Mock USDG" or metadata.get("symbol") != "USDG"
+            or type(metadata.get("decimals")) is not int or metadata["decimals"] != 6
+            or metadata.get("isMock") is not True):
+        raise ValueError("Schema 4 requires six-decimal Mock USDG metadata")
+    if (metadata.get("supportsReceiveWithAuthorization") is not False
+            or metadata.get("supportsBridgeFunding") is not False):
+        raise ValueError("MockUSDG cannot advertise signed deposits or bridge funding")
+    rewards = manifest.get("rewards", {})
+    if rewards.get("status") != "not_applicable":
+        raise ValueError("GDN rewards are not applicable to MockUSDG")
+    holders = rewards.get("holdingContracts")
+    if holders != ["marginClearinghouse", "housePool"] or any(key not in contracts for key in holders):
+        raise ValueError("Rewards holding contracts must identify the clearinghouse and HousePool")
+    if "payoutAddress" not in rewards or "payoutController" not in rewards:
+        raise ValueError("Rewards payout address and controller must be explicitly configured or null")
+    destination, controller = rewards["payoutAddress"], rewards["payoutController"]
+    if destination is None and controller is None:
+        return
+    for value in (destination, controller):
+        if not isinstance(value, str) or not re.fullmatch(r"0x[a-fA-F0-9]{40}", value) or int(value, 16) == 0:
+            raise ValueError("Rewards payout address and controller must both be nonzero addresses")
+    protocol_addresses = {entry["address"].lower() for entry in contracts.values() if entry.get("address")}
+    if destination.lower() in protocol_addresses:
+        raise ValueError("Rewards payout destination must be separate from deployed protocol contracts")
+
+
 def consumer_inventory(root, manifest):
     """Select artifacts from committed source declarations, never from pre-existing compiler output."""
+    validate_settlement_configuration(manifest)
     inventory = {}
     for key, entry in manifest["contracts"].items():
         identifier = artifact_identifier(key, entry)

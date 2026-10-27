@@ -31,7 +31,7 @@ contract VpiRebateReserveTest is Test {
             initMarginBps: 150,
             fadMarginBps: 300,
             baseCarryBps: 0,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -39,65 +39,66 @@ contract VpiRebateReserveTest is Test {
     }
 
     function _positionSnapshot(
-        uint256 vpiReserveUsdc,
-        uint256 protectedBountyUsdc,
-        uint256 pendingCarryUsdc
+        uint256 vpiReserveAssets,
+        uint256 protectedBountyAssets,
+        uint256 pendingCarryAssets
     ) internal pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         uint256 size = 1000e18;
         uint256 lots = CfdMath.sizeToLots(size);
-        uint256 entryCostUsdcAtoms = lots * ENTRY_PRICE;
-        uint256 marginUsdc = 20e6;
-        uint256 liquidationReserveUsdc = 1e6;
-        uint256 actionReserveUsdc = vpiReserveUsdc + protectedBountyUsdc;
-        uint256 settlementBalanceUsdc = marginUsdc + liquidationReserveUsdc + actionReserveUsdc;
-        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.LONG, CAP_PRICE);
+        uint256 entryCostAssetAtoms = lots * ENTRY_PRICE;
+        uint256 marginAssets = 20e6;
+        uint256 liquidationReserveAssets = 1e6;
+        uint256 actionReserveAssets = vpiReserveAssets + protectedBountyAssets;
+        uint256 settlementBalanceAssets = marginAssets + liquidationReserveAssets + actionReserveAssets;
+        uint256 maxProfitAssets =
+            CfdMath.calculateExactMaxProfit(lots, entryCostAssetAtoms, CfdTypes.Side.LONG, CAP_PRICE);
 
         snap.account = address(0xBEEF);
         snap.position = CfdTypes.Position({
             size: size,
-            margin: marginUsdc,
+            margin: marginAssets,
             entryPrice: ENTRY_PRICE,
-            maxProfitUsdc: maxProfitUsdc,
+            maxProfitAssets: maxProfitAssets,
             side: CfdTypes.Side.LONG,
             lastUpdateTime: 1,
             lastCarryTimestamp: 1,
             vpiAccrued: -10e6
         });
-        snap.positionEntryCostUsdcAtoms = entryCostUsdcAtoms;
+        snap.positionEntryCostAssetAtoms = entryCostAssetAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = ENTRY_PRICE;
         snap.lastMarkTime = 1;
         snap.longSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: maxProfitUsdc,
+            maxProfitAssets: maxProfitAssets,
             openInterest: size,
-            entryNotional: entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
-            totalMargin: marginUsdc,
-            borrowBaseUsdc: 0,
+            entryNotional: entryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
+            totalMargin: marginAssets,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
         snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseUsdc: 0, carryIndex: 0
+            maxProfitAssets: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseAssets: 0, carryIndex: 0
         });
-        snap.poolAssetsUsdc = 1_000_000e6;
-        snap.poolCashUsdc = 1_000_000e6;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: settlementBalanceUsdc,
-            totalLockedMarginUsdc: settlementBalanceUsdc,
-            activePositionMarginUsdc: marginUsdc,
-            otherLockedMarginUsdc: liquidationReserveUsdc + actionReserveUsdc,
-            freeSettlementUsdc: 0
+        snap.poolAssets = 1_000_000e6;
+        snap.poolCashAssets = 1_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: settlementBalanceAssets,
+            totalLockedMarginAssets: settlementBalanceAssets,
+            activePositionMarginAssets: marginAssets,
+            otherLockedMarginAssets: liquidationReserveAssets + actionReserveAssets,
+            freeSettlementAssets: 0
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: marginUsdc,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: actionReserveUsdc,
-            totalLockedMarginUsdc: settlementBalanceUsdc
+            positionMarginAssets: marginAssets,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: actionReserveAssets,
+            totalLockedMarginAssets: settlementBalanceAssets
         });
-        snap.liquidationReserveUsdc = liquidationReserveUsdc;
-        snap.actionReserveUsdc = actionReserveUsdc;
-        snap.vpiRebateReserveUsdc = vpiReserveUsdc;
-        snap.protectedExecutionBountyUsdc = protectedBountyUsdc;
-        snap.unsettledCarryUsdc = pendingCarryUsdc;
+        snap.liquidationReserveAssets = liquidationReserveAssets;
+        snap.actionReserveAssets = actionReserveAssets;
+        snap.vpiRebateReserveAssets = vpiReserveAssets;
+        snap.protectedExecutionBountyAssets = protectedBountyAssets;
+        snap.unsettledCarryAssets = pendingCarryAssets;
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams(0);
     }
@@ -125,12 +126,12 @@ contract VpiRebateReserveTest is Test {
             CfdEnginePlanLib.planClose(snap, _closeOrder(snap.account, 500e18), ENTRY_PRICE);
 
         assertTrue(delta.valid);
-        assertEq(delta.vpiRebateReserveBeforeUsdc, 10e6);
-        assertEq(delta.vpiRebateReserveAfterUsdc, 5e6);
-        assertEq(delta.vpiRebateReserveConsumedUsdc, 5e6);
-        assertEq(delta.actionChargeAssessedUsdc, 5e6);
-        assertEq(delta.actionChargeCollectedUsdc, 5e6);
-        assertEq(delta.actionChargeWaivedUsdc, 0);
+        assertEq(delta.vpiRebateReserveBeforeAssets, 10e6);
+        assertEq(delta.vpiRebateReserveAfterAssets, 5e6);
+        assertEq(delta.vpiRebateReserveConsumedAssets, 5e6);
+        assertEq(delta.actionChargeAssessedAssets, 5e6);
+        assertEq(delta.actionChargeCollectedAssets, 5e6);
+        assertEq(delta.actionChargeWaivedAssets, 0);
         assertEq(snap.position.vpiAccrued - delta.posVpiAccruedReduction, -5e6);
     }
 
@@ -140,75 +141,76 @@ contract VpiRebateReserveTest is Test {
             CfdEnginePlanLib.planClose(snap, _closeOrder(snap.account, snap.position.size), 99_000_000);
 
         assertTrue(delta.valid);
-        assertEq(delta.priceGainUsdc, 10e6);
-        assertEq(delta.actionChargeWithheldUsdc, 10e6);
-        assertEq(delta.vpiRebateReserveConsumedUsdc, 0);
-        assertEq(delta.vpiRebateReserveAfterUsdc, 0);
-        assertEq(delta.actionChargeCollectedUsdc, 0);
-        assertEq(delta.pricePayoutUsdc, 0);
+        assertEq(delta.priceGainAssets, 10e6);
+        assertEq(delta.actionChargeWithheldAssets, 10e6);
+        assertEq(delta.vpiRebateReserveConsumedAssets, 0);
+        assertEq(delta.vpiRebateReserveAfterAssets, 0);
+        assertEq(delta.actionChargeCollectedAssets, 0);
+        assertEq(delta.pricePayoutAssets, 0);
     }
 
     function test_PositiveVpiOpenReleasesBackingBeforeCharging() public pure {
         CfdEnginePlanTypes.RawSnapshot memory snap;
         uint256 size = 100_000e18;
         uint256 lots = CfdMath.sizeToLots(size);
-        uint256 entryCostUsdcAtoms = lots * ENTRY_PRICE;
-        uint256 marginUsdc = 20_000e6;
-        uint256 orderMarginUsdc = 5000e6;
-        uint256 liquidationReserveUsdc = 100e6;
-        uint256 vpiReserveUsdc = 10e6;
-        uint256 totalLockedUsdc = marginUsdc + liquidationReserveUsdc + vpiReserveUsdc;
-        uint256 settlementBalanceUsdc = totalLockedUsdc + orderMarginUsdc;
-        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.LONG, CAP_PRICE);
+        uint256 entryCostAssetAtoms = lots * ENTRY_PRICE;
+        uint256 marginAssets = 20_000e6;
+        uint256 orderMarginAssets = 5000e6;
+        uint256 liquidationReserveAssets = 100e6;
+        uint256 vpiReserveAssets = 10e6;
+        uint256 totalLockedAssets = marginAssets + liquidationReserveAssets + vpiReserveAssets;
+        uint256 settlementBalanceAssets = totalLockedAssets + orderMarginAssets;
+        uint256 maxProfitAssets =
+            CfdMath.calculateExactMaxProfit(lots, entryCostAssetAtoms, CfdTypes.Side.LONG, CAP_PRICE);
 
         snap.account = address(0xCAFE);
         snap.position = CfdTypes.Position({
             size: size,
-            margin: marginUsdc,
+            margin: marginAssets,
             entryPrice: ENTRY_PRICE,
-            maxProfitUsdc: maxProfitUsdc,
+            maxProfitAssets: maxProfitAssets,
             side: CfdTypes.Side.LONG,
             lastUpdateTime: 1,
             lastCarryTimestamp: 1,
             vpiAccrued: -10e6
         });
-        snap.positionEntryCostUsdcAtoms = entryCostUsdcAtoms;
+        snap.positionEntryCostAssetAtoms = entryCostAssetAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = ENTRY_PRICE;
         snap.lastMarkTime = 1;
         snap.longSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: maxProfitUsdc,
+            maxProfitAssets: maxProfitAssets,
             openInterest: size,
-            entryNotional: entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
-            totalMargin: marginUsdc,
-            borrowBaseUsdc: 0,
+            entryNotional: entryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
+            totalMargin: marginAssets,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
-        snap.poolAssetsUsdc = 1_000_000e6;
-        snap.poolCashUsdc = 1_000_000e6;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: settlementBalanceUsdc,
-            totalLockedMarginUsdc: totalLockedUsdc,
-            activePositionMarginUsdc: marginUsdc,
-            otherLockedMarginUsdc: liquidationReserveUsdc + vpiReserveUsdc,
-            freeSettlementUsdc: orderMarginUsdc
+        snap.poolAssets = 1_000_000e6;
+        snap.poolCashAssets = 1_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: settlementBalanceAssets,
+            totalLockedMarginAssets: totalLockedAssets,
+            activePositionMarginAssets: marginAssets,
+            otherLockedMarginAssets: liquidationReserveAssets + vpiReserveAssets,
+            freeSettlementAssets: orderMarginAssets
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: marginUsdc,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: vpiReserveUsdc,
-            totalLockedMarginUsdc: totalLockedUsdc
+            positionMarginAssets: marginAssets,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: vpiReserveAssets,
+            totalLockedMarginAssets: totalLockedAssets
         });
-        snap.liquidationReserveUsdc = liquidationReserveUsdc;
-        snap.actionReserveUsdc = vpiReserveUsdc;
-        snap.vpiRebateReserveUsdc = vpiReserveUsdc;
+        snap.liquidationReserveAssets = liquidationReserveAssets;
+        snap.actionReserveAssets = vpiReserveAssets;
+        snap.vpiRebateReserveAssets = vpiReserveAssets;
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams(0.005e18);
 
         CfdTypes.Order memory order = CfdTypes.Order({
             account: snap.account,
             sizeDelta: 10_000e18,
-            marginDelta: orderMarginUsdc,
+            marginDelta: orderMarginAssets,
             targetPrice: ENTRY_PRICE,
             commitTime: 1,
             commitBlock: 1,
@@ -219,30 +221,30 @@ contract VpiRebateReserveTest is Test {
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, ENTRY_PRICE);
 
         assertTrue(delta.valid);
-        assertEq(delta.openState.vpiUsdc, 5_250_000);
-        assertEq(delta.tradeCostUsdc, 5_250_000);
-        assertEq(delta.vpiRebateReserveBeforeUsdc, 10e6);
-        assertEq(delta.vpiRebateReserveAfterUsdc, 4_750_000);
-        assertEq(delta.vpiRebateReserveFromPledgeUsdc, 0);
+        assertEq(delta.openState.vpiAssets, 5_250_000);
+        assertEq(delta.tradeCostAssets, 5_250_000);
+        assertEq(delta.vpiRebateReserveBeforeAssets, 10e6);
+        assertEq(delta.vpiRebateReserveAfterAssets, 4_750_000);
+        assertEq(delta.vpiRebateReserveFromPledgeAssets, 0);
         assertEq(delta.positionMarginAfterOpen, 24_984_750_000);
     }
 
     function test_GrossRebateBackingIncludesFeeOffset() public pure {
         CfdEnginePlanTypes.RawSnapshot memory snap;
-        // Leave one micro-USDC above initial margin after funding the rebate and liquidation reserves.
-        uint256 marginUsdc = 4920e6 + 1;
+        // Leave one micro-settlement token above initial margin after funding the rebate and liquidation reserves.
+        uint256 marginAssets = 4920e6 + 1;
         snap.account = address(0xD00D);
         snap.position.side = CfdTypes.Side.SHORT;
         snap.longSide.openInterest = 300_000e18;
-        snap.longSide.entryNotional = 300_000e6 * CfdMath.USDC_TO_TOKEN_SCALE;
-        snap.poolAssetsUsdc = 2_000_000e6;
-        snap.poolCashUsdc = 2_000_000e6;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: marginUsdc,
-            totalLockedMarginUsdc: 0,
-            activePositionMarginUsdc: 0,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: marginUsdc
+        snap.longSide.entryNotional = 300_000e6 * CfdMath.ASSETS_TO_TOKEN_SCALE;
+        snap.poolAssets = 2_000_000e6;
+        snap.poolCashAssets = 2_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: marginAssets,
+            totalLockedMarginAssets: 0,
+            activePositionMarginAssets: 0,
+            otherLockedMarginAssets: 0,
+            freeSettlementAssets: marginAssets
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams(0.05e18);
@@ -251,7 +253,7 @@ contract VpiRebateReserveTest is Test {
         CfdTypes.Order memory order = CfdTypes.Order({
             account: snap.account,
             sizeDelta: 300_000e18,
-            marginDelta: marginUsdc,
+            marginDelta: marginAssets,
             targetPrice: ENTRY_PRICE,
             commitTime: 1,
             commitBlock: 1,
@@ -262,35 +264,35 @@ contract VpiRebateReserveTest is Test {
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, ENTRY_PRICE);
 
         assertTrue(delta.valid);
-        assertEq(delta.openState.vpiUsdc, -int256(1125e6));
-        assertEq(delta.executionFeeUsdc, 120e6);
-        assertEq(delta.poolRebatePayoutUsdc, 1005e6);
-        assertEq(delta.vpiRebateReserveAfterUsdc, 1125e6);
-        assertEq(delta.vpiRebateReserveFromPledgeUsdc, 120e6);
+        assertEq(delta.openState.vpiAssets, -int256(1125e6));
+        assertEq(delta.executionFeeAssets, 120e6);
+        assertEq(delta.poolRebatePayoutAssets, 1005e6);
+        assertEq(delta.vpiRebateReserveAfterAssets, 1125e6);
+        assertEq(delta.vpiRebateReserveFromPledgeAssets, 120e6);
         assertEq(delta.positionMarginAfterOpen, 4500e6 + 1);
     }
 
     function test_LiquidationCancelsFundedVpiOnceAndProtectsBounty() public pure {
         CfdEnginePlanTypes.RawSnapshot memory baseline = _positionSnapshot(0, 0, 0);
         baseline.position.vpiAccrued = 0;
-        baseline.actionReserveUsdc = 0;
-        baseline.accountBuckets.settlementBalanceUsdc = 21e6;
-        baseline.accountBuckets.otherLockedMarginUsdc = 1e6;
-        baseline.accountBuckets.totalLockedMarginUsdc = 21e6;
-        baseline.lockedBuckets.reservedSettlementUsdc = 0;
-        baseline.lockedBuckets.totalLockedMarginUsdc = 21e6;
+        baseline.actionReserveAssets = 0;
+        baseline.accountBuckets.settlementBalanceAssets = 21e6;
+        baseline.accountBuckets.otherLockedMarginAssets = 1e6;
+        baseline.accountBuckets.totalLockedMarginAssets = 21e6;
+        baseline.lockedBuckets.reservedSettlementAssets = 0;
+        baseline.lockedBuckets.totalLockedMarginAssets = 21e6;
 
         CfdEnginePlanTypes.LiquidationDelta memory baselineDelta =
             CfdEnginePlanLib.planLiquidation(baseline, ENTRY_PRICE);
         assertFalse(baselineDelta.liquidatable);
-        assertEq(baselineDelta.riskState.equityUsdc, 20e6);
+        assertEq(baselineDelta.riskState.equityAssets, 20e6);
 
         CfdEnginePlanTypes.RawSnapshot memory funded = _positionSnapshot(10e6, 0, 0);
         CfdEnginePlanTypes.LiquidationDelta memory fundedDelta = CfdEnginePlanLib.planLiquidation(funded, ENTRY_PRICE);
         assertFalse(fundedDelta.liquidatable);
         assertEq(
-            fundedDelta.riskState.equityUsdc,
-            baselineDelta.riskState.equityUsdc,
+            fundedDelta.riskState.equityAssets,
+            baselineDelta.riskState.equityAssets,
             "Funded reserve and matching VPI clawback must cancel exactly once"
         );
 
@@ -299,14 +301,14 @@ contract VpiRebateReserveTest is Test {
             CfdEnginePlanLib.planLiquidation(withCarryAndBounty, ENTRY_PRICE);
         assertTrue(liquidation.liquidatable);
         assertEq(
-            liquidation.riskState.equityUsdc,
-            baselineDelta.riskState.equityUsdc - 11e6,
+            liquidation.riskState.equityAssets,
+            baselineDelta.riskState.equityAssets - 11e6,
             "Margin-funded carry reduces price equity while preserving VPI and bounty reserves"
         );
-        assertEq(liquidation.vpiRebateReserveConsumedUsdc, 10e6);
-        assertEq(liquidation.actionReserveConsumedUsdc, 0, "Generic collection must not consume a queued bounty");
-        assertEq(liquidation.realizedCarryUsdc, 11e6);
-        assertEq(liquidation.actionChargeWaivedUsdc, 0);
+        assertEq(liquidation.vpiRebateReserveConsumedAssets, 10e6);
+        assertEq(liquidation.actionReserveConsumedAssets, 0, "Generic collection must not consume a queued bounty");
+        assertEq(liquidation.realizedCarryAssets, 11e6);
+        assertEq(liquidation.actionChargeWaivedAssets, 0);
     }
 
     function test_LiquidationRejectsUnderfundedVpiReserve() public {
@@ -326,8 +328,8 @@ contract VpiRebateReserveTest is Test {
 
         assertTrue(exactDelta.liquidatable, "setup must breach exact P+C price health");
         assertTrue(overfundedDelta.liquidatable, "excess VPI reserve must not cure price insolvency");
-        assertEq(overfundedDelta.riskState.equityUsdc, exactDelta.riskState.equityUsdc);
-        assertEq(overfundedDelta.riskState.maintenanceMarginUsdc, exactDelta.riskState.maintenanceMarginUsdc);
+        assertEq(overfundedDelta.riskState.equityAssets, exactDelta.riskState.equityAssets);
+        assertEq(overfundedDelta.riskState.maintenanceMarginAssets, exactDelta.riskState.maintenanceMarginAssets);
     }
 
 }

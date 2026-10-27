@@ -319,7 +319,7 @@ contract StaleSeniorMutationTest is BasePerpTest {
         _fundJunior(juniorLp, 100_000e6);
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 150_000e6);
+        settlementToken.transfer(address(0xDEAD), 150_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -333,7 +333,7 @@ contract StaleSeniorMutationTest is BasePerpTest {
         uint256 staleMutationTime = staleStart + 30 days;
         vm.warp(staleMutationTime);
 
-        usdc.mint(address(pool), 50_000e6);
+        settlementToken.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             50_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -368,7 +368,7 @@ contract CarryAndMarginCheckpointCouponTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -426,7 +426,7 @@ contract FrozenCouponCheckpointTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -512,7 +512,7 @@ contract FrozenFreshnessCouponTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0

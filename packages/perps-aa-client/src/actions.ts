@@ -55,7 +55,8 @@ function plan(
 
 export interface BuildAuthorizedDepositInput {
   readonly account: Address;
-  readonly usdc: Address;
+  /** The configured six-decimal settlement token. */
+  readonly settlementToken: Address;
   readonly clearinghouse: Address;
   readonly authorization: ReceiveWithAuthorization;
   readonly authorizationSignature: Hex;
@@ -63,13 +64,14 @@ export interface BuildAuthorizedDepositInput {
 
 /**
  * Creates one atomic smart-account batch:
- * USDC.receiveWithAuthorization(owner -> account), approve, depositMargin.
+ * settlementToken.receiveWithAuthorization(owner -> account), approve, depositMargin.
+ * Requires verified EIP-3009 support; MockUSDG does not support this route.
  */
 export function buildAuthorizedDepositAction(
   input: BuildAuthorizedDepositInput,
 ): PerpsActionPlan {
   const account = address(input.account, "Smart account");
-  const usdc = address(input.usdc, "USDC");
+  const settlementToken = address(input.settlementToken, "Settlement token");
   const clearinghouse = address(input.clearinghouse, "Clearinghouse");
   validateAuthorization(input.authorization);
 
@@ -84,7 +86,7 @@ export function buildAuthorizedDepositAction(
 
   return plan("deposit", account, [
     call(
-      usdc,
+      settlementToken,
       encodeFunctionData({
         abi: eip3009ReceiveWithAuthorizationAbi,
         functionName: "receiveWithAuthorization",
@@ -102,7 +104,7 @@ export function buildAuthorizedDepositAction(
       }),
     ),
     call(
-      usdc,
+      settlementToken,
       encodeFunctionData({
         abi: erc20ApproveAbi,
         functionName: "approve",
@@ -120,21 +122,22 @@ export function buildAuthorizedDepositAction(
   ]);
 }
 
-/** Deposit USDC already held by the smart account. */
+/** Deposit settlement tokens already held by the smart account, without a token authorization signature. */
 export function buildSmartAccountBalanceDepositAction(input: {
   readonly account: Address;
-  readonly usdc: Address;
+  /** The configured six-decimal settlement token. */
+  readonly settlementToken: Address;
   readonly clearinghouse: Address;
   readonly amount: bigint;
 }): PerpsActionPlan {
   positive(input.amount, "Deposit amount");
   const account = address(input.account, "Smart account");
-  const usdc = address(input.usdc, "USDC");
+  const settlementToken = address(input.settlementToken, "Settlement token");
   const clearinghouse = address(input.clearinghouse, "Clearinghouse");
 
   return plan("deposit", account, [
     call(
-      usdc,
+      settlementToken,
       encodeFunctionData({
         abi: erc20ApproveAbi,
         functionName: "approve",
@@ -248,7 +251,7 @@ export function buildWithdrawAction(input: {
 
 /**
  * Atomically withdraws from the clearinghouse to the smart account, then sends
- * that exact USDC amount to the account's externally owned wallet.
+ * that exact settlement-token amount to the account's externally owned wallet.
  *
  * The sponsor backend must independently prove `owner` is the registered owner
  * of `account`; accepting an arbitrary recipient would create a sponsored token
@@ -257,14 +260,15 @@ export function buildWithdrawAction(input: {
 export function buildWithdrawToOwnerAction(input: {
   readonly account: Address;
   readonly owner: Address;
-  readonly usdc: Address;
+  /** The configured six-decimal settlement token. */
+  readonly settlementToken: Address;
   readonly clearinghouse: Address;
   readonly amount: bigint;
 }): PerpsActionPlan {
   positive(input.amount, "Withdrawal amount");
   const account = address(input.account, "Smart account");
   const owner = address(input.owner, "Smart-account owner");
-  const usdc = address(input.usdc, "USDC");
+  const settlementToken = address(input.settlementToken, "Settlement token");
   const clearinghouse = address(input.clearinghouse, "Clearinghouse");
 
   if (account === owner) {
@@ -283,7 +287,7 @@ export function buildWithdrawToOwnerAction(input: {
       }),
     ),
     call(
-      usdc,
+      settlementToken,
       encodeFunctionData({
         abi: erc20TransferAbi,
         functionName: "transfer",

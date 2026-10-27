@@ -16,9 +16,9 @@ abstract contract HousePoolAsyncTestBase is BasePerpTest {
         address owner,
         uint256 assets
     ) internal returns (uint256 requestId) {
-        usdc.mint(owner, assets);
+        settlementToken.mint(owner, assets);
         vm.startPrank(owner);
-        usdc.approve(address(vault), assets);
+        settlementToken.approve(address(vault), assets);
         requestId = vault.requestDeposit(assets, owner, owner);
         vm.stopPrank();
     }
@@ -129,14 +129,14 @@ abstract contract HousePoolTestBase is HousePoolAsyncTestBase {
     function _mintAndAccountPoolExcess(
         uint256 amount
     ) internal {
-        usdc.mint(address(pool), amount);
+        settlementToken.mint(address(pool), amount);
         pool.accountExcess();
     }
 
     function _setTotalTraderClaim(
         uint256 amount
     ) internal {
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(amount);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(amount);
     }
 
     function _enterFrozenWindow() internal {
@@ -158,7 +158,7 @@ abstract contract HousePoolTestBase is HousePoolAsyncTestBase {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0

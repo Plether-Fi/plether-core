@@ -32,11 +32,11 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
 
     function _bounds() internal pure returns (OrderV3Types.ExecutionBounds memory b) {
         b.allowedExecutionModes = 7;
-        b.maxExecutionBountyUsdc = type(uint256).max;
-        b.maxExecutionNotionalUsdc = type(uint256).max;
-        b.maxGrossAccountDebitUsdc = type(uint256).max;
-        b.maxActionChargeUsdc = type(uint256).max;
-        b.maxExplicitFeesUsdc = type(uint256).max;
+        b.maxExecutionBountyAssets = type(uint256).max;
+        b.maxExecutionNotionalAssets = type(uint256).max;
+        b.maxGrossAccountDebitAssets = type(uint256).max;
+        b.maxActionChargeAssets = type(uint256).max;
+        b.maxExplicitFeesAssets = type(uint256).max;
         b.maxPostPositionSize = type(uint256).max;
         b.maxPostLeverageBps = type(uint32).max;
     }
@@ -70,7 +70,7 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
         router.executeOrder(id, update);
         (uint256 size,,,,,,) = engine.positions(ACCOUNT);
         assertEq(size, SIZE, "normal router opening succeeds");
-        uint256 free = clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
+        uint256 free = clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets;
         vm.prank(ACCOUNT);
         clearinghouse.withdraw(ACCOUNT, free - freeAfter);
     }
@@ -91,27 +91,27 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
     ) internal returns (uint64 id, CfdClosePreview.ClosePreview memory p) {
         bytes32 bucketsBefore = keccak256(
             abi.encode(
-                clearinghouse.getAccountUsdcBuckets(ACCOUNT),
+                clearinghouse.getAccountAssetBuckets(ACCOUNT),
                 clearinghouse.getLockedMarginBuckets(ACCOUNT),
-                clearinghouse.totalBountyReservationsUsdc(ACCOUNT)
+                clearinghouse.totalBountyReservationsAssets(ACCOUNT)
             )
         );
-        uint256 settlementBefore = clearinghouse.balanceUsdc(ACCOUNT);
+        uint256 settlementBefore = clearinghouse.balanceAssets(ACCOUNT);
         p = _preview(o, price, executor);
         assertEq(
             bucketsBefore,
             keccak256(
                 abi.encode(
-                    clearinghouse.getAccountUsdcBuckets(ACCOUNT),
+                    clearinghouse.getAccountAssetBuckets(ACCOUNT),
                     clearinghouse.getLockedMarginBuckets(ACCOUNT),
-                    clearinghouse.totalBountyReservationsUsdc(ACCOUNT)
+                    clearinghouse.totalBountyReservationsAssets(ACCOUNT)
                 )
             ),
             "preview is read-only"
         );
         vm.prank(ACCOUNT);
         id = router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
-        assertEq(settlementBefore - clearinghouse.balanceUsdc(ACCOUNT), p.commitmentCarryUsdc);
+        assertEq(settlementBefore - clearinghouse.balanceAssets(ACCOUNT), p.commitmentCarryAssets);
         OrderV3Types.ExecutionAssessment memory actual =
             policyEvaluator.assessCommittedOrder(address(engine), id, executor, price);
         assertEq(
@@ -131,17 +131,17 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
             ) {
                 (,,, OrderV3Types.OrderReceipt memory receipt) =
                     abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
-                assertEq(receipt.economics.postSettlementBalanceUsdc, clearinghouse.balanceUsdc(ACCOUNT));
-                assertEq(receipt.economics.grossAccountDebitUsdc, predicted.grossAccountDebitUsdc);
-                assertEq(receipt.economics.actionChargeCollectedUsdc, predicted.actionChargeCollectedUsdc);
-                assertEq(receipt.economics.postTraderClaimBalanceUsdc, predicted.postTraderClaimUsdc);
+                assertEq(receipt.economics.postSettlementBalanceAssets, clearinghouse.balanceAssets(ACCOUNT));
+                assertEq(receipt.economics.grossAccountDebitAssets, predicted.grossAccountDebitAssets);
+                assertEq(receipt.economics.actionChargeCollectedAssets, predicted.actionChargeCollectedAssets);
+                assertEq(receipt.economics.postTraderClaimBalanceAssets, predicted.postTraderClaimAssets);
                 assertEq(keccak256(abi.encode(receipt.economics.close)), keccak256(abi.encode(predicted.close)));
                 assertEq(
-                    receipt.bounty.bountyEntitlementUsdc,
-                    receipt.bounty.bountyPaidUsdc + receipt.bounty.bountyRefundedUsdc
-                        + receipt.bounty.bountyForfeitedUsdc
+                    receipt.bounty.bountyEntitlementAssets,
+                    receipt.bounty.bountyPaidAssets + receipt.bounty.bountyRefundedAssets
+                        + receipt.bounty.bountyForfeitedAssets
                 );
-                assertEq(receipt.commitment.bountyFromFreeUsdc, receipt.bounty.bountyEntitlementUsdc);
+                assertEq(receipt.commitment.bountyFromFreeAssets, receipt.bounty.bountyEntitlementAssets);
                 return;
             }
         }
@@ -158,21 +158,21 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
         CfdTypes.Order memory o = _order(side, size);
         address executor = self ? ACCOUNT : KEEPER;
         (uint64 id, CfdClosePreview.ClosePreview memory p) = _commitParity(o, price, executor);
-        uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
+        uint256 keeperBefore = clearinghouse.balanceAssets(KEEPER);
         bytes[] memory update = _mockPythUpdateData(price);
         vm.recordLogs();
         vm.prank(executor);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         _assertReceipt(vm.getRecordedLogs(), id, p.assessment);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), p.assessment.postSettlementBalanceUsdc);
-        assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), p.assessment.postTraderClaimUsdc);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), p.assessment.postSettlementBalanceAssets);
+        assertEq(engine.traderClaimBalanceAssets(ACCOUNT), p.assessment.postTraderClaimAssets);
         (uint256 actualSize,,,,,,) = engine.positions(ACCOUNT);
         assertEq(actualSize, p.assessment.postPositionSize);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), p.assessment.postPositionMarginUsdc);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+        assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), p.assessment.postPositionMarginAssets);
+        assertEq(clearinghouse.totalBountyReservationsAssets(ACCOUNT), 0);
         if (!self) {
-            assertEq(clearinghouse.balanceUsdc(KEEPER), keeperBefore, "close executor receives no bounty");
+            assertEq(clearinghouse.balanceAssets(KEEPER), keeperBefore, "close executor receives no bounty");
         }
     }
 

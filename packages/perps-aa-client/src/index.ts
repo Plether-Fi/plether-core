@@ -14,7 +14,6 @@ export * from "./orderV3.js";
 
 export { classifyCloseFailureV3 } from "./orderV3.js";
 
-export { orderLifecycleV4Abi } from "./orderLifecycleV4Abi.js";
 export * from "./terminalHistory.js";
 export * from "./bridgeFunding.js";
 export * from "./bridgeFundingAbi.js";

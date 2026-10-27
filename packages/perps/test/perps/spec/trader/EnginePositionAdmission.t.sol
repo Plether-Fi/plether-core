@@ -65,7 +65,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         engine.processOrderTyped(order, 0.5e8, remainingDepth, uint64(block.timestamp));
 
         // Re-deposit to allow the trade
-        usdc.approve(address(juniorVault), withdrawnAssets);
+        settlementToken.approve(address(juniorVault), withdrawnAssets);
         _settleJuniorDepositFromBalance(address(this), withdrawnAssets);
 
         vm.prank(address(router));
@@ -75,12 +75,12 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         assertEq(size, 100_000 * 1e18, "Size mismatch");
         assertEq(margin, 1_847_500_000, "PnL pledge should exclude the dedicated liquidation reserve");
         assertEq(
-            clearinghouse.liquidationReserveUsdc(account),
+            clearinghouse.liquidationReserveAssets(account),
             100_000_000,
             "The entry-notional bounty target must be isolated in its dedicated reserve"
         );
         assertEq(
-            margin + clearinghouse.liquidationReserveUsdc(account),
+            margin + clearinghouse.liquidationReserveAssets(account),
             1_947_500_000,
             "PnL pledge plus liquidation reserve should conserve post-cost supplied collateral"
         );
@@ -160,7 +160,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         (, uint256 marginBefore,,,,,) = engine.positions(account);
-        uint256 lockedBefore = clearinghouse.lockedMarginUsdc(account);
+        uint256 lockedBefore = clearinghouse.lockedMarginAssets(account);
         uint256 totalLongMarginBefore = _sideTotalMargin(CfdTypes.Side.LONG);
 
         vm.prank(trader);
@@ -169,7 +169,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         (, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(marginAfter, marginBefore + 500 * 1e6, "Position margin should increase by the added amount");
         assertEq(
-            clearinghouse.lockedMarginUsdc(account),
+            clearinghouse.lockedMarginAssets(account),
             lockedBefore + 500 * 1e6,
             "Clearinghouse locked margin should increase by the same amount"
         );
@@ -218,10 +218,10 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         vm.prank(trader);
         engine.addMargin(account, 100e6);
 
-        (, uint256 marginAfter,, uint256 maxProfitUsdc,,,) = engine.positions(account);
+        (, uint256 marginAfter,, uint256 maxProfitAssets,,,) = engine.positions(account);
         assertEq(
-            _positionBorrowBaseUsdc(account),
-            PositionRiskAccountingLib.computeBorrowBaseUsdc(maxProfitUsdc, marginAfter),
+            _positionBorrowBaseAssets(account),
+            PositionRiskAccountingLib.computeBorrowBaseAssets(maxProfitAssets, marginAfter),
             "stale-mark add-margin should reduce future borrow base"
         );
     }
@@ -231,8 +231,8 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
 
         CfdEnginePlanTypes.OpenDelta memory delta = harness.planOpenWithExistingVpiAccrued(
             CfdEnginePlanLibHarness.OpenWithExistingVpiParams({
-                settlementBalanceUsdc: 1900e6,
-                positionMarginUsdc: 1700e6,
+                settlementBalanceAssets: 1900e6,
+                positionMarginAssets: 1700e6,
                 currentSize: 100_000e18,
                 currentEntryPrice: 1e8,
                 vpiAccrued: -1000e6,
@@ -244,8 +244,8 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
 
         assertTrue(delta.valid, "Fully backed legacy VPI must not be charged against open risk a second time");
         assertEq(uint8(delta.revertCode), uint8(CfdEnginePlanTypes.OpenRevertCode.OK));
-        assertEq(delta.vpiRebateReserveBeforeUsdc, 1000e6);
-        assertEq(delta.vpiRebateReserveAfterUsdc, 1000e6);
+        assertEq(delta.vpiRebateReserveBeforeAssets, 1000e6);
+        assertEq(delta.vpiRebateReserveAfterAssets, 1000e6);
     }
 
     function test_OpposingPosition_Reverts() public {
@@ -407,7 +407,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
-                minBountyUsdc: 1 * 1e6,
+                minBountyAssets: 1 * 1e6,
                 bountyBps: 10,
                 keeperShareBps: 5000,
                 protocolShareBps: 0
@@ -489,7 +489,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
             side: CfdTypes.Side.LONG,
             isClose: false
         });
-        uint256 chBeforeOpen = clearinghouse.balanceUsdc(account);
+        uint256 chBeforeOpen = clearinghouse.balanceAssets(account);
         vm.prank(address(router));
         engine.processOrderTyped(openOrder, 1e8, largeDepth, uint64(block.timestamp));
 
@@ -510,7 +510,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.processOrderTyped(closeOrder, 1e8, smallDepth, uint64(block.timestamp));
 
-        uint256 chAfterClose = clearinghouse.balanceUsdc(account);
+        uint256 chAfterClose = clearinghouse.balanceAssets(account);
 
         // Without fix: close at smallDepth yields massive VPI rebate (attacker profits).
         // With fix: stateful bound caps close rebate to what was paid on open → net VPI = 0.

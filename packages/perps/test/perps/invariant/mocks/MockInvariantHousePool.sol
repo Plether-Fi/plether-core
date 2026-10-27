@@ -1,32 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract MockInvariantHousePool is IHousePool {
 
-    using SafeERC20 for MockUSDC;
+    using SafeERC20 for MockSettlementToken;
 
-    MockUSDC public immutable usdc;
+    MockSettlementToken public immutable settlementToken;
     address public immutable engine;
     bool public lpEpochSettlementPaused;
-    uint256 public pendingRecapitalizationUsdc;
-    uint256 public pendingTradingRevenueUsdc;
+    uint256 public pendingRecapitalizationAssets;
+    uint256 public pendingTradingRevenueAssets;
 
     constructor(
-        address _usdc,
+        address _settlementToken,
         address _engine
     ) {
-        usdc = MockUSDC(_usdc);
+        settlementToken = MockSettlementToken(_settlementToken);
         engine = _engine;
-    }
-
-    function USDC() external view returns (address) {
-        return address(usdc);
     }
 
     function ENGINE() external view returns (address) {
@@ -34,36 +30,37 @@ contract MockInvariantHousePool is IHousePool {
     }
 
     function seedAssets(
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external {
-        usdc.mint(address(this), amountUsdc);
+        settlementToken.mint(address(this), amountAssets);
     }
 
     function setAssets(
-        uint256 targetAmountUsdc
+        uint256 targetAmountAssets
     ) external {
-        uint256 currentAssets = usdc.balanceOf(address(this));
-        if (targetAmountUsdc > currentAssets) {
-            usdc.mint(address(this), targetAmountUsdc - currentAssets);
-        } else if (currentAssets > targetAmountUsdc) {
-            usdc.burn(address(this), currentAssets - targetAmountUsdc);
+        uint256 currentAssets = settlementToken.balanceOf(address(this));
+        if (targetAmountAssets > currentAssets) {
+            settlementToken.mint(address(this), targetAmountAssets - currentAssets);
+        } else if (currentAssets > targetAmountAssets) {
+            settlementToken.burn(address(this), currentAssets - targetAmountAssets);
         }
     }
 
     function totalAssets() external view returns (uint256) {
-        return usdc.balanceOf(address(this));
+        return settlementToken.balanceOf(address(this));
     }
 
-    function getSettlementFreeUSDC() external view returns (uint256) {
+    function getSettlementFreeAssets() external view returns (uint256) {
         ICfdEngineCore host = ICfdEngineCore(engine);
-        (uint256 longMaxProfitUsdc,,,) = host.sides(0);
-        (uint256 shortMaxProfitUsdc,,,) = host.sides(1);
-        uint256 maxLiabilityUsdc = longMaxProfitUsdc > shortMaxProfitUsdc ? longMaxProfitUsdc : shortMaxProfitUsdc;
-        uint256 reservedUsdc = maxLiabilityUsdc + host.totalTraderClaimBalanceUsdc()
-            + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, host.settlementBufferBps())
-            + pendingRecapitalizationUsdc + pendingTradingRevenueUsdc;
-        uint256 cashUsdc = usdc.balanceOf(address(this));
-        return cashUsdc > reservedUsdc ? cashUsdc - reservedUsdc : 0;
+        (uint256 longMaxProfitAssets,,,) = host.sides(0);
+        (uint256 shortMaxProfitAssets,,,) = host.sides(1);
+        uint256 maxLiabilityAssets =
+            longMaxProfitAssets > shortMaxProfitAssets ? longMaxProfitAssets : shortMaxProfitAssets;
+        uint256 reservedAssets = maxLiabilityAssets + host.totalTraderClaimBalanceAssets()
+            + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, host.settlementBufferBps())
+            + pendingRecapitalizationAssets + pendingTradingRevenueAssets;
+        uint256 cashAssets = settlementToken.balanceOf(address(this));
+        return cashAssets > reservedAssets ? cashAssets - reservedAssets : 0;
     }
 
     function currentLpEpoch() external view returns (uint256) {
@@ -81,19 +78,19 @@ contract MockInvariantHousePool is IHousePool {
         uint256 amount
     ) external {
         _requireAuthorized();
-        usdc.safeTransfer(recipient, amount);
+        settlementToken.safeTransfer(recipient, amount);
     }
 
     function recordClaimantInflow(
-        uint256 amountUsdc,
+        uint256 amountAssets,
         IHousePool.ClaimantInflowKind kind,
         IHousePool.ClaimantInflowCashMode
     ) external {
         _requireAuthorized();
         if (kind == IHousePool.ClaimantInflowKind.Recapitalization) {
-            pendingRecapitalizationUsdc += amountUsdc;
+            pendingRecapitalizationAssets += amountAssets;
         } else {
-            pendingTradingRevenueUsdc += amountUsdc;
+            pendingTradingRevenueAssets += amountAssets;
         }
     }
 
@@ -139,7 +136,7 @@ contract MockInvariantHousePool is IHousePool {
         return 0;
     }
 
-    function maxSeniorExposureUsdc() external pure returns (uint256) {
+    function maxSeniorExposureAssets() external pure returns (uint256) {
         return type(uint256).max;
     }
 
@@ -151,7 +148,7 @@ contract MockInvariantHousePool is IHousePool {
         return type(uint256).max;
     }
 
-    function reservedSeniorDepositAssetsUsdc() external pure returns (uint256) {
+    function reservedSeniorDepositAssets() external pure returns (uint256) {
         return 0;
     }
 
@@ -163,7 +160,7 @@ contract MockInvariantHousePool is IHousePool {
         return 0;
     }
 
-    function terminalDeficitUsdc() external pure returns (uint256) {
+    function terminalDeficitAssets() external pure returns (uint256) {
         return 0;
     }
 
@@ -216,10 +213,10 @@ contract MockInvariantHousePool is IHousePool {
         external
         pure
         returns (
-            uint256 seniorPrincipalUsdc,
-            uint256 juniorPrincipalUsdc,
-            uint256 maxSeniorWithdrawUsdc,
-            uint256 maxJuniorWithdrawUsdc
+            uint256 seniorPrincipalAssets,
+            uint256 juniorPrincipalAssets,
+            uint256 maxSeniorWithdrawAssets,
+            uint256 maxJuniorWithdrawAssets
         )
     {
         return (0, 0, 0, 0);
@@ -228,7 +225,7 @@ contract MockInvariantHousePool is IHousePool {
     function getPendingDepositTrancheState()
         external
         pure
-        returns (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc)
+        returns (uint256 seniorPrincipalAssets, uint256 juniorPrincipalAssets)
     {
         return (0, 0);
     }
@@ -263,7 +260,7 @@ contract MockInvariantHousePool is IHousePool {
         return 0;
     }
 
-    function minTrancheDepositUsdc() external pure returns (uint256) {
+    function minTrancheDepositAssets() external pure returns (uint256) {
         return 1e6;
     }
 

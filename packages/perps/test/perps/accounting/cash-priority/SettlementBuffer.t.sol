@@ -17,21 +17,19 @@ import {Test} from "forge-std/Test.sol";
 contract SettlementBufferAccountingHarness {
 
     function target(
-        uint256 maxLiabilityUsdc,
+        uint256 maxLiabilityAssets,
         uint256 settlementBufferBps
     ) external pure returns (uint256) {
-        return SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, settlementBufferBps);
+        return SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, settlementBufferBps);
     }
 
     function isCovered(
-        uint256 effectiveAssetsUsdc,
-        uint256 maxLiabilityUsdc,
+        uint256 effectiveAssets,
+        uint256 maxLiabilityAssets,
         uint256 settlementBufferBps
     ) external pure returns (bool) {
         return
-            SolvencyAccountingLib.hasRequiredSettlementBuffer(
-                effectiveAssetsUsdc, maxLiabilityUsdc, settlementBufferBps
-            );
+            SolvencyAccountingLib.hasRequiredSettlementBuffer(effectiveAssets, maxLiabilityAssets, settlementBufferBps);
     }
 
 }
@@ -56,24 +54,27 @@ contract SettlementBufferAccountingTest is Test {
     }
 
     function test_HasRequiredSettlementBuffer_AcceptsEqualityAndRejectsOneAtomLess() public view {
-        uint256 liabilityUsdc = 400_000e6;
-        uint256 bufferUsdc = harness.target(liabilityUsdc, 25);
-        uint256 exactRequirementUsdc = liabilityUsdc + bufferUsdc;
+        uint256 liabilityAssets = 400_000e6;
+        uint256 bufferAssets = harness.target(liabilityAssets, 25);
+        uint256 exactRequirementAssets = liabilityAssets + bufferAssets;
 
         assertTrue(
-            harness.isCovered(exactRequirementUsdc, liabilityUsdc, 25), "exact liability-plus-buffer equality must pass"
+            harness.isCovered(exactRequirementAssets, liabilityAssets, 25),
+            "exact liability-plus-buffer equality must pass"
         );
         assertFalse(
-            harness.isCovered(exactRequirementUsdc - 1, liabilityUsdc, 25), "one atom below the buffer must fail"
+            harness.isCovered(exactRequirementAssets - 1, liabilityAssets, 25), "one atom below the buffer must fail"
         );
         assertFalse(
-            harness.isCovered(liabilityUsdc, liabilityUsdc, 25), "raw solvency equality is intentionally under-buffer"
+            harness.isCovered(liabilityAssets, liabilityAssets, 25),
+            "raw solvency equality is intentionally under-buffer"
         );
         assertTrue(
-            harness.isCovered(liabilityUsdc, liabilityUsdc, 0), "disabled buffer must preserve raw solvency equality"
+            harness.isCovered(liabilityAssets, liabilityAssets, 0),
+            "disabled buffer must preserve raw solvency equality"
         );
         assertFalse(
-            harness.isCovered(liabilityUsdc - 1, liabilityUsdc, 0),
+            harness.isCovered(liabilityAssets - 1, liabilityAssets, 0),
             "disabled buffer must not weaken the raw insolvency boundary"
         );
     }
@@ -116,15 +117,15 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         _fundTrader(freshTrader, 10_000e6);
         _open(incumbent, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
 
-        uint256 maxLiabilityUsdc = _maxLiability();
-        uint256 settlementBufferUsdc =
-            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engine.settlementBufferBps());
-        uint256 poolAssetsUsdc = pool.totalAssets();
-        assertGt(poolAssetsUsdc, maxLiabilityUsdc, "setup must have drainable raw-solvency headroom");
+        uint256 maxLiabilityAssets = _maxLiability();
+        uint256 settlementBufferAssets =
+            SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, engine.settlementBufferBps());
+        uint256 poolAssets = pool.totalAssets();
+        assertGt(poolAssets, maxLiabilityAssets, "setup must have drainable raw-solvency headroom");
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssetsUsdc - maxLiabilityUsdc);
-        assertEq(pool.totalAssets(), maxLiabilityUsdc, "setup must stop at raw solvency equality");
+        settlementToken.transfer(address(0xDEAD), poolAssets - maxLiabilityAssets);
+        assertEq(pool.totalAssets(), maxLiabilityAssets, "setup must stop at raw solvency equality");
 
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
         engine.clearDegradedMode();
@@ -132,13 +133,13 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory accounting =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        assertEq(accounting.effectiveSolvencyAssetsUsdc, maxLiabilityUsdc, "raw effective assets");
+        assertEq(accounting.effectiveSolvencyAssets, maxLiabilityAssets, "raw effective assets");
         assertEq(
-            accounting.withdrawalReservedUsdc,
-            maxLiabilityUsdc + settlementBufferUsdc,
+            accounting.withdrawalReservedAssets,
+            maxLiabilityAssets + settlementBufferAssets,
             "LP withdrawal reserve must retain the settlement buffer"
         );
-        assertEq(accounting.freeUsdc, 0, "under-buffer raw solvency must expose no LP withdrawal cash");
+        assertEq(accounting.freeAssets, 0, "under-buffer raw solvency must expose no LP withdrawal cash");
 
         uint8 revertCode = engineLens.previewOpenRevertCode(freshTrader, CfdTypes.Side.SHORT, 10_000e18, 1000e6, 1e8);
         assertEq(
@@ -168,30 +169,30 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         _fundTrader(queuedTrader, 10_000e6);
         _open(incumbent, CfdTypes.Side.SHORT, 300_000e18, 5000e6, 1e8);
 
-        uint256 maxLiabilityUsdc = _maxLiability();
-        uint256 bufferAtCommitUsdc =
-            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engine.settlementBufferBps());
-        uint256 assetsAtCommitUsdc = maxLiabilityUsdc + bufferAtCommitUsdc;
-        uint256 poolAssetsUsdc = pool.totalAssets();
+        uint256 maxLiabilityAssets = _maxLiability();
+        uint256 bufferAtCommitAssets =
+            SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, engine.settlementBufferBps());
+        uint256 assetsAtCommitAssets = maxLiabilityAssets + bufferAtCommitAssets;
+        uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssetsUsdc - assetsAtCommitUsdc);
+        settlementToken.transfer(address(0xDEAD), poolAssets - assetsAtCommitAssets);
 
         uint256 queuedSize = 10_000e18;
-        uint256 queuedMarginUsdc = 1000e6;
+        uint256 queuedMarginAssets = 1000e6;
         uint8 commitCode =
-            engineLens.previewOpenRevertCode(queuedTrader, CfdTypes.Side.LONG, queuedSize, queuedMarginUsdc, 1e8);
+            engineLens.previewOpenRevertCode(queuedTrader, CfdTypes.Side.LONG, queuedSize, queuedMarginAssets, 1e8);
         assertEq(commitCode, uint8(CfdEnginePlanTypes.OpenRevertCode.OK), "25 bps commit preflight must pass");
 
         uint64 orderId = router.nextCommitId();
         vm.prank(queuedTrader);
-        router.commitOrder(CfdTypes.Side.LONG, queuedSize, queuedMarginUsdc, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, queuedSize, queuedMarginAssets, 1e8, false);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(orderId);
 
         vm.warp(activationTime);
         engineAdmin.finalizeRiskConfig();
 
         uint8 executionCode =
-            engineLens.previewOpenRevertCode(queuedTrader, CfdTypes.Side.LONG, queuedSize, queuedMarginUsdc, 1e8);
+            engineLens.previewOpenRevertCode(queuedTrader, CfdTypes.Side.LONG, queuedSize, queuedMarginAssets, 1e8);
         assertEq(
             executionCode,
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),

@@ -106,7 +106,7 @@ export function mapPerpsExecutionError(error: unknown): PerpsClientError {
   if (/sign.?typed.?data.*(unsupported|not supported)|method not found.*typed/.test(normalized)) {
     return mapped(
       "WALLET_UNSUPPORTED",
-      "This wallet cannot sign the USDC authorization required for a gasless first deposit.",
+      "This wallet cannot sign the settlement-token authorization required for an owner-wallet deposit.",
     );
   }
   if (/sponsor(ship)? (policy )?(denied|rejected)|policy_denied|not eligible/.test(normalized)) {
@@ -118,7 +118,7 @@ export function mapPerpsExecutionError(error: unknown): PerpsClientError {
   if (/insufficientfreeequity|insufficientbalance|insufficient initial margin|insufficient margin/.test(normalized)) {
     return mapped(
       "INSUFFICIENT_MARGIN",
-      "Not enough available USDC margin for this action.",
+      "Not enough available settlement-token margin for this action.",
     );
   }
   if (/noopenposition|no open position/.test(normalized)) {
@@ -143,7 +143,7 @@ export function mapPerpsExecutionError(error: unknown): PerpsClientError {
   if (/authorization.*(expired|used|invalid)|invalid.*authorization|eip.?3009/.test(normalized)) {
     return mapped(
       "AUTHORIZATION_INVALID",
-      "The USDC authorization is invalid or expired. Sign a new deposit authorization.",
+      "The settlement-token authorization is invalid or expired. Sign a new deposit authorization.",
       true,
     );
   }

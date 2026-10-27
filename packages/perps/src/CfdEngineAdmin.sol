@@ -13,7 +13,7 @@ import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost
 ///      its pending value and restarts that category's 72-hour delay. Proposals survive ownership transfer, so the
 ///      current owner at execution time may finalize or cancel them. Finalization is permitted at or after its activation
 ///      timestamp and proposals do not expire. Basis-point values use a 10,000 denominator, WAD values use 1e18,
-///      USDC amounts use 6 decimals, and timestamps/durations use seconds.
+///      settlement token amounts use 6 decimals, and timestamps/durations use seconds.
 contract CfdEngineAdmin is Ownable2Step {
 
     /// @notice Delay between a proposal and its earliest finalization, in seconds.
@@ -266,7 +266,7 @@ contract CfdEngineAdmin is Ownable2Step {
         if (riskParams_.baseCarryBps > 100_000) {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
-        if (riskParams_.minBountyUsdc == 0 || riskParams_.bountyBps == 0) {
+        if (riskParams_.minBountyAssets == 0 || riskParams_.bountyBps == 0) {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
         if (riskParams_.keeperShareBps > 10_000 || riskParams_.protocolShareBps > 10_000 - riskParams_.keeperShareBps) {

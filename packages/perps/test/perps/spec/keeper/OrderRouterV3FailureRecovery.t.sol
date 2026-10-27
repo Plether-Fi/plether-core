@@ -37,17 +37,17 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
         request.bounds.executionWindowSeconds = 60;
         request.bounds.allowedExecutionModes = 7;
         request.bounds.expectedConfigHash = book.currentExecutionConfigHash();
-        request.bounds.maxExecutionBountyUsdc = type(uint256).max;
-        request.bounds.maxExecutionNotionalUsdc = type(uint256).max;
-        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
-        request.bounds.maxActionChargeUsdc = type(uint256).max;
-        request.bounds.maxExplicitFeesUsdc = type(uint256).max;
+        request.bounds.maxExecutionBountyAssets = type(uint256).max;
+        request.bounds.maxExecutionNotionalAssets = type(uint256).max;
+        request.bounds.maxGrossAccountDebitAssets = type(uint256).max;
+        request.bounds.maxActionChargeAssets = type(uint256).max;
+        request.bounds.maxExplicitFeesAssets = type(uint256).max;
         request.bounds.maxPostPositionSize = type(uint256).max;
         request.bounds.maxPostLeverageBps = type(uint32).max;
         vm.prank(ALICE);
         orderId = router.commitOrder(request);
         pendingHash = keccak256(abi.encode(book.pendingIntent(orderId)));
-        freeSettlement = _freeSettlementUsdc(ALICE);
+        freeSettlement = _freeSettlementAssets(ALICE);
         keeperSettlement = _settlementBalance(KEEPER);
     }
 
@@ -123,7 +123,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
         input.reason = OrderV3Types.TerminalReason.Expired;
         _expectInvalidReceipt(input);
         input = _riskOffInput();
-        input.bountyUsdc++;
+        input.bountyAssets++;
         vm.expectRevert(
             abi.encodeWithSelector(OrderRecoverySidecar.OrderRecoverySidecar__OrderIdentityMismatch.selector, orderId)
         );
@@ -220,8 +220,8 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
         input.orderId = orderId;
         input.executor = KEEPER;
         input.reason = OrderV3Types.TerminalReason.RiskOff;
-        input.bountyUsdc = book.pendingIntent(orderId).executionBountyUsdc;
-        input.bountyRefundedUsdc = input.bountyUsdc;
+        input.bountyAssets = book.pendingIntent(orderId).executionBountyAssets;
+        input.bountyRefundedAssets = input.bountyAssets;
         input.bountyDisposition = OrderV3Types.BountyDisposition.RefundedToAccount;
         input.bountyRecipient = ALICE;
     }
@@ -239,7 +239,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
         assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
         assertEq(book.terminalOutcome(orderId).receiptHash, bytes32(0), "no false terminal evidence");
         assertEq(_remainingCommittedMargin(orderId), 1000e6);
-        assertEq(_freeSettlementUsdc(ALICE), freeSettlement);
+        assertEq(_freeSettlementAssets(ALICE), freeSettlement);
         assertEq(_settlementBalance(KEEPER), keeperSettlement, "no failed-attempt bounty");
         assertEq(router.pendingOrderCounts(ALICE), 1);
         assertEq(router.nextExecuteId(), orderId);

@@ -37,10 +37,10 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
         _fundTrader(alice, 20_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
-        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 fees = clearinghouse.balanceAssets(engine.protocolTreasury());
         assertGt(fees, 0, "Setup should accrue protocol fees");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             fees,
             "Protocol fees should live in the treasury clearinghouse account"
         );
@@ -57,24 +57,24 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
-        uint256 aliceClaim = engine.traderClaimBalanceUsdc(aliceAccount);
+        uint256 aliceClaim = engine.traderClaimBalanceAssets(aliceAccount);
         assertGt(aliceClaim, 0, "setup must create a trader claim");
 
-        usdc.mint(address(pool), aliceClaim);
+        settlementToken.mint(address(pool), aliceClaim);
 
-        uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobAccount);
+        uint256 bobSettlementBefore = clearinghouse.balanceAssets(bobAccount);
         _close(bobAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         assertGt(
-            engine.traderClaimBalanceUsdc(bobAccount),
+            engine.traderClaimBalanceAssets(bobAccount),
             0,
             "new payout must become a claim while older trader claims reserve cash"
         );
         assertEq(
-            clearinghouse.balanceUsdc(bobAccount),
+            clearinghouse.balanceAssets(bobAccount),
             bobSettlementBefore,
             "fresh profitable close must not bypass older trader claims via immediate payment"
         );
@@ -87,13 +87,13 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
-        uint256 traderClaim = engine.traderClaimBalanceUsdc(aliceAccount);
+        uint256 traderClaim = engine.traderClaimBalanceAssets(aliceAccount);
         assertGt(traderClaim, 0, "setup must create a trader claim");
 
-        usdc.mint(address(pool), traderClaim);
+        settlementToken.mint(address(pool), traderClaim);
 
         assertTrue(
             _traderClaimStatus(aliceAccount, address(0)).traderClaimServiceableNow,
@@ -112,31 +112,35 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
         _close(bobAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
-        uint256 aliceClaim = engine.traderClaimBalanceUsdc(aliceAccount);
-        uint256 bobClaim = engine.traderClaimBalanceUsdc(bobAccount);
+        uint256 aliceClaim = engine.traderClaimBalanceAssets(aliceAccount);
+        uint256 bobClaim = engine.traderClaimBalanceAssets(bobAccount);
         assertGt(aliceClaim, 0, "setup must create oldest trader claim");
         assertGt(bobClaim, 0, "setup must create second trader claim");
 
-        usdc.mint(address(pool), aliceClaim / 2);
+        settlementToken.mint(address(pool), aliceClaim / 2);
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(alice);
         engine.settleTraderClaim(aliceAccount);
 
-        assertEq(engine.traderClaimBalanceUsdc(aliceAccount), aliceClaim, "Oldest trader claim should remain frozen");
-        assertEq(engine.traderClaimBalanceUsdc(bobAccount), bobClaim, "Unclaimed later balance should remain unchanged");
+        assertEq(engine.traderClaimBalanceAssets(aliceAccount), aliceClaim, "Oldest trader claim should remain frozen");
+        assertEq(
+            engine.traderClaimBalanceAssets(bobAccount), bobClaim, "Unclaimed later balance should remain unchanged"
+        );
 
-        usdc.mint(address(pool), bobClaim / 2);
+        settlementToken.mint(address(pool), bobClaim / 2);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(bob);
         engine.settleTraderClaim(bobAccount);
 
-        assertEq(engine.traderClaimBalanceUsdc(bobAccount), bobClaim, "Later trader claimant should remain frozen too");
+        assertEq(
+            engine.traderClaimBalanceAssets(bobAccount), bobClaim, "Later trader claimant should remain frozen too"
+        );
     }
 
 }
@@ -164,7 +168,7 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
         _open(bobAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
-        assertEq(_freeSettlementUsdc(aliceAccount), 0, "setup must leave no idle settlement");
+        assertEq(_freeSettlementAssets(aliceAccount), 0, "setup must leave no idle settlement");
         (, uint256 marginBefore,,,,,) = engine.positions(aliceAccount);
 
         vm.prank(alice);
@@ -175,7 +179,7 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         assertEq(router.pendingOrderCounts(aliceAccount), 1, "accepted close enters FIFO");
         assertEq(router.nextCommitId(), 2, "accepted close consumes one ID");
         assertEq(
-            clearinghouse.getLockedMarginBuckets(aliceAccount).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(aliceAccount).reservedSettlementAssets,
             0,
             "bounty is protected in action reserve"
         );

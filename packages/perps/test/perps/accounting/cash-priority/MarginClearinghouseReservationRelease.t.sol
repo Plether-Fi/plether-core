@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract ReservationReleaseEngineMock {
@@ -28,7 +28,7 @@ contract ReservationReleaseEngineMock {
 contract MarginClearinghouseReservationReleaseTest is Test {
 
     MarginClearinghouse internal clearinghouse;
-    MockUSDC internal usdc;
+    MockSettlementToken internal settlementToken;
     ReservationReleaseEngineMock internal engine;
 
     address internal constant ACCOUNT = address(0xA11CE);
@@ -36,16 +36,16 @@ contract MarginClearinghouseReservationReleaseTest is Test {
     address internal constant STRANGER = address(0xCA11);
 
     function setUp() public {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         engine = new ReservationReleaseEngineMock();
         engine.setOrderRouter(ROUTER);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         clearinghouse.setEngine(address(engine));
 
-        usdc.mint(ACCOUNT, 1000e6);
+        settlementToken.mint(ACCOUNT, 1000e6);
         vm.startPrank(ACCOUNT);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(ACCOUNT, 1000e6);
         vm.stopPrank();
     }
@@ -53,15 +53,15 @@ contract MarginClearinghouseReservationReleaseTest is Test {
     function test_TerminalCleanup_SkipsCarryAndReconcilesReservationAccounting() public {
         _reserve(3, 210e6);
         uint256 carryCallsBefore = engine.carryCheckpointCalls();
-        uint256 settlementBefore = clearinghouse.balanceUsdc(ACCOUNT);
+        uint256 settlementBefore = clearinghouse.balanceAssets(ACCOUNT);
 
         vm.prank(ROUTER);
-        uint256 releasedUsdc = clearinghouse.releaseOrderReservationForTerminalCleanup(3);
+        uint256 releasedAssets = clearinghouse.releaseOrderReservationForTerminalCleanup(3);
 
         _assertReleased(3, 210e6);
-        assertEq(releasedUsdc, 210e6);
+        assertEq(releasedAssets, 210e6);
         assertEq(engine.carryCheckpointCalls(), carryCallsBefore, "terminal release must not checkpoint carry");
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), settlementBefore, "release must not debit settlement");
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), settlementBefore, "release must not debit settlement");
     }
 
     function test_TerminalCleanup_IsRouterOnlyAndIdempotentForInactiveReservations() public {
@@ -90,15 +90,15 @@ contract MarginClearinghouseReservationReleaseTest is Test {
 
     function _reserve(
         uint64 orderId,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
         vm.prank(address(engine));
-        clearinghouse.reserveCommittedOrderMargin(ACCOUNT, orderId, amountUsdc);
+        clearinghouse.reserveCommittedOrderMargin(ACCOUNT, orderId, amountAssets);
     }
 
     function _assertReleased(
         uint64 orderId,
-        uint256 originalAmountUsdc
+        uint256 originalAmountAssets
     ) internal view {
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
         IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(ACCOUNT);
@@ -106,12 +106,12 @@ contract MarginClearinghouseReservationReleaseTest is Test {
             clearinghouse.getAccountReservationSummary(ACCOUNT);
 
         assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Released));
-        assertEq(reservation.originalAmountUsdc, originalAmountUsdc);
-        assertEq(reservation.remainingAmountUsdc, 0);
-        assertEq(buckets.committedOrderMarginUsdc, 0);
-        assertEq(summary.activeCommittedOrderMarginUsdc, 0);
+        assertEq(reservation.originalAmountAssets, originalAmountAssets);
+        assertEq(reservation.remainingAmountAssets, 0);
+        assertEq(buckets.committedOrderMarginAssets, 0);
+        assertEq(summary.activeCommittedOrderMarginAssets, 0);
         assertEq(summary.activeReservationCount, 0);
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(ACCOUNT), clearinghouse.balanceUsdc(ACCOUNT));
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(ACCOUNT), clearinghouse.balanceAssets(ACCOUNT));
     }
 
 }

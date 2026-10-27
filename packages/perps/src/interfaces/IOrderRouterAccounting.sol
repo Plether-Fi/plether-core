@@ -22,15 +22,15 @@ interface IOrderRouterAccounting {
     }
 
     /// @notice Router/accounting view of queued order reservations attributed to an account.
-    /// @dev `committedMarginUsdc` is derived from canonical MarginClearinghouse reservation state.
-    ///      `executionBountyUsdc` is the clearinghouse aggregate across order and protection bounty namespaces.
-    ///      The router owns lifecycle counts and holds no settlement cash. Monetary fields use 6-decimal USDC.
-    /// @param committedMarginUsdc Remaining committed margin across active clearinghouse reservations.
-    /// @param executionBountyUsdc Unpaid open-order and protection-trigger bounties; close bounties are zero.
+    /// @dev `committedMarginAssets` is derived from canonical MarginClearinghouse reservation state.
+    ///      `executionBountyAssets` is the clearinghouse aggregate across order and protection bounty namespaces.
+    ///      The router owns lifecycle counts and holds no settlement cash. Monetary fields use 6-decimal settlement token.
+    /// @param committedMarginAssets Remaining committed margin across active clearinghouse reservations.
+    /// @param executionBountyAssets Unpaid open-order and protection-trigger bounties; close bounties are zero.
     /// @param pendingOrderCount Number of linked pending orders for the account.
     struct AccountReservationView {
-        uint256 committedMarginUsdc;
-        uint256 executionBountyUsdc;
+        uint256 committedMarginAssets;
+        uint256 executionBountyAssets;
         uint256 pendingOrderCount;
     }
 
@@ -39,12 +39,12 @@ interface IOrderRouterAccounting {
     /// @param isClose Whether the order strictly reduces queued position exposure.
     /// @param side Direction to open/increase or direction of the queued position being closed.
     /// @param sizeDelta Position-size change with 18 decimals.
-    /// @param marginDelta Original order-supplied margin in USDC; close orders require zero.
+    /// @param marginDelta Original order-supplied margin in settlement token; close orders require zero.
     /// @param targetPrice Nonzero direction-aware execution limit with 8 decimals.
     /// @param commitTime Submission timestamp in Unix seconds.
     /// @param commitBlock Submission block number.
-    /// @param committedMarginUsdc Current remaining clearinghouse reservation for the order, in USDC.
-    /// @param executionBountyUsdc Current unpaid clearinghouse-custodied keeper bounty, in USDC.
+    /// @param committedMarginAssets Current remaining clearinghouse reservation for the order, in settlement token.
+    /// @param executionBountyAssets Current unpaid clearinghouse-custodied keeper bounty, in settlement token.
     struct PendingOrderView {
         uint64 orderId;
         bool isClose;
@@ -54,8 +54,8 @@ interface IOrderRouterAccounting {
         uint256 targetPrice;
         uint64 commitTime;
         uint64 commitBlock;
-        uint256 committedMarginUsdc;
-        uint256 executionBountyUsdc;
+        uint256 committedMarginAssets;
+        uint256 executionBountyAssets;
     }
 
     /// @notice Returns aggregate queued reservation attributed to an account across all pending orders.

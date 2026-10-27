@@ -13,27 +13,27 @@ import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginC
 contract WithdrawResidualCarryRollbackTest is BasePerpTest {
 
     struct CarryState {
-        uint256 borrowBaseUsdc;
+        uint256 borrowBaseAssets;
         uint256 lastCarryIndex;
         uint64 lastCarryTimestamp;
         uint256 sideCarryIndex;
         uint64 sideCarryTimestamp;
-        uint256 unsettledCarryUsdc;
+        uint256 unsettledCarryAssets;
     }
 
     struct CustodyState {
-        uint256 settlementBalanceUsdc;
-        uint256 pnlPledgeUsdc;
-        uint256 liquidationReserveUsdc;
-        uint256 orderMarginUsdc;
-        uint256 actionReserveUsdc;
-        uint256 vpiRebateReserveUsdc;
-        uint256 totalLockedUsdc;
-        uint256 freeSettlementUsdc;
-        uint256 clearinghouseCashUsdc;
-        uint256 poolCashUsdc;
-        uint256 poolAccountedAssetsUsdc;
-        uint256 traderCashUsdc;
+        uint256 settlementBalanceAssets;
+        uint256 pnlPledgeAssets;
+        uint256 liquidationReserveAssets;
+        uint256 orderMarginAssets;
+        uint256 actionReserveAssets;
+        uint256 vpiRebateReserveAssets;
+        uint256 totalLockedAssets;
+        uint256 freeSettlementAssets;
+        uint256 clearinghouseCashAssets;
+        uint256 poolCashAssets;
+        uint256 poolAccountedAssets;
+        uint256 traderCashAssets;
     }
 
     struct RollbackState {
@@ -52,28 +52,28 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         _open(account, CfdTypes.Side.LONG, 50_000e18, 850e6, executionPrice);
         vm.warp(block.timestamp + 3 * 365 days);
 
-        uint256 pendingCarryUsdc = _expectedIndexedCarryUsdc(account);
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+        uint256 pendingCarryAssets = _expectedIndexedCarryAssets(account);
+        IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
         (
             MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption,
-            IMarginClearinghouse.AccountUsdcBuckets memory afterCarry
-        ) = MarginClearinghouseAccountingLib.projectCarryLoss(buckets, pendingCarryUsdc);
-        assertGt(pendingCarryUsdc, 0, "setup must accrue carry");
-        assertEq(carryConsumption.uncoveredUsdc, 0, "margin and free settlement must fully fund carry");
-        assertGt(carryConsumption.activeMarginConsumedUsdc, 0, "carry must consume active margin first");
-        assertGt(afterCarry.freeSettlementUsdc, 0, "free cash must remain despite impaired price health");
+            IMarginClearinghouse.AccountAssetBuckets memory afterCarry
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(buckets, pendingCarryAssets);
+        assertGt(pendingCarryAssets, 0, "setup must accrue carry");
+        assertEq(carryConsumption.uncoveredAssets, 0, "margin and free settlement must fully fund carry");
+        assertGt(carryConsumption.activeMarginConsumedAssets, 0, "carry must consume active margin first");
+        assertGt(afterCarry.freeSettlementAssets, 0, "free cash must remain despite impaired price health");
 
-        uint256 priceCollateralUsdc = buckets.activePositionMarginUsdc + engine.traderClaimBalanceUsdc(account);
+        uint256 priceCollateralAssets = buckets.activePositionMarginAssets + engine.traderClaimBalanceAssets(account);
         uint256 maintenanceBps = _maintenanceMarginBps();
         assertFalse(
-            _isPriceRiskLiquidatable(account, executionPrice, priceCollateralUsdc, maintenanceBps),
+            _isPriceRiskLiquidatable(account, executionPrice, priceCollateralAssets, maintenanceBps),
             "exact price risk must be healthy"
         );
         assertTrue(
             _isPriceRiskLiquidatable(
                 account,
                 executionPrice,
-                afterCarry.activePositionMarginUsdc + engine.traderClaimBalanceUsdc(account),
+                afterCarry.activePositionMarginAssets + engine.traderClaimBalanceAssets(account),
                 maintenanceBps
             ),
             "margin-funded carry must breach the maintained price-risk threshold"
@@ -91,35 +91,35 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
 
         _fundTrader(trader, 3500e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 3000e6, executionPrice);
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
-        assertGt(withdrawableUsdc, 0, "setup must initially have removable free settlement");
+        uint256 withdrawableAssets = engineAccountLens.getWithdrawableAssets(account);
+        assertGt(withdrawableAssets, 0, "setup must initially have removable free settlement");
         vm.prank(trader);
-        clearinghouse.withdraw(account, withdrawableUsdc);
+        clearinghouse.withdraw(account, withdrawableAssets);
 
         vm.warp(block.timestamp + 10 * 365 days);
         // A favorable price leaves exact price equity healthy even after carry consumes all available cash.
         uint256 riskPrice = 90_000_000;
         vm.prank(address(router));
         engine.updateMarkPrice(riskPrice, uint64(block.timestamp));
-        uint256 pendingCarryUsdc = _expectedIndexedCarryUsdc(account);
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+        uint256 pendingCarryAssets = _expectedIndexedCarryAssets(account);
+        IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
         (
             MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption,
-            IMarginClearinghouse.AccountUsdcBuckets memory afterCarry
-        ) = MarginClearinghouseAccountingLib.projectCarryLoss(buckets, pendingCarryUsdc);
-        assertGt(carryConsumption.uncoveredUsdc, 0, "setup must leave carry independently delinquent");
+            IMarginClearinghouse.AccountAssetBuckets memory afterCarry
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(buckets, pendingCarryAssets);
+        assertGt(carryConsumption.uncoveredAssets, 0, "setup must leave carry independently delinquent");
 
-        uint256 priceCollateralUsdc = afterCarry.activePositionMarginUsdc + engine.traderClaimBalanceUsdc(account);
+        uint256 priceCollateralAssets = afterCarry.activePositionMarginAssets + engine.traderClaimBalanceAssets(account);
         uint256 maintenanceBps = _maintenanceMarginBps();
         assertFalse(
-            _isPriceRiskLiquidatable(account, riskPrice, priceCollateralUsdc, maintenanceBps),
+            _isPriceRiskLiquidatable(account, riskPrice, priceCollateralAssets, maintenanceBps),
             "post-carry price equity must remain healthy independently of uncovered carry"
         );
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
         assertTrue(snapshot.liquidatable, "any uncovered carry must independently mark delinquency");
         assertTrue(publicLens.isLiquidatable(account), "public lens must expose carry delinquency");
-        assertEq(engineAccountLens.getWithdrawableUsdc(account), 0, "delinquent carry must block withdrawal");
+        assertEq(engineAccountLens.getWithdrawableAssets(account), 0, "delinquent carry must block withdrawal");
     }
 
     function test_WithdrawResidualCarryBlocksAndRollsBackEveryProvisionalMutation() public {
@@ -144,24 +144,24 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
 
         CfdTypes.Side positionSide;
         {
-            uint256 pendingCarryUsdc = _expectedIndexedCarryUsdc(account);
+            uint256 pendingCarryAssets = _expectedIndexedCarryAssets(account);
             (
                 MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption,
-                IMarginClearinghouse.AccountUsdcBuckets memory afterCarry
+                IMarginClearinghouse.AccountAssetBuckets memory afterCarry
             ) = MarginClearinghouseAccountingLib.projectCarryLoss(
-                clearinghouse.getAccountUsdcBuckets(account), pendingCarryUsdc
+                clearinghouse.getAccountAssetBuckets(account), pendingCarryAssets
             );
-            assertGt(carryConsumption.activeMarginConsumedUsdc, 0, "setup must provisionally debit active margin");
-            assertGt(carryConsumption.freeSettlementConsumedUsdc, 0, "setup must provisionally debit free settlement");
-            assertGt(carryConsumption.uncoveredUsdc, 0, "setup must leave uncovered carry after realization");
+            assertGt(carryConsumption.activeMarginConsumedAssets, 0, "setup must provisionally debit active margin");
+            assertGt(carryConsumption.freeSettlementConsumedAssets, 0, "setup must provisionally debit free settlement");
+            assertGt(carryConsumption.uncoveredAssets, 0, "setup must leave uncovered carry after realization");
 
             positionSide = _position(account).side;
-            uint256 reachablePriceCollateralUsdc =
-                afterCarry.activePositionMarginUsdc + engine.traderClaimBalanceUsdc(account);
+            uint256 reachablePriceCollateralAssets =
+                afterCarry.activePositionMarginAssets + engine.traderClaimBalanceAssets(account);
             uint256 requiredMarginBps = _withdrawRequiredMarginBps();
 
             assertFalse(
-                _isPriceRiskLiquidatable(account, riskPrice, reachablePriceCollateralUsdc, requiredMarginBps),
+                _isPriceRiskLiquidatable(account, riskPrice, reachablePriceCollateralAssets, requiredMarginBps),
                 "post-carry price equity must remain healthy so uncovered carry independently blocks withdrawal"
             );
         }
@@ -185,8 +185,8 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         );
         assertEq(terminalBookAfter.totalLots, beforeState.terminalBook.totalLots, "terminal book lots must roll back");
         assertEq(
-            terminalBookAfter.totalEffectiveCapUsdcAtoms,
-            beforeState.terminalBook.totalEffectiveCapUsdcAtoms,
+            terminalBookAfter.totalEffectiveCapAssetAtoms,
+            beforeState.terminalBook.totalEffectiveCapAssetAtoms,
             "terminal collectible cap must roll back"
         );
     }
@@ -194,16 +194,16 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
     function _isPriceRiskLiquidatable(
         address account,
         uint256 price,
-        uint256 priceCollateralUsdc,
+        uint256 priceCollateralAssets,
         uint256 requiredMarginBps
     ) internal view returns (bool) {
         return engine.planner()
             .isExactPriceRiskLiquidatable(
                 _position(account),
-                engine.positionEntryCostUsdcAtoms(account),
+                engine.positionEntryCostAssetAtoms(account),
                 price,
                 engine.CAP_PRICE(),
-                priceCollateralUsdc,
+                priceCollateralAssets,
                 requiredMarginBps
             );
     }
@@ -221,7 +221,7 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
     function _position(
         address account
     ) internal view returns (CfdTypes.Position memory pos) {
-        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
+        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitAssets, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engine.positions(account);
     }
 
@@ -240,11 +240,11 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         address account,
         CfdTypes.Side side
     ) internal view returns (CarryState memory state) {
-        (state.borrowBaseUsdc, state.lastCarryIndex, state.lastCarryTimestamp) = engine.positionCarryState(account);
+        (state.borrowBaseAssets, state.lastCarryIndex, state.lastCarryTimestamp) = engine.positionCarryState(account);
         uint256 sideIndex = uint256(side);
         state.sideCarryIndex = engine.sideCarryIndex(sideIndex);
         state.sideCarryTimestamp = engine.sideCarryTimestamp(sideIndex);
-        state.unsettledCarryUsdc = engine.unsettledCarryUsdc(account);
+        state.unsettledCarryAssets = engine.unsettledCarryAssets(account);
     }
 
     function _custodyState(
@@ -252,52 +252,50 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         address trader
     ) internal view returns (CustodyState memory state) {
         IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(account);
-        state.settlementBalanceUsdc = buckets.settlementBalanceUsdc;
-        state.pnlPledgeUsdc = buckets.pnlPledgeUsdc;
-        state.liquidationReserveUsdc = buckets.liquidationReserveUsdc;
-        state.orderMarginUsdc = buckets.orderMarginUsdc;
-        state.actionReserveUsdc = buckets.actionReserveUsdc;
-        state.vpiRebateReserveUsdc = buckets.vpiRebateReserveUsdc;
-        state.totalLockedUsdc = buckets.totalLockedUsdc;
-        state.freeSettlementUsdc = buckets.freeSettlementUsdc;
-        state.clearinghouseCashUsdc = usdc.balanceOf(address(clearinghouse));
-        state.poolCashUsdc = pool.rawAssets();
-        state.poolAccountedAssetsUsdc = pool.accountedAssets();
-        state.traderCashUsdc = usdc.balanceOf(trader);
+        state.settlementBalanceAssets = buckets.settlementBalanceAssets;
+        state.pnlPledgeAssets = buckets.pnlPledgeAssets;
+        state.liquidationReserveAssets = buckets.liquidationReserveAssets;
+        state.orderMarginAssets = buckets.orderMarginAssets;
+        state.actionReserveAssets = buckets.actionReserveAssets;
+        state.vpiRebateReserveAssets = buckets.vpiRebateReserveAssets;
+        state.totalLockedAssets = buckets.totalLockedAssets;
+        state.freeSettlementAssets = buckets.freeSettlementAssets;
+        state.clearinghouseCashAssets = settlementToken.balanceOf(address(clearinghouse));
+        state.poolCashAssets = pool.rawAssets();
+        state.poolAccountedAssets = pool.accountedAssets();
+        state.traderCashAssets = settlementToken.balanceOf(trader);
     }
 
     function _assertCarryStateEq(
         CarryState memory actual,
         CarryState memory expected
     ) internal pure {
-        assertEq(actual.borrowBaseUsdc, expected.borrowBaseUsdc, "position borrow base must roll back");
+        assertEq(actual.borrowBaseAssets, expected.borrowBaseAssets, "position borrow base must roll back");
         assertEq(actual.lastCarryIndex, expected.lastCarryIndex, "position carry index must roll back");
         assertEq(actual.lastCarryTimestamp, expected.lastCarryTimestamp, "position carry timestamp must roll back");
         assertEq(actual.sideCarryIndex, expected.sideCarryIndex, "side carry index must roll back");
         assertEq(actual.sideCarryTimestamp, expected.sideCarryTimestamp, "side carry timestamp must roll back");
-        assertEq(actual.unsettledCarryUsdc, expected.unsettledCarryUsdc, "unsettled carry must roll back");
+        assertEq(actual.unsettledCarryAssets, expected.unsettledCarryAssets, "unsettled carry must roll back");
     }
 
     function _assertCustodyStateEq(
         CustodyState memory actual,
         CustodyState memory expected
     ) internal pure {
-        assertEq(actual.settlementBalanceUsdc, expected.settlementBalanceUsdc, "settlement debit must roll back");
-        assertEq(actual.pnlPledgeUsdc, expected.pnlPledgeUsdc, "PnL pledge must roll back");
-        assertEq(actual.liquidationReserveUsdc, expected.liquidationReserveUsdc, "liquidation reserve must roll back");
-        assertEq(actual.orderMarginUsdc, expected.orderMarginUsdc, "order margin must roll back");
-        assertEq(actual.actionReserveUsdc, expected.actionReserveUsdc, "action reserve must roll back");
-        assertEq(actual.vpiRebateReserveUsdc, expected.vpiRebateReserveUsdc, "VPI reserve must roll back");
-        assertEq(actual.totalLockedUsdc, expected.totalLockedUsdc, "total locked settlement must roll back");
-        assertEq(actual.freeSettlementUsdc, expected.freeSettlementUsdc, "free settlement must roll back");
-        assertEq(actual.clearinghouseCashUsdc, expected.clearinghouseCashUsdc, "clearinghouse cash must roll back");
-        assertEq(actual.poolCashUsdc, expected.poolCashUsdc, "pool carry inflow must roll back");
+        assertEq(actual.settlementBalanceAssets, expected.settlementBalanceAssets, "settlement debit must roll back");
+        assertEq(actual.pnlPledgeAssets, expected.pnlPledgeAssets, "PnL pledge must roll back");
         assertEq(
-            actual.poolAccountedAssetsUsdc,
-            expected.poolAccountedAssetsUsdc,
-            "pool accounted carry inflow must roll back"
+            actual.liquidationReserveAssets, expected.liquidationReserveAssets, "liquidation reserve must roll back"
         );
-        assertEq(actual.traderCashUsdc, expected.traderCashUsdc, "withdrawal transfer must not escape");
+        assertEq(actual.orderMarginAssets, expected.orderMarginAssets, "order margin must roll back");
+        assertEq(actual.actionReserveAssets, expected.actionReserveAssets, "action reserve must roll back");
+        assertEq(actual.vpiRebateReserveAssets, expected.vpiRebateReserveAssets, "VPI reserve must roll back");
+        assertEq(actual.totalLockedAssets, expected.totalLockedAssets, "total locked settlement must roll back");
+        assertEq(actual.freeSettlementAssets, expected.freeSettlementAssets, "free settlement must roll back");
+        assertEq(actual.clearinghouseCashAssets, expected.clearinghouseCashAssets, "clearinghouse cash must roll back");
+        assertEq(actual.poolCashAssets, expected.poolCashAssets, "pool carry inflow must roll back");
+        assertEq(actual.poolAccountedAssets, expected.poolAccountedAssets, "pool accounted carry inflow must roll back");
+        assertEq(actual.traderCashAssets, expected.traderCashAssets, "withdrawal transfer must not escape");
     }
 
 }

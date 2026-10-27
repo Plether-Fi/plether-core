@@ -32,7 +32,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(address(monitorLens.TERMINAL_NAV_BOOK()), address(terminalNavBook));
         assertEq(address(monitorLens.SENIOR_VAULT()), address(seniorVault));
         assertEq(address(monitorLens.JUNIOR_VAULT()), address(juniorVault));
-        assertEq(address(monitorLens.USDC()), address(usdc));
+        assertEq(address(monitorLens.settlementToken()), address(settlementToken));
         assertEq(monitorLens.SIDECAR().MONITOR(), address(monitorLens));
 
         (uint256 observedEpoch, uint256 nextCutoff) = juniorVault.getRequestEpochWindow();
@@ -60,10 +60,10 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(health.dependencyFailureMask, 0);
         assertEq(health.bookCapPrice, engine.CAP_PRICE());
         assertEq(health.engineCapPrice, engine.CAP_PRICE());
-        assertEq(health.poolRawAssetsUsdc, usdc.balanceOf(address(pool)));
-        assertEq(health.poolAccountedAssetsUsdc, pool.accountedAssets());
-        assertEq(health.poolCustodyDeficitUsdc, 0);
-        assertEq(health.seniorImpairmentUsdc, 0);
+        assertEq(health.poolRawAssets, settlementToken.balanceOf(address(pool)));
+        assertEq(health.poolAccountedAssets, pool.accountedAssets());
+        assertEq(health.poolCustodyDeficitAssets, 0);
+        assertEq(health.seniorImpairmentAssets, 0);
         assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 6);
         assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V6"));
         assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V5"));
@@ -148,7 +148,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
     function test_ConstructorRejectsRouterSettlementPoolDifferentFromEnginePool() public {
         // Pass the router's pool checks while retaining a different pool from engine.pool().
         address wrongPool =
-            address(new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar)));
+            address(new HousePool(address(settlementToken), address(engine), address(housePoolRedemptionMathSidecar)));
         SettlementMonitorOracleBindingMock wrongOracle =
             new SettlementMonitorOracleBindingMock(address(engine), wrongPool, address(baseMockPyth));
         OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
@@ -192,32 +192,32 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
             pool.getPendingTrancheState();
         ICfdEngineTypes.TerminalNavSnapshot memory terminal = engine.terminalNavSnapshot();
 
-        assertEq(accounting.poolRawAssetsUsdc, pool.rawAssets());
-        assertEq(accounting.poolAccountedAssetsUsdc, pool.accountedAssets());
-        assertEq(accounting.poolTotalAssetsUsdc, pool.totalAssets());
-        assertEq(accounting.poolExcessAssetsUsdc, pool.excessAssets());
-        assertEq(accounting.withdrawalReservedUsdc, liquidity.withdrawalReservedUsdc);
-        assertEq(accounting.freeUsdc, liquidity.freeUsdc);
-        assertEq(accounting.storedSeniorPrincipalUsdc, pool.seniorPrincipal());
-        assertEq(accounting.storedJuniorPrincipalUsdc, pool.juniorPrincipal());
-        assertEq(accounting.storedSeniorHighWaterMarkUsdc, pool.seniorHighWaterMark());
-        assertEq(accounting.cachedPreviewSeniorPrincipalUsdc, pendingSenior);
-        assertEq(accounting.cachedPreviewJuniorPrincipalUsdc, pendingJunior);
-        assertEq(accounting.cachedPreviewMaxSeniorWithdrawUsdc, pendingSeniorWithdraw);
-        assertEq(accounting.cachedPreviewMaxJuniorWithdrawUsdc, pendingJuniorWithdraw);
-        assertEq(accounting.pendingRecapitalizationUsdc, pool.pendingRecapitalizationUsdc());
-        assertEq(accounting.pendingTradingRevenueUsdc, pool.pendingTradingRevenueUsdc());
-        assertEq(accounting.unassignedAssetsUsdc, pool.unassignedAssets());
-        assertEq(accounting.reservedSeniorDepositAssetsUsdc, pool.reservedSeniorDepositAssetsUsdc());
-        assertEq(accounting.storedTerminalDeficitUsdc, pool.terminalDeficitUsdc());
-        assertEq(accounting.cachedPreviewTerminalDeficitUsdc, liquidity.currentTerminalDeficitUsdc);
+        assertEq(accounting.poolRawAssets, pool.rawAssets());
+        assertEq(accounting.poolAccountedAssets, pool.accountedAssets());
+        assertEq(accounting.poolTotalAssets, pool.totalAssets());
+        assertEq(accounting.poolExcessAssets, pool.excessAssets());
+        assertEq(accounting.withdrawalReservedAssets, liquidity.withdrawalReservedAssets);
+        assertEq(accounting.freeAssets, liquidity.freeAssets);
+        assertEq(accounting.storedSeniorPrincipalAssets, pool.seniorPrincipal());
+        assertEq(accounting.storedJuniorPrincipalAssets, pool.juniorPrincipal());
+        assertEq(accounting.storedSeniorHighWaterMarkAssets, pool.seniorHighWaterMark());
+        assertEq(accounting.cachedPreviewSeniorPrincipalAssets, pendingSenior);
+        assertEq(accounting.cachedPreviewJuniorPrincipalAssets, pendingJunior);
+        assertEq(accounting.cachedPreviewMaxSeniorWithdrawAssets, pendingSeniorWithdraw);
+        assertEq(accounting.cachedPreviewMaxJuniorWithdrawAssets, pendingJuniorWithdraw);
+        assertEq(accounting.pendingRecapitalizationAssets, pool.pendingRecapitalizationAssets());
+        assertEq(accounting.pendingTradingRevenueAssets, pool.pendingTradingRevenueAssets());
+        assertEq(accounting.unassignedAssets, pool.unassignedAssets());
+        assertEq(accounting.reservedSeniorDepositAssets, pool.reservedSeniorDepositAssets());
+        assertEq(accounting.storedTerminalDeficitAssets, pool.terminalDeficitAssets());
+        assertEq(accounting.cachedPreviewTerminalDeficitAssets, liquidity.currentTerminalDeficitAssets);
         assertEq(accounting.lastReconcileTime, pool.lastReconcileTime());
         assertEq(accounting.lastSeniorCouponCheckpointTime, pool.lastSeniorCouponCheckpointTime());
         assertEq(accounting.terminalMarkPrice, terminal.markPrice);
         assertEq(accounting.terminalMarkTime, terminal.markTime);
-        assertEq(accounting.terminalLpPriceDeltaUsdc, terminal.terminalLpPriceDeltaUsdc);
-        assertEq(accounting.totalTraderClaimsUsdc, terminal.totalTraderClaimsUsdc);
-        assertEq(accounting.maxDirectionalLiabilityUsdc, terminal.maxDirectionalLiabilityUsdc);
+        assertEq(accounting.terminalLpPriceDeltaAssets, terminal.terminalLpPriceDeltaAssets);
+        assertEq(accounting.totalTraderClaimsAssets, terminal.totalTraderClaimsAssets);
+        assertEq(accounting.maxDirectionalLiabilityAssets, terminal.maxDirectionalLiabilityAssets);
         assertEq(accounting.terminalBookVersion, terminal.bookVersion);
         assertEq(accounting.terminalHasOpenPositions, terminal.hasOpenPositions);
         assertEq(accounting.terminalDegradedMode, terminal.degradedMode);
@@ -1141,15 +1141,15 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
     function test_HealthClassifiesCustodyDeficitsAndBenignSurplus() public {
         uint256 branch = vm.snapshotState();
 
-        usdc.mint(address(pool), 3e6);
+        settlementToken.mint(address(pool), 3e6);
         SettlementMonitorViewTypes.SettlementHealth memory surplus = monitorLens.getSettlementHealth();
         assertEq(uint8(surplus.state), uint8(SettlementMonitorViewTypes.HealthState.Healthy));
         assertEq(surplus.criticalFaultMask, 0);
-        assertEq(surplus.poolCustodyDeficitUsdc, 0);
-        assertEq(surplus.poolCustodySurplusUsdc, 3e6);
+        assertEq(surplus.poolCustodyDeficitAssets, 0);
+        assertEq(surplus.poolCustodySurplusAssets, 3e6);
 
         vm.revertToState(branch);
-        usdc.burn(address(pool), 1e6);
+        settlementToken.burn(address(pool), 1e6);
         SettlementMonitorViewTypes.SettlementHealth memory poolDeficit = monitorLens.getSettlementHealth();
         assertEq(uint8(poolDeficit.state), uint8(SettlementMonitorViewTypes.HealthState.Critical));
         assertTrue(
@@ -1157,12 +1157,12 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
                 poolDeficit.criticalFaultMask, SettlementMonitorViewTypes.CriticalFault.PoolCustodyDeficit
             )
         );
-        assertEq(poolDeficit.poolCustodyDeficitUsdc, 1e6);
+        assertEq(poolDeficit.poolCustodyDeficitAssets, 1e6);
 
         vm.revertToState(branch);
         uint256 assets = 10e6;
         _requestDeposit(juniorVault, ALICE, assets);
-        usdc.burn(address(juniorVault), 1);
+        settlementToken.burn(address(juniorVault), 1);
         SettlementMonitorViewTypes.SettlementHealth memory vaultDeficit = monitorLens.getSettlementHealth();
         assertEq(uint8(vaultDeficit.state), uint8(SettlementMonitorViewTypes.HealthState.Critical));
         assertTrue(
@@ -1170,8 +1170,8 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
                 vaultDeficit.criticalFaultMask, SettlementMonitorViewTypes.CriticalFault.JuniorAssetEscrowDeficit
             )
         );
-        assertEq(vaultDeficit.juniorRequiredAssetEscrowUsdc, assets);
-        assertEq(vaultDeficit.juniorActualAssetEscrowUsdc, assets - 1);
+        assertEq(vaultDeficit.juniorRequiredAssetEscrowAssets, assets);
+        assertEq(vaultDeficit.juniorActualAssetEscrowAssets, assets - 1);
     }
 
     function test_ObservedDepositFieldsTrackFinalizedClaimsAndRejection() public {
@@ -1236,7 +1236,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
 
         uint256 partialShares = shares / 2;
         uint256 partialAssets = 6000e6;
-        usdc.mint(address(juniorVault), partialAssets);
+        settlementToken.mint(address(juniorVault), partialAssets);
         vm.prank(address(pool));
         juniorVault.fundRedeemEpoch(observedEpoch, partialShares, partialAssets);
 
@@ -1256,7 +1256,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         uint256 partialBranch = vm.snapshotState();
         uint256 remainingShares = shares - partialShares;
         uint256 remainingAssets = 7000e6;
-        usdc.mint(address(juniorVault), remainingAssets);
+        settlementToken.mint(address(juniorVault), remainingAssets);
         vm.prank(address(pool));
         juniorVault.fundRedeemEpoch(observedEpoch, remainingShares, remainingAssets);
 
@@ -1726,7 +1726,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertGt(reservation, 0, "fixture must expose reservable capacity");
         uint256 observedEpoch = _requestDeposit(seniorVault, ALICE, reservation);
 
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservation);
+        assertEq(pool.reservedSeniorDepositAssets(), reservation);
         assertEq(pool.getSeniorDepositCapacity(), 0, "reservation consumes all new-admission capacity");
         assertTrue(pool.areSeniorDepositReservationsWithinLimits(), "accepted reservation remains activatable");
 
@@ -1748,7 +1748,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
     function test_MaturedJuniorRedemptionCannotDisplaceSeniorCommitment() public {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 0;
-        config.maxSeniorExposureUsdc = TEST_MAX_SENIOR_EXPOSURE_USDC;
+        config.maxSeniorExposureAssets = TEST_MAX_SENIOR_EXPOSURE_ASSETS;
         config.maxSeniorShareBps = 5000;
         pool.proposePoolConfig(config);
         vm.warp(pool.poolConfigActivationTime());
@@ -1792,7 +1792,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(result.juniorFundedAssets, 0, "full-cap Senior commitment leaves no Junior exit headroom");
         assertEq(result.seniorDepositAssets, reservation);
         assertEq(seniorVault.claimableDepositRequest(observedEpoch, BOB), reservation);
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
+        assertEq(pool.reservedSeniorDepositAssets(), 0);
     }
 
     function test_NoCodePlannerCannotReportHealthyOrCompleteConfig() public {
@@ -2311,7 +2311,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
             bytes("unreadable")
         );
         vm.mockCallRevert(
-            address(usdc),
+            address(settlementToken),
             abi.encodeWithSelector(bytes4(keccak256("balanceOf(address)")), address(juniorVault)),
             bytes("unreadable")
         );
@@ -2452,8 +2452,8 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
 
     function test_StatusReportsCombinedOperationalWarningsAndDepositDeferrals() public {
         IHousePool.PoolLiquidityView memory liquidity = pool.getPoolLiquidityView();
-        liquidity.freeUsdc = 0;
-        liquidity.currentTerminalDeficitUsdc = 1;
+        liquidity.freeAssets = 0;
+        liquidity.currentTerminalDeficitAssets = 1;
         liquidity.degradedMode = true;
         vm.mockCall(
             address(pool), abi.encodeWithSelector(bytes4(keccak256("getPoolLiquidityView()"))), abi.encode(liquidity)
@@ -2563,7 +2563,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
 
     function test_ConservativeActivationGateProjectsUnreconciledSeniorImpairment() public {
         uint256 retainedAssets = pool.seniorPrincipal() / 2;
-        usdc.burn(address(pool), pool.rawAssets() - retainedAssets);
+        settlementToken.burn(address(pool), pool.rawAssets() - retainedAssets);
 
         assertEq(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "stored Senior accounting is not yet impaired");
         assertFalse(pool.canSettleDepositEntries(), "the diagnostic must project the settlement-time reconcile");
@@ -2591,13 +2591,13 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
 
     function test_ConservativeActivationGateProjectsExactlyRestorativeRecapitalization() public {
         uint256 retainedAssets = pool.seniorPrincipal() / 2;
-        usdc.burn(address(pool), pool.rawAssets() - retainedAssets);
+        settlementToken.burn(address(pool), pool.rawAssets() - retainedAssets);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         uint256 recapitalization = pool.seniorHighWaterMark() - pool.seniorPrincipal();
         assertGt(recapitalization, 0, "fixture must begin with committed Senior impairment");
-        usdc.mint(address(pool), recapitalization);
+        settlementToken.mint(address(pool), recapitalization);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             recapitalization,
@@ -2641,7 +2641,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         uint256 observedEpoch = _requestDeposit(seniorVault, BOB, 1e6);
         assertEq(_requestRedeem(seniorVault, ALICE, seniorVault.balanceOf(ALICE)), observedEpoch);
 
-        usdc.burn(address(pool), pool.rawAssets() - (pool.seniorPrincipal() - 1));
+        settlementToken.burn(address(pool), pool.rawAssets() - (pool.seniorPrincipal() - 1));
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorHighWaterMark() - pool.seniorPrincipal(), 1, "fixture must create a one-atom impairment");
@@ -2679,9 +2679,9 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         uint256 targetRawAssets = juniorBacking + seniorBootstrapAssets;
         uint256 rawAssets = pool.rawAssets();
         if (rawAssets > targetRawAssets) {
-            usdc.burn(address(pool), rawAssets - targetRawAssets);
+            settlementToken.burn(address(pool), rawAssets - targetRawAssets);
         } else {
-            usdc.mint(address(pool), targetRawAssets - rawAssets);
+            settlementToken.mint(address(pool), targetRawAssets - rawAssets);
         }
         stdstore.target(address(pool)).sig("seniorPrincipal()").checked_write(uint256(0));
         stdstore.target(address(pool)).sig("seniorHighWaterMark()").checked_write(uint256(0));
@@ -2759,7 +2759,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
     function test_UnreadableReservationMakesHealthUnknownWithoutFalseCriticalFault() public {
         vm.mockCallRevert(
             address(pool),
-            abi.encodeWithSelector(bytes4(keccak256("reservedSeniorDepositAssetsUsdc()"))),
+            abi.encodeWithSelector(bytes4(keccak256("reservedSeniorDepositAssets()"))),
             bytes("unreadable")
         );
 
@@ -2824,7 +2824,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
     }
 
     function test_KnownCriticalFaultOutranksAnUnrelatedUnknownRead() public {
-        usdc.burn(address(pool), 1e6);
+        settlementToken.burn(address(pool), 1e6);
         vm.mockCallRevert(
             address(juniorVault), abi.encodeWithSelector(bytes4(keccak256("depositQueueHead()"))), bytes("unreadable")
         );
@@ -2876,8 +2876,8 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         SettlementMonitorViewTypes.SettlementHealth memory health = monitorLens.getSettlementHealth();
         assertEq(uint8(health.state), uint8(SettlementMonitorViewTypes.HealthState.Healthy));
         assertEq(health.criticalFaultMask, 0);
-        assertEq(health.seniorImpairmentUsdc, 0);
-        assertEq(health.seniorPrincipalAboveHighWaterMarkUsdc, pool.seniorPrincipal() - pool.seniorHighWaterMark());
+        assertEq(health.seniorImpairmentAssets, 0);
+        assertEq(health.seniorPrincipalAboveHighWaterMarkAssets, pool.seniorPrincipal() - pool.seniorHighWaterMark());
     }
 
     function test_ObservationAndConfigDigestsAreDeterministicAndDomainSensitive() public {

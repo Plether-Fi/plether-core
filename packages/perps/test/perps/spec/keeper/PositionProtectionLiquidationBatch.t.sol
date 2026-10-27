@@ -16,10 +16,10 @@ import {
 contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidationBatchTestFixture {
 
     function test_Batch_ArmedProtectionTerminalizesAndForfeitsTriggerBountyExactlyOnce() public {
-        uint64 protectionId = _openAndProtect(ARMED_ACCOUNT, THIN_MARGIN_USDC);
+        uint64 protectionId = _openAndProtect(ARMED_ACCOUNT, THIN_MARGIN_ASSETS);
         _withdrawAllFreeSettlement(ARMED_ACCOUNT);
 
-        uint256 expectedForfeitureUsdc = _totalProtectionBountyUsdc();
+        uint256 expectedForfeitureAssets = _totalProtectionBountyAssets();
         uint256 treasuryBefore = _settlementBalance(engine.protocolTreasury());
 
         address[] memory accounts = new address[](2);
@@ -38,25 +38,25 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
             uint8(PositionProtectionTypes.PositionProtectionStatus.Liquidated),
             "successful batch liquidation must terminalize armed protection"
         );
-        assertEq(protection.triggerBountyUsdc, 0, "trigger bounty must be consumed");
+        assertEq(protection.triggerBountyAssets, 0, "trigger bounty must be consumed");
         assertEq(protectionViews.activePositionProtectionId(ARMED_ACCOUNT), 0, "trade lock must be released");
-        assertEq(router.getAccountReservations(ARMED_ACCOUNT).executionBountyUsdc, 0, "reserve must be clear");
+        assertEq(router.getAccountReservations(ARMED_ACCOUNT).executionBountyAssets, 0, "reserve must be clear");
         assertEq(
-            clearinghouse.getLockedMarginBuckets(ARMED_ACCOUNT).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(ARMED_ACCOUNT).reservedSettlementAssets,
             0,
             "clearinghouse reserve must be clear"
         );
         assertEq(_positionSize(ARMED_ACCOUNT), 0, "position must be liquidated");
         assertEq(
             _settlementBalance(engine.protocolTreasury()) - treasuryBefore,
-            expectedForfeitureUsdc,
+            expectedForfeitureAssets,
             "duplicate batch item must not forfeit the trigger bounty twice"
         );
     }
 
     function test_Batch_SolventItemRollsBackBookAndReserveBeforeLaterProtectedSuccess() public {
-        uint64 solventProtectionId = _openAndProtect(SOLVENT_ACCOUNT, HEALTHY_MARGIN_USDC);
-        uint64 liquidatedProtectionId = _openAndProtect(LATER_LIQUIDATION, THIN_MARGIN_USDC);
+        uint64 solventProtectionId = _openAndProtect(SOLVENT_ACCOUNT, HEALTHY_MARGIN_ASSETS);
+        uint64 liquidatedProtectionId = _openAndProtect(LATER_LIQUIDATION, THIN_MARGIN_ASSETS);
         _withdrawAllFreeSettlement(LATER_LIQUIDATION);
 
         SolventProtectionSnapshot memory solventBefore = _solventProtectionSnapshot(solventProtectionId);
@@ -93,13 +93,13 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
         assertEq(_positionSize(LATER_LIQUIDATION), 0, "later protected position must liquidate");
         assertEq(
             _settlementBalance(engine.protocolTreasury()) - treasuryBefore,
-            _totalProtectionBountyUsdc(),
+            _totalProtectionBountyAssets(),
             "only the successful item's trigger bounty may be forfeited"
         );
     }
 
     function test_Batch_TriggeredProtectionCleansLinkedZeroBountyCloseExactlyOnce() public {
-        uint64 protectionId = _openAndProtect(TRIGGERED_ACCOUNT, HEALTHY_MARGIN_USDC);
+        uint64 protectionId = _openAndProtect(TRIGGERED_ACCOUNT, HEALTHY_MARGIN_ASSETS);
         _withdrawAllFreeSettlement(TRIGGERED_ACCOUNT);
 
         bytes[] memory triggerData = _liveProtectionData(LONG_STOP_LOSS);
@@ -133,12 +133,12 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
             uint8(IOrderRouterAccounting.OrderStatus.Failed),
             "linked close must terminally fail during liquidation cleanup"
         );
-        assertEq(_orderRecord(linkedOrderId).executionBountyUsdc, 0, "linked close bounty must be consumed");
+        assertEq(_orderRecord(linkedOrderId).executionBountyAssets, 0, "linked close bounty must be consumed");
         assertEq(router.pendingOrderCounts(TRIGGERED_ACCOUNT), 0, "linked close must be unlinked");
         assertEq(router.pendingCloseSize(TRIGGERED_ACCOUNT), 0, "linked close size must be released");
-        assertEq(router.getAccountReservations(TRIGGERED_ACCOUNT).executionBountyUsdc, 0, "reserve must be clear");
+        assertEq(router.getAccountReservations(TRIGGERED_ACCOUNT).executionBountyAssets, 0, "reserve must be clear");
         assertEq(
-            clearinghouse.getLockedMarginBuckets(TRIGGERED_ACCOUNT).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(TRIGGERED_ACCOUNT).reservedSettlementAssets,
             0,
             "clearinghouse reserve must be clear"
         );

@@ -33,12 +33,12 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract VpiImrBypassTest is RecordedOrderReceipts {
 
-    MockUSDC usdc;
+    MockSettlementToken settlementToken;
     CfdEngine engine;
     HousePool pool;
     TrancheVault seniorVault;
@@ -60,7 +60,7 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
     function _settlementBalance(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.balanceUsdc(account);
+        return clearinghouse.balanceAssets(account);
     }
 
     function _warpPastTimelock() internal {
@@ -73,7 +73,7 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
             juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
-            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorExposureAssets: type(uint256).max - 1,
             maxSeniorShareBps: 9999
         });
         pool.proposePoolConfig(config);
@@ -83,8 +83,8 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
 
     function _bootstrapSeededLifecycle() internal {
         uint256 seedAmount = 1000e6;
-        usdc.mint(address(this), seedAmount * 2);
-        usdc.approve(address(pool), seedAmount * 2);
+        settlementToken.mint(address(this), seedAmount * 2);
+        settlementToken.approve(address(pool), seedAmount * 2);
         pool.initializeSeedPosition(false, seedAmount, address(this));
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
@@ -92,7 +92,7 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
 
     function setUp() public {
         vm.warp(1_709_532_000);
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 1e18,
@@ -101,23 +101,27 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
 
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 50);
+        engine = new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, params, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(CAP_PRICE))));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC", 0, address(0));
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC", 0, address(0));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        seniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), true, "Senior LP", "sAssets", 0, address(0)
+        );
+        juniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), false, "Junior LP", "jAssets", 0, address(0)
+        );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));
@@ -167,9 +171,9 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
         address lp,
         uint256 amount
     ) internal {
-        usdc.mint(lp, amount);
+        settlementToken.mint(lp, amount);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
+        settlementToken.approve(address(juniorVault), amount);
         uint256 requestId = juniorVault.requestDeposit(amount, lp, lp);
         vm.stopPrank();
 
@@ -189,9 +193,9 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
         uint256 amount
     ) internal {
         address account = trader;
-        usdc.mint(trader, amount);
+        settlementToken.mint(trader, amount);
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
+        settlementToken.approve(address(clearinghouse), amount);
         clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
@@ -245,12 +249,12 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
         address eveAccount = eve;
 
         vm.startPrank(eve);
-        usdc.mint(eve, 1e6);
-        usdc.approve(address(clearinghouse), 1e6);
+        settlementToken.mint(eve, 1e6);
+        settlementToken.approve(address(clearinghouse), 1e6);
         clearinghouse.deposit(eveAccount, 1e6);
         vm.stopPrank();
 
-        assertEq(clearinghouse.balanceUsdc(eveAccount), 1e6, "Trader only funds the reserved execution bounty");
+        assertEq(clearinghouse.balanceAssets(eveAccount), 1e6, "Trader only funds the reserved execution bounty");
 
         vm.prank(eve);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
@@ -267,8 +271,8 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
         address eveAccount = eve;
 
         vm.startPrank(eve);
-        usdc.mint(eve, 1e6);
-        usdc.approve(address(clearinghouse), 1e6);
+        settlementToken.mint(eve, 1e6);
+        settlementToken.approve(address(clearinghouse), 1e6);
         clearinghouse.deposit(eveAccount, 1e6);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
         vm.stopPrank();
@@ -278,7 +282,7 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(address(this)) - keeperBefore,
+            clearinghouse.balanceAssets(address(this)) - keeperBefore,
             200_000,
             "Typed user-invalid open should pay the clearer as clearinghouse credit"
         );
@@ -292,7 +296,9 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
         assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.PlannerRejected));
         assertEq(
-            usdc.balanceOf(address(router)), 0, "Router should not retain consumed user-invalid bounty reservation"
+            settlementToken.balanceOf(address(router)),
+            0,
+            "Router should not retain consumed user-invalid bounty reservation"
         );
     }
 

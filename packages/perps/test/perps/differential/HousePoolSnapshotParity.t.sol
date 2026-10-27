@@ -25,7 +25,7 @@ abstract contract HousePoolAccountingParityBase is BasePerpTest {
         IHousePool.ClaimantInflowKind kind,
         uint256 amount
     ) internal {
-        usdc.mint(address(pool), amount);
+        settlementToken.mint(address(pool), amount);
         vm.prank(address(engine));
         pool.recordClaimantInflow(amount, kind, IHousePool.ClaimantInflowCashMode.CashArrived);
     }
@@ -37,8 +37,8 @@ abstract contract HousePoolAccountingParityBase is BasePerpTest {
                 pool.juniorPrincipal(),
                 pool.seniorHighWaterMark(),
                 pool.unassignedAssets(),
-                pool.pendingRecapitalizationUsdc(),
-                pool.pendingTradingRevenueUsdc()
+                pool.pendingRecapitalizationAssets(),
+                pool.pendingTradingRevenueAssets()
             )
         );
         return keccak256(
@@ -46,9 +46,9 @@ abstract contract HousePoolAccountingParityBase is BasePerpTest {
                 ownership,
                 pool.lastSeniorCouponCheckpointTime(),
                 pool.lastReconcileTime(),
-                pool.terminalDeficitUsdc(),
+                pool.terminalDeficitAssets(),
                 pool.accountedAssets(),
-                usdc.balanceOf(address(pool)),
+                settlementToken.balanceOf(address(pool)),
                 seniorVault.totalSupply(),
                 juniorVault.totalSupply()
             )
@@ -59,7 +59,7 @@ abstract contract HousePoolAccountingParityBase is BasePerpTest {
         ExpectedAccounting memory expected
     ) internal returns (uint256[4] memory preview) {
         bytes32 beforePreview = _accountingHash();
-        assertEq(pool.getSettlementFreeUSDC(), pool.getFreeUSDC(), "Settlement cash matches withdrawal reserves");
+        assertEq(pool.getSettlementFreeAssets(), pool.getFreeAssets(), "Settlement cash matches withdrawal reserves");
         uint256 previewGasBefore = gasleft();
         (preview[0], preview[1], preview[2], preview[3]) = pool.getPendingTrancheState();
         emit log_named_uint("pending_tranche_preview_gas", previewGasBefore - gasleft());
@@ -83,9 +83,9 @@ abstract contract HousePoolAccountingParityBase is BasePerpTest {
         assertEq(pool.juniorPrincipal(), expected.junior, "reconciled junior principal");
         assertEq(pool.seniorHighWaterMark(), expected.highWaterMark, "reconciled senior recovery target");
         assertEq(pool.unassignedAssets(), expected.unassigned, "reconciled ownerless assets");
-        assertEq(pool.pendingRecapitalizationUsdc(), expected.pendingRecapitalization, "remaining recapitalization");
-        assertEq(pool.pendingTradingRevenueUsdc(), expected.pendingRevenue, "remaining trading revenue");
-        assertEq(pool.getSettlementFreeUSDC(), pool.getFreeUSDC(), "Settlement cash matches reconciled reserves");
+        assertEq(pool.pendingRecapitalizationAssets(), expected.pendingRecapitalization, "remaining recapitalization");
+        assertEq(pool.pendingTradingRevenueAssets(), expected.pendingRevenue, "remaining trading revenue");
+        assertEq(pool.getSettlementFreeAssets(), pool.getFreeAssets(), "Settlement cash matches reconciled reserves");
         assertEq(pool.getMaxSeniorWithdraw(), preview[2], "senior withdrawal-cap parity");
         assertEq(pool.getMaxJuniorWithdraw(), preview[3], "junior withdrawal-cap parity");
     }
@@ -123,7 +123,7 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
     using stdStorage for StdStorage;
 
     function _wipePrincipal() internal {
-        usdc.burn(address(pool), pool.totalAssets());
+        settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal(), 0);
@@ -156,14 +156,14 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
         _wipePrincipal();
         _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 40_000e6);
         _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 15_000e6);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(30_000e6));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(uint256(30_000e6));
 
         uint256[4] memory preview =
             _assertPendingAccounting(ExpectedAccounting(25_000e6, 0, 40_000e6, 0, 15_000e6, 15_000e6));
         assertEq(preview[2], 0, "residual claimant buckets reserve all remaining senior liquidity");
         assertEq(preview[3], 0, "no junior principal exists before residual settlement");
 
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(0));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(uint256(0));
         // Principal already exists on this pass, so residual revenue continues to junior after senior recovery.
         _assertPendingAccounting(ExpectedAccounting(40_000e6, 15_000e6, 40_000e6, 0, 0, 0));
     }
@@ -172,12 +172,12 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
         _wipePrincipal();
         _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 40_000e6);
         _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 15_000e6);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(5000e6));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(uint256(5000e6));
 
         // The first pass can settle all recapitalization and only part of the revenue.
         _assertPendingAccounting(ExpectedAccounting(40_000e6, 10_000e6, 40_000e6, 0, 0, 5000e6));
 
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(0));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(uint256(0));
         _assertPendingAccounting(ExpectedAccounting(40_000e6, 15_000e6, 40_000e6, 0, 0, 0));
     }
 
@@ -231,28 +231,28 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
             engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(
-            inputSnapshot.physicalAssetsUsdc,
-            protocolSnapshot.poolAssetsUsdc,
+            inputSnapshot.physicalAssets,
+            protocolSnapshot.poolAssets,
             "HousePool input physical assets should match protocol pool assets"
         );
         assertEq(
-            inputSnapshot.netPhysicalAssetsUsdc,
-            protocolSnapshot.netPhysicalAssetsUsdc,
+            inputSnapshot.netPhysicalAssets,
+            protocolSnapshot.netPhysicalAssets,
             "HousePool input net physical assets should match protocol snapshot"
         );
         assertEq(
-            inputSnapshot.maxLiabilityUsdc,
-            protocolSnapshot.maxLiabilityUsdc,
+            inputSnapshot.maxLiabilityAssets,
+            protocolSnapshot.maxLiabilityAssets,
             "HousePool input max liability should match protocol snapshot"
         );
         assertEq(
-            inputSnapshot.traderClaimBalanceUsdc,
-            protocolSnapshot.totalTraderClaimBalanceUsdc,
+            inputSnapshot.traderClaimBalanceAssets,
+            protocolSnapshot.totalTraderClaimBalanceAssets,
             "HousePool input trader claim balance should match protocol snapshot"
         );
         assertEq(
-            inputSnapshot.terminalLpPriceDeltaUsdc,
-            terminalSnapshot.terminalLpPriceDeltaUsdc,
+            inputSnapshot.terminalLpPriceDeltaAssets,
+            terminalSnapshot.terminalLpPriceDeltaAssets,
             "HousePool input must preserve the Engine terminal delta"
         );
         assertEq(
@@ -308,7 +308,7 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
         uint256 seniorRestorationTarget = pool.seniorHighWaterMark();
         uint256 restorationRevenue = 35_000e6;
 
-        usdc.burn(address(pool), pool.totalAssets());
+        settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -317,7 +317,7 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
         assertGt(seniorVault.totalSupply(), 0, "Setup should preserve seeded senior ownership");
         assertGt(juniorVault.totalSupply(), 0, "Setup should preserve seeded junior ownership");
 
-        usdc.mint(address(pool), restorationRevenue);
+        settlementToken.mint(address(pool), restorationRevenue);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             restorationRevenue, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -385,14 +385,14 @@ contract HousePoolSeededClaimReleaseSnapshotParityTest is HousePoolAccountingPar
     function test_ClaimReleaseRestoresSeededSeniorBeforePendingRevenueSettles() public {
         uint256 seededAssets = pool.totalAssets();
         assertEq(seededAssets, 2000e6, "fixture should begin with only the two seed positions");
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(seededAssets);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(seededAssets);
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), 0, "claims should wipe stored LP principal");
 
         _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 10e6);
-        assertEq(pool.pendingTradingRevenueUsdc(), 10e6, "revenue should remain queued until reconcile");
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(seededAssets - 20e6);
+        assertEq(pool.pendingTradingRevenueAssets(), 10e6, "revenue should remain queued until reconcile");
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(seededAssets - 20e6);
 
         _assertPendingAccounting(ExpectedAccounting(30e6, 0, 1000e6, 0, 0, 0));
         assertEq(seniorVault.totalAssets(), 30e6, "released claim and revenue should both belong to seeded senior");
@@ -400,12 +400,12 @@ contract HousePoolSeededClaimReleaseSnapshotParityTest is HousePoolAccountingPar
 
     function test_ClaimReleaseRestoresSeededJuniorBeforePendingRevenueSettles() public {
         uint256 seededAssets = pool.totalAssets();
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(seededAssets);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(seededAssets);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 10e6);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(seededAssets - 1020e6);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(seededAssets - 1020e6);
 
         _assertPendingAccounting(ExpectedAccounting(1000e6, 30e6, 1000e6, 0, 0, 0));
         assertEq(juniorVault.totalAssets(), 30e6, "released claim and revenue should both belong to seeded junior");

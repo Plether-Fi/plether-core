@@ -86,11 +86,11 @@ contract OracleRegimeMatrixTest is BasePerpTest {
         if (degraded) {
             _fundTrader(LATCH, 5000e6);
             _open(LATCH, CfdTypes.Side.LONG, 20_000e18, 4000e6, 1e8);
-            uint256 cash = usdc.balanceOf(address(pool));
-            usdc.burn(address(pool), cash);
+            uint256 cash = settlementToken.balanceOf(address(pool));
+            settlementToken.burn(address(pool), cash);
             _close(LATCH, CfdTypes.Side.LONG, 10_000e18, 1e8);
             assertTrue(engine.degradedMode());
-            usdc.mint(address(pool), cash);
+            settlementToken.mint(address(pool), cash);
         }
         uint256 liquidationTime = regime == 0 ? BEFORE_FAD - 1 hours : regime == 1 ? BEFORE_FAD + 1 : BEFORE_FAD + 1801;
         vm.warp(liquidationTime);
@@ -109,9 +109,9 @@ contract OracleRegimeMatrixTest is BasePerpTest {
         uint256 executionPrice = regime == 2 ? 150_030_000 : 150_000_000;
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(ACCOUNT, executionPrice);
         assertTrue(preview.liquidatable, "Every row starts with an actually liquidatable position");
-        uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
-        uint256 custodyBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 cashBefore = usdc.balanceOf(address(pool));
+        uint256 keeperBefore = clearinghouse.balanceAssets(KEEPER);
+        uint256 custodyBefore = settlementToken.balanceOf(address(clearinghouse));
+        uint256 cashBefore = settlementToken.balanceOf(address(pool));
         if (boundary == 3) {
             if (regime == 2) {
                 vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
@@ -124,14 +124,17 @@ contract OracleRegimeMatrixTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(ACCOUNT);
         if (boundary == 3) {
             assertEq(size, 10_000e18);
-            assertEq(clearinghouse.balanceUsdc(KEEPER), keeperBefore);
-            assertEq(usdc.balanceOf(address(pool)), cashBefore);
-            assertEq(usdc.balanceOf(address(clearinghouse)), custodyBefore);
+            assertEq(clearinghouse.balanceAssets(KEEPER), keeperBefore);
+            assertEq(settlementToken.balanceOf(address(pool)), cashBefore);
+            assertEq(settlementToken.balanceOf(address(clearinghouse)), custodyBefore);
         } else {
             assertEq(size, 0);
-            assertEq(clearinghouse.balanceUsdc(KEEPER), keeperBefore + preview.keeperBountyUsdc);
-            assertEq(usdc.balanceOf(address(pool)) - cashBefore, custodyBefore - usdc.balanceOf(address(clearinghouse)));
-            assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 0);
+            assertEq(clearinghouse.balanceAssets(KEEPER), keeperBefore + preview.keeperBountyAssets);
+            assertEq(
+                settlementToken.balanceOf(address(pool)) - cashBefore,
+                custodyBefore - settlementToken.balanceOf(address(clearinghouse))
+            );
+            assertEq(engine.traderClaimBalanceAssets(ACCOUNT), 0);
         }
     }
 
@@ -156,21 +159,21 @@ contract OracleRegimeMatrixTest is BasePerpTest {
         vm.prank(ACCOUNT);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, close ? 0 : 2000e6, 0, close);
         if (degraded) {
-            uint256 cash = usdc.balanceOf(address(pool));
-            usdc.burn(address(pool), cash);
+            uint256 cash = settlementToken.balanceOf(address(pool));
+            settlementToken.burn(address(pool), cash);
             _close(LATCH, CfdTypes.Side.LONG, 10_000e18, 1e8);
             assertTrue(engine.degradedMode(), "Executed partial close latches cash insolvency");
-            usdc.mint(address(pool), cash);
+            settlementToken.mint(address(pool), cash);
         }
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(ACCOUNT);
         BeforeExecution memory before_ = BeforeExecution({
-            trader: clearinghouse.balanceUsdc(ACCOUNT),
-            keeper: clearinghouse.balanceUsdc(KEEPER),
-            custody: usdc.balanceOf(address(clearinghouse)),
-            bounty: reservation.executionBountyUsdc,
-            margin: reservation.committedMarginUsdc,
-            treasury: clearinghouse.balanceUsdc(engine.protocolTreasury()),
-            poolCash: usdc.balanceOf(address(pool))
+            trader: clearinghouse.balanceAssets(ACCOUNT),
+            keeper: clearinghouse.balanceAssets(KEEPER),
+            custody: settlementToken.balanceOf(address(clearinghouse)),
+            bounty: reservation.executionBountyAssets,
+            margin: reservation.committedMarginAssets,
+            treasury: clearinghouse.balanceAssets(engine.protocolTreasury()),
+            poolCash: settlementToken.balanceOf(address(pool))
         });
         vm.warp(regime == 0 ? commitTime + 1 : regime == 1 ? BEFORE_FAD + 1 : BEFORE_FAD + 1801);
         baseMockPyth.setAllPrices(_basePythFeedIds(), 100_000_000, -8, block.timestamp);
@@ -197,11 +200,11 @@ contract OracleRegimeMatrixTest is BasePerpTest {
             assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.CloseOnly));
             assertEq(router.nextExecuteId(), 1);
             assertEq(after_.pendingOrderCount, 1);
-            assertEq(after_.committedMarginUsdc, before_.margin);
-            assertEq(after_.executionBountyUsdc, before_.bounty);
-            assertEq(clearinghouse.balanceUsdc(ACCOUNT), before_.trader);
-            assertEq(clearinghouse.balanceUsdc(KEEPER), before_.keeper);
-            assertEq(usdc.balanceOf(address(clearinghouse)), before_.custody);
+            assertEq(after_.committedMarginAssets, before_.margin);
+            assertEq(after_.executionBountyAssets, before_.bounty);
+            assertEq(clearinghouse.balanceAssets(ACCOUNT), before_.trader);
+            assertEq(clearinghouse.balanceAssets(KEEPER), before_.keeper);
+            assertEq(settlementToken.balanceOf(address(clearinghouse)), before_.custody);
             return;
         }
         bool rejected = !close && degraded;
@@ -214,33 +217,35 @@ contract OracleRegimeMatrixTest is BasePerpTest {
             uint8(rejected ? OrderV3Types.TerminalReason.PlannerRejected : OrderV3Types.TerminalReason.Executed)
         );
         assertEq(after_.pendingOrderCount, 0);
-        assertEq(after_.committedMarginUsdc, 0);
-        assertEq(after_.executionBountyUsdc, 0);
+        assertEq(after_.committedMarginAssets, 0);
+        assertEq(after_.executionBountyAssets, 0);
         assertEq(router.nextExecuteId(), 0);
-        assertEq(clearinghouse.balanceUsdc(KEEPER), before_.keeper + before_.bounty);
+        assertEq(clearinghouse.balanceAssets(KEEPER), before_.keeper + before_.bounty);
         OrderV3Types.CompactOutcome memory receipt = _verifiedOutcome(router.lifecycleBook(), 1);
-        assertEq(receipt.bountyRecipient, receipt.bountyUsdc == 0 ? address(0) : KEEPER);
+        assertEq(receipt.bountyRecipient, receipt.bountyAssets == 0 ? address(0) : KEEPER);
         assertEq(
             uint8(receipt.bountyDisposition),
-            uint8(receipt.bountyUsdc == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
+            uint8(receipt.bountyAssets == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
         );
-        assertEq(receipt.bountyUsdc, before_.bounty);
+        assertEq(receipt.bountyAssets, before_.bounty);
         assertEq(uint8(receipt.executionMode), regime + 1, "Receipt records the actual calendar mode");
         (uint256 size,,,,,,) = engine.positions(ACCOUNT);
         assertEq(size, (action == 1 || rejected) ? 0 : 10_000e18);
         if (rejected) {
-            assertEq(clearinghouse.balanceUsdc(ACCOUNT), before_.trader - before_.bounty);
+            assertEq(clearinghouse.balanceAssets(ACCOUNT), before_.trader - before_.bounty);
             assertEq(
-                usdc.balanceOf(address(clearinghouse)), before_.custody, "Terminal cleanup only reallocates custody"
+                settlementToken.balanceOf(address(clearinghouse)),
+                before_.custody,
+                "Terminal cleanup only reallocates custody"
             );
             assertEq(receipt.failureSelector, ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector);
             assertEq(receipt.failureCode, 2, "Live degraded open must fail the DEGRADED_MODE admission rule");
         } else {
             uint256 frozenSpread = close && regime == 2 ? 50e6 : 0;
-            assertEq(clearinghouse.balanceUsdc(ACCOUNT), before_.trader - before_.bounty - 4e6 - frozenSpread);
-            assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), before_.treasury + 4e6);
-            assertEq(usdc.balanceOf(address(clearinghouse)), before_.custody - frozenSpread);
-            assertEq(usdc.balanceOf(address(pool)), before_.poolCash + frozenSpread);
+            assertEq(clearinghouse.balanceAssets(ACCOUNT), before_.trader - before_.bounty - 4e6 - frozenSpread);
+            assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), before_.treasury + 4e6);
+            assertEq(settlementToken.balanceOf(address(clearinghouse)), before_.custody - frozenSpread);
+            assertEq(settlementToken.balanceOf(address(pool)), before_.poolCash + frozenSpread);
         }
     }
 

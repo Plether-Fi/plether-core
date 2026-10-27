@@ -10,10 +10,10 @@ import {VmSafe} from "forge-std/Vm.sol";
 contract PerpsReleaseSizeDeployment is DeployPerpsArbitrumSepolia {
 
     function engineArguments(
-        address usdc,
+        address settlementToken,
         address clearinghouse
     ) external pure returns (bytes memory) {
-        return abi.encode(usdc, clearinghouse, CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        return abi.encode(settlementToken, clearinghouse, CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
     }
 
     function oracleArguments(
@@ -74,18 +74,18 @@ contract PerpsReleaseDeploymentSizeTest is Test {
         }
         address owner = vm.addr(LOCAL_DEPLOYER_KEY);
 
-        _measure("mockUsdc", string.concat(DEPLOY_SCRIPT, "MockUSDC"), address(d.usdc), "");
+        _measure("settlementToken", string.concat(DEPLOY_SCRIPT, "MockUSDG"), address(d.settlementToken), "");
         _measure(
             "marginClearinghouse",
             "MarginClearinghouse.sol:MarginClearinghouse",
             address(d.clearinghouse),
-            abi.encode(address(d.usdc))
+            abi.encode(address(d.settlementToken))
         );
         _measure(
             "cfdEngine",
             "CfdEngine.sol:CfdEngine",
             address(d.engine),
-            deployment.engineArguments(address(d.usdc), address(d.clearinghouse))
+            deployment.engineArguments(address(d.settlementToken), address(d.clearinghouse))
         );
         _measure(
             "terminalNavBookV2",
@@ -116,7 +116,7 @@ contract PerpsReleaseDeploymentSizeTest is Test {
             "housePool",
             string.concat(DEPLOY_SCRIPT, "ArbitrumSepoliaReleaseHousePool"),
             address(d.housePool),
-            abi.encode(address(d.usdc), address(d.engine), address(d.housePoolRedemptionMathSidecar))
+            abi.encode(address(d.settlementToken), address(d.engine), address(d.housePoolRedemptionMathSidecar))
         );
         _measure(
             "cfdEngineProtocolLens",
@@ -129,7 +129,7 @@ contract PerpsReleaseDeploymentSizeTest is Test {
             "TrancheVault.sol:TrancheVault",
             address(d.seniorVault),
             abi.encode(
-                address(d.usdc),
+                address(d.settlementToken),
                 address(d.housePool),
                 true,
                 d.seniorVault.name(),
@@ -143,7 +143,7 @@ contract PerpsReleaseDeploymentSizeTest is Test {
             "TrancheVault.sol:TrancheVault",
             address(d.juniorVault),
             abi.encode(
-                address(d.usdc),
+                address(d.settlementToken),
                 address(d.housePool),
                 false,
                 d.juniorVault.name(),

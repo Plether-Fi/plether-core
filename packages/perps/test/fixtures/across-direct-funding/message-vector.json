@@ -3,7 +3,7 @@
   "apiQuoteValidated": false,
   "chainId": 42161,
   "multicallHandler": "0x0f7ae28de1c8532170ad4ee566b5801485c13a0e",
-  "usdc": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+  "settlementToken": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
   "sampleClearinghouse": "0x3333333333333333333333333333333333333333",
   "sampleBeneficiary": "0x2222222222222222222222222222222222222222",
   "instructionsType": "tuple(tuple(address target,bytes callData,uint256 value)[] calls,address fallbackRecipient)",

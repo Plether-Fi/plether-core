@@ -1,7 +1,7 @@
 # Perps Gas Sponsorship Security Model
 
 The paymaster controls a pool of native token. A successful exploit can drain that pool even when it cannot steal
-protocol or trader USDC. Treat the policy service, sponsor signer, account implementation, bundler, and EntryPoint as a
+protocol or trader settlement tokens. Treat the policy service, sponsor signer, account implementation, bundler, and EntryPoint as a
 separate production security boundary.
 
 ## Enforced on-chain

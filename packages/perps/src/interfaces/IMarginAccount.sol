@@ -2,42 +2,42 @@
 pragma solidity 0.8.35;
 
 /// @notice Public trader-facing margin account surface stripped of internal reservation and bucket plumbing.
-/// @dev Monetary values use the settlement token's native units, expected to be 6-decimal USDC.
+/// @dev Monetary values use the settlement token's native units, expected to be 6-decimal settlement token.
 interface IMarginAccount {
 
-    /// @notice Deposits USDC into the caller's canonical margin account.
+    /// @notice Deposits settlement token into the caller's canonical margin account.
     /// @dev Requires a positive amount and prior token allowance. Tokens are pulled from the caller, its internal
     ///      settlement balance is credited, and any open-position carry is then checkpointed or realized.
-    /// @param amount USDC amount to deposit
+    /// @param amount settlement token amount to deposit
     function depositMargin(
         uint256 amount
     ) external;
 
-    /// @notice Deposits the caller's USDC into an account's free settlement balance without recipient authorization.
+    /// @notice Deposits the caller's settlement token into an account's free settlement balance without recipient authorization.
     /// @dev Requires a nonzero account, positive amount, prior caller allowance, and exact token receipt. Does not
     ///      allocate position margin or checkpoint carry; pending carry remains due on normal account actions.
     ///      The payer receives no withdrawal or trading authority. Self-funding and undeployed accounts are allowed.
     /// @param account Account receiving the settlement credit
-    /// @param amount Exact USDC amount pulled from the caller
+    /// @param amount Exact settlement token amount pulled from the caller
     function depositFor(
         address account,
         uint256 amount
     ) external;
 
-    /// @notice Withdraws USDC from the caller's canonical margin account.
+    /// @notice Withdraws settlement token from the caller's canonical margin account.
     /// @dev Carry and engine withdrawal guards are applied after a provisional debit; the remaining settlement must
     ///      still cover all locked buckets. A zero amount is allowed but still runs the checks and hooks.
-    /// @param amount USDC amount to withdraw
+    /// @param amount settlement token amount to withdraw
     function withdrawMargin(
         uint256 amount
     ) external;
 
-    /// @notice Returns total account equity in settlement USDC.
+    /// @notice Returns total account equity in settlement settlement token.
     /// @dev Despite the legacy name, this is the clearinghouse's internal settlement balance and excludes unrealized
     ///      PnL and engine withdrawal guards.
     /// @param account Account to inspect
-    /// @return Settlement balance in USDC
-    function getAccountEquityUsdc(
+    /// @return Settlement balance in settlement token
+    function getAccountEquityAssets(
         address account
     ) external view returns (uint256);
 
@@ -45,8 +45,8 @@ interface IMarginAccount {
     /// @dev Equals `max(settlement balance - total locked margin, 0)`. This clearinghouse-local view excludes
     ///      unrealized PnL and does not account for engine withdrawal guards.
     /// @param account Account to inspect
-    /// @return Unencumbered settlement balance in USDC
-    function getFreeBuyingPowerUsdc(
+    /// @return Unencumbered settlement balance in settlement token
+    function getFreeBuyingPowerAssets(
         address account
     ) external view returns (uint256);
 

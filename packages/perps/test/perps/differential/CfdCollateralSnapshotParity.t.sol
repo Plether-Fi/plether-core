@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../utils/MockSettlementToken.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract CollateralSnapshotHarness {
@@ -25,15 +25,15 @@ contract CollateralSnapshotHarness {
         address account,
         bool closeCommit
     ) external view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
-        snapshot.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
+        snapshot.accountBuckets = clearinghouse.getAccountAssetBuckets(account);
         snapshot.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        snapshot.liquidationReserveUsdc = clearinghouse.liquidationReserveUsdc(account);
-        snapshot.actionReserveUsdc = clearinghouse.actionReserveUsdc(account);
+        snapshot.liquidationReserveAssets = clearinghouse.liquidationReserveAssets(account);
+        snapshot.actionReserveAssets = clearinghouse.actionReserveAssets(account);
         if (!closeCommit) {
-            snapshot.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
-            snapshot.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
+            snapshot.vpiRebateReserveAssets = clearinghouse.vpiRebateReserveAssets(account);
+            snapshot.protectedExecutionBountyAssets = clearinghouse.totalBountyReservationsAssets(account);
         }
-        snapshot.position.margin = snapshot.lockedBuckets.positionMarginUsdc;
+        snapshot.position.margin = snapshot.lockedBuckets.positionMarginAssets;
     }
 
 }
@@ -42,20 +42,20 @@ contract CollateralSnapshotHarness {
 contract CorruptCollateralClearinghouse is MarginClearinghouse {
 
     constructor(
-        address usdc
-    ) MarginClearinghouse(usdc) {}
+        address settlementToken
+    ) MarginClearinghouse(settlementToken) {}
 
     function corruptBuckets(
         address account,
         uint256[7] memory amounts
     ) external {
         settlementBalances[account] = amounts[0];
-        positionMarginUsdc[account] = amounts[1];
+        positionMarginAssets[account] = amounts[1];
         liquidationReserveBalances[account] = amounts[2];
-        committedOrderMarginUsdc[account] = amounts[3];
-        reservedSettlementUsdc[account] = amounts[4];
+        committedOrderMarginAssets[account] = amounts[3];
+        reservedSettlementAssets[account] = amounts[4];
         vpiRebateReserveBalances[account] = amounts[5];
-        totalBountyReservationsUsdc[account] = amounts[6];
+        totalBountyReservationsAssets[account] = amounts[6];
     }
 
 }
@@ -63,13 +63,13 @@ contract CorruptCollateralClearinghouse is MarginClearinghouse {
 contract CfdCollateralSnapshotParityTest is Test {
 
     address private constant ACCOUNT = address(0xA11CE);
-    MockUSDC private usdc;
+    MockSettlementToken private settlementToken;
     CorruptCollateralClearinghouse private clearinghouse;
     CollateralSnapshotHarness private harness;
 
     function setUp() public {
-        usdc = new MockUSDC();
-        clearinghouse = new CorruptCollateralClearinghouse(address(usdc));
+        settlementToken = new MockSettlementToken();
+        clearinghouse = new CorruptCollateralClearinghouse(address(settlementToken));
         clearinghouse.setEngine(address(this));
         harness = new CollateralSnapshotHarness();
     }
@@ -92,21 +92,21 @@ contract CfdCollateralSnapshotParityTest is Test {
         _fundPublicBuckets(200e6, 100e6, 150e6, 50e6, 20e6, 80e6);
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _assertParity(false);
         assertEq(snapshot.position.margin, 200e6, "canonical pledge replaces stale Engine margin");
-        assertEq(snapshot.accountBuckets.freeSettlementUsdc, 80e6);
-        assertEq(snapshot.actionReserveUsdc, 70e6, "VPI belongs inside the action reserve");
-        assertEq(snapshot.protectedExecutionBountyUsdc, 50e6);
-        assertEq(snapshot.accountBuckets.otherLockedMarginUsdc, 320e6, "liquidation reserve remains locked");
+        assertEq(snapshot.accountBuckets.freeSettlementAssets, 80e6);
+        assertEq(snapshot.actionReserveAssets, 70e6, "VPI belongs inside the action reserve");
+        assertEq(snapshot.protectedExecutionBountyAssets, 50e6);
+        assertEq(snapshot.accountBuckets.otherLockedMarginAssets, 320e6, "liquidation reserve remains locked");
         snapshot = _assertParity(true);
-        assertEq(snapshot.actionReserveUsdc, 70e6, "commitment still protects the entire action reserve");
-        assertEq(snapshot.vpiRebateReserveUsdc, 0, "commitment omits execution-only VPI field");
-        assertEq(snapshot.protectedExecutionBountyUsdc, 0, "commitment omits execution-only bounty field");
+        assertEq(snapshot.actionReserveAssets, 70e6, "commitment still protects the entire action reserve");
+        assertEq(snapshot.vpiRebateReserveAssets, 0, "commitment omits execution-only VPI field");
+        assertEq(snapshot.protectedExecutionBountyAssets, 0, "commitment omits execution-only bounty field");
     }
 
     function test_ZeroFreeSettlementMatchesBothSnapshotShapes() public {
         _fundPublicBuckets(200e6, 100e6, 150e6, 50e6, 20e6, 0);
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _assertParity(false);
-        assertEq(snapshot.accountBuckets.freeSettlementUsdc, 0);
-        assertEq(snapshot.accountBuckets.totalLockedMarginUsdc, snapshot.accountBuckets.settlementBalanceUsdc);
+        assertEq(snapshot.accountBuckets.freeSettlementAssets, 0);
+        assertEq(snapshot.accountBuckets.totalLockedMarginAssets, snapshot.accountBuckets.settlementBalanceAssets);
         _assertParity(true);
     }
 
@@ -138,11 +138,11 @@ contract CfdCollateralSnapshotParityTest is Test {
     function test_SyntheticUndercollateralizationKeepsZeroFloorAndRawClassifications() public {
         clearinghouse.corruptBuckets(ACCOUNT, [uint256(1), 2, 3, 4, 5, 6, 7]);
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _assertParity(false);
-        assertEq(snapshot.accountBuckets.freeSettlementUsdc, 0);
-        assertEq(snapshot.accountBuckets.totalLockedMarginUsdc, 14);
-        assertEq(snapshot.actionReserveUsdc, 5, "disputed backing is not silently repaired");
-        assertEq(snapshot.vpiRebateReserveUsdc, 6);
-        assertEq(snapshot.protectedExecutionBountyUsdc, 7);
+        assertEq(snapshot.accountBuckets.freeSettlementAssets, 0);
+        assertEq(snapshot.accountBuckets.totalLockedMarginAssets, 14);
+        assertEq(snapshot.actionReserveAssets, 5, "disputed backing is not silently repaired");
+        assertEq(snapshot.vpiRebateReserveAssets, 6);
+        assertEq(snapshot.protectedExecutionBountyAssets, 7);
         _assertParity(true);
     }
 
@@ -173,9 +173,9 @@ contract CfdCollateralSnapshotParityTest is Test {
     ) private {
         uint256 settlement = pledge + liquidation + orderMargin + bounty + vpi + free;
         if (settlement > 0) {
-            usdc.mint(ACCOUNT, settlement);
+            settlementToken.mint(ACCOUNT, settlement);
             vm.startPrank(ACCOUNT);
-            usdc.approve(address(clearinghouse), settlement);
+            settlementToken.approve(address(clearinghouse), settlement);
             clearinghouse.deposit(ACCOUNT, settlement);
             vm.stopPrank();
         }

@@ -9,21 +9,21 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 library CfdEngineSettlementTypes {
 
     /// @notice Engine-owned position fields produced by a planned settlement.
-    /// @dev `size` uses 18 decimals and both entry cost and maximum profit use 6-decimal USDC atoms.
+    /// @dev `size` uses 18 decimals and both entry cost and maximum profit use 6-decimal settlement token atoms.
     ///      Active position margin is maintained separately in the clearinghouse. The host derives the position's
     ///      borrow base and last carry index rather than accepting them in this payload. Terminal paths call the
     ///      dedicated position-deletion hook instead.
     /// @param size Post-settlement position size.
-    /// @param entryCostUsdcAtoms Post-settlement exact entry cost.
-    /// @param maxProfitUsdc Post-settlement maximum-profit envelope.
+    /// @param entryCostAssetAtoms Post-settlement exact entry cost.
+    /// @param maxProfitAssets Post-settlement maximum-profit envelope.
     /// @param lastUpdateTime Timestamp of the position mutation.
     /// @param lastCarryTimestamp Timestamp from which subsequent position carry accrues.
-    /// @param vpiAccrued Net VPI accumulated on the remaining position, in USDC with 6 decimals.
+    /// @param vpiAccrued Net VPI accumulated on the remaining position, in settlement token with 6 decimals.
     /// @param side Direction of the post-settlement position.
     struct PositionState {
         uint256 size;
-        uint256 entryCostUsdcAtoms;
-        uint256 maxProfitUsdc;
+        uint256 entryCostAssetAtoms;
+        uint256 maxProfitAssets;
         uint64 lastUpdateTime;
         uint64 lastCarryTimestamp;
         int256 vpiAccrued;

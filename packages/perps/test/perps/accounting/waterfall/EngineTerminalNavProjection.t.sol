@@ -16,14 +16,15 @@ contract EngineTerminalNavProjectionTest is BasePerpTest {
     function _accountTerminalLpPriceDelta(
         address account,
         uint256 markPrice
-    ) internal view returns (int256 deltaUsdc) {
+    ) internal view returns (int256 deltaAssets) {
         ITerminalNavBookV2.CurveRecord memory curve = terminalNavBook.curveOf(account);
-        int256 markedNotionalUsdc = int256(uint256(curve.lots) * markPrice);
-        int256 entryCostUsdc = int256(uint256(curve.entryCostUsdcAtoms));
-        int256 uncappedUsdc =
-            curve.side == CfdTypes.Side.LONG ? markedNotionalUsdc - entryCostUsdc : entryCostUsdc - markedNotionalUsdc;
-        int256 collectibleCapUsdc = int256(uint256(curve.effectiveCapUsdcAtoms));
-        deltaUsdc = uncappedUsdc > collectibleCapUsdc ? collectibleCapUsdc : uncappedUsdc;
+        int256 markedNotionalAssets = int256(uint256(curve.lots) * markPrice);
+        int256 entryCostAssets = int256(uint256(curve.entryCostAssetAtoms));
+        int256 uncappedAssets = curve.side == CfdTypes.Side.LONG
+            ? markedNotionalAssets - entryCostAssets
+            : entryCostAssets - markedNotionalAssets;
+        int256 collectibleCapAssets = int256(uint256(curve.effectiveCapAssetAtoms));
+        deltaAssets = uncappedAssets > collectibleCapAssets ? collectibleCapAssets : uncappedAssets;
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
@@ -34,7 +35,7 @@ contract EngineTerminalNavProjectionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -106,16 +107,16 @@ contract EngineTerminalNavProjectionTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(vm.getBlockTimestamp()));
 
-        int256 aliceDeltaUsdc = _accountTerminalLpPriceDelta(aliceAccount, 1.1e8);
-        int256 bobDeltaUsdc = _accountTerminalLpPriceDelta(bobAccount, 1.1e8);
-        int256 aggregateDeltaUsdc = _terminalLpPriceDelta();
+        int256 aliceDeltaAssets = _accountTerminalLpPriceDelta(aliceAccount, 1.1e8);
+        int256 bobDeltaAssets = _accountTerminalLpPriceDelta(bobAccount, 1.1e8);
+        int256 aggregateDeltaAssets = _terminalLpPriceDelta();
         assertEq(
-            aggregateDeltaUsdc,
-            aliceDeltaUsdc + bobDeltaUsdc,
+            aggregateDeltaAssets,
+            aliceDeltaAssets + bobDeltaAssets,
             "Book aggregate must equal the sum of exact account-local collateral-capped curves"
         );
-        uint256 expectedLiabilityUsdc = aggregateDeltaUsdc < 0 ? uint256(-(aggregateDeltaUsdc + 1)) + 1 : 0;
-        assertEq(_poolMtmAdjustment(), expectedLiabilityUsdc, "HousePool liability must derive from the signed book");
+        uint256 expectedLiabilityAssets = aggregateDeltaAssets < 0 ? uint256(-(aggregateDeltaAssets + 1)) + 1 : 0;
+        assertEq(_poolMtmAdjustment(), expectedLiabilityAssets, "HousePool liability must derive from the signed book");
         _assertTerminalCurveMatchesEngine(aliceAccount);
         _assertTerminalCurveMatchesEngine(bobAccount);
     }
@@ -136,10 +137,10 @@ contract EngineTerminalNavProjectionTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1.5e8, uint64(vm.getBlockTimestamp()));
 
-        int256 terminalDeltaUsdc = _terminalLpPriceDelta();
+        int256 terminalDeltaAssets = _terminalLpPriceDelta();
         (uint256 withdrawalSeniorNav, uint256 withdrawalJuniorNav,,) = pool.getPendingTrancheState();
         (uint256 depositSeniorNav, uint256 depositJuniorNav) = pool.getPendingDepositTrancheState();
-        assertGt(terminalDeltaUsdc, 0, "Adverse LONG mark must create collectible LP terminal price value");
+        assertGt(terminalDeltaAssets, 0, "Adverse LONG mark must create collectible LP terminal price value");
         assertEq(depositSeniorNav, withdrawalSeniorNav, "Senior entry and exit must share the signed projection");
         assertEq(depositJuniorNav, withdrawalJuniorNav, "Junior entry and exit must share the signed projection");
         assertGt(withdrawalJuniorNav, juniorBefore, "Collectible trader loss must increase the shared Junior NAV");

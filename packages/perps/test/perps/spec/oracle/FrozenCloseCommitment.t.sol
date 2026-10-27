@@ -28,12 +28,12 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract WeekendArbitrageTest is RecordedOrderReceipts {
 
-    MockUSDC usdc;
+    MockSettlementToken settlementToken;
     CfdEngine engine;
     HousePool pool;
     TrancheVault seniorVault;
@@ -66,7 +66,7 @@ contract WeekendArbitrageTest is RecordedOrderReceipts {
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
             juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
-            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorExposureAssets: type(uint256).max - 1,
             maxSeniorShareBps: 9999
         });
         pool.proposePoolConfig(config);
@@ -76,8 +76,8 @@ contract WeekendArbitrageTest is RecordedOrderReceipts {
 
     function _bootstrapSeededLifecycle() internal {
         uint256 seedAmount = 1000e6;
-        usdc.mint(address(this), seedAmount * 2);
-        usdc.approve(address(pool), seedAmount * 2);
+        settlementToken.mint(address(this), seedAmount * 2);
+        settlementToken.approve(address(pool), seedAmount * 2);
         pool.initializeSeedPosition(false, seedAmount, address(this));
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
@@ -87,9 +87,9 @@ contract WeekendArbitrageTest is RecordedOrderReceipts {
         address lp,
         uint256 amount
     ) internal {
-        usdc.mint(lp, amount);
+        settlementToken.mint(lp, amount);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
+        settlementToken.approve(address(juniorVault), amount);
         uint256 requestId = juniorVault.requestDeposit(amount, lp, lp);
         vm.stopPrank();
 
@@ -109,9 +109,9 @@ contract WeekendArbitrageTest is RecordedOrderReceipts {
         uint256 amount
     ) internal {
         address account = trader;
-        usdc.mint(trader, amount);
+        settlementToken.mint(trader, amount);
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
+        settlementToken.approve(address(clearinghouse), amount);
         clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
@@ -119,7 +119,7 @@ contract WeekendArbitrageTest is RecordedOrderReceipts {
     function setUp() public {
         // Complete the 72-hour capacity proposal on Friday before the market closes.
         vm.warp(1_709_100_000 - 1 days);
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
@@ -130,22 +130,26 @@ contract WeekendArbitrageTest is RecordedOrderReceipts {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 50);
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
+        engine = new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, params, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(CAP_PRICE))));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC", 0, address(0));
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC", 0, address(0));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        seniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), true, "Senior LP", "sAssets", 0, address(0)
+        );
+        juniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), false, "Junior LP", "jAssets", 0, address(0)
+        );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));

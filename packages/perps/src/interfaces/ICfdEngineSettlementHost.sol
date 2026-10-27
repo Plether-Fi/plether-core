@@ -5,7 +5,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "@plether/perps/interfaces/CfdEngineSettlementTypes.sol";
 
 /// @notice Narrow engine hook surface callable by the settlement sidecar.
-/// @dev Mutation hooks are callable only by the engine's configured settlement sidecar. USDC amounts use 6 decimals,
+/// @dev Mutation hooks are callable only by the engine's configured settlement sidecar. settlement token amounts use 6 decimals,
 ///      prices use 8 decimals, position sizes use 18 decimals, and timestamps are Unix seconds.
 interface ICfdEngineSettlementHost {
 
@@ -26,8 +26,8 @@ interface ICfdEngineSettlementHost {
     function protocolTreasury() external view returns (address);
 
     /// @notice Trader claim balance still owed to beneficiaries.
-    /// @return Aggregate senior HousePool payout liability in USDC
-    function totalTraderClaimBalanceUsdc() external view returns (uint256);
+    /// @return Aggregate senior HousePool payout liability in settlement token
+    function totalTraderClaimBalanceAssets() external view returns (uint256);
 
     /// @notice Applies a newer mark price and advances carry.
     /// @dev A mark whose publish time is not strictly newer than the cached time is a no-op. A strictly newer mark
@@ -48,8 +48,8 @@ interface ICfdEngineSettlementHost {
     /// @notice Synchronizes aggregate side margin after settlement changes a position margin bucket.
     /// @dev Adds or subtracts the exact difference; inconsistent inputs can underflow and revert.
     /// @param side Side whose aggregate margin should be updated
-    /// @param marginBefore Account position margin before settlement, in USDC
-    /// @param marginAfter Account position margin after settlement, in USDC
+    /// @param marginBefore Account position margin before settlement, in settlement token
+    /// @param marginAfter Account position margin after settlement, in settlement token
     function settlementSyncTotalSideMargin(
         CfdTypes.Side side,
         uint256 marginBefore,
@@ -60,7 +60,7 @@ interface ICfdEngineSettlementHost {
     /// @dev Positive deltas add and negative deltas subtract. The sidecar must provide consistent bounded deltas;
     ///      subtraction underflow or signed-to-unsigned overflow reverts.
     /// @param side Side whose totals are mutated
-    /// @param maxProfitDelta Signed maximum-profit envelope delta in USDC
+    /// @param maxProfitDelta Signed maximum-profit envelope delta in settlement token
     /// @param openInterestDelta Signed open-interest delta with 18 decimals
     /// @param entryNotionalDelta Signed raw `size * entryPrice` numerator delta with 26 decimals
     function settlementApplySideDelta(
@@ -73,21 +73,21 @@ interface ICfdEngineSettlementHost {
     /// @notice Consumes previously recorded trader-claim balance during settlement.
     /// @dev Decreases both the account claim and aggregate claim liability by the exact amount.
     /// @param account Claim account to debit
-    /// @param amountUsdc Claim amount to consume in USDC
+    /// @param amountAssets Claim amount to consume in settlement token
     function settlementConsumeTraderClaim(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external;
 
     /// @notice Pays or records trader-claim value during settlement.
     /// @dev Pays immediately only when cash remains after reserving all existing trader claims; otherwise records a new
     ///      senior claim liability. Zero is a no-op.
     /// @param account Claim beneficiary
-    /// @param amountUsdc Fresh payout amount to pay or record in USDC
+    /// @param amountAssets Fresh payout amount to pay or record in settlement token
     /// @param positionRemainsOpen Whether immediate cash is credited to PnL pledge rather than free settlement
     function settlementRecordTraderClaim(
         address account,
-        uint256 amountUsdc,
+        uint256 amountAssets,
         bool positionRemainsOpen
     ) external;
 

@@ -42,7 +42,7 @@ contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
         _fundJunior(bob, 50_000e6);
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 120_000e6);
+        settlementToken.transfer(address(0xDEAD), 120_000e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -57,8 +57,8 @@ contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
 
     function test_MaxDepositAndMaxMint_ReopenForPendingSeniorRecapAfterWipeout() public {
         uint256 rawAssetsBefore = pool.rawAssets();
-        assertGt(rawAssetsBefore, 0, "Setup should leave real USDC in the pool before wipeout");
-        usdc.burn(address(pool), rawAssetsBefore);
+        assertGt(rawAssetsBefore, 0, "Setup should leave real settlementToken in the pool before wipeout");
+        settlementToken.burn(address(pool), rawAssetsBefore);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -67,7 +67,7 @@ contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
         assertGt(pool.seniorHighWaterMark(), 0, "Stored HWM should remain stale until reconcile applies the recap");
 
         uint256 recapAmount = 500e6;
-        usdc.mint(address(pool), recapAmount);
+        settlementToken.mint(address(pool), recapAmount);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             recapAmount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -86,7 +86,7 @@ contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
         pool.reconcile();
 
         uint256 juniorBacking = 1e6;
-        usdc.mint(address(pool), juniorBacking);
+        settlementToken.mint(address(pool), juniorBacking);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             juniorBacking, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -98,9 +98,9 @@ contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
         assertTrue(pool.canAcceptTrancheDeposits(true), "Senior deposits should reopen with junior backing");
 
         uint256 totalBeforeDeposit = pool.totalAssets();
-        usdc.mint(dave, 1000e6);
+        settlementToken.mint(dave, 1000e6);
         vm.startPrank(dave);
-        usdc.approve(address(seniorVault), 1000e6);
+        settlementToken.approve(address(seniorVault), 1000e6);
         assertGe(seniorVault.maxRequestDeposit(dave), 1000e6, "request capacity should include supported depth");
         uint256 requestId = seniorVault.requestDeposit(1000e6, dave, dave);
         vm.stopPrank();

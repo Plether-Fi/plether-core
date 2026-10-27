@@ -58,14 +58,14 @@ contract OrderLifecycleBookUnpinnedConfigTest is RecordedOrderReceipts {
             executionWindowSeconds: uint32(uint256(uint64(block.timestamp + 1 hours)) - block.timestamp),
             allowedExecutionModes: 1,
             expectedConfigHash: expectedConfigHash,
-            maxExecutionBountyUsdc: 0,
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max,
+            maxExecutionBountyAssets: 0,
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max,
             maxPostPositionSize: type(uint256).max,
-            minPostSettlementBalanceUsdc: 0,
-            minPostPositionEquityUsdc: 0,
+            minPostSettlementBalanceAssets: 0,
+            minPostPositionEquityAssets: 0,
             maxPostLeverageBps: type(uint32).max
         });
     }
@@ -90,7 +90,7 @@ contract OrderLifecycleBookUnpinnedConfigTest is RecordedOrderReceipts {
         receipt.priceSource = OrderV3Types.PriceSource.OracleExecution;
         receipt.executionPrice = 1e8;
         receipt.neutralMarkPrice = 1e8;
-        receipt.poolDepthUsdc = 1e6;
+        receipt.poolDepthAssets = 1e6;
         receipt.oraclePublishTime = 1;
         receipt.priceReachedEngine = true;
     }

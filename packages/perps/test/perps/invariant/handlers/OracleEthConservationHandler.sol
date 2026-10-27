@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
@@ -12,11 +13,10 @@ import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 
-/// @dev Spends only its setup-funded ETH. Trader collateral and keeper USDC credits never enter this actor's budget.
+/// @dev Spends only its setup-funded ETH. Trader collateral and keeper settlement token credits never enter this actor's budget.
 contract OracleEthKeeper {
 
     enum Mode {
@@ -145,7 +145,7 @@ contract OracleEthConservationHandler is Test {
     PletherOracle public immutable oracle;
     OrderRouterAdmin public immutable admin;
     MockPyth public immutable pyth;
-    MockUSDC public immutable usdc;
+    MockSettlementToken public immutable settlementToken;
     address public immutable owner;
     OracleEthKeeper[3] public actors;
     bytes32[] private feeds;
@@ -217,7 +217,7 @@ contract OracleEthConservationHandler is Test {
         PletherOracle oracle_,
         OrderRouterAdmin admin_,
         MockPyth pyth_,
-        MockUSDC usdc_,
+        MockSettlementToken settlementToken_,
         bytes32[] memory feeds_
     ) {
         router = router_;
@@ -226,7 +226,7 @@ contract OracleEthConservationHandler is Test {
         oracle = oracle_;
         admin = admin_;
         pyth = pyth_;
-        usdc = usdc_;
+        settlementToken = settlementToken_;
         feeds = feeds_;
         owner = msg.sender;
         for (uint256 i; i < actors.length; ++i) {
@@ -660,9 +660,9 @@ contract OracleEthConservationHandler is Test {
         address trader = existingTrader;
         if (!close) {
             trader = address(uint160(0xE70000 + ++traderNonce));
-            usdc.mint(trader, 2000e6);
+            settlementToken.mint(trader, 2000e6);
             vm.startPrank(trader);
-            usdc.approve(address(clearinghouse), 2000e6);
+            settlementToken.approve(address(clearinghouse), 2000e6);
             clearinghouse.deposit(trader, 2000e6);
             vm.stopPrank();
         }
@@ -984,7 +984,7 @@ contract OracleEthConservationHandler is Test {
             digest = keccak256(abi.encode(digest, _itemHash(i)));
         }
         for (uint256 i; i < actors.length; ++i) {
-            digest = keccak256(abi.encode(digest, clearinghouse.getAccountUsdcBuckets(address(actors[i]))));
+            digest = keccak256(abi.encode(digest, clearinghouse.getAccountAssetBuckets(address(actors[i]))));
         }
     }
 
@@ -999,7 +999,7 @@ contract OracleEthConservationHandler is Test {
                 router.lifecycleBook().pendingIntent(orderIds[index]),
                 router.lifecycleBook().terminalOutcome(orderIds[index]),
                 clearinghouse.getOrderReservation(orderIds[index]),
-                clearinghouse.getAccountUsdcBuckets(traders[index]),
+                clearinghouse.getAccountAssetBuckets(traders[index]),
                 position
             )
         );

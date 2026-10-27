@@ -5,6 +5,7 @@ pragma solidity 0.8.35;
 // Source of truth: packages/perps/ACCOUNTING_SPEC.md#oracle-and-freshness-policy
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -30,7 +31,6 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract FuturePublishDelayTest is BasePerpTest {
@@ -44,22 +44,22 @@ contract FuturePublishDelayTest is BasePerpTest {
     address alice = address(0xA11CE);
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -131,22 +131,22 @@ contract StoredMarkOrderingTest is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -194,8 +194,8 @@ contract StoredMarkOrderingTest is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1010);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1010);
 
-        uint256 keeperUsdcBefore = usdc.balanceOf(keeper);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperAssetsBefore = settlementToken.balanceOf(keeper);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeper);
         uint256 expectedBounty = _executionBountyReserve(1);
 
         bytes[] memory updateData = new bytes[](1);
@@ -208,10 +208,14 @@ contract StoredMarkOrderingTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), 0, "Historical execution should consume the order");
         assertEq(engine.lastMarkTime(), 1020, "Historical execution must not roll back the live mark");
-        assertEq(usdc.balanceOf(keeper), keeperUsdcBefore, "Execution must preserve keeper wallet USDC");
+        assertEq(
+            settlementToken.balanceOf(keeper),
+            keeperAssetsBefore,
+            "Execution must preserve keeper wallet settlementToken"
+        );
 
         assertEq(
-            clearinghouse.balanceUsdc(keeper) - keeperSettlementBefore,
+            clearinghouse.balanceAssets(keeper) - keeperSettlementBefore,
             expectedBounty,
             "Terminal execution credits all reserved bounties"
         );
@@ -236,8 +240,8 @@ contract StoredMarkOrderingTest is BasePerpTest {
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1010);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1010);
 
-        uint256 keeperUsdcBefore = usdc.balanceOf(keeper);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperAssetsBefore = settlementToken.balanceOf(keeper);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeper);
         uint256 expectedBounty = _executionBountyReserve(1) + _executionBountyReserve(2);
 
         bytes[] memory updateData = new bytes[](1);
@@ -250,10 +254,14 @@ contract StoredMarkOrderingTest is BasePerpTest {
 
         assertEq(router.nextExecuteId(), 0, "Batch historical execution should consume covered orders");
         assertEq(engine.lastMarkTime(), 1020, "Batch historical execution must not roll back the live mark");
-        assertEq(usdc.balanceOf(keeper), keeperUsdcBefore, "Execution must preserve keeper wallet USDC");
+        assertEq(
+            settlementToken.balanceOf(keeper),
+            keeperAssetsBefore,
+            "Execution must preserve keeper wallet settlementToken"
+        );
 
         assertEq(
-            clearinghouse.balanceUsdc(keeper) - keeperSettlementBefore,
+            clearinghouse.balanceAssets(keeper) - keeperSettlementBefore,
             expectedBounty,
             "Terminal execution credits all reserved bounties"
         );
@@ -291,22 +299,22 @@ contract FreshPostCommitTickTest is BasePerpTest {
     address alice = address(0xA11CE);
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -400,22 +408,22 @@ contract SameBlockTickOrderingTest is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -486,22 +494,22 @@ contract PostCommitTimestampBoundsTest is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -588,23 +596,23 @@ contract CrossBlockPostCommitTickTest is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
         baseMockPyth = mockPyth;
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -673,23 +681,23 @@ contract HistoricalTickSafetyTest is BasePerpTest {
     address alice = address(0xA11CE);
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
         baseMockPyth = mockPyth;
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -784,7 +792,7 @@ contract HistoricalTickSafetyTest is BasePerpTest {
 
 contract StaleExecutionReservationTest is Test {
 
-    MockUSDC usdc;
+    MockSettlementToken settlementToken;
     MockPyth mockPyth;
     CfdEngine engine;
     HousePool pool;
@@ -804,25 +812,25 @@ contract StaleExecutionReservationTest is Test {
     receive() external payable {}
 
     function setUp() public {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 50);
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
+        engine = new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -863,8 +871,8 @@ contract StaleExecutionReservationTest is Test {
         engine.setOrderRouter(address(router));
 
         _bypassAllTimelocks();
-        usdc.mint(address(this), 2000e6);
-        usdc.approve(address(pool), 2000e6);
+        settlementToken.mint(address(this), 2000e6);
+        settlementToken.approve(address(pool), 2000e6);
         pool.initializeSeedPosition(false, 1000e6, address(this));
         pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
@@ -883,7 +891,7 @@ contract StaleExecutionReservationTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -898,7 +906,7 @@ contract StaleExecutionReservationTest is Test {
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
             juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
-            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorExposureAssets: type(uint256).max - 1,
             maxSeniorShareBps: 9999
         });
         pool.proposePoolConfig(config);
@@ -911,9 +919,9 @@ contract StaleExecutionReservationTest is Test {
         address lp,
         uint256 amount
     ) internal {
-        usdc.mint(lp, amount);
+        settlementToken.mint(lp, amount);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
+        settlementToken.approve(address(juniorVault), amount);
         uint256 requestId = juniorVault.requestDeposit(amount, lp);
         vm.stopPrank();
 
@@ -931,9 +939,9 @@ contract StaleExecutionReservationTest is Test {
         uint256 amount
     ) internal {
         address account = trader;
-        usdc.mint(trader, amount);
+        settlementToken.mint(trader, amount);
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
+        settlementToken.approve(address(clearinghouse), amount);
         clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
@@ -948,11 +956,11 @@ contract StaleExecutionReservationTest is Test {
             orderSettlementWindow: router.pletherOracle().orderSettlementWindow(),
             maxComponentPublishTimeDivergence: router.pletherOracle().maxComponentPublishTimeDivergence(),
             adverseConfidenceMultiplierBps: router.pletherOracle().adverseConfidenceMultiplierBps(),
-            minOpenNotionalUsdc: router.minOpenNotionalUsdc(),
+            minOpenNotionalAssets: router.minOpenNotionalAssets(),
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
-            minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
-            maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
-            positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
+            minOpenOrderExecutionBountyAssets: router.minOpenOrderExecutionBountyAssets(),
+            maxOpenOrderExecutionBountyAssets: router.maxOpenOrderExecutionBountyAssets(),
+            positionProtectionTriggerBountyAssets: router.positionProtectionTriggerBountyAssets(),
             maxPendingOrders: router.maxPendingOrders(),
             minEngineGas: router.minEngineGas(),
             maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
@@ -974,9 +982,9 @@ contract StaleExecutionReservationTest is Test {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        uint256 keeperUsdcBefore = clearinghouse.balanceUsdc(keeper);
-        uint256 traderBefore = clearinghouse.balanceUsdc(alice);
-        uint256 lockedBefore = clearinghouse.lockedMarginUsdc(alice);
+        uint256 keeperAssetsBefore = clearinghouse.balanceAssets(keeper);
+        uint256 traderBefore = clearinghouse.balanceAssets(alice);
+        uint256 lockedBefore = clearinghouse.lockedMarginAssets(alice);
 
         vm.warp(t0 + 61);
         vm.roll(101);
@@ -986,13 +994,13 @@ contract StaleExecutionReservationTest is Test {
         assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
 
         assertEq(
-            clearinghouse.balanceUsdc(keeper) - keeperUsdcBefore,
+            clearinghouse.balanceAssets(keeper) - keeperAssetsBefore,
             0,
             "Keeper should not collect the reserve on stale oracle input"
         );
 
-        assertEq(clearinghouse.balanceUsdc(alice), traderBefore);
-        assertEq(clearinghouse.lockedMarginUsdc(alice), lockedBefore);
+        assertEq(clearinghouse.balanceAssets(alice), traderBefore);
+        assertEq(clearinghouse.lockedMarginAssets(alice), lockedBefore);
         assertEq(router.nextExecuteId(), 1, "Stale execution must not terminally dequeue the order");
     }
 

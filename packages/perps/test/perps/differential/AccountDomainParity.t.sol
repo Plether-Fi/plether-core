@@ -11,20 +11,20 @@ import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginC
 contract AccountDomainParityTest is BasePerpTest {
 
     function test_DomainHelpers_SeparateGenericAndTerminalReachability() public pure {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 12_000e6,
-            totalLockedMarginUsdc: 9000e6,
-            activePositionMarginUsdc: 3000e6,
-            otherLockedMarginUsdc: 6000e6,
-            freeSettlementUsdc: 3000e6
+        IMarginClearinghouse.AccountAssetBuckets memory buckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: 12_000e6,
+            totalLockedMarginAssets: 9000e6,
+            activePositionMarginAssets: 3000e6,
+            otherLockedMarginAssets: 6000e6,
+            freeSettlementAssets: 3000e6
         });
 
-        assertEq(buckets.settlementBalanceUsdc, 12_000e6);
-        assertEq(buckets.freeSettlementUsdc, 3000e6);
-        assertEq(buckets.activePositionMarginUsdc, 3000e6);
-        assertEq(buckets.otherLockedMarginUsdc, 6000e6);
-        assertEq(buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc, 6000e6);
-        assertEq(MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets), 12_000e6);
+        assertEq(buckets.settlementBalanceAssets, 12_000e6);
+        assertEq(buckets.freeSettlementAssets, 3000e6);
+        assertEq(buckets.activePositionMarginAssets, 3000e6);
+        assertEq(buckets.otherLockedMarginAssets, 6000e6);
+        assertEq(buckets.freeSettlementAssets + buckets.activePositionMarginAssets, 6000e6);
+        assertEq(MarginClearinghouseAccountingLib.getTerminalReachableAssets(buckets), 12_000e6);
     }
 
     function test_AccountCollateralView_UsesNamedDomains() public {
@@ -41,48 +41,48 @@ contract AccountDomainParityTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+        IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
         ICfdEngineTypes.AccountCollateralView memory collateralView =
             engineAccountLens.getAccountCollateralView(account);
 
         assertEq(
-            collateralView.settlementBalanceUsdc,
-            buckets.settlementBalanceUsdc,
+            collateralView.settlementBalanceAssets,
+            buckets.settlementBalanceAssets,
             "Collateral view settlement balance should come from the named domain"
         );
         assertEq(
-            collateralView.freeSettlementUsdc,
-            buckets.freeSettlementUsdc,
+            collateralView.freeSettlementAssets,
+            buckets.freeSettlementAssets,
             "Collateral view free settlement should come from the named domain"
         );
         assertEq(
-            collateralView.activePositionMarginUsdc,
-            buckets.activePositionMarginUsdc,
+            collateralView.activePositionMarginAssets,
+            buckets.activePositionMarginAssets,
             "Collateral view position margin should come from the named domain"
         );
         assertEq(
-            collateralView.otherLockedMarginUsdc,
-            buckets.otherLockedMarginUsdc,
+            collateralView.otherLockedMarginAssets,
+            buckets.otherLockedMarginAssets,
             "Collateral view queued reservations should come from the named domain"
         );
         assertEq(
-            collateralView.closeReachableUsdc,
-            buckets.freeSettlementUsdc,
+            collateralView.closeReachableAssets,
+            buckets.freeSettlementAssets,
             "Close reachability should remain free settlement only"
         );
         assertEq(
-            collateralView.liquidationReachableSettlementUsdc,
-            buckets.settlementBalanceUsdc - router.getAccountReservations(account).executionBountyUsdc,
+            collateralView.liquidationReachableSettlementAssets,
+            buckets.settlementBalanceAssets - router.getAccountReservations(account).executionBountyAssets,
             "Liquidation settlement reachability should exclude queued execution bounty"
         );
         assertLt(
-            buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc,
-            collateralView.liquidationReachableSettlementUsdc,
+            buckets.freeSettlementAssets + buckets.activePositionMarginAssets,
+            collateralView.liquidationReachableSettlementAssets,
             "Queued reservations should distinguish generic from liquidation reachability"
         );
         assertEq(
-            collateralView.terminalPriceCollectibleCapUsdc,
-            terminalNavBook.curveOf(account).effectiveCapUsdcAtoms,
+            collateralView.terminalPriceCollectibleCapAssets,
+            terminalNavBook.curveOf(account).effectiveCapAssetAtoms,
             "Terminal price cap should match the canonical account curve"
         );
     }
@@ -94,12 +94,12 @@ contract AccountDomainParityTest is BasePerpTest {
 
         ICfdEngineTypes.AccountCollateralView memory collateralView =
             engineAccountLens.getAccountCollateralView(account);
-        uint256 bookCapUsdc = terminalNavBook.curveOf(account).effectiveCapUsdcAtoms;
+        uint256 bookCapAssets = terminalNavBook.curveOf(account).effectiveCapAssetAtoms;
 
-        assertGt(clearinghouse.pnlPledgeUsdc(account), bookCapUsdc, "setup must contain unreachable excess pledge");
+        assertGt(clearinghouse.pnlPledgeAssets(account), bookCapAssets, "setup must contain unreachable excess pledge");
         assertEq(
-            collateralView.terminalPriceCollectibleCapUsdc,
-            bookCapUsdc,
+            collateralView.terminalPriceCollectibleCapAssets,
+            bookCapAssets,
             "Lens cap must apply the same endpoint clipping as the terminal book"
         );
     }
@@ -114,8 +114,8 @@ contract AccountDomainParityTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 accountLensWithdrawable = engineAccountLens.getWithdrawableUsdc(account);
-        uint256 publicLensWithdrawable = publicLens.getTraderAccount(account).withdrawableUsdc;
+        uint256 accountLensWithdrawable = engineAccountLens.getWithdrawableAssets(account);
+        uint256 publicLensWithdrawable = publicLens.getTraderAccount(account).withdrawableAssets;
 
         assertEq(
             publicLensWithdrawable,
@@ -142,9 +142,11 @@ contract AccountDomainParityTest is BasePerpTest {
 
         vm.warp(block.timestamp + 31);
 
-        assertEq(engineAccountLens.getWithdrawableUsdc(account), 0, "Account lens should honor tighter pool freshness");
         assertEq(
-            publicLens.getTraderAccount(account).withdrawableUsdc,
+            engineAccountLens.getWithdrawableAssets(account), 0, "Account lens should honor tighter pool freshness"
+        );
+        assertEq(
+            publicLens.getTraderAccount(account).withdrawableAssets,
             0,
             "Public lens should inherit account-lens freshness"
         );

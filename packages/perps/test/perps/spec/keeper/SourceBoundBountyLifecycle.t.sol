@@ -16,7 +16,7 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
         router.lifecycleBook().validateBountyFunding(id);
         assertEq(_bountyReservation(id).account, BOUNTY_TRADER);
         assertEq(uint8(_bountyReservation(id).state), uint8(IMarginClearinghouse.BountyReservationState.Active));
-        assertEq(_bountyReservation(id).amountUsdc, 0);
+        assertEq(_bountyReservation(id).amountAssets, 0);
         vm.expectRevert(bytes4(keccak256("MarginClearinghouse__InvalidBountyReservation()")));
         clearinghouse.validateBountyReservation(BOUNTY_OTHER, IMarginClearinghouse.BountyKind.Order, id, 0);
         vm.expectRevert(bytes4(keccak256("MarginClearinghouse__InvalidBountyReservation()")));
@@ -43,7 +43,7 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
         assertEq(_bountyStateDigest(router.nextCommitId()), beforeState);
 
         uint64 id = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, true, BOUNTY_SIZE, 0);
-        assertEq(_bountyReservation(id).amountUsdc, 0);
+        assertEq(_bountyReservation(id).amountAssets, 0);
     }
 
     function testFuzz_UnpaidExpiryPreservesPledgeCashAndKeeper(
@@ -57,16 +57,16 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
         if (free != 0) {
             _fundTrader(BOUNTY_TRADER, free);
         }
-        uint256 custody = clearinghouse.balanceUsdc(BOUNTY_TRADER);
-        uint256 keeper = clearinghouse.balanceUsdc(BOUNTY_KEEPER);
+        uint256 custody = clearinghouse.balanceAssets(BOUNTY_TRADER);
+        uint256 keeper = clearinghouse.balanceAssets(BOUNTY_KEEPER);
         uint64 id = _bountyCommit(BOUNTY_TRADER, side, true, BOUNTY_SIZE, 0);
-        assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), pledge);
-        assertEq(clearinghouse.actionReserveUsdc(BOUNTY_TRADER), 0);
+        assertEq(clearinghouse.pnlPledgeAssets(BOUNTY_TRADER), pledge);
+        assertEq(clearinghouse.actionReserveAssets(BOUNTY_TRADER), 0);
         _assertUnpaid(_bountyExpire(id, self ? BOUNTY_TRADER : BOUNTY_KEEPER));
         _assertBountyResolved(id);
-        assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), pledge);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), custody);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), keeper);
+        assertEq(clearinghouse.pnlPledgeAssets(BOUNTY_TRADER), pledge);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), custody);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_KEEPER), keeper);
     }
 
     function testFuzz_UnpaidSuccessBothSidesPartialFullAndSelf(
@@ -76,8 +76,8 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
     ) public {
         CfdTypes.Side side = shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
         _bountyPosition(side);
-        uint256 keeper = clearinghouse.balanceUsdc(BOUNTY_KEEPER);
-        uint256 wallet = usdc.balanceOf(BOUNTY_TRADER);
+        uint256 keeper = clearinghouse.balanceAssets(BOUNTY_KEEPER);
+        uint256 wallet = settlementToken.balanceOf(BOUNTY_TRADER);
         uint256 size = full ? BOUNTY_SIZE : BOUNTY_SIZE / 2;
         uint64 id = _bountyCommit(BOUNTY_TRADER, side, true, size, 0);
         _assertUnpaid(
@@ -88,8 +88,8 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
         _assertBountyResolved(id);
         (uint256 remaining,,,,,,) = engine.positions(BOUNTY_TRADER);
         assertEq(remaining, BOUNTY_SIZE - size);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), keeper);
-        assertEq(usdc.balanceOf(BOUNTY_TRADER), wallet, "no additional USDC deposited");
+        assertEq(clearinghouse.balanceAssets(BOUNTY_KEEPER), keeper);
+        assertEq(settlementToken.balanceOf(BOUNTY_TRADER), wallet, "no additional settlementToken deposited");
     }
 
     function test_PartialCloseQueueNeedsNoFreeCashOrBounty() public {
@@ -97,9 +97,9 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
         uint64 first = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
         uint64 second = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
         assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 2);
-        assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), pledge);
-        assertEq(_bountyReservation(first).amountUsdc, 0);
-        assertEq(_bountyReservation(second).amountUsdc, 0);
+        assertEq(clearinghouse.pnlPledgeAssets(BOUNTY_TRADER), pledge);
+        assertEq(_bountyReservation(first).amountAssets, 0);
+        assertEq(_bountyReservation(second).amountAssets, 0);
         _assertUnpaid(_bountyExecute(first, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed));
         _assertUnpaid(_bountyExecute(second, BOUNTY_PRICE, BOUNTY_TRADER, OrderV3Types.LifecycleStatus.Executed));
         _assertBountyResolved(first);
@@ -123,8 +123,8 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
 
     function test_RepeatedUnderwaterFailuresCannotDrainPositionOrCreditKeeper() public {
         uint256 pledge = _bountyPosition(CfdTypes.Side.LONG);
-        uint256 keeper = clearinghouse.balanceUsdc(BOUNTY_KEEPER);
-        uint256 custody = clearinghouse.balanceUsdc(BOUNTY_TRADER);
+        uint256 keeper = clearinghouse.balanceAssets(BOUNTY_KEEPER);
+        uint256 custody = clearinghouse.balanceAssets(BOUNTY_TRADER);
         for (uint256 i; i < 5; ++i) {
             vm.warp(block.timestamp + 1);
             router.updateMarkPrice(_bountyPriceData(140_000_000));
@@ -132,9 +132,9 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
             _assertUnpaid(_bountyExpire(id, BOUNTY_KEEPER));
             _assertBountyResolved(id);
         }
-        assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), pledge);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), custody);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), keeper);
+        assertEq(clearinghouse.pnlPledgeAssets(BOUNTY_TRADER), pledge);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), custody);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_KEEPER), keeper);
     }
 
     function test_PendingUnpaidCloseDoesNotChangeLiquidationLossRecovery() public {
@@ -144,8 +144,8 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
         vm.prank(BOUNTY_KEEPER);
         router.executeLiquidation(BOUNTY_TRADER, data);
         uint256 controlPool = pool.totalAssets();
-        uint256 controlTreasury = clearinghouse.balanceUsdc(engine.protocolTreasury());
-        uint256 controlKeeper = clearinghouse.balanceUsdc(BOUNTY_KEEPER);
+        uint256 controlTreasury = clearinghouse.balanceAssets(engine.protocolTreasury());
+        uint256 controlKeeper = clearinghouse.balanceAssets(BOUNTY_KEEPER);
         assertTrue(vm.revertToState(snapshot));
         uint64 id = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
         data = _mockPythUpdateData(140_000_000);
@@ -155,17 +155,17 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
         _assertUnpaid(_bountyReceipt(id));
         _assertBountyResolved(id);
         assertEq(pool.totalAssets(), controlPool);
-        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), controlTreasury);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), controlKeeper);
+        assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), controlTreasury);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_KEEPER), controlKeeper);
     }
 
     function _assertUnpaid(
         OrderV3Types.OrderReceipt memory receipt
     ) private pure {
-        assertEq(receipt.bountyUsdc, 0);
-        assertEq(receipt.bounty.bountyPaidUsdc, 0);
-        assertEq(receipt.bounty.bountyRefundedUsdc, 0);
-        assertEq(receipt.bounty.bountyForfeitedUsdc, 0);
+        assertEq(receipt.bountyAssets, 0);
+        assertEq(receipt.bounty.bountyPaidAssets, 0);
+        assertEq(receipt.bounty.bountyRefundedAssets, 0);
+        assertEq(receipt.bounty.bountyForfeitedAssets, 0);
         assertEq(receipt.bountyRecipient, address(0));
         assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None));
     }

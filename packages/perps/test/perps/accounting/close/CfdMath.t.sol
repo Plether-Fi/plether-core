@@ -21,7 +21,7 @@ contract CfdMathTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -43,7 +43,7 @@ contract CfdMathTest is Test {
             size: 100_000 * 1e18,
             margin: 2000 * 1e6, // $2k margin (50x leverage)
             entryPrice: 1e8,
-            maxProfitUsdc: 0,
+            maxProfitAssets: 0,
             side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
@@ -59,7 +59,7 @@ contract CfdMathTest is Test {
             CAP_PRICE
         );
         assertTrue(isProfit);
-        assertEq(pnl, 2000 * 1e6); // $2,000 USDC
+        assertEq(pnl, 2000 * 1e6); // $2,000 settlementToken
 
         // Price rises to $1.05 (LONG loses $0.05 * 100k = $5,000)
         (isProfit, pnl) = CfdMath.calculateExactPnl(
@@ -70,7 +70,7 @@ contract CfdMathTest is Test {
             CAP_PRICE
         );
         assertFalse(isProfit);
-        assertEq(pnl, 5000 * 1e6); // $5,000 USDC
+        assertEq(pnl, 5000 * 1e6); // $5,000 settlementToken
     }
 
     function test_CalculatePnL_ClampsToCap() public pure {
@@ -78,7 +78,7 @@ contract CfdMathTest is Test {
             size: 100_000 * 1e18,
             margin: 2000 * 1e6,
             entryPrice: 1e8,
-            maxProfitUsdc: 0,
+            maxProfitAssets: 0,
             side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
@@ -128,21 +128,21 @@ contract CfdMathTest is Test {
     /// @notice Checks opposite skew transitions have exactly zero net raw VPI at fixed depth and factor.
     /// @dev This arithmetic property does not model changing depth, execution fees, or lifetime rebate clamps.
     function testFuzz_VpiWashTradingIsZeroSum(
-        uint256 preSkewUsdc,
-        uint256 tradeSizeUsdc,
-        uint256 depthUsdc
+        uint256 preSkewAssets,
+        uint256 tradeSizeAssets,
+        uint256 depthAssets
     ) public view {
         // Bound the arithmetic campaign to $10k-$100m depth; these are test bounds, not protocol limits.
-        depthUsdc = bound(depthUsdc, 10_000 * 1e6, 100_000_000 * 1e6);
+        depthAssets = bound(depthAssets, 10_000 * 1e6, 100_000_000 * 1e6);
         // Pre-skew can be up to 40% of depth
-        preSkewUsdc = bound(preSkewUsdc, 0, (depthUsdc * 40) / 100);
+        preSkewAssets = bound(preSkewAssets, 0, (depthAssets * 40) / 100);
         // Trade size shouldn't exceed remaining depth
-        tradeSizeUsdc = bound(tradeSizeUsdc, 1 * 1e6, depthUsdc / 10);
+        tradeSizeAssets = bound(tradeSizeAssets, 1 * 1e6, depthAssets / 10);
 
-        uint256 postSkewUsdc = preSkewUsdc + tradeSizeUsdc;
+        uint256 postSkewAssets = preSkewAssets + tradeSizeAssets;
 
-        int256 vpiCharge = CfdMath.calculateVPI(preSkewUsdc, postSkewUsdc, depthUsdc, params.vpiFactor);
-        int256 vpiRebate = CfdMath.calculateVPI(postSkewUsdc, preSkewUsdc, depthUsdc, params.vpiFactor);
+        int256 vpiCharge = CfdMath.calculateVPI(preSkewAssets, postSkewAssets, depthAssets, params.vpiFactor);
+        int256 vpiRebate = CfdMath.calculateVPI(postSkewAssets, preSkewAssets, depthAssets, params.vpiFactor);
 
         if (vpiCharge == 0) {
             // Dust trade: both legs round to zero — still zero-sum
@@ -156,18 +156,18 @@ contract CfdMathTest is Test {
 
     /// @notice Checks equal VPI for this exactly divisible ten-chunk example at fixed depth and factor.
     function test_VpiPathIndependence() public pure {
-        uint256 depthUsdc = 10_000_000 * 1e6;
+        uint256 depthAssets = 10_000_000 * 1e6;
         uint256 vpiFactor = 0.0005e18;
 
         // Whale does one $1M trade
-        int256 massiveTradeCharge = CfdMath.calculateVPI(0, 1_000_000 * 1e6, depthUsdc, vpiFactor);
+        int256 massiveTradeCharge = CfdMath.calculateVPI(0, 1_000_000 * 1e6, depthAssets, vpiFactor);
 
         // Whale splits into ten sequential $100k trades
         int256 splitTradeCharge = 0;
         for (uint256 i = 0; i < 10; i++) {
             uint256 pre = i * 100_000 * 1e6;
             uint256 post = (i + 1) * 100_000 * 1e6;
-            splitTradeCharge += CfdMath.calculateVPI(pre, post, depthUsdc, vpiFactor);
+            splitTradeCharge += CfdMath.calculateVPI(pre, post, depthAssets, vpiFactor);
         }
 
         assertEq(massiveTradeCharge, splitTradeCharge, "VPI must be path independent");
@@ -182,7 +182,7 @@ contract CfdMathTest is Test {
             size: 100_000 * 1e18,
             margin: 2000 * 1e6,
             entryPrice: 0.8e8,
-            maxProfitUsdc: 0,
+            maxProfitAssets: 0,
             side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
@@ -217,7 +217,7 @@ contract CfdMathTest is Test {
             size: 0,
             margin: 0,
             entryPrice: 1e8,
-            maxProfitUsdc: 0,
+            maxProfitAssets: 0,
             side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,

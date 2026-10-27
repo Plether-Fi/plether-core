@@ -7,7 +7,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
 /// @notice Read-only planner and liquidation diagnostics for the CFD engine.
 /// @dev The lens does not ingest Pyth data, validate oracle freshness, or mutate engine state. Callers supply candidate
-///      prices. USDC amounts use 6 decimals, prices use 8 decimals, and sizes use 18 decimals.
+///      prices. settlement token amounts use 6 decimals, prices use 8 decimals, and sizes use 18 decimals.
 interface ICfdEngineLens {
 
     /// @notice The interval budget was exhausted; no approximate or partial maximum is returned.
@@ -34,8 +34,8 @@ interface ICfdEngineLens {
         ICfdEngineTypes.LiquidationPreview liquidation;
         uint64 riskOffCutoff;
         uint256 refundedOrderCount;
-        uint256 releasedCommittedMarginUsdc;
-        uint256 releasedBountyUsdc;
+        uint256 releasedCommittedMarginAssets;
+        uint256 releasedBountyAssets;
     }
 
     /// @notice Returns the engine inspected by this lens.
@@ -65,7 +65,7 @@ interface ICfdEngineLens {
     /// @param account Account that would open or increase the position
     /// @param side Position side
     /// @param sizeDelta Position size delta (18 decimals)
-    /// @param marginDelta Margin supplied with the hypothetical order in USDC
+    /// @param marginDelta Margin supplied with the hypothetical order in settlement token
     /// @param oraclePrice Oracle price used for the simulation, clamped to CAP_PRICE for execution economics
     /// @return preview Validity, economics, projected position health, and liquidation boundary
     function previewOpen(
@@ -84,7 +84,7 @@ interface ICfdEngineLens {
     ///      zero capacity and NUMERIC_DOMAIN_EXCEEDED before search-bound arithmetic.
     /// @param account Account that would open or increase the position
     /// @param side Position side
-    /// @param marginDelta Margin supplied with the hypothetical order in USDC
+    /// @param marginDelta Margin supplied with the hypothetical order in settlement token
     /// @param oraclePrice Candidate execution price (8 decimals)
     /// @return quote Largest planner-valid increase, its complete preview, and a limiting rejection code
     function quoteMaxOpen(
@@ -99,7 +99,7 @@ interface ICfdEngineLens {
     /// @param account Account that would open or increase the position
     /// @param side Position side
     /// @param sizeDelta Position size delta (18 decimals)
-    /// @param marginDelta Margin supplied with the hypothetical order in USDC
+    /// @param marginDelta Margin supplied with the hypothetical order in settlement token
     /// @param oraclePrice Candidate execution price (8 decimals)
     /// @return code Numeric `OpenRevertCode` value
     function previewOpenRevertCode(
@@ -116,7 +116,7 @@ interface ICfdEngineLens {
     /// @param account Account that would open or increase the position
     /// @param side Position side
     /// @param sizeDelta Position size delta (18 decimals)
-    /// @param marginDelta Margin supplied with the hypothetical order in USDC
+    /// @param marginDelta Margin supplied with the hypothetical order in settlement token
     /// @param oraclePrice Candidate execution price (8 decimals)
     /// @return category Open failure policy category, including execution-time categories
     function previewOpenFailurePolicyCategory(
@@ -128,26 +128,26 @@ interface ICfdEngineLens {
     ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category);
 
     /// @notice Simulates a close/decrease at caller-supplied pool depth.
-    /// @dev Treats `poolDepthUsdc` as both solvency assets and available pool cash; it does not read hypothetical token
+    /// @dev Treats `poolDepthAssets` as both solvency assets and available pool cash; it does not read hypothetical token
     ///      custody or mutate protocol state. Carry-index projection still uses live effective HousePool assets. The
     ///      execution price is clamped to the engine cap.
     /// @param account Account whose position would be closed
     /// @param sizeDelta Position size to close (18 decimals)
     /// @param oraclePrice Candidate execution price (8 decimals)
-    /// @param poolDepthUsdc Caller-supplied hypothetical solvency assets and available cash in USDC
+    /// @param poolDepthAssets Caller-supplied hypothetical solvency assets and available cash in settlement token
     /// @return preview Close economics and projected post-operation solvency
     function simulateClose(
         address account,
         uint256 sizeDelta,
         uint256 oraclePrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) external view returns (ICfdEngineTypes.ClosePreview memory preview);
 
     /// @notice Previews liquidation against current pool depth, without preceding Router risk-off refunds.
     /// @dev Use previewRouterLiquidation for the current Router queue/refund policy.
     /// @dev Models forfeiture of the account's pending execution bounties before terminal collateral is evaluated.
     ///      Uses current effective `HousePool.totalAssets()`, clamps the price, and does not validate oracle freshness.
-    ///      settlementRetainedUsdc already includes immediatePayoutUsdc; the latter is a breakdown, not extra cash.
+    ///      settlementRetainedAssets already includes immediatePayoutAssets; the latter is a breakdown, not extra cash.
     /// @param account Account whose position would be tested
     /// @param oraclePrice Candidate liquidation execution price (8 decimals)
     /// @return preview Liquidation economics and projected post-operation solvency
@@ -172,12 +172,12 @@ interface ICfdEngineLens {
     ///      live effective HousePool assets.
     /// @param account Account whose position would be tested
     /// @param oraclePrice Candidate liquidation execution price (8 decimals)
-    /// @param poolDepthUsdc Caller-supplied hypothetical solvency assets and available cash in USDC
+    /// @param poolDepthAssets Caller-supplied hypothetical solvency assets and available cash in settlement token
     /// @return preview Liquidation economics and projected post-operation solvency
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview);
 
     /// @notice Returns exact planner liquidation eligibility after hypothetically forfeiting live order bounties.
@@ -186,7 +186,7 @@ interface ICfdEngineLens {
     function isLiquidatableAt(
         address account,
         uint256 oraclePrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) external view returns (bool liquidatable);
 
 }

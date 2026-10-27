@@ -18,7 +18,7 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
     }
 
     /// @dev A 2-cent adverse move loses $2 per 100-token lot. Keep enough total pledge to absorb that entire
-    /// loss and leave the remaining lots exactly at maintenance (reject), or one USDC atom above (accept).
+    /// loss and leave the remaining lots exactly at maintenance (reject), or one settlement token atom above (accept).
     function testFuzz_PartialCloseResidualMaintenanceAtomBoundary(
         bool isShort,
         bool aboveBoundary,
@@ -49,11 +49,11 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
         } else {
             (uint256 size, uint256 pledge,,,,,) = engine.positions(ACCOUNT);
             assertEq(size, (lots - closedLots) * CfdTypes.SIZE_QUANTUM);
-            assertEq(engine.positionEntryCostUsdcAtoms(ACCOUNT), (lots - closedLots) * entry);
+            assertEq(engine.positionEntryCostAssetAtoms(ACCOUNT), (lots - closedLots) * entry);
             assertEq(pledge, (lots - closedLots) * 2e6 + residualRequirement + 1);
             assertEq(pledge - (lots - closedLots) * 2e6, residualRequirement + 1);
-            assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 0);
-            assertEq(engine.unsettledCarryUsdc(ACCOUNT), 0);
+            assertEq(engine.traderClaimBalanceAssets(ACCOUNT), 0);
+            assertEq(engine.unsettledCarryAssets(ACCOUNT), 0);
         }
     }
 
@@ -62,16 +62,16 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
         // After the $3.20 fee, all supplied margin becomes reserve. The independently known $995.60 claim, rather than
         // PnL pledge, admits the $8000 position and supports its $4000 partial remainder.
         _open(ACCOUNT, CfdTypes.Side.LONG, 100 * CfdTypes.SIZE_QUANTUM, 11_200_000, 80_000_000);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), 0);
-        assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 995_600_000);
+        assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), 0);
+        assertEq(engine.traderClaimBalanceAssets(ACCOUNT), 995_600_000);
         _close(ACCOUNT, CfdTypes.Side.LONG, 50 * CfdTypes.SIZE_QUANTUM, 80_000_000);
         (uint256 size, uint256 pledge,,,,,) = engine.positions(ACCOUNT);
         assertEq(size, 50 * CfdTypes.SIZE_QUANTUM);
         assertEq(pledge, 0);
-        assertEq(engine.positionEntryCostUsdcAtoms(ACCOUNT), 4000e6);
-        assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 995_600_000);
+        assertEq(engine.positionEntryCostAssetAtoms(ACCOUNT), 4000e6);
+        assertEq(engine.traderClaimBalanceAssets(ACCOUNT), 995_600_000);
         assertGt(
-            engine.traderClaimBalanceUsdc(ACCOUNT),
+            engine.traderClaimBalanceAssets(ACCOUNT),
             40e6,
             "Same-account claim exceeds the independently known residual requirement"
         );
@@ -86,7 +86,7 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
         _expectUnhealthy();
         _close(ACCOUNT, CfdTypes.Side.LONG, 50 * CfdTypes.SIZE_QUANTUM, 95_000_000, depth);
         assertEq(_state(), beforeState, "Rejected close cannot consume the existing claim");
-        assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 995_600_000);
+        assertEq(engine.traderClaimBalanceAssets(ACCOUNT), 995_600_000);
     }
 
     function test_FundedCarryStillAdmitsHealthyPartialClose() public {
@@ -96,13 +96,13 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
         assertEq(pool.totalAssets(), 1_002_000e6);
         vm.warp(block.timestamp + 1 days);
         // Golden vector: $7008 borrow / $1,002,000 depth -> 69 utilization bps. At 500 annual bps,
-        // one day advances index by 945205479452 and assesses exactly 6623 USDC atoms.
-        uint256 cashBefore = usdc.balanceOf(address(pool));
+        // one day advances index by 945205479452 and assesses exactly 6623 settlement token atoms.
+        uint256 cashBefore = settlementToken.balanceOf(address(pool));
         _close(ACCOUNT, CfdTypes.Side.LONG, 50 * CfdTypes.SIZE_QUANTUM, 80_000_000);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), 1000e6 - 6623 - 1_600_000);
-        assertEq(usdc.balanceOf(address(pool)), cashBefore + 6623);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), 1000e6 - 6623 - 1_600_000);
+        assertEq(settlementToken.balanceOf(address(pool)), cashBefore + 6623);
         assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), 945_205_479_452);
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), 0);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), 0);
         (uint256 size, uint256 pledge,,,,,) = engine.positions(ACCOUNT);
         assertEq(size, 50 * CfdTypes.SIZE_QUANTUM);
         assertEq(pledge, 495_996_689, "Carry is collected once before proportional release, retaining the odd atom");
@@ -116,8 +116,8 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
         _enableCarry();
         _fundTrader(ACCOUNT, 131_200_001);
         _open(ACCOUNT, CfdTypes.Side.LONG, 100 * CfdTypes.SIZE_QUANTUM, 131_200_001, 80_000_000);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), 120_000_001, "Open equity exceeds initial margin by one atom");
-        assertEq(clearinghouse.liquidationReserveUsdc(ACCOUNT), 8e6);
+        assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), 120_000_001, "Open equity exceeds initial margin by one atom");
+        assertEq(clearinghouse.liquidationReserveAssets(ACCOUNT), 8e6);
         // $7879.999999 borrow, 78 utilization bps, and 100 years produce $307.319999 carry. Only $120.000001
         // pledge is collectible; the separate $8 liquidation reserve remains protected, leaving $187.319998 arrears.
         vm.warp(block.timestamp + 100 * 365 days);
@@ -137,13 +137,13 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
     function _createClaim() private {
         _fundTrader(ACCOUNT, 20_000e6);
         _open(ACCOUNT, CfdTypes.Side.LONG, 100 * CfdTypes.SIZE_QUANTUM, 1000e6, 120_000_000);
-        uint256 drainedCash = usdc.balanceOf(address(pool));
+        uint256 drainedCash = settlementToken.balanceOf(address(pool));
         // Explicit external liquidity shock; the claim itself is created only by ordinary close execution.
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), drainedCash);
+        settlementToken.transfer(address(0xDEAD), drainedCash);
         _close(ACCOUNT, CfdTypes.Side.LONG, 100 * CfdTypes.SIZE_QUANTUM, 110_000_000);
-        assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 995_600_000);
-        usdc.mint(address(pool), drainedCash);
+        assertEq(engine.traderClaimBalanceAssets(ACCOUNT), 995_600_000);
+        settlementToken.mint(address(pool), drainedCash);
         if (engine.degradedMode()) {
             engine.clearDegradedMode();
         }
@@ -189,11 +189,11 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
             abi.encode(
                 position,
                 _carryState(),
-                engine.positionEntryCostUsdcAtoms(ACCOUNT),
+                engine.positionEntryCostAssetAtoms(ACCOUNT),
                 engineProtocolLens.getProtocolAccountingSnapshot(),
                 _custodyState(),
-                engine.traderClaimBalanceUsdc(ACCOUNT),
-                engine.unsettledCarryUsdc(ACCOUNT),
+                engine.traderClaimBalanceAssets(ACCOUNT),
+                engine.unsettledCarryAssets(ACCOUNT),
                 terminalNavBook.curveHashOf(ACCOUNT)
             )
         );
@@ -202,13 +202,13 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
     function _custodyState() private view returns (bytes32) {
         return keccak256(
             abi.encode(
-                clearinghouse.balanceUsdc(ACCOUNT),
-                clearinghouse.lockedMarginUsdc(ACCOUNT),
-                clearinghouse.liquidationReserveUsdc(ACCOUNT),
-                clearinghouse.vpiRebateReserveUsdc(ACCOUNT),
-                usdc.balanceOf(address(pool)),
-                usdc.balanceOf(address(clearinghouse)),
-                clearinghouse.balanceUsdc(PROTOCOL_TREASURY_ACCOUNT)
+                clearinghouse.balanceAssets(ACCOUNT),
+                clearinghouse.lockedMarginAssets(ACCOUNT),
+                clearinghouse.liquidationReserveAssets(ACCOUNT),
+                clearinghouse.vpiRebateReserveAssets(ACCOUNT),
+                settlementToken.balanceOf(address(pool)),
+                settlementToken.balanceOf(address(clearinghouse)),
+                clearinghouse.balanceAssets(PROTOCOL_TREASURY_ACCOUNT)
             )
         );
     }

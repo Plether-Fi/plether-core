@@ -20,39 +20,39 @@ library PerpsViewTypes {
     }
 
     /// @notice Compact custody, reservation, and risk summary for one trader account.
-    /// @dev All monetary fields use USDC's 6 decimals.
-    /// @param equityUsdc Cached-mark price-risk equity: post-carry pledge plus same-account claim plus exact price PnL.
+    /// @dev All monetary fields use settlement token's 6 decimals.
+    /// @param equityAssets Cached-mark price-risk equity: post-carry pledge plus same-account claim plus exact price PnL.
     ///        VPI is excluded. Uncovered carry or an underfunded negative-VPI reserve independently makes
     ///        `liquidatable` true and withdrawal capacity zero. This field is floored at zero and equals raw settlement
     ///        equity when flat.
-    /// @param withdrawableUsdc Same-state withdrawal estimate from the account lens. Uncovered carry or an underfunded
+    /// @param withdrawableAssets Same-state withdrawal estimate from the account lens. Uncovered carry or an underfunded
     ///        negative-VPI reserve makes this zero. When price-risk headroom binds, the live guard requires equity to
     ///        remain strictly above the requirement, so the exact quoted boundary may need to be reduced by one atomic
-    ///        USDC unit.
-    /// @param pendingOrderMarginUsdc Margin committed to pending open or increase orders.
-    /// @param pendingExecutionBountyUsdc Clearinghouse-custodied settlement attributed to execution bounties.
+    ///        settlement token unit.
+    /// @param pendingOrderMarginAssets Margin committed to pending open or increase orders.
+    /// @param pendingExecutionBountyAssets Clearinghouse-custodied settlement attributed to execution bounties.
     /// @param hasOpenPosition Whether the account currently has a nonzero position.
     /// @param liquidatable Cached-mark diagnostic that is true for an exact price-risk maintenance breach, carry left
     ///        uncovered after projected margin-first, then free-settlement collection, or an underfunded negative-VPI reserve; mark
     ///        freshness is not validated by this view.
     struct TraderAccountView {
-        uint256 equityUsdc;
-        uint256 withdrawableUsdc;
-        uint256 pendingOrderMarginUsdc;
-        uint256 pendingExecutionBountyUsdc;
+        uint256 equityAssets;
+        uint256 withdrawableAssets;
+        uint256 pendingOrderMarginAssets;
+        uint256 pendingExecutionBountyAssets;
         bool hasOpenPosition;
         bool liquidatable;
     }
 
     /// @notice Compact current-position summary for one account.
-    /// @dev USDC fields use 6 decimals, `size` uses 18 decimals, and `entryPrice` uses 8 decimals.
+    /// @dev settlement token fields use 6 decimals, `size` uses 18 decimals, and `entryPrice` uses 8 decimals.
     /// @param exists Whether the account currently has a nonzero position.
     /// @param side Direction of the live position.
     /// @param size Live position size.
     /// @param entryPrice Average position entry price.
-    /// @param marginUsdc Canonical position-margin bucket backing the position.
-    /// @param unrealizedPnlUsdc Mark-to-market PnL at the cached engine mark, excluding pending carry and VPI.
-    /// @param maintenanceMarginUsdc Margin required at the current mark under the active calendar regime.
+    /// @param marginAssets Canonical position-margin bucket backing the position.
+    /// @param unrealizedPnlAssets Mark-to-market PnL at the cached engine mark, excluding pending carry and VPI.
+    /// @param maintenanceMarginAssets Margin required at the current mark under the active calendar regime.
     /// @param liquidatable Cached-mark diagnostic that is true for an exact price-risk maintenance breach, carry left
     ///        uncovered after projected margin-first, then free-settlement collection, or an underfunded negative-VPI
     ///        reserve; mark freshness is not validated by this view.
@@ -61,18 +61,18 @@ library PerpsViewTypes {
         CfdTypes.Side side;
         uint256 size;
         uint256 entryPrice;
-        uint256 marginUsdc;
-        int256 unrealizedPnlUsdc;
-        uint256 maintenanceMarginUsdc;
+        uint256 marginAssets;
+        int256 unrealizedPnlAssets;
+        uint256 maintenanceMarginAssets;
         bool liquidatable;
     }
 
     /// @notice Product-facing summary of one queued order.
-    /// @dev USDC fields use 6 decimals, `sizeDelta` uses 18 decimals, and `acceptablePrice` uses 8 decimals.
+    /// @dev settlement token fields use 6 decimals, `sizeDelta` uses 18 decimals, and `acceptablePrice` uses 8 decimals.
     /// @param orderId Monotonically increasing router order identifier.
     /// @param side Requested position direction.
     /// @param sizeDelta Position size to open, increase, or reduce.
-    /// @param marginDeltaUsdc Requested nonnegative margin amount; close orders always report zero.
+    /// @param marginDeltaAssets Requested nonnegative margin amount; close orders always report zero.
     /// @param acceptablePrice Nonzero Router directional target-price boundary.
     /// @param isReduceOnly Whether the order is a close/reduce order.
     /// @param status Product-facing lifecycle status.
@@ -80,14 +80,14 @@ library PerpsViewTypes {
         uint64 orderId;
         CfdTypes.Side side;
         uint256 sizeDelta;
-        int256 marginDeltaUsdc;
+        int256 marginDeltaAssets;
         uint256 acceptablePrice;
         bool isReduceOnly;
         OrderStatus status;
     }
 
     /// @notice Compact view of a senior or junior tranche vault.
-    /// @param totalAssetsUsdc Assets attributed to the tranche, with 6 decimals.
+    /// @param totalAssets Assets attributed to the tranche, with 6 decimals.
     /// @param totalShares Outstanding raw ERC4626 share units, using the vault's share decimals.
     /// @param effectiveTotalShares Raw supply plus uncheckpointed maintenance-fee shares. This equals `totalShares`
     ///        for Senior and whenever Junior has no pending fee.
@@ -96,23 +96,23 @@ library PerpsViewTypes {
     ///        Senior.
     /// @param maintenanceFeeRecipient Address that receives checkpointed Junior maintenance-fee shares, or the zero
     ///        address when no recipient is configured.
-    /// @param sharePrice Raw `(totalAssetsUsdc * 1e18) / effectiveTotalShares` quotient, or `1e18` when effective
+    /// @param sharePrice Raw `(totalAssets * 1e18) / effectiveTotalShares` quotient, or `1e18` when effective
     ///        supply is zero. The populated-vault branch does not normalize differing asset and share decimals.
-    /// @param maxWithdrawUsdc Pool-wide stored-state tranche cap, with 6 decimals; not holder-specific and not a
+    /// @param maxWithdrawAssets Pool-wide stored-state tranche cap, with 6 decimals; not holder-specific and not a
     ///        preview of the reconciliation performed by live withdrawal execution.
     /// @param frozenLpFeeBps Active frozen-oracle LP fee in basis points, or zero outside frozen mode.
     /// @param depositEnabled Whether the pool accepts a delayed deposit request for the tranche.
     /// @param withdrawEnabled Whether pool-level withdrawals are currently live.
     /// @param oracleFrozen Whether the engine is in the calendar-defined frozen-oracle regime.
     struct TrancheView {
-        uint256 totalAssetsUsdc;
+        uint256 totalAssets;
         uint256 totalShares;
         uint256 effectiveTotalShares;
         uint256 pendingMaintenanceFeeShares;
         uint256 maintenanceFeeAprBps;
         address maintenanceFeeRecipient;
         uint256 sharePrice;
-        uint256 maxWithdrawUsdc;
+        uint256 maxWithdrawAssets;
         uint256 frozenLpFeeBps;
         bool depositEnabled;
         bool withdrawEnabled;
@@ -126,7 +126,7 @@ library PerpsViewTypes {
     /// @param nextRequestEpoch Epoch currently targeted by new deposit and redemption requests.
     /// @param nextRequestCutoffTime Future Unix timestamp when `nextRequestEpoch` will next roll forward.
     /// @param depositHeadEpoch Oldest matured deposit epoch, or zero when none is visible.
-    /// @param depositHeadAssets Assets in the matured deposit head, with 6-decimal USDC units.
+    /// @param depositHeadAssets Assets in the matured deposit head, with 6-decimal settlement token units.
     /// @param redeemHeadEpoch Oldest matured redemption epoch, or zero when none is visible.
     /// @param redeemHeadShares Unfunded shares in the matured redemption head.
     /// @param depositBacklog Whether matured deposit work is visible to settlement.
@@ -158,15 +158,15 @@ library PerpsViewTypes {
     /// @param vault Configured Senior or Junior tranche vault.
     /// @param requestId Shared LP epoch used as the asynchronous request id.
     /// @param controller Account that controls the request.
-    /// @param pendingDepositAssets Requested assets that have not become claimable, with 6-decimal USDC units.
+    /// @param pendingDepositAssets Requested assets that have not become claimable, with 6-decimal settlement token units.
     /// @param pendingDepositSharesEstimate Indicative shares for the pending deposit assets at current pricing.
-    /// @param claimableDepositAssets Finalized deposit contribution basis available to claim, in USDC units.
+    /// @param claimableDepositAssets Finalized deposit contribution basis available to claim, in settlement token units.
     /// @param claimableDepositShares Finalized vault shares available to claim.
     /// @param pendingRedeemShares Requested shares that have not become claimable or refundable.
-    /// @param pendingRedeemAssetsEstimate Indicative assets for the pending redemption shares, in USDC units.
+    /// @param pendingRedeemAssetsEstimate Indicative assets for the pending redemption shares, in settlement token units.
     /// @param claimableRedeemShares Funded redemption shares available to claim.
-    /// @param claimableRedeemAssets Exact funded USDC available to claim.
-    /// @param refundableDepositAssets Rejected deposit assets available to recover through cancellation, in USDC units.
+    /// @param claimableRedeemAssets Exact funded settlement token available to claim.
+    /// @param refundableDepositAssets Rejected deposit assets available to recover through cancellation, in settlement token units.
     /// @param refundableRedeemShares Unburned redemption shares available to reclaim from request escrow.
     /// @param redeemRefundPending Whether the controller must acknowledge a terminal redemption refund; this can be
     ///        true even when its pro-rata refundable share amount rounded to zero.

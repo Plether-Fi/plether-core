@@ -81,9 +81,9 @@ contract EmergencyRiskOffGasTest is BasePerpTest {
     }
 
     function test_Gas_RiskOffKeeperCallRefundsExactly64OpensWithinBlockBudget() public {
-        uint256 aliceFreeBefore = _freeSettlementUsdc(ALICE);
-        uint256 bobFreeBefore = _freeSettlementUsdc(BOB);
-        uint256 keeperFreeBefore = _freeSettlementUsdc(KEEPER);
+        uint256 aliceFreeBefore = _freeSettlementAssets(ALICE);
+        uint256 bobFreeBefore = _freeSettlementAssets(BOB);
+        uint256 keeperFreeBefore = _freeSettlementAssets(KEEPER);
 
         for (uint256 i; i < MAX_PENDING_ORDERS_PER_ACCOUNT; ++i) {
             _commitOpen(ALICE);
@@ -104,9 +104,9 @@ contract EmergencyRiskOffGasTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "all 64 invalidated heads must be removed");
         assertEq(router.pendingOrderCounts(ALICE), 0);
         assertEq(router.pendingOrderCounts(BOB), 0);
-        assertEq(_freeSettlementUsdc(ALICE), aliceFreeBefore, "Alice must receive every reserve back");
-        assertEq(_freeSettlementUsdc(BOB), bobFreeBefore, "Bob must receive every reserve back");
-        assertEq(_freeSettlementUsdc(KEEPER), keeperFreeBefore, "keeper must receive no risk-off bounty");
+        assertEq(_freeSettlementAssets(ALICE), aliceFreeBefore, "Alice must receive every reserve back");
+        assertEq(_freeSettlementAssets(BOB), bobFreeBefore, "Bob must receive every reserve back");
+        assertEq(_freeSettlementAssets(KEEPER), keeperFreeBefore, "keeper must receive no risk-off bounty");
 
         for (uint64 orderId = 1; orderId <= 64; ++orderId) {
             assertEq(
