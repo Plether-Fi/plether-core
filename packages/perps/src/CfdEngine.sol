@@ -476,12 +476,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         view
         returns (address treasury, uint256 activationTime, uint256 lockedUntil)
     {
-        // All account writes are zero-extended address inputs. Returning these full-slot words directly keeps
-        // the getter's ABI while avoiding redundant address cleanup in the size-constrained engine.
+        uint256 account = _pendingTreasury.account;
+        uint256 activation = _currentTreasury.lockedUntil;
+        bool hasAccount = account != 0;
+        bool beforeActivation = block.timestamp < activation;
+        // Keep the readiness comparisons in Solidity so Forge can instrument them. All account writes are
+        // zero-extended addresses; assembly only encodes the three ABI words to keep the engine deployable.
         assembly ("memory-safe") {
-            let account := sload(_pendingTreasury.slot)
-            let activation := sload(add(_currentTreasury.slot, 1))
-            let pending := and(iszero(iszero(account)), lt(timestamp(), activation))
+            let pending := and(hasAccount, beforeActivation)
             let result := mload(0x40)
             mstore(result, mul(pending, account))
             mstore(add(result, 0x20), mul(pending, activation))
