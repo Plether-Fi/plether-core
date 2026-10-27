@@ -1,203 +1,162 @@
 # Bridge funding into perps margin
 
-The new MockUSDG deployment has bridge funding disabled. This guide documents a separately reviewed USDC provider
-route; it does not make MockUSDG bridgeable. Current SDK token-address fields use `settlementToken`, including the
-bridge deployment object. The rename is breaking and introduces no `usdc` alias; old release manifests remain
-archived evidence and must not be loaded as the new runtime configuration.
+The new USDG testnet deployment has bridge funding disabled. This guide describes a separately reviewed USDC
+provider route. SDK token-address inputs use `settlementToken`.
 
-The Across integration requests an atomic destination action through Across's existing MulticallHandler: approve
-canonical USDC to the configured clearinghouse, call `depositFor` for the user's verified trading account, clear the
-allowance, and emit the quote's unique marker through the known Across EventEmitter.
-The same trading account is the explicit fallback recipient. A successful bridge fill is not proof of margin credit;
-fallback USDC in that account's wallet remains `needs-deposit`.
+`MarginClearinghouse.depositFor(account, amount)` lets a third party pay USDC into another account's free settlement
+balance. The Across integration uses that method during a destination callback: approve the clearinghouse, deposit
+for the trading account, clear the allowance, and emit a quote-specific marker. If the action fails, the intended
+fallback sends wallet USDC to the same trading account. **A bridge fill or wallet transfer is not proof of margin
+credit.**
 
-The route remains disabled without a reviewed compatible release. No live compatible clearinghouse or successful
-end-to-end bridge transfer is asserted here. Existing immutable clearinghouses without
-`MarginClearinghouse.depositFor(address,uint256)` require a new compatible core release. This integration does not
-upgrade them or resolve the application's active V3 trading and account-abstraction compatibility. Do not replace
-addresses in historical release records to imply an upgrade.
-
-## Destination call flow
-
-1. Pin the destination chain, canonical USDC, clearinghouse, Across SpokePool proxy and implementation, existing
-   MulticallHandler, runtime code hashes, and confirmation policy from the reviewed funding release. Verify the
-   trading-account beneficiary separately from the connected source wallet; they may be different addresses.
-2. Persist the funding intent and validate the provider quote before requesting a source signature. The quote must
-   bind the allowed source route, destination token/handler, beneficiary, destination message, amount bounds, and
-   expiry. The message's nonzero `fallbackRecipient` must equal that beneficiary.
-3. The required message has four ordered zero-native-value calls: an exact-balance USDC approval to the clearinghouse,
-   `depositFor(beneficiary, balance)`, `USDC.approve(clearinghouse, 0)`, and the pinned Across EventEmitter's
-   `emitData(quoteId)` with the 32-byte quote identifier. The first two are handler self-calls to
-   `makeCallWithBalance`; each inner amount starts at zero and is replaced at byte offset 36 with the handler's
-   current canonical-USDC balance. The deposit amount is not a quoted estimate or unlimited allowance. The parser
-   accepts exactly these four calls, or eight calls with only two additional same-token/same-beneficiary drains and
-   two bounded metadata calls to the known emitter. The quote marker and nonzero beneficiary fallback are mandatory.
-4. If the calls succeed, the clearinghouse pulls that balance from the handler and credits the beneficiary. If any
-   inner call reverts, the handler rolls back the entire call sequence and drains remaining canonical USDC to the
-   explicit beneficiary. Leftover tokens are drained there after successful calls too. If the fallback transfer itself cannot
-   succeed, the handler invocation reverts; do not report wallet delivery from the attempted callback alone.
-5. Attribute the result only after matching the canonical destination fill to the persisted source intent and
-   confirming its receipt and relevant credit/fallback logs at the configured depth. Successful credit requires the
-   exact quote marker after the clearinghouse events in that fill's callback interval. Fallback requires matching
-   `CallsFailed`, token transfer, and `DrainedTokens` evidence in the same interval. Refresh canonical account balances
-   before using credited funds in a trading decision.
-
-The handler is shared and its callback is permissionless. It is not a per-user custody account, and tokens left
-there can be consumed by another caller. Never send funds there as a standalone transfer or design a later flush or
-recovery step. The intended fill and callback execute together. Balance substitution consumes the handler's full
-current token balance, which can include unsolicited dust; use the actual confirmed credit amount, not a locally
-invented balance increment. Code pins establish contract identity, not source-intent authorization.
+This repository contains the contract method, client helpers, a release verifier, and local tests using pinned Across
+runtimes. It does not establish a compatible live deployment or a successful end-to-end bridge transfer. Existing
+immutable clearinghouses without `depositFor` need a new compatible core release. Keep funding unavailable until the
+core deployment, authentic provider quote, and application release have been verified together.
 
 ## Clearinghouse accounting
 
-`depositFor` pulls tokens from **its caller**, requires exact receipt of the requested amount, and credits the chosen
-account's free settlement. It does not allocate position margin, collect/checkpoint carry, change reservations or
-terminal NAV, or grant the payer account authority. Outstanding carry remains due under ordinary account actions
-and risk checks. Existing owner `deposit` and `depositMargin` carry behavior is unchanged.
+`depositFor` pulls tokens from **its caller**, requires a positive amount and nonzero beneficiary, checks that the
+clearinghouse received exactly the requested amount, and credits the beneficiary's free settlement. It permits
+self-funding and counterfactual account addresses. It does not verify that the payer controls the beneficiary; the
+application must establish the intended trading account before requesting a source signature.
 
-The clearinghouse emits `Deposit(account,asset,amount)` once and an additional `DepositFor(payer,account,amount)`
-describing the same credit. Index it once; `DepositFor` adds payer attribution. For the direct Across route, the payer
-is the verified handler, not the relayer or source wallet. Match chain, emitting clearinghouse, token, beneficiary,
-handler payer, amount, successful receipt, and the intent's fill evidence. An unrelated deposit in the same account
-cannot satisfy a funding intent.
+The deposit does not allocate position margin, collect/checkpoint carry, change reservations or Terminal NAV, or grant
+the payer authority over the beneficiary. Outstanding carry remains due under normal account actions and risk checks.
+Owner `deposit` and `depositMargin` retain their carry-realization behavior.
 
-A fallback transfers wallet USDC to the trading-account beneficiary without crediting the clearinghouse. That result
-is `needs-deposit`, never trading-ready margin on that evidence alone. A separate authenticated deposit can move
-those tokens into margin. A connected owner EOA cannot spend a smart account's tokens without that account's
-normal authorization path. After credit, normal clearinghouse withdrawal, health, and carry rules apply.
+The clearinghouse emits both `Deposit(account,asset,amount)` and `DepositFor(payer,account,amount)` for the **same**
+credit. Index the credit once; the second event supplies payer attribution. On the Across route the payer is the
+verified handler, not the source wallet or relayer. After credit, normal withdrawal, health, and carry rules apply.
 
-## Provider and lifecycle boundaries
+## Destination message
 
-The runtime manifest selects `provider: "across"`. The application currently targets Ethereum mainnet USDC/USDT to
-native Arbitrum USDC through an external source wallet. Support for those routes does not establish support for
-other tokens, chains, accounts, or future quotes. No Privy funding-session API is required by the core `depositFor`
-method or the client helpers.
+The tested recipe uses the existing Across MulticallHandler and pinned Across EventEmitter. ABI-encode:
 
-The backend sends the documented `POST /api/swap/approval` action body for those four calls. An authentic response
-with the required handler recipient, nonzero beneficiary fallback, and exact destination calldata has not been
-captured: the live POST attempt returned HTTP 403, and no Across API key/integrator ID was available for verification.
-The actual API recipient/fallback encoding therefore remains unverified. The runtime parser rejects any returned
-calldata that does not meet the recipe; a successful HTTP response alone cannot enable a source transaction. The
-route remains disabled until an authentic quote and a real compatible clearinghouse establish the integration.
+```text
+((address target, bytes callData, uint256 value)[] calls, address fallbackRecipient)
+```
 
-Validate every quote's source/destination chains and tokens, exact destination message and fallback beneficiary,
-amounts, slippage/expiry, transaction targets, approval spenders, swap exchanges, and SpokePools against the persisted
-intent and reviewed allowlists. Provider-suggested addresses must not extend an allowlist. Where a source approval is
-required, approve only the intended spend and independently validate the subsequent transaction.
+Set `fallbackRecipient` to the verified destination trading account, which may differ from the source wallet. Use
+these four ordered calls, all with zero native value:
+
+| Step | Outer target | Action |
+| --- | --- | --- |
+| 1 | Handler itself | `makeCallWithBalance` wrapping `USDC.approve(clearinghouse, 0)` |
+| 2 | Handler itself | `makeCallWithBalance` wrapping `clearinghouse.depositFor(beneficiary, 0)` |
+| 3 | USDC | `approve(clearinghouse, 0)` to clear remaining allowance |
+| 4 | Pinned EventEmitter | `emitData(bytes)` containing the unique 32-byte quote ID |
+
+The two dynamic wrappers each use one replacement `(USDC, 36)`. Offset 36 is the amount word after the four-byte
+selector and first 32-byte argument. The original amount must be zero: the pinned handler inserts its current token
+balance using bitwise OR. Approval and deposit therefore use the actual balance, including any unsolicited dust,
+rather than a quoted estimate or unlimited allowance.
+
+If the inner call sequence succeeds, the clearinghouse credits the beneficiary and the marker follows its deposit
+events. If an inner call fails, the entire sequence rolls back and the handler drains remaining callback-token USDC
+to the beneficiary. Remaining USDC is also drained after a successful sequence. A failed fallback transfer or malformed
+outer message can revert the callback; attempted execution alone does not prove wallet delivery.
+
+The handler is shared and permissionless, with no per-intent custody or replay protection. Never send a standalone
+transfer to it or plan a later flush. The fill and callback must execute together. Runtime hashes prove contract
+identity, not intent authorization. See the [fixture documentation](test/fixtures/across-direct-funding/README.md)
+for pinned addresses, source provenance, independent encoding, and actual local-receipt checks.
+
+## Attribution and funding lifecycle
+
+Persist the intent before submission. Validate the quote against that intent and a reviewed allowlist: source and
+destination chains/tokens, amount bounds, expiry/slippage, transaction target, approval spender, exchange, SpokePool,
+handler recipient, exact destination message, and beneficiary fallback. Provider-suggested addresses must not expand
+the allowlist. A source approval must cover only the intended spend; validate the following source transaction too.
 
 | Evidence | What it establishes |
-|---|---|
-| Approved quote | A currently offered route matching the intent's constraints |
-| Submitted source transaction | A transaction hash, not successful source execution |
-| Confirmed source receipt and deposit event | Canonical source execution and the relay identity to reconcile |
-| Provider delivery status | Advisory provider progress |
-| Canonical destination fill | The intent's relay was filled; destination calls may still have fallen back |
-| Matching confirmed clearinghouse credit | The actual amount credited to the beneficiary |
-| Matching confirmed fallback transfer | Wallet USDC delivered to the beneficiary; still `needs-deposit` |
+| --- | --- |
+| Validated provider quote | An offered route matching the intent's constraints |
+| Source transaction hash | Submission, not successful execution |
+| Confirmed source receipt/deposit | Canonical source execution and relay identity |
+| Provider delivery status | Advisory progress |
+| Canonical destination fill | The relay was filled; destination actions may have fallen back |
+| Matching confirmed clearinghouse credit | The actual amount credited to the trading account |
+| Matching confirmed fallback transfer | Wallet USDC delivered; a separate deposit is still needed |
 
-Persist intent identity before submission and resume it after reload, wallet changes, RPC failures, replacement
-transactions, and provider timeouts. Do not repeat the source payment because polling or destination reconciliation
-failed. Reorgs invalidate earlier confirmation evidence and require reconciliation again. The integration deploys no
-per-intent receiver/factory and has no bridge-specific KMS signer, deployment transaction, or flush transaction.
+Reconcile the canonical destination fill to the persisted source intent, then inspect the successful receipt at the
+configured confirmation depth. Credit evidence must match chain, clearinghouse emitter, USDC, beneficiary, handler
+payer, and amount. Require the quote marker after the deposit events inside that fill's callback interval. The emitter
+is permissionless, so the marker alone is insufficient. Fallback evidence must match `CallsFailed`, the USDC transfer,
+and `DrainedTokens` in the same callback interval.
+
+Represent confirmed wallet fallback as `needs-deposit`, not trading-ready margin. A later authenticated deposit can
+move it into settlement. A connected owner EOA cannot spend a smart account's tokens without that account's normal
+authorization path. Refresh canonical account balances before using credited funds in a trading decision.
+
+Resume pending intents across reloads, wallet changes, RPC failures, replacement transactions, and provider timeouts.
+Do not repeat the source payment because destination polling failed. Reorgs invalidate confirmation evidence and
+require reconciliation again. Keep reconciliation for the original release available after disabling new quotes.
 
 ## Client helpers
 
-`@plether-fi/perps-aa-client` exports the minimal clearinghouse funding ABI and:
+The [bridge funding client](../perps-aa-client/src/bridgeFunding.ts) exports:
 
-- `buildDepositForCalls({settlementToken,clearinghouse,beneficiary,amount})`: approval plus a caller-funded deposit, both executed
-  from the same payer. Batch atomically when the account supports it; otherwise confirm approval before depositing.
-  This helper uses a supplied positive amount; it does not build the Across balance-replacement message.
-- `verifyBridgeFundingDeployment({client,deployment})`: checks the RPC chain, runtime hashes for USDC, clearinghouse,
-  SpokePool proxy/implementation and handler, the SpokePool's EIP-1967 implementation slot, and the clearinghouse's
-  settlement-token binding at one block. Returns the verified addresses, chain ID, and observation block.
+- `buildDepositForCalls({settlementToken,clearinghouse,beneficiary,amount})`: raw approval and caller-funded deposit calls from
+  the same payer. Batch atomically when supported; otherwise confirm approval before deposit. The supplied positive
+  amount is fixed. This helper does not build the Across dynamic-balance message or clear allowance after failure.
+- `verifyBridgeFundingDeployment({client,deployment})`: checks chain ID, runtime hashes for token, clearinghouse,
+  SpokePool proxy/implementation and handler, the SpokePool EIP-1967 implementation slot, and the clearinghouse's token
+  binding at one captured block. It returns the verified addresses, chain ID, and observation block.
 
 `BridgeFundingDeployment` contains `chainId`, `settlementToken`, `clearinghouse`, `destinationSpokePool`,
 `destinationSpokePoolImplementation`, `multicallHandler`, and each address's corresponding `*RuntimeCodeHash`.
-Map those fields from a previously validated release. The handler has no immutable SpokePool binding; the helper
-cannot prove route authorization, provider support, `depositFor` behavior, or a credited receipt. It also does not
-replace verification of the full core graph. USDC's proxy governance remains part of the settlement-token trust model.
+Populate these from a validated funding release. The helper does not prove `depositFor` behavior, provider support,
+the full core graph, or margin credit. USDC proxy governance and SpokePool upgrades remain external dependencies.
 
-The deposit builder returns raw zero-native-value calls. It does not create a quote, sponsor gas, prove wallet
-control, or extend the existing paymaster action allowlist. These helpers are not new `sendSponsoredAction` kinds.
+The builder neither sponsors gas nor proves wallet control. These calls are not additional `sendSponsoredAction`
+kinds and do not extend the paymaster allowlist.
 
-## Release artifact and validation
+## Funding release artifact
 
-Use the separate repository-root `deployments/perps-bridge-funding.template.json`. Do not add funding fields to
-`arbitrum-sepolia-perps-aa.template.json`, whose strict schema describes account abstraction and paymaster policy.
-The funding profile contains:
+Use repository-root `deployments/perps-bridge-funding.template.json`. The separate AA manifest has a strict schema for
+account abstraction/paymaster policy and must not receive funding fields.
 
-- `version: "perps-funding-v1"`, `provider: "across"`, `destinationChainId`, `releaseId`, `clearinghouse`,
-  `clearinghouseCodeHash`, `token`, `confirmations`, and `startBlock`;
-- `destinationSpokePool`, `destinationSpokePoolCodeHash`, `destinationSpokePoolImplementation`,
-  `destinationSpokePoolImplementationCodeHash`, `multicallHandler`, and `multicallHandlerCodeHash`;
-- `sources`, each with `chainId`, `name`, `token`, `symbol`, `decimals`, `transactionTargets`, `approvalSpenders`,
-  `swapExchanges`, and `spokePools`;
-- `evidence`, with source provenance, pinned contract addresses/runtime hashes, and a successful real third-party
-  `depositFor` probe.
+The funding artifact pins `version: "perps-funding-v1"`, `provider: "across"`, destination chain/release identity,
+clearinghouse, token, SpokePool proxy/implementation, handler, code hashes, confirmation depth, start block, allowed
+source routes and transaction targets, and evidence for a real third-party `depositFor` probe. Flat values must match
+`evidence.contracts`. Missing, unknown, malformed, zero, or inconsistent required release values fail validation.
+The template's null values are deliberate placeholders, not an executable release.
 
-Flat addresses/hashes must agree with `evidence.contracts`; missing, zero, malformed, inconsistent, or unknown fields
-fail strict release validation. The template intentionally contains null deployment values and is not an executable
-profile. Populate a new artifact from reviewed deployment evidence and pin its trusted distribution location.
-`VITE_PERPS_FUNDING_MANIFEST_URL` selects that artifact for the frontend; a missing or incompatible release keeps the
-route unavailable. The active application deployment and its trading/AA configuration must match separately.
-
-From the repository root, validate the unpopulated template without treating it as a release:
+From the repository root, check template structure:
 
 ```bash
 node scripts/perps-bridge-funding-release.mjs template deployments/perps-bridge-funding.template.json
 ```
 
-For a real release, set `FUNDING_MANIFEST` to the saved artifact and `FUNDING_RPC_URL` to the destination RPC. `verify`
-requires `cast` on `PATH`:
+For a populated release, set `FUNDING_MANIFEST` to its file path and export `FUNDING_RPC_URL` for its destination chain.
+`verify` also requires `cast` on `PATH`:
 
 ```bash
 node scripts/perps-bridge-funding-release.mjs validate "$FUNDING_MANIFEST"
 node scripts/perps-bridge-funding-release.mjs verify "$FUNDING_MANIFEST"
 ```
 
-Both commands are read-only. Verification checks runtime hashes and reciprocal bindings for token, clearinghouse,
-Engine, HousePool, Router, oracle, and lifecycle Book, plus handler identity and the SpokePool proxy implementation
-slot/runtime at the captured block. The direct third-party `depositFor` probe must have a successful canonical,
-sufficiently confirmed receipt and matching transfer/credit events; `startBlock` must not skip its block. An ABI
-selector, simulated call, or token binding alone does not establish deployed `depositFor` support.
+Both commands are read-only. `validate` checks structure; `verify` checks runtime hashes and reciprocal core bindings
+for the token, clearinghouse, Engine, Pool, Router, Oracle, and lifecycle Book, plus handler identity and the SpokePool
+implementation. It verifies the probe's successful canonical receipt, confirmation depth, exact transfer/credit
+logs, and that `startBlock` does not skip its block. A selector, simulated call, or token binding alone does not
+establish deployed `depositFor` support.
 
-The funding verifier complements the full perps release verifier. It does not verify all admins, sidecars, terminal
-Book, vaults, economic parameters, activation state, operational services, or source-chain provider allowlists.
-SpokePool upgrades can invalidate a reviewed implementation pin. Keep historical artifacts unchanged and enable
-routing only after the compatible core, funding graph, and application releases pass their respective checks.
+This verifier complements the full perps verifier. It does not verify every admin, sidecar, vault, economic parameter,
+activation state, off-chain service, or source-chain provider allowlist. Pin the reviewed artifact's distribution
+location and keep historical artifacts unchanged.
 
-## Backend operation
+## Application boundary and validation limits
 
-The separate `plether-app` repository owns quote admission and read-only destination reconciliation. Its worker
-entrypoint is `apps/backend/app/FundingWorker.hs`; implementation is under
-`apps/backend/src/Plether/Perps/Funding/`. Configure API and worker from the same verified release served to the
-frontend. `PERPS_FUNDING_DEPLOYMENT_JSON` contains JSON text, not a filename, including the flat clearinghouse,
-SpokePool proxy/implementation, and handler address/hash fields above. `releaseId` is at most 128 characters;
-`confirmations` is between 1 and 1,000.
+The companion `plether-app` repository owns quote admission, the frontend funding state, and destination
+reconciliation. Use that release's configuration and operational documentation; the core helpers do not establish
+its supported source routes, API readiness, worker readiness, or AA compatibility. No receiver/factory deployment,
+bridge-specific signer, or later flush is required by the direct callback design.
 
-Both processes need PostgreSQL and destination RPC configuration (`DATABASE_URL`, `PERPS_RPC_URL` or `RPC_URL`, and
-`PERPS_RPC_AUTH_TOKEN` when required), plus an HTTPS Ethereum-mainnet `PERPS_FUNDING_SOURCE_RPC_URL` and optional
-`PERPS_FUNDING_SOURCE_RPC_AUTH_TOKEN`. The API also needs actual `ACROSS_API_KEY` and `ACROSS_INTEGRATOR_ID`
-credentials. Keep `PERPS_FUNDING_ENABLED=false` while the compatible deployment and provider route are unavailable.
-A configuration flag alone cannot establish release or worker readiness.
-
-Run `plether-funding-worker --once` for one reconciliation pass or `--loop` continuously. The worker persists
-observations and confirmed evidence; it does not deploy receivers, sign, broadcast, or flush. Use the backend's
-bridge-funding configuration documentation for current API readiness and schema requirements. Existing AA KMS
-configuration serves its separate trading/sponsorship role and is not bridge funding infrastructure.
-
-New quotes require a quoted minimum of at least 1 USDC. Source-hash registration verifies the submitted transaction
-against the persisted quote. Source confirmation requires two canonical source confirmations and binds a unique
-relay to the intent. The backend also pins the known EventEmitter runtime used for the success marker. Source status
-and provider progress stay separate from destination credit. A confirmed beneficiary fallback is `needs-deposit`;
-a provider's `filled` or `refunded` response alone cannot establish margin credit. Keep reconciliation available for
-pending intents on their original release until resolved, even after new quote admission is disabled. The API hides
-previously confirmed credit/fallback status while observer readiness or its evidence is stale.
-
-## Validation limits
-
-The checked-in [runtime fixtures](test/fixtures/across-direct-funding/README.md) record the observed Arbitrum handler
-and emitter bytecode and their source provenance. Installing those runtimes into a local test VM with mock USDC and
-the local clearinghouse tests destination-call semantics. It is not a mainnet fork, a real provider quote, a mined
-bridge fill, or proof of a compatible live clearinghouse. Activation still requires actual reviewed deployment and
-route evidence.
+The checked-in [runtime fixtures](test/fixtures/across-direct-funding/README.md) test destination semantics with mock
+USDC and the local clearinghouse. Their receipt verifier runs local Anvil without a fork. The recorded provider
+validation did not capture an authentic quote with the required nonzero beneficiary fallback: the attempted POST was
+rejected before API processing. The independent encoding vector is not a returned quote. These tests therefore do
+not prove that the provider offers the required message or that a real bridge fill will credit a compatible live
+clearinghouse. Release qualification must supply that missing evidence.

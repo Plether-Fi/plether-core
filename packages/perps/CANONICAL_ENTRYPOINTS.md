@@ -1,21 +1,38 @@
 # Canonical Perps Entrypoints
 
-This file defines the intended product-facing perps surface.
+Use this guide to choose the public contract for each integration. The linked interfaces and release-generated ABIs
+are the source of exact tuple layouts; internal host callbacks and sidecar selectors are not user entrypoints.
 
-For audit review that needs policy tables and read-surface canonicality in one place, use [`PRE_AUDIT_GUIDE.md`](PRE_AUDIT_GUIDE.md) alongside this file.
+| Task | Contract |
+| --- | --- |
+| Deposit or withdraw trader cash | `MarginClearinghouse` |
+| Add isolated position margin or settle a trader claim | `CfdEngine` |
+| Commit and execute orders | `OrderRouter` |
+| Create, manage or trigger TP/SL protection | `PositionProtectionBook` |
+| Resolve order identity and authenticate outcomes | `OrderLifecycleBook` |
+| Request/claim LP deposits and redemptions | Senior or Junior `TrancheVault` |
+| Read compact product state | `PerpsPublicLens` |
+| Choose and preflight LP settlement | `SettlementMonitorLens`, then the selected Pool/Router route |
+
+USDG asset amounts use 6 decimals, LP shares use 9 decimals, prices use 8 decimals, and position sizes use 18 decimals
+in multiples of `CfdTypes.SIZE_QUANTUM` (`1e20`, or 100 position units). `LONG` profits when the basket mark falls; `SHORT` profits
+when it rises. See [README](README.md) before interpreting direction or slippage.
+
+For review priorities, failure policy and settlement walkthroughs, use the [security review guide](SECURITY.md#review-guide).
 
 For autonomous trading-account and AI-agent integration, including bounded authority and receipt verification, use
 [`WORKING_WITH_AI_AGENTS.md`](WORKING_WITH_AI_AGENTS.md) alongside this file.
 
-The fresh MockUSDG stack uses token-neutral APIs with no old token-specific aliases. Token-address inputs/getters
-are `settlementToken`; settlement amounts use `*Assets` or `*AssetAtoms` in six-decimal integer base units
-(`1_000_000` = one token). Use current generated ABIs and SDK types together; archived ABIs belong only to their
-original deployments.
-
 ## Traders
 
-- Owner margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
-- Credit-only funding: `MarginClearinghouse.depositFor(address,uint256)` pulls the payer's exact settlement-token amount and
+### Funding and orders
+
+- Owner margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`.
+  Approve the Clearinghouse to pull USDG before depositing. A deposit credits custody and checkpoints carry; it does
+  not automatically add isolated position margin. Withdrawal applies carry and safety checks as well as reserve locks.
+- Add isolated margin without increasing size: `CfdEngine.addMargin(address account,uint256 amount)`; caller must be
+  the account owner, have an open position and sufficient free settlement after carry collection.
+- Credit-only funding: `MarginClearinghouse.depositFor(address,uint256)` pulls the payer's exact USDG amount and
   credits the beneficiary's free settlement without a carry checkpoint or position-margin allocation. Funding gives
   the payer no authority over the beneficiary. `DepositFor` is payer metadata for the same credit recorded by
   `Deposit`; indexers must not count both. See [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md) for the Across
@@ -26,19 +43,91 @@ original deployments.
 - Emergency policy note: committed orders remain user-uncancellable. If RouterAdmin enters risk-off, each pre-cutoff
   open is instead terminally invalidated by protocol policy and its remaining reservations are refunded to the
   trader's internal clearinghouse balance.
+- Requests include a nonzero client id and target, explicit financial bounds, `submitBy` and
+  `executionWindowSeconds`. A close has zero `marginDelta` and zero execution bounty. Fresh requests require nonzero
+  `maxPostLeverageBps` even when full-close post-position checks will be skipped. See
+  [Order timing](#order-timing) and [Trading-agent integration](WORKING_WITH_AI_AGENTS.md) for field-level rules.
+- A positive `minPostSettlementBalanceAssets` is supported only for an opening order on a flat account with no pending
+  orders. It protects total internal settlement custody, including locked value. It is not a general close or
+  withdrawable-balance floor; closes and increases must set it to zero.
+- Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner. Payment is
+  all-or-nothing and requires Pool cash to cover all outstanding trader claims. An open position receives the payment
+  as PnL pledge; otherwise it becomes free settlement.
+
+### Order timing
+
+Every ordinary request supplies two clocks in [`OrderV3Types.ExecutionBounds`](src/OrderV3Types.sol): a deadline to
+submit, then an execution duration measured from commitment.
+
+| Field | Meaning | Boundary |
+| --- | --- | --- |
+| `uint64 submitBy` | Latest chain timestamp for fresh commitment | Equality is allowed. |
+| `uint32 executionWindowSeconds` | Duration after successful commitment | Positive and at most `maxExecutionWindowSeconds` (default 60 seconds; governance maximum one hour). |
+| `commitTimestamp` | Timestamp of successful commitment | Recorded by the lifecycle Book. |
+| `executionDeadline` | `commitTimestamp + executionWindowSeconds` | Expiry is strictly after this timestamp; equality remains eligible. |
+
+A request with `submitBy = 12:02:00` and a 60-second duration committed at `12:01:30` expires after `12:02:30`.
+The submission cutoff no longer controls a committed order. FIFO, oracle, MEV, gas and financial checks still apply.
+Extending execution duration does not extend the Oracle's separate post-commit `orderSettlementWindow`; the signed
+historical price must qualify in that window even if execution happens later. Frozen execution follows the
+[stored-mark policy](ORACLE_SYNCHRONIZATION.md#frozen-operation).
+
+Expiry makes an order eligible for cleanup; it does not automatically release reservations. `expireOrder` and
+`clearInvalidOrders` provide oracle-free cleanup, and ordinary execution checks expiry before oracle work. See
+[Keepers](#keepers) for eligibility and result handling.
+
+`OrderLifecycleBook.orderTiming(orderId)` retains this tuple for pending and terminal orders, and returns zeros for
+unknown ids:
+
+```text
+(uint64 submitBy, uint32 executionWindowSeconds, uint64 commitTimestamp, uint64 executionDeadline)
+```
+
+`IntentRegistered`, pending intents and full receipts include timing; receipt verification authenticates it against
+the committed record. Exact `commitOrder` replay with the same account, client id and request returns the original
+id without new reservations, including after expiry. Changing either timing field changes the intent hash and
+conflicts with a used client id. Resolve ambiguous submissions through `clientIntent(account, clientOrderId)`.
+Composite protection actions have their own lifecycle checks and are not unconditional `commitOrder` replay.
+
+Protected parent opens use the same request timing. Each generated protection close/retry gets a fresh commit time
+and the then-configured execution duration. Clients choose submission headroom for their transaction path; the
+protocol imposes no 120-second default. Sponsored-operation validity controls submission separately and must not be
+mistaken for execution validity. Once committed, execution needs no new trader signature; recover ambiguous
+operations from chain evidence rather than a local countdown. See [Trading-agent integration](WORKING_WITH_AI_AGENTS.md).
+
+### Closing and reducing positions
+
+Submit an ordinary close through `commitOrder` with the current side, lot-aligned reduction size, zero `marginDelta`
+and explicit price/financial limits. Closing reserves no execution bounty. Ordinary commitment still collects
+applicable carry and records it in the lifecycle Book; execution later settles price PnL and action charges.
+Collected commitment carry is already included in the reported debit/charge totals. Native gas and oracle fees remain
+payable by the transaction sender.
+
+A full close removes the position and follows terminal collection/waiver rules. A partial close must preserve a
+healthy residual position, satisfy the partial-size minimum and fund the required charges; it can fail even with no
+keeper bounty. Trader claims may support price equity but are not cash for action charges. Use
+[Close preview](CLOSE_PREVIEW.md) to review the exact request, then simulate commitment and authenticate the eventual
+receipt. The detailed cash ordering is in [Close settlement](ACCOUNTING_SPEC.md#close-settlement).
+
+Active protection has its own owner-exit and permissionless retry paths below. A trigger or retry queues a new close
+without ordinary commitment carry effects; its execution still settles carry. A paid trigger, accepted commitment or
+successful cleanup transaction does not by itself establish that the position closed.
+
+### Position protection
+
 - Discover the immutable protection action/view surface through `OrderRouter.positionProtectionBook()`.
 - Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV3Types.OrderRequest,PositionProtectionParams)`
 - Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
 - A protection request must explicitly supply `PositionProtectionParams.closeLimits` with four close financial limits:
   `maxExecutionNotionalAssets`, `maxGrossAccountDebitAssets`, `maxActionChargeAssets`, and `maxExplicitFeesAssets`. Each is a
-  `uint256` ceiling in six-decimal settlement-token units units for future triggered or retried close attempts. Set the limits from the trader's intended
+  `uint256` ceiling in 6-decimal USDG units for future triggered or retried close attempts. Set the limits from the trader's intended
   close policy; integrations must not assume an implicit unlimited default. Zero is a zero allowance;
   `type(uint256).max` is an explicit unlimited allowance. The separately reserved trigger bounty is paid when the
   protection fires; these ceilings apply to its generated close attempt.
 - Existing-position protection creation is available in degraded mode; Router pause and frozen-oracle restrictions still apply.
-  Creation locks its trigger bounty first, then applies the canonical V2 exact-price safety
-  gate through the Engine's configured planner. Price equity uses exact entry cost and only PnL pledge plus same-account
-  claim; free settlement and generic action/reservation buckets do not count. Uncovered carry, an underfunded
+  Creation locks its trigger bounty first, then applies the exact-price safety gate through the Engine's configured
+  planner. Price equity is PnL pledge plus same-account claim plus exact capped price PnL computed from entry cost;
+  free settlement and generic action/reservation buckets do not count as price collateral. Uncovered carry, an underfunded
   negative-VPI reserve, or equity at or below the stricter of initial and active normal/FAD margin rejects the action.
 - Protection management: replace a `PendingOpen` or `Armed` record with
   `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)` to update its triggers and close
@@ -60,11 +149,11 @@ original deployments.
 - Only Router-authenticated TP/SL-triggered close attempts use `expectedConfigHash == bytes32(0)` as an internal
   unpinned marker. Protected parent opens and ordinary `OrderRouter.commitOrder(...)` requests require the current
   nonzero configuration hash.
-- Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner
-- Compact reads: `PerpsPublicLens`; use `getTrancheQueues(bool)` for matured heads/backlog and
-  `getLpRequestState(bool,uint256,address)` for controller-specific pending/claimable balances. The legacy
-  `TrancheView.maxWithdrawAssets` field now means current pool-level queue-funding capacity, not synchronous holder
-  withdrawal capacity.
+
+### Trader reads and previews
+
+- Compact account and order reads: `PerpsPublicLens` via `IPerpsTraderViews`. Gross settlement balance includes locked
+  buckets; use the account's explicit free/withdrawable views and simulate a withdrawal before presenting availability.
 - Protection reads: `PositionProtectionBook.activePositionProtectionId(address)` and
   `PositionProtectionBook.getPositionProtection(uint64)`. Read the retained close ceilings with
   `PositionProtectionBook.closeFinancialLimits(uint64)`.
@@ -82,24 +171,17 @@ Use these interfaces:
 - `IPositionProtectionViews`
 - `IPerpsTraderViews`
 - `ICfdEngineLens` for open-ticket previews and maximum-open quotes
-- The deployed `CfdClosePreview` ABI for reservation-aware close review
+- The deployed `CfdClosePreview` ABI for pre-commit close review
 
 Do not use the wide clearinghouse reservation API or detailed accounting lenses as the canonical trader integration
 surface. `CfdEngineLens.previewClose(...)` remains a planner diagnostic; it does not project a new close commitment's
-carry and bounty reservation.
+carry and the associated commitment effects.
 
 ### Across destination funding
 
-The provider route targets the reviewed existing Across destination handler. Its approved destination calls approve
-the clearinghouse for canonical USDC and invoke `depositFor(beneficiary, amount)` using the handler's actual balance.
-The remaining required calls clear that allowance and emit the unique quote marker through the known Across emitter.
-The explicit fallback recipient must be the same verified trading-account beneficiary. No per-intent receiver,
-factory deployment, or permissionless flush entrypoint is part of this integration.
-
-Match the destination fill and quote marker to the persisted source intent, then verify its confirmed clearinghouse
-credit before using the funds as margin. A fallback pays wallet USDC to the beneficiary and remains `needs-deposit`, never ready
-to trade on that evidence alone. The destination must already implement `depositFor`; configuring an Across route
-does not upgrade an existing clearinghouse or resolve the application's V3 trading and AA release compatibility.
+Use `depositFor` as the destination credit operation and verify the confirmed Clearinghouse deposit before treating
+funds as trading collateral. A fallback transfer to a wallet still needs a deposit. The complete call ordering,
+beneficiary checks, allowance cleanup and fixture limitations are in [Bridge funding](BRIDGE_FUNDING.md).
 
 ## LPs
 
@@ -133,14 +215,17 @@ does not upgrade an existing clearinghouse or resolve the application's V3 tradi
   `CachedMark` calls `HousePool.settleLpEpoch(uint256,uint256)` directly; `AtomicOracleRefresh` calls
   `OrderRouter.settleLpEpoch(bytes[])`. On the atomic route, the Router validates one `PoolReconcile` mark under the
   reported minimum-publish-time policy, installs it in the Engine, and reaches the Router-only HousePool callback in
-  the same rollback frame. A nonzero `minimumAtomicPublishTime` enforces the post-round-hour floor; frozen stale-mark
-  recovery reports zero and uses the frozen oracle policy instead. HousePool reconciles once, processes matured Senior
+  the same rollback frame. A nonzero `minimumAtomicPublishTime` enforces the post-round-hour floor. Frozen policy
+  reports zero but still requires a valid stored Engine mark; this route cannot repair a stale frozen mark. HousePool reconciles once, processes matured Senior
   withdrawal demand before Junior demand, rechecks the live deposit-entry gate after redemption funding, then
   finalizes Junior deposits before Senior deposits. If bounded Senior processing stops with an eligible head remaining,
   the call must stop before Junior. A pass that advances no queue item also rolls back the Pyth and Engine updates. The
   Lens selects the direct cached route when there are no open positions or when the oracle is frozen and the cached
-  mark is still fresh under the applicable frozen-mode limit; a frozen stale mark requires the atomic-refresh route.
-- Compact reads: `PerpsPublicLens`
+  mark is still fresh under the applicable frozen-mode limit. A frozen stale mark is classified for atomic execution
+  but remains blocked by Oracle policy until a valid price path is available.
+- Compact reads: `PerpsPublicLens`; use `getTrancheQueues(bool)` for matured heads/backlog and
+  `getLpRequestState(bool,uint256,address)` for controller-specific pending/claimable balances.
+  `TrancheView.maxWithdrawAssets` means current pool-level queue-funding capacity, not synchronous holder withdrawal capacity.
 - Capacity-specific reads: `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssets()`, and
   `areSeniorDepositReservationsWithinLimits()`; these intentionally are not added to the compact liquidity lens
 
@@ -159,8 +244,14 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
 
 ## Keepers
 
-- Order execution: `OrderRouter.executeOrder(uint64,bytes[])`
-- Batch execution: `OrderRouter.executeOrderBatch(uint64,bytes[])`
+- Order execution: `OrderRouter.executeOrder(uint64 orderId,bytes[])`; execution follows global FIFO.
+- Batch execution: `OrderRouter.executeOrderBatch(uint64 maxOrderId,bytes[])`; the id is an inclusive committed-order
+  bound, not a count. Inspect returned `nextOrderId`, `terminalCount` and `stopReason` before resuming.
+- Expiry cleanup: `OrderRouter.expireOrder(uint64)`.
+- Selected invalid-order cleanup: `OrderRouter.clearInvalidOrders(uint64[])`; permissionless and oracle-free,
+  accepting expired/configuration-invalid orders including non-head entries. Ineligible, duplicate and terminal ids
+  are skipped; item failure stops while retaining prior cleanup. The candidate limit is the smaller of 64 and
+  `maxPruneOrdersPerCall`.
 - Neutral mark refresh: `OrderRouter.updateMarkPrice(bytes[])`
 - Position-protection activation: `PositionProtectionBook.triggerPositionProtection(uint64,bytes[])`
 - Latched close retry: `PositionProtectionBook.retryPositionProtectionClose(uint64)`; permissionless, nonpayable, and
@@ -180,6 +271,11 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
   `SettlementMonitorLensSidecar` is monitor-bound implementation code and is not a public keeper entrypoint. An active
   `lpEpochSettlementPaused` blocker stops both routes; `LpEpochKeeper` rejects it before payload decoding or fee quote.
 
+Quote historical execution with `PletherOracle.getOrderExecutionFee`, and current-price operations with
+`getUpdateFee`; simulate exact calldata and ETH value. A successful transaction can leave an order pending, so read
+its `ExecutionResult` and canonical lifecycle outcome. See [Oracle synchronization](ORACLE_SYNCHRONIZATION.md).
+Ordinary and protection close execution/cleanup pays no execution bounty; operators must budget gas and oracle fees.
+
 The protocol-operated incident keeper should clear risk-off orders after containment. A risk-off open is already
 logically unexecutable before physical cleanup, and cleanup authority does not grant its caller the trader's bounty.
 Protection-attempt failure cleanup is unpaid when its exact protected position remains: the attempt's zero Order
@@ -193,12 +289,8 @@ Use this interface:
 - `IPerpsKeeper`
 - `IPositionProtectionActions` for the permissionless trigger and retry entrypoints
 
-Mark refresh, single and batch liquidation, and atomic-refresh LP-epoch settlement remain Router entrypoints.
-Integrations must not call matching selectors on `OrderRouterLiquidationBatchSidecar`: the Router invokes that
-separately deployed stateless implementation only through `delegatecall`, and direct or foreign-context sidecar calls
-revert. In the delegate frame the Router remains `address(this)` and the direct-event address, downstream integrations
-see it as caller, and the Router entrypoint caller is preserved; protection-trigger keeper identity is authenticated
-by the Book's trailing payload.
+Mark refresh, liquidation and atomic LP settlement are Router entrypoints. Protection triggering is a Book
+entrypoint that invokes authenticated Router hooks. Do not call implementation sidecars directly.
 
 ## Protocol / Status Readers
 
@@ -226,10 +318,9 @@ by the Book's trailing payload.
 
   `getSettlementStatus(...)` exposes `executionPathDependencyMask` for failures that prevent route selection and a
   broader `dependencyFailureMask`. Its Senior deposit-deferral mask describes pending activation gates, not
-  new-request admission capacity. Use status for routine polling. Composite observations are checkpoint and
-  alert-investigation reads (roughly 6 KB returned and about 0.8–1.3 million representative `eth_call` gas); they
-  expose `observationComplete` and `completeObservationDigest`. Completeness requires every Oracle dependency read,
-  including the updated current-feed ABI, even for cached/no-work routing, but requires Oracle policy validity only on
+  new-request admission capacity. Use status for routine polling. Larger composite observations are checkpoint and
+  alert-investigation reads; they expose `observationComplete` and `completeObservationDigest`.
+  Completeness requires every Oracle dependency read, even for cached/no-work routing, but Oracle policy validity only on
   the atomic-refresh route. The complete digest is otherwise zero and always unauthenticated.
   A successfully read settlement hold is intentional complete state: the explicit status flag, operational blocker,
   and deposit deferral are set while route classification remains visible. A failed hold read is an unknown Pool
@@ -263,50 +354,13 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `IOrderRouterAccounting`
 - `IHousePool`
 
-## Boundary Summary
+## Implementation boundaries
 
-- `CfdEngine` / `ICfdEngineCore`: canonical runtime truth for execution, liquidation, and protocol status.
-- `CfdEngineSettlementSidecar`: externalized close/liquidation settlement orchestration used by `CfdEngine`; not a product-facing surface.
-- `CfdOrderPolicyEvaluator`: fixed permissionless stateless policy dependency used to assess authoritative Engine
-  state against caller-pinned financial bounds; applications do not use it as an execution or custody surface.
-- `CfdClosePreview`: separately deployed stateless pre-commit close-review surface; projects commitment carry and a
-  new zero-amount bounty record and does not replace or reconfigure the Router's immutable execution evaluator.
-- `OrderLifecycleBook`: independently predeployed canonical permanent order-identity and terminal-outcome reader. It
-  is immutable-bound to the predicted Router, Engine, Clearinghouse, and HousePool; the Router constructor validates
-  all four bindings before accepting it. Only that Router may register or finalize lifecycle state, and the Book owns
-  no funds or execution authority.
-- `OrderRouterExecutionSidecar`: fixed stateless Router delegate implementation for oracle preparation, bounded
-  execution, failure classification, and receipts. Direct stateful calls are rejected; integrations call the Router.
-- `OrderRouterLiquidationBatchSidecar`: separately predeployed, immutable, exactly Router-bound stateless
-  implementation detail for mark refresh, protection-trigger oracle/orchestration, single and batch liquidation, and
-  atomic-refresh LP-epoch settlement. Direct integrations call the corresponding Router entrypoint, never the sidecar.
-- `HousePoolRedemptionMathSidecar`: immutable stateless pure LP redemption-budget implementation used by HousePool;
-  it is not an order, keeper, custody, or product-facing surface.
-- `PerpsPublicLens`: canonical product-facing read layer.
-- `SettlementMonitorLens`: canonical bounded settlement-monitoring read layer; no mutation or circuit-breaker
-  authority. It validates the required one-time core wiring and its monitor-only sidecar is not a second canonical
-  surface.
-- `EmergencyPauseCoordinator`: guardian-only, immutable-bound surface with three fixed containment actions for new
-  trading risk, LP entry, and/or LP settlement; no recovery, arbitrary mask, pricing, configuration, fund movement,
-  or arbitrary-call capability. Closes/reductions, liquidations, redemption requests, and already-funded claims
-  remain outside its authority; LP deposit requests are stopped by actions that include the entry restriction.
-- `CfdEngineAccountLens`: rich account/accounting diagnostics.
-- `CfdEngineProtocolLens`: protocol-accounting and house-pool snapshot diagnostics.
-- `MarginClearinghouse`: custody plumbing with a small public trader surface and a larger operator surface.
-- `OrderRouter`: delayed-order and keeper-execution plumbing, global FIFO ownership, and timelocked protection
-  configuration. Its eighth and final constructor dependency is the predeployed lifecycle Book, while it creates the
-  position-protection Book itself. It exposes both through `lifecycleBook()` and `positionProtectionBook()` but does
-  not forward public protection selectors; raw queue state is non-canonical. To stay within EIP-170 it delegatecalls
-  its separate stateless keeper sidecar for
-  mark refresh/trigger-oracle resolution, single liquidation, liquidation batches, and atomic-refresh LP-epoch
-  settlement, plus the active-oracle forwarding step of authenticated configuration, while retaining every public
-  entrypoint, admin check, and Router execution/event address.
-- `PositionProtectionBook`: canonical direct action/view surface and retained lifecycle store for position protection.
-  It emits all protection lifecycle events and calls narrow Router host operations for mark refresh and FIFO mutation; it
-  holds no token custody and does not mutate the queue directly. It is stateful and distinct from the stateless keeper
-  sidecar returned by `OrderRouter.liquidationBatchSidecar()`.
-- A `PendingOpen`, `Armed`, or `Latched` protection is a retained off-queue record, not an ordinary pending order.
-  `Triggered` identifies exactly one live full-position close attempt. Every attempt is an ordinary binding FIFO order
-  read through the normal order surfaces; a non-liquidation failure returns the protection to `Latched` and settles
-  its zero Order bounty record only when the exact protected side and size remain. A position mismatch resolves the
-  protection as `Failed` with no close-bounty payment. Neither path erases the failed order's permanent receipt.
+The Engine owns economic state; the Clearinghouse and Pool own custody; the Router and Books own order/protection
+lifecycle. Immutable planners and sidecars implement parts of those paths without becoming alternate public APIs.
+Read [Architecture map](INTERNAL_ARCHITECTURE_MAP.md) for custody, helper bindings and mutation authority.
+
+Release ABIs must match the deployed graph, including constructor-created Books and sidecars. The current request
+API is V3 and current receipt/configuration hash domains are V5. `orderInterfaceVersion: 3` identifies the request
+API, not every nested receipt version. Do not infer compatibility from the unversioned contract name or reuse old
+tuple/storage decoders; see [Deployment](DEPLOYMENT.md).

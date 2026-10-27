@@ -2,7 +2,7 @@
 pragma solidity 0.8.35;
 
 // Category: spec. All cases assert current documented behavior and are expected to pass.
-// Source of truth: packages/perps/PRE_AUDIT_GUIDE.md#order-lifecycle-state-machine
+// Source of truth: packages/perps/SECURITY.md#queue-failure-handling
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -16,7 +16,7 @@ contract SuccessfulBatchExecutionTest is BasePerpTest {
         return 1_000_000e6;
     }
 
-    /// @dev spec; source: PRE_AUDIT_GUIDE.md#order-lifecycle-state-machine.
+    /// @dev spec; source: SECURITY.md#queue-failure-handling.
     function test_ValidBatchExecutesWithSufficientGas() public {
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
@@ -46,7 +46,7 @@ contract SuccessfulBatchExecutionTest is BasePerpTest {
 
 contract FundedCommitLifetimeTest is BasePerpTest {
 
-    /// @dev spec; source: PRE_AUDIT_GUIDE.md#order-lifecycle-state-machine.
+    /// @dev spec; source: SECURITY.md#queue-failure-handling.
     function test_CommitOrderDoesNotRequireEth() public {
         _fundTrader(address(0xA11CE), 10_000e6);
 
@@ -56,7 +56,7 @@ contract FundedCommitLifetimeTest is BasePerpTest {
         assertEq(router.nextCommitId(), 2, "Commit should succeed without sending ETH");
     }
 
-    /// @dev spec; source: PRE_AUDIT_GUIDE.md#order-lifecycle-state-machine.
+    /// @dev spec; source: SECURITY.md#queue-failure-handling.
     function test_MaxExecutionWindowSecondsShouldBeNonZeroByDefault() public {
         // A nonzero default lifetime lets terminal cleanup expire abandoned queue entries.
         assertGt(router.maxExecutionWindowSeconds(), 0, "maxExecutionWindowSeconds should have a non-zero default");

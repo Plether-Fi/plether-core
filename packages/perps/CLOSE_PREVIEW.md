@@ -1,124 +1,127 @@
-> Historical/additive-preview documentation. Its V3 intent / V4 receipt references describe the earlier candidate.
-> Current source uses V3 request/intent and V5 receipt/config domains; use [current accounting](ACCOUNTING_SPEC.md)
-> and generated ABIs for a fresh stack. Keep this historical integration bound to its archived deployment; current
-> planner tuples are incompatible with v1.2.3. The current `previewClose` overloads omit the old planner-only
-> `publishTime` argument; use the archived ABI when calling a deployed v1.2.3 preview.
+# Close preview and integration
 
-> The current zero-bounty source removes `previewSponsoredClose` and `validateSponsoredClose`. The sponsored APIs
-> described below belong to archived releases only. New closes use ordinary `previewClose`; their commitment carry
-> is included in the current assessment and bound checks. Historical recovery continues against the original lens.
+`CfdClosePreview` reviews a prospective close by projecting commitment carry, then execution at a supplied price. It is read-only and has no constructor arguments. Use it before submitting a new close; use `CfdOrderPolicyEvaluator.assessCommittedOrder` for an existing pending order.
 
-# Reservation-aware close review
+This page describes the current source: V3 requests/intents and V5 receipt/configuration domains. Current closes have zero execution bounty. See the [close settlement rules](ACCOUNTING_SPEC.md#close-settlement) for protocol economics and [keeper operations](DEPLOYMENT.md#order-keeper-operations) for execution, funding and fallback procedures. The integration checks below are requirements, not evidence that an external frontend is deployed or has passed acceptance.
 
-## Current fresh-stack preview
+## Deployment and bindings
 
-The current contract has two five-argument overloads:
+Use the ABI and runtime hash from the exact deployed build. Verify the chain, code hashes and engine/Router/Book bindings. Keep distinct addresses for the close preview, execution policy evaluator, engine lens and public lens; a preview address equal to the execution evaluator is invalid. `CfdEngineLens.previewClose` has a different interface and is not a substitute for commitment-aware review.
+
+## Calling the preview
+
+The contract exposes two five-argument overloads:
 
 ```text
 previewClose(engineAddress, account, request, executor, executionPrice)
 previewClose(engineAddress, closeOrder, executor, executionPrice, bounds)
 ```
 
-The first accepts a prospective `OrderRequest` and checks close admission through the configured Router's batch
-sidecar. The second accepts a `CfdTypes.Order` and explicit execution bounds. Both return `commitment`,
-`commitmentCarryAssets`, and `assessment`; neither returns a close execution bounty. Use the matching generated ABI
-for a fresh deployment. The archived six-argument call and bounty handling below describe the pinned v1.2.3 lens.
+Prefer the first overload for ordinary user submission. It accepts the exact `OrderV3Types.OrderRequest` intended for `Router.commitOrder` and resolves permanent client identity before checking fresh admission:
 
-## Historical additive-preview integration
+- An unused client ID proceeds through request validation, queued-position side/size/dust checks, commitment carry, and execution assessment.
+- An exact replay returns the existing `replayOrderId` with empty commitment and assessment fields. This also works after expiry, configuration changes or terminalization. It is an identity lookup, not a zero-cost execution quote.
+- Reusing the client ID for different request contents reverts with `OrderLifecycleBook__ClientIdConflict`.
 
-`CfdClosePreview.previewClose` is the pre-commit close-review API. `CfdOrderPolicyEvaluator.assessOrder` remains the execution-state API: its supplied bounty must already have been reserved by commitment.
+The second overload accepts a synthetic `CfdTypes.Order`. It checks side and partial-close dust against the **live** position and projects commitment/execution. It does not resolve client identity or validate request timing, configuration hash, protection lock or queued-position admission. Its `replayOrderId` is always zero.
 
-For the frontend rollout after deployment, use the [implementation handoff and acceptance checklist](CLOSE_PREVIEW_FRONTEND_HANDOFF.md).
-
-## Calling the preview
-
-Deploy `CfdClosePreview` as an additive, stateless read-only contract. It has no constructor arguments. Pin its address and runtime bytecode independently from the existing release's engine, router, planner, and execution evaluator. The preview reads the engine's configured router to obtain the close bounty and its configured pool for canonical depth.
+Both overloads read canonical pool depth from the supplied engine's pool and share the commitment calculation used by the engine. Neither takes a bounty, pool-depth or `publishTime` argument. Neither verifies that the supplied execution price came from an admissible oracle payload, or applies the Router's target-price/slippage check. The actual execution path performs those checks.
 
 ```typescript
+// closePreviewAbi must come from the build matching the selected deployment.
 const preview = await publicClient.readContract({
   address: closePreviewAddress,
   abi: closePreviewAbi,
   functionName: 'previewClose',
-  args: [engineAddress, closeOrder, executorAddress, reviewedPrice, publishTime, executionBounds],
+  args: [engineAddress, tradingAccount, request, executorAddress, reviewedPrice],
   blockNumber,
 })
-const assessment = preview.assessment
+
+if (preview.replayOrderId !== 0n) {
+  // Load the existing order's lifecycle; do not display the empty assessment.
+} else {
+  const assessment = preview.assessment
+  // Use the assessment as returned, including its commitment carry.
+}
 ```
 
-Use this call at each reviewed close price (current, midpoint, and adverse slippage limit). Preserve the existing open-review route. Feed these assessments into the existing bounds construction and validation policy. Continue to simulate the actual router commitment for queue admission, deadlines, configuration hashes, and other router-level requirements.
+## Review and submit
 
-`preview.commitmentCarryUsdc` is the settlement debit projected at commitment. `assessment.preSettlementBalanceUsdc` starts after that debit. `assessment.grossAccountDebitUsdc` and `assessment.carryUsdc` describe execution from that projected state; do not count commitment carry twice. `preview.executionBountyUsdc` is the new order's configured bounty. A nonzero bounty is always reserved in addition to all existing reservations, regardless of their aggregate value. If the configured bounty is zero, the commitment projection skips carry collection, funding validation, and the commitment-specific health/mark checks, matching the engine's zero-bounty branch; the execution planner still validates and projects the close.
+1. Read the trading account, live position, pending orders, protection state, current configuration and block timestamp/number at one block. Build the bounded close request using the admission rules below. For a smart account, the position owner is that account, not its owner EOA.
+2. Review the request at that block using the bounded five-argument overload. Sample the current price and adverse slippage limit, plus intermediate scenarios needed by the client. If `replayOrderId` is nonzero, resume the existing order instead of displaying the empty assessment.
+3. Derive financial bounds from the fresh assessments and the user's tolerances, then repeat review with the final bounds. Check target-price/slippage separately. Keep opening-order preparation on its own route.
+4. Simulate the actual `commitOrder(request)` from the trading account. This checks the complete submission path, including queue capacity. Earlier queued orders can change the eventual position; preview does not execute them hypothetically. Refresh context and review before submission if state has changed.
+5. Persist the exact submitted request and client ID. After an ambiguous submission, reconcile its transaction and permanent client-intent record before creating another request. An exact retry returns the same ID; changing any request field, including bounds, under a committed ID conflicts.
+6. Track the returned order through execution or terminal failure. Use `assessCommittedOrder(engine, orderId, executor, executionPrice)` for an authenticated pending-order assessment, and verified lifecycle receipts for history. Commitment, a paid protection trigger or a queued retry does not prove the position closed.
 
-The preview models commitment and execution at the snapshot time, with a supplied execution price. Future carry, market/configuration changes, and an oracle refresh during commitment can change the result. Refresh the preview when relevant state changes. A stale but nonzero stored mark remains accepted for commitment, as in the engine; this is not a guarantee that an execution oracle update will be accepted.
+Use a fresh unused client ID for a new order and preserve the original request/ID for recovery. Final bounds can change during preparation before submission. Refresh on account, chain, size, target, configuration, position, queue or protection changes; an older asynchronous review must not overwrite a newer one or survive an aborted request. If review fails, report it as unavailable rather than silently using a stale assessment or the raw evaluator.
 
-Side and partial-close dust validation use the live position. The router instead validates against its queued position, including earlier pending opens and closes. A preview can therefore differ from commitment when other orders are pending; simulation of the actual commitment remains required. Full closes are exempt from the dust floor only relative to the position each path uses.
+## Result and accounting
+
+Generate types from [CfdClosePreview.sol](src/CfdClosePreview.sol) and [OrderV3Types.sol](src/OrderV3Types.sol), rather than copying an archived tuple.
+
+| Field | Meaning |
+| --- | --- |
+| `replayOrderId` | Existing order ID for an exact request replay; zero for a new preview. Check this first. |
+| `commitment` | Collected/outstanding carry and settlement before/after commitment. `bountyFromFreeAssets` is zero for a close. |
+| `commitmentCarryAssets` | Alias of `commitment.carryCollectedAssets`, useful for explaining the commitment checkpoint. |
+| `assessment` | Projected execution and post-state, with commitment carry already included in the aggregate charge and debit fields. |
+
+There is no `executionBountyAssets` result. Close execution earns zero bounty; native gas and oracle update fees remain separate. Do not add a close-bounty deposit requirement to the review flow.
+
+Commitment collects carry even though the close bounty is zero. The projected execution starts from the resulting account state. In particular:
+
+- `assessment.preSettlementBalanceAssets` is custody **after** commitment carry. `commitment.settlementBeforeAssets` is the pre-commitment balance.
+- `grossAccountDebitAssets`, `actionChargeAssessedAssets`, `actionChargeCollectedAssets`, and `carryAssets` already include collected commitment carry. Do not add `commitmentCarryAssets` again when displaying totals or deriving bounds.
+- `carryAssets` is assessed carry, not necessarily the cash collected. A full close can leave uncollectible carry to the full-close settlement rules. Gross debit also includes trader-claim consumption, so it is not the same as a wallet payment or net cash loss.
+- `postSettlementBalanceAssets` is total internal custody, including locked funds. `assessment.close.postFreeSettlementAssets` is projected free settlement. `assessment.postTraderClaimAssets` is a separate claim balance, not immediately spendable USDG.
+- `safeMarginReleaseAssets` is the pledge that may be released while preserving residual health. `actionChargeFromReleasedMarginAssets` and `netReleasedMarginAssets` explain how much of that release pays charges and how much remains.
+
+USDG amounts use 6 decimals, prices 8, and sizes 18. Valid sizes are multiples of `1e20` (100 tokens). PnL, VPI and post-position equity are signed; retain integer precision in clients.
+
+## Admission and bound checks
+
+A fresh public close needs a nonzero, unused client ID outside the protocol-reserved prefix; matching side; a valid size; zero `marginDelta`; a nonzero target price; the current nonzero configuration hash; a valid submission cutoff and execution window; and valid execution modes. Active protection and certain pending-order policies may block ordinary submission. The bounded-request preview uses the Router's admission checks for these rules.
+
+`submitBy` must be at or after the reviewed timestamp. `executionWindowSeconds` must be positive and no greater than the Router's configured maximum. At execution, a LONG close accepts a price at or below its target; a SHORT close accepts a price at or above it. See [order timing](CANONICAL_ENTRYPOINTS.md#order-timing) for the delayed execution window.
+
+Set `maxExecutionBountyAssets = 0` for the zero-bounty close and `minPostSettlementBalanceAssets = 0`: positive settlement floors are unsupported on closes. Bounds are inclusive; zero maximum bounds are real zero allowances. Full closes skip residual equity/leverage checks during assessment, but fresh public requests still require a nonzero `maxPostLeverageBps`. Execution modes are enum values `None=0, Live=1, Fad=2, Frozen=3`; allowed-mode bits are `Live=1, Fad=2, Frozen=4`.
+
+Partial closes must fund outstanding carry at commitment and meet commitment health checks. Execution independently requires a healthy residual position and collectible partial-close charges. Full closes have no residual-position health requirement. Both still require valid mark/price inputs and the user's other bounds.
+
+The stored commitment mark must be nonzero with a nonzero timestamp; commitment does not impose a mark-age freshness limit. This does not establish that an execution oracle update will be accepted. Preview models the current timestamp, so later carry, oracle/mode changes, pool state and configuration changes can alter execution.
 
 ## Failure semantics
 
-- Insufficient free settlement after commitment carry uses the existing `CfdEngine__InsufficientCloseOrderBountyBacking(requiredBounty, freeSettlement, unpaidCarry)` error. Decode all three arguments.
-- Invalid position/size, missing stored mark, and unhealthy partial closes preserve the engine's existing commitment errors.
-- Wrong-side closes use `OrderRouter__SideMismatch`; partial closes below the router's minimum notional use `OrderRouter__CommitValidation(11)`. These checks also apply when the configured bounty is zero.
-- Insufficient settlement at the evaluator's terminal bounty debit uses `CfdOrderPolicyEvaluator__InsufficientBountyBacking(settlement, bounty)`. This is an accounting invariant failure, including for self-execution. It must remain retryable and must not be classified as a terminal policy constraint.
-- Decode Solidity `Panic(uint256)` for older deployed evaluators; a panic is distinct from an RPC failing to provide revert data.
+| Error or result | Interpretation |
+| --- | --- |
+| `replayOrderId != 0` | Resume the existing order's lifecycle. No new assessment was produced. |
+| `OrderLifecycleBook__ClientIdConflict` | The same account/client ID is bound to different request contents. |
+| `OrderRouter__SettlementFloorUnsupported` | A fresh close requested a positive settlement floor. |
+| `OrderRouter__SideMismatch`, `OrderRouter__CommitValidation(11)` | Side mismatch or a partial close below the minimum notional. A full close's dust exemption depends on the position used by that path. |
+| `CfdEngine__PartialCloseCarryUnfunded`, `CfdEngine__PartialCloseUnhealthy` | The proposed partial close fails a commitment carry/health check. |
+| `CfdEngine__TypedOrderFailure` | Execution planning rejected the proposed close; preserve category and code. |
+| `CfdOrderPolicyEvaluator__ConstraintViolation`, `CfdOrderPolicyEvaluator__ExecutionModeDisallowed` | The projected execution violates a user bound or allowed mode. |
+| Panic, unexpected invariant error, or missing RPC revert data | Review unavailable; keep diagnostics and refresh. Do not replace it with a zero assessment. |
 
-## Sponsored testnet closes
+Import the complete current error ABI. The removed close-bounty funding errors and sponsored-grant errors are not current close admission rules.
 
-The archived sponsored release exposes `previewSponsoredClose(engine, account, request, executor, executionPrice, publishTime)`
-and `validateSponsoredClose(engine, request, expectedSubsidyUsdc)`. These APIs are restricted to Arbitrum Sepolia
-(`421614`) and the immutable `SPONSORED_ENGINE` v1.2.3 address. The ordinary `previewClose` has no such deployment gate.
+Preserve constraint actual/limit values, typed planner category/code, and raw revert data. Distinguish a Solidity panic from an RPC response with no revert data. Keep chain, contract address, block/hash, account and reviewed price with diagnostics. A preview failure describes current admission or hypothetical execution; commitment simulation and terminal receipts establish what happened on-chain. A generic failure is not evidence that a deposit is required.
 
-`previewSponsoredClose` returns `subsidyUsdc`, `depositCarryUsdc`, `commitmentCarryUsdc`, `executionBountyUsdc`, and
-`assessment`. It first projects carry against existing collateral, rejects uncovered carry, and computes only the
-remaining free-settlement shortfall for the close bounty. The bounty cannot exceed `MAX_CLOSE_SUBSIDY_USDC = 200_000`
-(USDC atoms, or $0.20). It then reloads the original snapshot, credits the proposed deposit before projecting its carry
-hook, and projects close commitment and execution. Display deposit carry and commitment carry separately from the
-execution assessment; none should be charged twice. A fully funded account previews with zero subsidy, but the guard
-rejects a zero grant.
+## Acceptance checks
 
-The account must have no pending orders or active protection. The request must be a close with zero margin delta,
-nonzero target price, an unused nonzero client intent outside the protocol-reserved prefix, the current configuration
-hash, a `submitBy` at or after the current timestamp, a positive `executionWindowSeconds` no greater than
-`maxExecutionWindowSeconds`, sufficient bounty allowance, and valid execution
-modes. Preview accepts nonempty combinations of the three mode bits; the final guard requires one mode. Ordinary
-side, size, dust, funding, execution bounds, and partial-close charge rules still apply.
+- Correct-chain ABI/runtime and binding checks pass; a mismatched preview is rejected. Initial and final close reviews use the bounded five-argument overload.
+- Exact replay resumes an existing pending or terminal ID without presenting empty economics; changed request contents conflict.
+- Commitment carry is counted once in totals and bounds, including when pledge pays it and free settlement is zero.
+- Full/partial, LONG/SHORT, gains/losses, self/external execution, Live/FAD/Frozen and deferred claims display correctly.
+- Positive close settlement floors fail; zero maximum bounds, the full-close dust exemption and partial-close health checks behave as documented.
+- Final simulation checks pending orders, queue capacity, active protection, configuration and submission timing. Changed inputs, failed requests and aborted reviews leave no actionable stale quote.
+- Completion uses verified lifecycle evidence. A successful transaction alone is insufficient to show that a position closed.
 
-For assistance, the smart account must call `validateSponsoredClose` first in an atomic reverting batch, immediately
-followed by the authorized test-token mint, approval, clearinghouse deposit, and router commitment. The guard checks
-`msg.sender` as the beneficiary and requires the exact positive shortfall. It does not mint funds, consume the client
-intent, validate every execution bound, or guarantee queue admission; the actual commitment must succeed in the same
-batch. Successful commitment consumes the intent, so a replay fails before another mint. There is no campaign expiry
-in the lens; order validity and external issuance/paymaster policy remain separate checks.
+Run the consuming frontend's tests/build and integration tests against the intended deployment. The [close integration checks](test/perps/TEST_MAP.md#close-integration-checks) map current source coverage and its limits; local mock-based parity does not prove compatibility with older deployed bytecode.
 
 ## Release boundaries
 
-The original preview was deployed and source-verified alongside the existing v1.2.3 engine on Arbitrum Sepolia on 2026-09-14 at `0x202A2C5156563Ec4fEF7D3997771bBCa90e98117`. See the [deployment packet](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/README.md) for its exact ABI, runtime hash and recorded validation evidence. That deployment did not switch the frontend; the dated [handoff](CLOSE_PREVIEW_FRONTEND_HANDOFF.md) records the required integration work, not a live verification of the frontend's current status.
+The current lens is separate from the Router's execution evaluator and exposes neither `assessOrder` nor the evaluator's pure wrappers. Deploying a lens does not replace the Router, evaluator or engine, and current planner/receipt tuples cannot be mixed with an archived stack.
 
-The [2026-09-15 sponsored-close release](../../deployments/releases/2026-09-15-sponsored-close-arbitrum-sepolia/README.md)
-preserves `previewClose` and adds the sponsored methods at `0xC8Ad43019D371DEe7784C06dFa1A2F1538E0D7cf`. Its
-[manifest](../../deployments/releases/2026-09-15-sponsored-close-arbitrum-sepolia/manifest.json) pins the final lens,
-runtime hash, ABI checksum, and v1.2.3 bindings. It records issuance disabled by default. Use that release's ABI and
-runtime pin for sponsored integration; the earlier candidate identified in its README was never enabled. Deployment
-alone does not enable assistance, and repository source is not evidence that either deployed lens has been upgraded.
-
-For a new full protocol deployment, `DeployPerpsArbitrumSepolia` deploys and logs `CfdClosePreview` before the router CREATE-address nonce snapshot. The deployment template records it as `cfdClosePreview`; supply its address as `PERPS_CLOSE_PREVIEW` to the release verifier. For an existing v1.2.3 deployment, deploy only the constructor-free preview contract, record its verified address/runtime hash separately, and update frontend close-review calls; do not run the full protocol deployment script for this additive rollout.
-
-The current preview and execution evaluator share internal snapshot construction and normalization through
-`CfdOrderPolicyEvaluatorBase`. The current preview does not expose `assessOrder`, `evaluateOpen`, or `evaluateClose`;
-those public wrappers belong to `CfdOrderPolicyEvaluator`. The historical 2026-09-14 preview ABI did inherit those
-methods, but they were never prospective-close APIs. Keep the preview separate from the execution evaluator: the
-release verifier rejects `router.policyEvaluator() == closePreview`, including a manifest that labels the execution
-evaluator as the preview. Deploying a hardened execution evaluator remains an explicit protocol-release decision.
-
-For the recorded v1.2.3 rollout, evaluator hardening requires a separate execution-contract release. The existing router's evaluator is immutable, and the engine's router binding is set once. Do not replace the router's evaluator address in a manifest, attach a new router to the existing engine, or assume deploying this preview upgrades execution.
-
-The original real-stack adverse full-consumption regression opened a 10,000-token LONG with $250 margin and exactly $0.20 free settlement, then reviewed a full close at 1.025. Under the historical policy, unreserved `assessOrder` spent that $0.20 on action charges and subtracted the bounty again, understating the reservation-aware result by exactly $0.20. With released-surplus collection, this fixture now pays the full execution fee from released liquidation reserve in both assessments, and the regression checks their agreement and live execution within one second of carry drift. It does not replay the deployed evaluator bytecode.
-
-In the assessed historical deployment, the liquidation reserve is floored at `riskParams.minBountyUsdc` ($1), while the close bounty defaults to $0.20 and is capped at $1. Price loss, carry, and action charges cannot consume the liquidation-reserve bucket there. The plain open-to-close lifecycle therefore demonstrates mispricing rather than a panic. The panic form appears unreachable under those conditions; attributing a deployed panic to this mechanism would require evidence that the protected reserve was below the bounty or another assumption differed.
-
-For the next deployment, a full close releases unused pledge and liquidation reserve after carry and price-loss
-settlement, making that surplus eligible for action charges before pending-order margin. Reservation-aware previews
-protect the execution bounty before computing collection; that reservation is essential even when all remaining
-surplus is consumed. Preview and receipt collection fields exclude withheld price profit, while the settlement
-`ActionChargeSettled` event includes withholding in recovered value. This reserve-eligibility change adds no preview or receipt fields beyond the current V3 close schema. Released-pledge attribution remains exact: free settlement, including the released liquidation reserve, is consumed before `actionChargeFromReleasedMarginAssets`.
-
-The synthetic regression demonstrates the underflow state shape with no liquidation reserve; the hardened evaluator reports the typed invariant error there. Neither that fixture nor the real-stack regression identifies the historical screenshot account or establishes a panic in a properly reserved deployed order.
+Historical v1.2.3 integration details, addresses and ABI/runtime pins remain in the [2026-09-14 preview release](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/README.md) and [2026-09-15 sponsored-close release](../../deployments/releases/2026-09-15-sponsored-close-arbitrum-sepolia/README.md). Those releases used different close-bounty behavior and a six-argument preview. `previewSponsoredClose` and `validateSponsoredClose` are absent from current source. Use each archived deployment's own artifacts when servicing it.

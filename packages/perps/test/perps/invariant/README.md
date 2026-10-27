@@ -1,496 +1,164 @@
-# Perps Invariant Suites
+# Perps invariant suites
 
-This directory contains handler-driven Foundry invariant campaigns and bounded state-machine fuzz tests for the
-perps system. Coverage descriptions below refer to the assertions and actor domains in each harness. Executable suites live in
-`properties/`; deployment fixtures, handlers, mocks, and reference ledgers are kept alongside that directory.
+These suites exercise sequences of actions and compare the resulting state with accounting rules, reference
+models, or other protocol views. Start with the [protocol overview](../../../README.md) and
+[accounting specification](../../../ACCOUNTING_SPEC.md); use the [test map](../TEST_MAP.md) to find individual
+boundary cases. This directory is a guide to test evidence, not a separate protocol specification.
 
-## Evidence and failure handling
+## How to read a campaign
 
-- **Independent reference models** compute expected state from initial conditions and action inputs. The claim,
-  carry, mixed-accounting, fee, ETH refund, VPI/frozen-spread, and waterfall models below have explicit bounded
-  domains; none proves every interaction.
-- **Reconciliation** checks agreement among observed storage, custody, snapshots, and tracked ownership. In particular,
-  `PerpAccountingHandler` keeps observed claim mirrors for batch/account reconciliation. Those mirrors are separate
-  from `PerpGhostLedger` and are not an independent oracle for the correctness of claim amounts.
-- **Differential checks** compare previews/planners with execution or other public views. Shared production arithmetic
-  can make both sides agree on the same error; these checks complement the independent models.
-- Every invariant campaign inherits `fail_on_revert = true` from the default Foundry profile. An unexpected outer
-  handler revert therefore fails validation under default, quick, CI, audit, and coverage profiles. Expected protocol business
-  rejections remain caught within adversarial actions and are counted by selector; strict handling therefore also
-  exposes a reverted ghost assertion or arithmetic failure. `PerpAccountingHandler` classifies caught bytes by action
-  domain, custom-error selector, and ABI length (including exact planner error codes). Unknown errors, empty data,
-  `Error(string)`, and `Panic(uint256)` fail validation. Returned `EngineFailure` or `ReceiptFailure` pending outcomes
-  also fail. Deterministic injection tests cover both thrown and returned failures. The bounded models additionally
-  classify exact expected rejections or retain sticky unexpected-failure counters. The main/adversarial Router
-  handlers classify commit error payloads and reject internal pending failures. Oracle rejection expectations include
-  the current live/frozen policy and timestamp precedence. LP lifecycle handlers distinguish state-qualified
-  frozen/capacity rejection and exact `NoLpEpochProgress` from all other failures. Positive value-conservation
-  fixtures require their setup calls to succeed and distinguish the intentional slippage rejection from a successful
-  close. Snapshot scenarios persist outcome counters after restoring economic state.
-- `OracleSynchronizationHandler` matches exact injected oracle failures, checks complete rollback, and requires
-  the healthy retry to produce an authenticated terminal receipt. Independent liability/buffer arithmetic
-  distinguishes successful fills from justified solvency rejections; pending responses and unexpected errors fail.
-  Its bounded two-feed, zero-VPI domain does not establish general accounting or real-Pyth verification.
-- Deterministic reachability and deliberately perturbed accounting tests establish that the new models exercise
-  successful transitions and detect incorrect balances. More runs cannot replace these checks.
+A Foundry campaign has three parts: a fixture deploys contracts and initial balances, a handler generates actions,
+and an `invariant_*` function checks the resulting state. Read `setUp()` and `targetSelector()` as well as the
+assertion: they determine which actions, actors, and configurations the campaign can reach.
 
-## Campaign entrypoints
+- **Independent models** advance expected state from initial conditions and action inputs. Production values are
+  compared with that state; they must not silently replace the model's expectations.
+- **Reconciliation** compares observed balances, ownership records, queues, and public snapshots. It can expose
+  disagreement without independently establishing that every amount is economically correct.
+- **Parity** compares previews or planners with execution. Shared arithmetic can make both agree on the same error.
+- **Fault controls** deliberately corrupt a value and require the ordinary checker to fail. These establish checker
+  sensitivity; they do not establish that the corrupted state is reachable through public calls.
 
-Each invariant campaign has a domain name describing its checks; reconciliation
-and parity names do not claim independent economic modeling. The 17 former `invariant_job1`/`invariant_job2` pairs
-called the same `_assertAllInvariants()` body with identical setup, targets and configuration. Each second wrapper
-was removed and both baseline entries map to the retained, renamed entrypoint. That deduplication preserved assertion
-bodies, actor domains, profile budgets and seed selection; subsequent domain extensions are described below.
+The package [Foundry configuration](../../../foundry.toml) sets `fail_on_revert = true`. Unexpected outer handler
+reverts fail a campaign. Handlers may catch expected protocol rejections, so their rejection classifiers and outcome
+counters are also part of the test. The accounting handler rejects unknown, empty, built-in and malformed errors,
+and treats internal Engine/receipt failures as unexpected. Dedicated tests inject such failures to check this behavior.
 
-The prior CI run produced identical per-selector metrics for every pair. A separate fixed-seed replay of one pair
-also produced identical full handler call traces; the prior full CI traces were compacted, so that exact-history
-comparison is limited to the replay. Additional exploration uses the configured depth, runs and separate seeds.
-This cleanup removes duplicate execution without changing economic expectations.
+Successful-transition counters and deterministic setup histories prevent a run consisting entirely of rejected
+calls from being mistaken for settlement coverage. More runs or greater depth do not expand a handler's actor set,
+action set, or economic assumptions.
 
-## Reachability and fault sensitivity
+## Independent accounting models
 
-Successful setup is asserted before fault injection; the following negative controls perturb the deployed subject
-or its dependency response while retaining the reference model. They must fail the normal reconciliation assertion.
-
-| Subject | Reachable transition | Negative control |
+| Suite | What it checks | Main limits |
 | --- | --- | --- |
-| Claims and base withdrawal reserve | Deferred and immediate full closes, claim consumption, live-position claim settlement, asymmetric positions and dominant-side changes | Claim storage faults; separately, change only the reported withdrawal reserve by ±1 while claim checks pass, and require the normal invariant to reject it |
-| Fee custody and payout | Repeated open/close/treasury-withdraw cycles | Add/remove one atom of treasury credit, or burn one atom of the paid wallet balance |
-| VPI and frozen spread | Positive/negative VPI, frozen partial/full close, thaw | Add one atom of unmodeled pool cash |
-| LP waterfall | Junior loss, Senior impairment/restoration, coupon accrual, recapitalization | Add one atom of unmodeled pool cash |
-| Bounty custody and payment | Fund protection, pay its trigger reward, then execute its zero-bounty close | Add one atom to the actual reservation aggregate, or add an unauthorized atom of execution-keeper credit |
-| Shared accounting handler | Execute a real queued order, then reject the sixth pending commit | Inject unknown/empty/built-in errors or malformed planner codes; return internal Engine/receipt failures |
-| Independent carry | Both sides accrue; collateral exhausts while reservations remain protected; deposit repays retained arrears | Mock double-collected pledge or lost arrears and require the normal account/side comparator to fail |
-| Mixed trader/LP accounting | Public V3 trading, delayed deposits/redemptions, claim-backed partial close and reusable liquidation generations | Unrecorded pool cash, cross-account settlement credit, corrupted share supply and stale per-controller LP pricing |
-| Explicit preview/live scenarios | Successful close, liquidation, and paired roundtrip | Inject an unexpected open failure and verify its counter survives snapshot rollback |
+| [Independent claims](properties/PerpIndependentClaimInvariant.t.sol) | Claim creation, price-loss consumption, immediate payout, all-claim liquidity gating, and the Engine withdrawal reserve against an input-driven ledger | Three actors, funded full closes, fixed time, zero carry/VPI, mock pool. Real-vault epoch reserves and partial-close health are outside this model. |
+| [Fee flows](properties/PerpFeeFlowInvariant.t.sol) | Independently calculated execution fees, clearinghouse treasury custody and withdrawals through queued Router trades | Funded live opens/full closes with ample liquidity and zero carry/VPI. Liquidation charges and stressed fee waivers are separate tests. |
+| [VPI and frozen spread](properties/PerpVpiFrozenAccountingInvariant.t.sol) | Persistent opens/increases, partial/full closes, lifetime VPI limits, backing reserves, frozen spreads and thaw | Fixed mark, zero carry, mock pool. Calls the Engine with Router authority; it does not test Router/Pyth authorization. |
+| [Waterfall](properties/PerpWaterfallReferenceInvariant.t.sol) | Junior-first loss, Senior impairment/restoration, coupon ratcheting and recapitalization against a cash/principal/high-water-mark ledger | Real pool with fixed seed owners. No pending share transactions, carry, VPI, claims or raw-cash shortage. |
+| [Mixed trader/LP accounting](properties/PerpMixedAccountingInvariant.t.sol) | Public V3 orders, custody, exact entry basis, carry, claims, VPI, fees, reservations and Junior LP entitlements in one persistent history | Four reusable traders, two Junior controllers and fixed seed owners. See the domain below. |
+| [Oracle ETH conservation](properties/OracleEthConservationInvariant.t.sol) | Pyth fees, immediate refunds and separate Oracle/Admin refund claims from input-derived ETH budgets | Three actors funded with 1 ETH each; fixed prices and mocked calendar predicates. Each scenario drains its queue; ETH debts and counters persist. No liquidation, LP flow or forced ETH. |
 
-The properties use counters to distinguish successful comparisons from intentional no-op or invalid-preview cases.
-A counter does not turn a rejected action into evidence for successful settlement. Random action coverage remains
-bounded by each handler's actor set and input range.
+The ETH campaign covers successful execution, completed batch prefixes, unavailable history, rollback, rejected or
+gas-burning callbacks, reentry attempts and both refund ledgers. Its bounded callback gas makes it a production
+compiler gate, including in the otherwise faster PR test lane.
 
-## Independent campaigns
+### Mixed campaign domain
 
-- `properties/PerpIndependentClaimInvariant.t.sol`: persistent three-account claim creation, same-account price-loss
-  consumption, immediate payout, and all-or-nothing claim settlement at zero/own-claim/global-minus-one/exact/surplus
-  pool liquidity. Checks settlement and PnL-pledge credits, pool cash, aggregate claims, and the base Engine withdrawal
-  reserve after setup and every generated transition. Per-account side, 17–251 whole lots and exact entry cost determine
-  both directional liabilities; the larger side plus claims receives a quotient/remainder ceiling buffer. Generated
-  entry prices span 80,000,001–120,000,003 atoms, with explicit $0.80/$1.00/$1.20 dust and buffer boundary examples.
-  Real-vault epoch reserves are excluded. Uses funded full closes,
-  fixed time, zero VPI, and a mock HousePool; it does not model partial-close health, Router policy, carry, or LP NAV.
-- `ghost/CarryReferenceLedger.sol`: independently advances side indexes and account carry from submitted actions,
-  with distinct utilization, index and assessment floors. Tracks depth, borrow basis, clocks, protected funds,
-  margin/free collection, arrears and paid/waived totals. Terminal carry recovery separately records physical cash,
-  withheld new gains, and negative-VPI credit offsets: all extinguish carry once, but only physical recovery adds
-  pool cash. Per-charge offset attribution comes from the independent action ledger; production exposes the combined
-  action settlement. Passive cash/depth changes and opening-bounty reservations preserve carry clocks; zero-bounty
-  close commitment does not reclassify pledge. A read-only projection distinguishes stored arrears
-  from carry still unpaid after collecting
-  newly available backing. Incoming deposits can pay carry immediately; claim and bounty credits checkpoint existing
-  backing before crediting without a second collection pass. The companion `../accounting/carry/CarryReferenceLedger.t.sol`
-  compares real Engine/clearinghouse state against this ledger. Its 43 accrual goldens also check production math;
-  thirteen terminal-recovery and five passive-depth goldens exercise the reference model, including rejected duplicate
-  recovery, VPI-offset attribution and phantom-cash controls. All 61 checked-in integer/rational vectors are generated
-  offline by `scripts/generate-perps-carry-vectors.py`; no Python or FFI runs during Solidity tests. Real-account trade setup uses
-  the Engine's Router capability; public order reachability belongs to the mixed campaign and Router matrices.
-  `../accounting/carry/HistoricalOpenCarry.t.sol` also drives real historical-price opens and same-address reopening
-  through the Router. Both side indexes advance at execution wall time using the old borrowing bases and depth,
-  before the new exposure enters, even when a newer accounting mark is retained. The ledger then checks a later
-  hour of new-basis accrual and exact pledged carry collection.
-- `properties/PerpFeeFlowInvariant.t.sol`: independent amount and wallet ledger for funded live-market opens and full
-  closes, with actual queued Router execution and unique oracle updates. Covers gain/loss/flat outcomes and rounding;
-  zero VPI/carry and ample liquidity exclude fee waivers, deferred-claim priority, and liquidation charges.
-- `properties/PerpVpiFrozenAccountingInvariant.t.sol`: persistent nonzero-VPI opens/increases and partial/full closes,
-  lifetime clamp and reserve tracking, and successful nonzero frozen-spread settlement across freeze/thaw. Computes
-  expected quadratic costs and cash independently at a fixed mark with zero carry. Calls the Engine as its configured
-  Router; the Router oracle/degraded authorization matrix is covered separately in `../matrices/`.
-- `properties/PerpWaterfallReferenceInvariant.t.sol`: persistent real-pool Junior-first losses, Senior impairment,
-  revenue restoration, coupon ratcheting, and recapitalization priority with an input-derived cash/principal/HWM
-  model. Both seeded tranches retain their owners. Router authorization and the Engine-only recapitalization inflow
-  are explicit harness boundaries; issuance/redemption, carry, VPI, deferred claims, and raw-cash shortage remain
-  outside this model. Existing lifecycle and capacity campaigns cover those LP queue paths separately.
-- `ghost/LiquidationReferenceMath.sol`: independent post-carry eligibility and terminal allocation for the mixed
-  fixture's fixed charge configuration (10 bps, $1 floor, half to the keeper). Inputs come from the action ledger,
-  including exact entry basis, old claims, eligible cash, VPI backing and unpaid carry. It distinguishes claim/pledge
-  price-loss collection, write-off, gain withholding, physical carry recovery, waiver, and immediate/deferred fresh
-  payout. `../accounting/liquidation/LiquidationReferenceMath.t.sol` checks literal boundaries and conservation;
-  these pure model tests are paired with actual Router transitions in `properties/PerpMixedLiquidation.t.sol`.
-- `ghost/MarketCalendarReference.sol`: input-only Gregorian/DST calendar for the mixed fixture's empty administrative
-  override set. It selects normal/FAD maintenance independently of production calendar helpers. Fixed UTC examples in
-  `../accounting/liquidation/MarketCalendarReference.t.sol` check Friday/Sunday shoulders, both DST transitions and
-  leap-century boundaries; timestamps were checked offline with Python `zoneinfo`, with no runtime Python or FFI.
-- `ghost/PendingOrderReferenceLedger.sol`: input-driven request identity, deadlines, queued exposure, reservation
-  provenance and terminal dispositions for four actors with five live orders each (twenty globally). Its insertion-order
-  array supplies expected global/account FIFO membership independently of the Router's linked queues. Original and
-  remaining committed margin, opening-bounty funding and zero close-bounty records, position epochs (distinct from
-  liquidation generations), and exact client-ID replay survive
-  terminalization. `properties/PendingOrderReferenceLedger.t.sol` tests the reference state machine;
-  `properties/PerpMixedPendingOrders.t.sol` connects it to real commitment, execution, expiry and cleanup.
-- `ghost/CloseReferenceMath.sol`: input-driven partial/full close allocation for the mixed fixture. It models exact
-  entry basis, claim-first price-loss netting, retained pledge with a strict health atom, eligible charge sources,
-  carry/VPI withholding, rebates and immediate/deferred gain backing. Literal tests in
-  `../accounting/close/CloseReferenceMath.t.sol` check this reference arithmetic separately from real Router execution.
-- `properties/PerpMixedAccountingInvariant.t.sol`: a bounded persistent model across four reusable traders, two
-  Junior LP controllers and fixed seed owners, with $500,000 in each tranche. All trades submit public V3
-  `OrderRequest` objects and authenticate terminal receipts. Generated open requests start at 17–500 lots and clip to
-  a 500-lot queued-exposure cap per actor; requests near that cap and partial-close residuals may be smaller whole lots.
-  Queued exposure cannot satisfy the live-position minimum for a fresh open: a clipped request below that threshold
-  must reject with the exact commitment category/code while preserving earlier reservations.
-  Entry prices use $0.80–$1.20 with dust, while mark transitions cover $0.60–$1.40. Generated opens/increases and
-  partial commitments fund at least $60 of pledge per existing lot. Synchronous setup helpers retain focused
-  live/frozen close funding; separate histories retain zero pledge for claim-supported admission or zero free cash
-  for zero-bounty closes. Partial closes can leave one lot; the generator skips another half-close because it would
-  request zero lots. A separate explicit zero-size request checks exact `ZeroSize` rejection and rollback before
-  minimum-notional checks, while a full close of the same one-lot position remains valid. Minimum-notional and close-size commitment rejections require their exact code
-  and unchanged accounting. Time has no artificial horizon cap;
-  live actions and LP maturities move monotonically past Friday-noon/weekend closures to Monday noon.
-  Carry is 500 bps, VPI and frozen spread are
-  enabled, and Junior maintenance dilution is disabled. Generated commitment, head/batch execution, expiry, replay,
-  slippage failure and risk-off cleanup are separate actions. Up to five orders per trader and twenty globally remain
-  pending across carry, collateral, price and LP transitions; LP requests occupy at most two epochs. Same-block/MEV
-  timing, sixth-order rejection and exact reservation ownership are checked explicitly. Synchronous trade helpers
-  remain setup conveniences over the same queue ledger. A separate input history fixes each live order's first
-  actually authored oracle tick in `(commitTime, commitTime + 15 seconds]`; later mark changes do not replace its fill.
-  Missing history requires the exact single-order stale-price rejection or batch `HistoricalPriceUnavailable` stop,
-  preserving the pending item until a valid retry or explicit expiry. Batch histories retain an already executed prefix.
-  Focused full-close histories consume queued margin in FIFO order, preserve bounties and require exact later planner
-  failures; historical full closes also exercise unpaid carry resolved by a healing negative-VPI adjustment while an
-  unrelated account's live order remains reserved.
-  Independent state includes settlement/token custody, exact entry basis, carry, claims, VPI reserves,
-  order margins/bounties and position generations, treasury/keeper entitlements, tranche principal, Junior shares and
-  request/claim escrows. The existing reference waterfall priority arithmetic is extended with independently summed
-  terminal account PnL before LP pricing. Ordinary and protection close attempts use authenticated zero Order bounty
-  records, with no pledged escrow, source epoch, keeper payment, refund or forfeiture. Opening bounties remain
-  free-funded, and a close may queue behind another order subject to the normal exposure and capacity checks.
-  The model prices LP NAV without close-bounty escrow and authenticates terminal bounty dispositions against its own
-  input history; it does not resynchronize expectations from production records. The generated `commitZeroFreeClose`
-  action withdraws available free collateral and submits a zero-bounty close. A generated partial close returns before
-  changing mark, carry, custody or model state when fewer than two lots remain, because halving one lot
-  would submit zero size. The deterministic 85→43→1-lot replay in `PerpMixedAccountingInvariant.t.sol` checks this
-  generator boundary and normal model preservation; it does not classify Router's zero-size rejection as an accounting
-  defect. Focused `PerpMixedPendingOrders` regressions cover zero-free close expiry and self-execution, close/open
-  queue transitions, and preservation of unrelated opening reservations. The domain remains four traders, two
-  Junior LPs, fixed Senior owners, five orders per account and twenty globally. Its external keeper is flat; this model
-  does not generate corrupt/quarantined records or carry-bearing keeper accounts.
-  Deterministic preludes require both VPI signs, deferred claims, a zero-pledge claim-supported partial close,
-  retained arrears, rejected withdrawal, held/retried settlement, Junior cancellation/payout and two same-address
-  liquidations followed by legal residual withdrawals. Mock-token cash shocks are explicit external inflows/outflows
-  in conservation equations; no storage mutation or fabricated claim establishes ordinary reachability.
-  Mixed liquidation uses all four reusable actors on both sides and independently classifies post-carry health.
-  Claim-bearing histories cover zero/negative/positive price PnL, full and partial old-claim consumption, price-loss
-  write-off, terminal carry withheld from new gains, remaining carry waiver, and immediate or deferred fresh payout.
-  Both sides exercise fresh-payout cash one atom below, exactly at, and one atom above full coverage after old claims.
-  A real opposing position also creates backed negative VPI: a small terminal gain replaces part of that backing,
-  released cash pays carry, and remaining carry is waived without consuming the old claim.
-  Another both-side history holds a real open order's margin through an elapsed-carry shortage; terminal liquidation
-  consumes only part of that margin, releases the remainder, forfeits its bounty and authenticates AccountLiquidated
-  cleanup receipts, while preserving the old claim.
-  A full five-order cleanup interleaves another account's order, verifies every own terminal receipt and reservation
-  disposition, and preserves the other account's queue/custody. Terminal replay after redeposit cannot reserve funds again.
-  The prelude requires both-side claim/carry liquidations and both payout branches. Dedicated
-  `properties/PerpMixedLiquidation.t.sol` histories also require a paid claim to restore projected health while stored
-  arrears remain, exact healthy-liquidation rejection, and two claim-bearing generations at the same address.
-  Claims arise from real profitable closes; elapsed carry and declared token cash shocks establish shortages, with
-  environmental cash restored as recorded input for later campaign actions. Focused corruption controls alter one
-  claim, arrears, retained-cash or keeper-credit response and require the normal model to reject it.
-  `properties/PerpMixedLpLifecycle.t.sol` additionally requires two-controller share dust burn, redemption cash dust
-  return, and rejection of stale pre-trade share pricing while total supply remains correct. Independent LP arithmetic
-  handles partial funding, exact no-progress rollback, zero Junior NAV, deferred deposits, mature cancellations and
-  worthless-share refunds. Public `redeem`, `withdraw`, and refund claims interleave partial funding, trading, and
-  later funding. The model preserves each request's original basis, cumulative funded/claimed/refunded amounts,
-  per-controller queue state, and every epoch's dust until terminal acknowledgments release it. Generated claim
-  attempts choose zero, one atom, half, all, or excess remaining entitlement and check exact rejection/rollback;
-  cash and refund claims run in both orders, including zero-share refund acknowledgment. Intermediate claimable
-  amounts and escrows are checked after every action. Generated Junior deposits use 1,000–3,000 settlement tokens and redemption
-  requests use the controller's full share wallet, with one unfinished redemption per controller across at most two
-  epochs. A focused real one-share transfer creates the zero-refund-entitlement acknowledgment case. Other focused
-  histories include thirteen years of coupon accrual and a recorded cash shock limiting funding to 10,000 atoms,
-  including two-controller final-claim dust. Reusable scenario setup is in
-  `support/MixedLpTestHarness.sol`; its helper contract does not add another executable test entrypoint.
-  A real active-borrow history delays final claims and dust before the next carry checkpoint: the dust transfer changes
-  physical/effective cash without advancing carry clocks or increasing accounted assets, and later real carry collection
-  must match the independent ledger. Separate controls detect floor-instead-of-ceiling share consumption for a one-atom
-  asset withdrawal and a premature but cash-conserving dust sweep before terminal funding acknowledgments.
-  `properties/PerpMixedInteraction.t.sol` keeps trader commitments pending while partial LP claims, further funding
-  and a held/retried epoch settlement occur, checking the same custody and queue ledgers after each transition.
-  A permanent trader regression covers terminal action-charge collection capped by available backing when a cash
-  shock leaves only carry dust in the pool; the independent model retains the waived remainder. These are bounded
-  conformance campaigns, not a model of every governance setting, Senior request lifecycle or maintenance fee.
+The mixed campaign seeds 500,000 USDG in each tranche, enables 500-bps carry, VPI and frozen spreads, and disables
+Junior maintenance dilution. Trading uses public `OrderRequest` objects and authenticated terminal receipts.
+Generated opens start from 17–500 lots and are clipped to a 500-lot queued-exposure cap per trader. There are at most
+five pending orders per trader, twenty globally, and two LP epochs. These are harness limits, not production limits.
 
-- `properties/OracleEthConservationInvariant.t.sol`: persistent independent ETH accounting across three actors,
-  Oracle refunds, Admin refunds and paid Pyth fees. Three 1-ETH actor budgets are funded only at setup; expected
-  parse/update fees, immediate refunds and both claim ledgers advance from scenario inputs and callback modes.
-  A deterministic prelude reaches all eleven families (ordinary/shared/mixed execution, frozen/FAD close,
-  unavailable history with/without a completed prefix, outer rollback, caught item failure, paused cleanup and
-  zero-fee surplus), all five rollback kinds, rejected/gas-burning/reentrant callbacks and both directions of
-  cross-ledger claims. Rollback hashes are before/after reconciliation; finalized receipts establish that a prefix
-  executed before rollback, without supplying expected ETH amounts. Fees are bounded to 0–1 gwei and surplus to
-  0–5 gwei. Every bounded scenario creates fresh traders, drains its queue and closes opened positions; ETH debt
-  and counters persist, but this is not a general persistent settlement tokens model. Prices are fixed, frozen/FAD predicates
-  mocked, and real Pyth verification, liquidation, LP flow and forced ETH are outside the domain. Bounded callback
-  gas makes both properties production-compiler gates in PR, post-merge and audit lanes.
+Commitment, single/batch execution, expiry, replay, slippage failure and risk-off cleanup are separate actions.
+Pending orders remain live across collateral, carry, price and LP transitions. A separate input history tracks the
+first authored oracle tick in each order's settlement window; later accounting marks do not replace that fill.
+The mock oracle does not verify real Pyth signatures.
 
-## Suites
+The model tracks each account's settlement, exact entry cost, carry arrears, claims, VPI reserves, margin/bounty
+reservations and generation, plus treasury/keeper entitlements and Junior share/request/claim escrows. Ordinary
+and protection-generated close orders reserve zero execution bounty; the positive protection trigger reward is a
+separate obligation. Recorded mock-token cash shocks are explicit external flows in the conservation equations.
 
-- `PerpAccountingInvariant.t.sol`
-  - Catches hidden-collateral and split-accounting bugs
-  - Verifies clearinghouse-reserved execution bounty value reconciles with live orders
-  - Verifies liquidation cleans the completed generation's orders and reservations while permitting same-address reuse
-  - Exercises legal residual and claim withdrawals, rejected excess/duplicate withdrawals, redeposit, reopening and
-    a second liquidation with independent fixture entitlements; broad generated wallet checks reconcile submitted flows
-  - Verifies ghost-tracked committed margin and reserved execution bounty stay aligned with protocol state
-  - Verifies a stricter per-order committed-margin state machine across commit, execution, terminal failure, and liquidation
-  - Verifies pending-order and margin-order FIFO queues keep consistent head/tail pointers, links, counts, and ordering
+Mandatory setup histories reach both VPI signs, deferred claims, claim-supported partial closes, unpaid carry,
+rejected withdrawals, held/retried LP settlement, cancellations and repeated liquidation at the same address.
+The following companion files reuse that model for focused histories:
 
-- `PerpPreviewInvariant.t.sol`
-  - Catches view-layer drift between previews and core engine/accounting state
-  - Verifies empty positions preview as inactive
-  - Verifies liquidation reachable collateral previews match clearinghouse accounting
-  - Verifies liquidation previews exclude clearinghouse-reserved execution reservation from reachable collateral
-  - Verifies generic position views expose physical reachable collateral separately from trader claim netting
-  - Verifies degraded-mode trigger flags behave as transition flags rather than persistent state flags
+| Companion | Additional coverage |
+| --- | --- |
+| [Pending orders](properties/PerpMixedPendingOrders.t.sol) | FIFO ownership, exact replay, expiry, missing historical ticks, risk-off cleanup, zero-free closes and terminal consumption of queued margin |
+| [Liquidation](properties/PerpMixedLiquidation.t.sol) | Both directions, claim-first price loss, diagnostic write-offs, carry recovery/waiver, immediate/deferred gains, keeper credit and cleanup without disturbing another account |
+| [LP lifecycle](properties/PerpMixedLpLifecycle.t.sol) | Partial funding and claims, independent share pricing, worthless-share refunds, per-controller entitlements, terminal dust and delayed carry checkpoints |
+| [Trader/LP interaction](properties/PerpMixedInteraction.t.sol) | Pending trader commitments across partial LP claims, further funding and held/retried settlement |
 
-- `PerpTraderClaimInvariant.t.sol`
-  - Catches trader claim and liquidity-gating bugs
-  - Verifies trader claim status matches engine storage and current HousePool liquidity
-  - Verifies observed per-account claim mirrors reconcile with engine totals; independent claim amounts are checked by the dedicated reference campaign
-  - Verifies close and liquidation previews use all-or-nothing immediate vs trader claim gating
+The mixed model does not combine every governance setting, Senior request lifecycle or Junior maintenance fee.
+Its external keeper is flat; it does not generate carry-bearing keeper accounts or corrupt/quarantined reservations.
+Dedicated policy, LP and corruption tests supply that separate evidence.
 
-- `PerpOracleBoundaryInvariant.t.sol`
-  - Catches stale-threshold, frozen-window, and FAD-boundary drift
-  - Verifies oracle-frozen boundary logic matches the intended weekend/admin-day formula
-  - Verifies house-pool freshness limits switch correctly between weekday and frozen-oracle modes
-  - Verifies maintenance margin switches cleanly between weekday and FAD settings
+### Reference helpers
 
-- `PerpMultiAccountInvariant.t.sol`
-  - Catches cross-account contamination bugs under overlapping commits, executions, liquidations, and claims
-  - Verifies per-account pending counts and margin-order counts aggregate cleanly into live global order ownership
-  - Verifies trader claim obligations remain isolated per account while still reconciling globally
+These are ordinary `.sol` helpers, not standalone invariant campaigns:
 
-- `PerpFeeFlowInvariant.t.sol`
-  - Catches fee accrual, custody, and withdrawal drift
-  - Verifies independently calculated execution fees reconcile with accumulated and withdrawn treasury value
-  - Verifies the canonical protocol accounting snapshot includes the same live treasury fee balance
-  - Verifies the live fee balance remains clearinghouse-custodied
+| Helper | Independent expectation | Companion tests |
+| --- | --- | --- |
+| [CarryReferenceLedger](ghost/CarryReferenceLedger.sol) | Side clocks/indexes, account accrual floors, protected funds, collection, arrears and recovery; physical cash is distinguished from withheld gains and VPI offsets | [CarryReferenceLedger.t.sol](../accounting/carry/CarryReferenceLedger.t.sol), [HistoricalOpenCarry.t.sol](../accounting/carry/HistoricalOpenCarry.t.sol) |
+| [CloseReferenceMath](ghost/CloseReferenceMath.sol) | Exact basis, claim-first price loss, partial-close residual health, eligible charge sources, rebates and payout destinations | [CloseReferenceMath.t.sol](../accounting/close/CloseReferenceMath.t.sol) |
+| [LiquidationReferenceMath](ghost/LiquidationReferenceMath.sol) | Post-carry health and terminal allocation for the mixed fixture's fixed fee configuration | [LiquidationReferenceMath.t.sol](../accounting/liquidation/LiquidationReferenceMath.t.sol) |
+| [MarketCalendarReference](ghost/MarketCalendarReference.sol) | Gregorian/DST market calendar with no administrative overrides | [MarketCalendarReference.t.sol](../accounting/liquidation/MarketCalendarReference.t.sol) |
+| [PendingOrderReferenceLedger](ghost/PendingOrderReferenceLedger.sol) | Input-driven identity, deadlines, FIFO membership, remaining reservations and terminal dispositions | [PendingOrderReferenceLedger.t.sol](properties/PendingOrderReferenceLedger.t.sol) |
+| [WaterfallReferenceMath](ghost/WaterfallReferenceMath.sol) | Cash, Senior principal/high-water mark and Junior residual allocation | [Waterfall campaign](properties/PerpWaterfallReferenceInvariant.t.sol) and mixed LP tests |
 
-- `PerpEconomicConservationInvariant.t.sol`
-  - Catches protocol-wide ledger drift and conservation bugs
-  - Verifies known actor and protocol balances conserve total settlement tokens supply
-  - Verifies clearinghouse custody matches tracked account balances
-  - Verifies the compact per-account ledger view stays aligned with clearinghouse buckets, router order reserves, trader claims, and pending order counts
-  - Verifies the expanded per-account ledger snapshot stays aligned with typed locked-margin buckets, collateral, position-health, and settlement-reachability views
-  - Verifies tracked per-account settlement, reservation, and trader claims aggregate cleanly into protocol custody and obligation buckets
-  - Verifies deposit/withdraw transitions preserve monotonic reachability expectations
-  - Verifies no orphaned account-risk state remains once an account has no position and no pending orders
-  - Verifies the expanded account ledger snapshot fully subsumes compact, collateral, and position views
-  - Verifies per-account settlement buckets reconcile with clearinghouse storage
-  - Verifies the canonical protocol accounting snapshot stays aligned with accessors and house-pool snapshots
-  - Verifies house-pool input/status snapshots stay aligned with physical assets, exact terminal NAV, trader claim liabilities, and engine status
-  - Verifies withdrawal reserves include maximum directional liability, trader claims, and the liability-scaled
-    settlement buffer
-  - Verifies terminal price loss never exceeds same-account claim plus PnL-pledge collection; any excess is a diagnostic write-off rather than protocol debt or terminal deficit
-  - Verifies observed claim mirrors stay complete across processed accounts and reconcile with engine totals
+Carry golden vectors are checked in and generated offline by
+[generate-perps-carry-vectors.py](../../../../../scripts/generate-perps-carry-vectors.py); Solidity tests do not run
+Python or FFI. Model-only arithmetic tests are paired with real Engine or Router histories, whose fixture
+boundaries still apply.
 
-- `PerpValueConservationInvariant.t.sol`
-  - Catches adversarial value-category transitions in the full perps stack
-  - Fuzzes terminal close execution, signed terminal-NAV LP pricing, timed carry checkpoints, and recapitalization/revenue reconciliation
-  - Verifies active margin, LP share value, historical carry, and pending claimant revenue cannot move owners without an intended settlement path
+## Reconciliation, policy and parity campaigns
 
-- `PerpClosePreviewParityInvariant.t.sol`
-  - Catches drift between close previews and canonical-depth simulations
-  - Independently checks valid partial-close residual health from whole lots, exact remaining entry basis, capped
-    mark, remaining PnL pledge, and same-account claims, strictly above the floored maintenance/FAD requirement
-  - Treats liquidation/VPI reserves as separate buckets; `minBountyAssets` is not a residual pledge floor
-  - Executes a reachable claim-backed partial close whose remaining pledge is below the minimum liquidation bounty,
-    checking actual size, pledge, claims, exact entry basis, separate liquidation reserve, and authenticated receipt
-  - When a full close is valid, restricts invalid canonical partial closes to `PartialActionChargeUncollectible`
-    or `PartialCloseUnhealthy`; the legacy `DustPosition` ABI value must not be emitted
-  - Verifies fresh payout is either immediately credited or added to the remaining existing trader claim, with the
-    two fresh-payout modes mutually exclusive
-  - Samples partial-close previews for non-reversion; this is not a carry-accrual or payout-funding assertion.
-    Timed carry conservation is covered separately by `PerpValueConservationInvariant.t.sol`
+| Suite | Checks and interpretation |
+| --- | --- |
+| [General and adversarial protocol](properties/PerpInvariant.t.sol) | Protocol solvency, positions and custody; adversarial queue progress, terminal outcomes, pending stops and reservation ownership. The file contains separate ordinary and adversarial campaigns. |
+| [Accounting](properties/PerpAccountingInvariant.t.sol) | Per-order margin/bounty ownership, account/global FIFO structure, liquidation cleanup, legal residual withdrawals and address reuse. Parts of its ghost ledger observe production deltas. |
+| [Economic conservation](properties/PerpEconomicConservationInvariant.t.sol) | Known-actor token conservation, clearinghouse custody, settlement buckets, claim totals, withdrawal reserves and public snapshots. Observed claim mirrors reconcile amounts; the independent claim campaign establishes separate amount expectations. |
+| [Multiple accounts](properties/PerpMultiAccountInvariant.t.sol) | Per-account ownership/counts and global claim/order reconciliation under overlapping activity |
+| [Trader claims](properties/PerpTraderClaimInvariant.t.sol) | Observed claims and actual settlement at aggregate-liquidity boundaries, including success/failure sensitivity controls |
+| [Account previews](properties/PerpPreviewInvariant.t.sol) | Account/liquidation views, reachable collateral, protected reservations and degraded transition flags against canonical state |
+| [Close previews](properties/PerpClosePreviewParityInvariant.t.sol) | Preview/simulation agreement, independent residual-health checks and mutually exclusive immediate/deferred fresh payout. Partial-preview sampling alone does not establish timed carry conservation. |
+| [Explicit accounting](properties/PerpExplicitAccountingInvariant.t.sol) | Close/liquidation preview parity and paired roundtrip value/cash conservation. Economic state resets after each scenario; outcome/mismatch counters survive. Depth counts separate scenarios, not one persistent history. |
+| [Value conservation](properties/PerpValueConservationInvariant.t.sol) | Snapshot-isolated close, LP pricing, carry checkpoint and recapitalization/revenue scenarios in the full stack; this is not one persistent economic history |
+| [Terminal NAV enumeration](properties/PerpTerminalNavBruteForceInvariant.t.sol) | Enumerates tracked positions, exact bases, pledges and claims, reconciles actor completeness to Engine side aggregates, then compares the NAV book at endpoints and account-derived boundaries. It is bounded differential evidence. |
+| [LP lifecycle](properties/PerpHousePoolLifecycleInvariant.t.sol) | Seeding, caps, cooldowns, asynchronous escrows, claim routing and settlement holds. A second maintenance-fee campaign checks Junior dilution, effective-supply pricing, fee recipient and escrow conservation. |
+| [Governed Senior capacity](properties/GovernedSeniorCapacityInvariant.t.sol) | Multi-actor request/cancel/settle/claim histories, both sides of the request cutoff, active/reserved Senior exposure, Junior withdrawal covenant and escrows |
+| [Oracle calendar boundaries](properties/PerpOracleBoundaryInvariant.t.sol) | Weekday, frozen and FAD maintenance/freshness transitions. The full calendar/degraded-state authorization matrix lives separately in [matrices](../matrices/). |
+| [Oracle refresh paths](properties/PerpOraclePathInvariant.t.sol) | Accepted/rejected mark refreshes, monotonic installed state, policy boundaries and refund custody |
+| [Oracle synchronization](properties/OracleSynchronizationInvariant.t.sol) | Stored-feed coverage, authenticated execution, keeper/treasury credits and complete rollback/retry. Two feeds, fresh alternating-side traders, ±1% prices, 1–10 second delays and zero VPI bound the domain. |
 
-- `PerpExplicitAccountingInvariant.t.sol`
-  - Runs isolated snapshot/revert scenarios, preserving mismatch/outcome counters but not economic state between calls;
-    depth is the number of independent scenarios, not a persistent trading history
-  - Seeds a successful close, liquidation, and paired roundtrip comparison; unexpected setup failures remain visible
-    after snapshot rollback, while invalid previews are counted as skipped scenarios
-  - Exercises preview/live parity for successful closes and liquidations against
-    the full deployed accounting stack
-  - Verifies paired Long/Short round trips conserve LP, trader, and protocol value
-  - Verifies the same round trips conserve physical protocol cash
+## Bounded state machines
 
-- `PerpHousePoolLifecycleInvariant.t.sol`
-  - Catches seed-lifecycle, vault-cap, cooldown, and raw/canonical asset drift
-  - Verifies trading and ordinary deposits cannot activate before both tranche
-    seeds exist
-  - Verifies seed floors, withdrawal caps, and share-transfer cooldown
-    propagation
-  - Verifies raw assets split into canonical assets plus excess
-  - Verifies asynchronous settlement tokens/share escrow conservation, request/claim capacity, direct routing from deposit-claim
-    escrow into redemption, and held-settlement rollback
-  - Also contains `PerpHousePoolMaintenanceFeeInvariantTest`, a companion campaign with a nonzero Junior fee:
-    effective supply includes pending dilution, fee materialization credits only the configured recipient, and
-    fee-only checkpoints preserve pool economics and escrows. It checks effective-supply deposit/redemption pricing,
-    redemption-before-deposit ordering, fee accrual during settlement holds, and raw supply across known holders
+[EmergencyRiskOffInvariant.t.sol](properties/EmergencyRiskOffInvariant.t.sol) uses ordinary `testFuzz_*` sequences
+and direct tests for monotonic cutoffs, permanent open invalidation, reservation refunds, reachable closes and
+liquidations, and held LP settlement. It is not a handler-driven `invariant_*` campaign.
 
-- `OracleSynchronizationInvariant.t.sol`
-  - Reconciles stored MockPyth feeds, parse/write counters and the Engine mark against the submitted update
-  - Authenticates terminal receipts, exact keeper/treasury credits, released reservations and retry rollback
-  - Uses two feeds, fresh alternating-side traders, ±1% prices and 1–10 second delays; positions accumulate
-  - Seeds an executed order and reconciles all attempts with executed orders or independently justified solvency
-    rejections; unexpected errors, pending responses and failed healthy retries fail the campaign
-  - Shared action logic is in `handlers/OracleSynchronizationHandler.sol`; executable property is in `properties/`
+[ProtectionBountyStateMachine.t.sol](properties/ProtectionBountyStateMachine.t.sol) uses a three-account independent
+bounty ledger for attached parents, cancellation, trigger/retry, expiry, risk-off and liquidation. It distinguishes
+protection rewards from zero-bounty close attempts and checks exact-once payment. Protection cancellation does not
+imply a cancellation API for ordinary FIFO orders.
 
-- `PerpOraclePathInvariant.t.sol`
-  - Catches state drift across successful and rejected mark-refresh paths
-  - Verifies the stored mark equals the last successful capped oracle update
-  - Verifies failed ETH refunds remain beneficiary-claimable rather than
-    becoming router-admin custody
-  - Verifies configurable execution and liquidation staleness limits remain
-    positive
+The other `.t.sol` files in `properties/` include deterministic regressions and pure reference tests. Their location
+or filename does not give them invariant depth; only `invariant_*` functions use that setting.
 
-- `PerpTerminalNavBruteForceInvariant.t.sol`
-  - Reconstructs terminal price PnL by exhaustively enumerating canonical Engine
-    positions, exact entry bases, clearinghouse PnL pledges, and Engine claims
-  - Proves the tracked account set is exhaustive against Engine side aggregates
-    before comparing it with the production NAV book
-  - Seeds opposing positions plus a partial-close residual with exact-basis dust
-    and a same-account deferred claim; separately verifies liquidation removal
-  - Verifies the radix result at both price endpoints, the live mark, and every
-    account-derived break-even and collateral-cap transition with adjacent and
-    radix-boundary interior marks
+## Harness layout
 
-- `GovernedSeniorCapacityInvariant.t.sol`
-  - Fuzzes cutoff-routed Senior/Junior deposit and redemption request/cancel/settle/claim transitions across multiple
-    actors
-  - Derives every expected request id from `getRequestEpochWindow()` and drives timestamps on both sides of the
-    exact five-minute cutoff instead of assuming a fixed activation delay
-  - Records pre-cutoff and cutoff-window reachability and verifies successful requests use the advertised future
-    target; requests at or after an epoch's cutoff cannot increase that locked epoch
-  - Verifies every successful senior admission or finalization leaves active plus
-    reserved exposure within both governed limits
-  - Verifies successful junior withdrawals preserve the active senior-share covenant
-  - Reconciles the pool reservation counter with unfinalized epoch assets and checks
-    vault escrow plus per-user pending-asset accounting
+- [BasePerpInvariantTest](BasePerpInvariantTest.sol) deploys real Engine/Router/clearinghouse components with a
+  [mock HousePool](mocks/MockInvariantHousePool.sol) whose liquidity can be controlled. It does not model the tranche waterfall.
+- [BasePerpTest](../BasePerpTest.sol) supplies the real HousePool/vault stack for full-stack suites. Both fixture
+  families use mock USDG/Pyth and test-only scalar adapters in `LegacyOrderRouterHarness`; those adapters are not
+  production entrypoints.
+- [handlers](handlers/) contains generated actions and expected-state updates. Some suites define their handlers
+  in the property file. [MixedLpTestHarness](support/MixedLpTestHarness.sol) adds reusable LP scenarios.
+- [PerpGhostLedger](ghost/PerpGhostLedger.sol) tracks generations, wallet flows, liquidation observations and order
+  reservations for the adversarial accounting handler. It is not a wholly independent economic model.
 
-- `EmergencyRiskOffInvariant.t.sol`
-  - Uses bounded `testFuzz_*` transition sequences, plus direct authority and liquidation tests
-  - Verifies monotonic risk-off cutoffs, permanent open invalidation, unpaid non-head cleanup, and exact internal
-    margin/bounty refunds across pause and recovery cycles
-  - Verifies queued closes and liquidations remain reachable, and repeated held LP settlement attempts preserve
-    accounting until owner release
+## Running a campaign
 
-- `ProtectionBountyStateMachine.t.sol`
-  - Uses a bounded `testFuzz_*` campaign with an independent three-account bounty ledger and additional random steps
-  - Exercises attached parents, pre-trigger protection cancellation, successful and reverted triggers, expiry,
-    relatching, retry, execution, risk-off refunds, and liquidation of armed, triggered, and latched protection
-  - Reconciles reserved, paid, refunded, and forfeited bounty value across separate order/protection namespaces,
-    including numeric-id collisions, zero-bounty close attempts, parent margin, and exact-once trigger-keeper credits
-
-## Coverage boundaries
-
-The stateful suites are high-signal conformance checks, not a complete proof of
-the accounting specification.
-
-- Most older campaigns retain zero VPI. The dedicated persistent VPI/frozen campaign and bounded mixed model add
-  nonzero-VPI and frozen-spread settlement. The mixed model joins carry, deferred claims and pending Junior requests
-  across one persistent economic history; it does not cover every simultaneous insolvency, fee-waiver or governance
-  combination. Dedicated direct tests cover assessed/paid/waived spread allocation.
-- `PerpHousePoolLifecycleInvariant.t.sol` covers the active vault lifecycle,
-  seed floors, cooldowns, caps, escrow routing, settlement holds, and excess accounting. Its maintenance-fee companion
-  covers active Junior dilution and settlement pricing. The separate
-  `GovernedSeniorCapacityInvariant.t.sol` covers the bounded pending senior
-  request/cancel/finalize/claim state machine, reservation conservation, and
-  stateful reachability on both sides of the shared request cutoff; it does not
-  model every possible epoch or governance transition. Epoch reservations and pending claims are reconciled against
-  observed queue/share state; the independent base Engine withdrawal-reserve model excludes those real-vault
-  reservations.
-- Degraded transition flags and post-operation balances are checked by
-  `PerpPreviewInvariant.t.sol`; preview/live degraded settlement parity is
-  additionally exercised by `PerpExplicitAccountingInvariant.t.sol`.
-- The stateful suites align protocol accounting views and withdrawal-reserve
-  composition, but they do not prove the asymptotic complexity of endpoint
-  aggregation or independently prove every projected admission branch.
-- The bounded persistent waterfall model covers Junior-first loss, Senior restoration, coupon ratcheting, and
-  recapitalization priority. It does not combine every waterfall transition with pending epoch/share transactions;
-  the lifecycle/capacity suites and domain-specific accounting tests remain complementary evidence.
-- FIFO structure, reservation ownership, replay identity and first-authored historical execution ticks are checked by
-  the persistent mixed ledger, alongside `../spec/trader/OrderRouterCommitment.t.sol` and
-  `../spec/oracle/OrderRouterExecutionFreshness.t.sol`. Its input history uses MockPyth; real-network signature/update
-  verification remains a separate integration scope. Protection cancellation is separate from queued-order cleanup: ordinary FIFO orders have no user
-  cancellation path. `ProtectionBountyStateMachine.t.sol` checks the protection/attempt reservation state machine.
-- Timed carry has both older snapshot-isolated scenarios and the independent carry ledger used by the persistent
-  mixed campaign. The ledger's separate arithmetic/real-account tests cover utilization saturation, dust, both-side
-  clocks and successive assessments; reference rate changes are narrower model-only examples.
-- Oracle/FAD boundary invariants do not span the complete two-axis authorization
-  matrix formed by the oracle/calendar state and the degraded-mode latch.
-- Committed margin tracks per-order ownership and reconciles reservations, but parts of the older ghost ledger
-  still observe production reservation deltas. That evidence is weaker than the independent bounty/claim/fee models.
-  The current protocol has clearinghouse-held bounty reservations and directly credited keeper rewards; it has no
-  deferred-keeper-credit or stored protocol-bad-debt bucket to model. Uncollectible price tails are diagnostic
-  writeoffs and are checked as such.
-- Account-capped price collection, failed full-close value safety, and preview/live terminal
-  parity are statefully exercised. No single invariant quantifies over every
-  valid insolvent terminal path and every risk-increasing entry point.
-- Whole-lot PnL/max-profit arithmetic and exact entry-cost conservation are
-  unit- and fuzz-tested. `TerminalNavBookV2.t.sol`,
-  `TerminalNavCloseConservation.t.sol`, and
-  `TerminalNavIntegrationSecurity.t.sol` provide focused book, split-close, and
-  symmetric-pricing evidence. `PerpTerminalNavBruteForceInvariant.t.sol`
-  independently reproduces the aggregate over the invariant harness's bounded,
-  completeness-checked actor domain; this remains stateful differential evidence,
-  not a formal proof over an unbounded production account set.
-
-## Harness Pieces
-
-- `BasePerpInvariantTest.sol`
-  - Shared invariant deployment harness using a deterministic mock HousePool
-  - Suites inheriting `../BasePerpTest.sol` instead exercise the full HousePool/vault stack. Both harness families
-    use `LegacyOrderRouterHarness` for test-only scalar-call adapters over production bounded-request logic; those
-    adapters are not production Router entrypoints
-
-- `handlers/PerpAccountingHandler.sol`
-  - Stateful fuzz actor that performs deposits, withdrawals, order commits, execution, liquidation, payout claims, and HousePool mode changes
-
-- `ghost/PerpGhostLedger.sol`
-  - Tracks account generations, submitted wallet flows, liquidation observations and committed-margin ownership for
-    the adversarial accounting handler. Historical cleanup applies to completed generations. Per-order
-    reservation transitions also reconcile against production state; this is not a fully independent economic model.
-
-- `handlers/PerpClaimModelHandler.sol`
-  - Independent expected claims and position lifecycle; expected balances never synchronize from Engine storage
-
-- `handlers/PerpOracleHandler.sol` and `handlers/PerpFeeHandler.sol`
-  - Dedicated oracle/calendar and protocol-fee fuzz actors; several full-stack suites define their handlers locally
-
-- `mocks/MockInvariantHousePool.sol`
-  - Deterministic test HousePool whose token balance can be seeded or set directly to vary Engine/sidecar payout
-    liquidity; it does not model the production tranche waterfall
-
-## Typical Commands
-
-Run from the repository root. The package root selects the perps test tree and compiler configuration:
+Run from the repository root with Foundry and Solc 0.8.35 installed. `--offline` requires the compiler to be cached.
+Use the `--root` argument so Forge reads the package's profiles rather than the repository integration profile.
 
 ```bash
-forge test --root packages/perps --match-contract PerpIndependentClaimInvariantTest
-forge test --root packages/perps --match-contract PerpVpiFrozenAccountingInvariantTest
-forge test --root packages/perps --match-contract PerpWaterfallReferenceInvariantTest
-forge test --root packages/perps --match-contract PerpAccountingInvariantTest
-forge test --root packages/perps --match-contract PerpPreviewInvariantTest
-forge test --root packages/perps --match-contract PerpTraderClaimInvariantTest
-forge test --root packages/perps --match-contract PerpOracleBoundaryInvariantTest
-forge test --root packages/perps --match-contract PerpMultiAccountInvariantTest
-forge test --root packages/perps --match-contract PerpFeeFlowInvariantTest
-forge test --root packages/perps --match-contract PerpEconomicConservationInvariantTest
-forge test --root packages/perps --match-contract PerpValueConservationInvariantTest
-forge test --root packages/perps --match-contract PerpClosePreviewParityInvariantTest
-forge test --root packages/perps --match-contract PerpExplicitAccountingInvariantTest
-forge test --root packages/perps --match-contract PerpHousePoolLifecycleInvariantTest
-forge test --root packages/perps --match-contract PerpHousePoolMaintenanceFeeInvariantTest
-forge test --root packages/perps --match-contract PerpOraclePathInvariantTest
-forge test --root packages/perps --match-contract PerpTerminalNavBruteForceInvariantTest
-forge test --root packages/perps --match-contract GovernedSeniorCapacityInvariantTest
-forge test --root packages/perps --match-contract EmergencyRiskOffInvariantTest
-forge test --root packages/perps --match-contract ProtectionBountyStateMachineTest
+# List the executable functions in this directory.
+forge test --offline --root packages/perps \
+  --match-path 'test/perps/invariant/properties/*.t.sol' --list
+
+# A focused independent claim campaign, including its deterministic controls.
+FOUNDRY_PROFILE=quick forge test --offline --root packages/perps \
+  --match-contract '^PerpIndependentClaimInvariantTest$' -vv
+
+# Persistent coupled trader/LP history with an explicit CI seed.
+FOUNDRY_PROFILE=ci FOUNDRY_FUZZ_SEED=0xdeadbeef forge test --offline --root packages/perps \
+  --match-contract '^PerpMixedAccountingInvariantTest$' -vv
 ```
+
+The default/quick profile uses 256 fuzz cases and 16 invariant runs at depth 128. CI uses 2,000 cases and 32 runs at
+depth 256; audit uses 20,000 cases and 256 runs at depth 1,000. These are configured defaults; environment overrides
+can change them. Use the [recorded runners and replay instructions](../TEST_MAP.md#running-and-replaying) for
+complete suite selection, production compiler gates, multiple seeds and saved failure corpora.
