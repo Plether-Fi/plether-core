@@ -20,14 +20,14 @@ abstract contract OrderCommitHandler is OrderValidation {
     // slither-disable-start reentrancy-benign
     function _createPendingOrder(
         CfdTypes.Order memory order,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) internal {
         uint64 orderId = order.orderId;
         address account = order.account;
         CfdEnginePlanTypes.CloseCommitment memory effects =
-            _reserveExecutionBounty(account, order.sizeDelta, executionBountyUsdc, order.isClose);
+            _reserveExecutionBounty(account, order.sizeDelta, executionBountyAssets, order.isClose);
         clearinghouse.recordBountyReservation(
-            account, IMarginClearinghouse.BountyKind.Order, orderId, executionBountyUsdc
+            account, IMarginClearinghouse.BountyKind.Order, orderId, executionBountyAssets
         );
         _onOrderCommitted(order, effects);
         _reserveCommittedMargin(account, orderId, order.isClose, order.marginDelta);
@@ -79,9 +79,9 @@ abstract contract OrderCommitHandler is OrderValidation {
             targetPrice: order.targetPrice,
             commitTime: order.commitTime,
             commitBlock: order.commitBlock,
-            committedMarginUsdc: clearinghouse.getOrderReservation(orderId).remainingAmountUsdc,
-            executionBountyUsdc: clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId)
-            .amountUsdc
+            committedMarginAssets: clearinghouse.getOrderReservation(orderId).remainingAmountAssets,
+            executionBountyAssets: clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId)
+            .amountAssets
         });
         nextAccountOrderId = record.nextAccountOrderId;
     }

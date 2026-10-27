@@ -22,7 +22,7 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
             _quote(address(0xBEEF), shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG, margin, 0.8e8);
         assertEq(quote.maxSizeDelta, 0);
         assertEq(uint8(quote.limitingReason), uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
-        assertEq(quote.preview.maintenanceMarginUsdc, 0);
+        assertEq(quote.preview.maintenanceMarginAssets, 0);
     }
 
     function test_QuoteMarginNumericBoundaryPreservesPlannerPrecedence() public {
@@ -123,14 +123,14 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         _open(account, CfdTypes.Side.LONG, 400_000e18, 30_000e6, 1e8);
         vm.warp(block.timestamp + 28 days);
         uint256 beforeDepth = pool.totalAssets();
-        uint256 beforeMargin = clearinghouse.pnlPledgeUsdc(account);
+        uint256 beforeMargin = clearinghouse.pnlPledgeAssets(account);
         ICfdEngineLens.MaxOpenQuote memory quote = _quote(account, CfdTypes.Side.LONG, 20_000e6, 1e8);
         assertEq(quote.maxSizeDelta, 1000e18, "old pre-carry cap was only 800 tokens");
-        assertGt(quote.preview.pendingCarryUsdc, 0);
+        assertGt(quote.preview.pendingCarryAssets, 0);
         assertEq(pool.totalAssets(), beforeDepth, "view must not collect carry");
-        assertEq(clearinghouse.pnlPledgeUsdc(account), beforeMargin);
+        assertEq(clearinghouse.pnlPledgeAssets(account), beforeMargin);
         _open(account, CfdTypes.Side.LONG, quote.maxSizeDelta, 20_000e6, 1e8);
-        assertEq(clearinghouse.pnlPledgeUsdc(account), quote.preview.postMarginUsdc);
+        assertEq(clearinghouse.pnlPledgeAssets(account), quote.preview.postMarginAssets);
     }
 
     function test_QuoteMaxOpen_ClampsPrice() public {
@@ -151,14 +151,14 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         _setRiskParams(params);
         _fundTrader(taker, 30_000e6);
         _open(taker, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
-        uint256 reserveBefore = clearinghouse.vpiRebateReserveUsdc(taker);
+        uint256 reserveBefore = clearinghouse.vpiRebateReserveAssets(taker);
         assertGt(reserveBefore, 0);
         ICfdEngineLens.MaxOpenQuote memory quote = _quote(taker, CfdTypes.Side.SHORT, 5000e6, 1e8);
         assertGt(quote.maxSizeDelta, 0);
-        assertEq(clearinghouse.vpiRebateReserveUsdc(taker), reserveBefore, "quote must not release backing");
+        assertEq(clearinghouse.vpiRebateReserveAssets(taker), reserveBefore, "quote must not release backing");
         _open(taker, CfdTypes.Side.SHORT, quote.maxSizeDelta, 5000e6, 1e8);
-        assertLt(clearinghouse.vpiRebateReserveUsdc(taker), reserveBefore);
-        assertEq(clearinghouse.pnlPledgeUsdc(taker), quote.preview.postMarginUsdc);
+        assertLt(clearinghouse.vpiRebateReserveAssets(taker), reserveBefore);
+        assertEq(clearinghouse.pnlPledgeAssets(taker), quote.preview.postMarginAssets);
     }
 
     function test_QuoteMaxOpen_UncollectibleCarryRejectsEverySize() public {
@@ -166,7 +166,7 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         _fundTrader(account, 5000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
         vm.warp(block.timestamp + 36_500 days);
-        assertGt(_expectedIndexedCarryUsdc(account), clearinghouse.balanceUsdc(account));
+        assertGt(_expectedIndexedCarryAssets(account), clearinghouse.balanceAssets(account));
         ICfdEngineLens.MaxOpenQuote memory quote = _quote(account, CfdTypes.Side.LONG, 5000e6, 1e8);
         assertEq(quote.maxSizeDelta, 0);
         assertEq(uint256(quote.limitingReason), uint256(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES));
@@ -215,7 +215,7 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         }
         if (quote.maxSizeDelta > 0) {
             _open(account, side, quote.maxSizeDelta, marginDelta, price);
-            assertEq(clearinghouse.pnlPledgeUsdc(account), quote.preview.postMarginUsdc);
+            assertEq(clearinghouse.pnlPledgeAssets(account), quote.preview.postMarginAssets);
         }
     }
 
@@ -234,12 +234,12 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         uint256 price = 1_000_003;
         snap.account = address(0x123);
         snap.capPrice = price * 2;
-        snap.poolAssetsUsdc = 100e6;
-        snap.poolCashUsdc = snap.poolAssetsUsdc;
+        snap.poolAssets = 100e6;
+        snap.poolCashAssets = snap.poolAssets;
         snap.traderClaimBalanceForAccount = bound(claim, 0, 5e6);
-        snap.totalTraderClaimBalanceUsdc = snap.traderClaimBalanceForAccount;
+        snap.totalTraderClaimBalanceAssets = snap.traderClaimBalanceForAccount;
         snap.riskParams = _riskParams();
-        snap.riskParams.minBountyUsdc = 1000;
+        snap.riskParams.minBountyAssets = 1000;
         snap.riskParams.initMarginBps = 1000;
         snap.riskParams.fadMarginBps = 2000;
         snap.riskParams.vpiFactor = bound(factor, 0, 18e18);
@@ -248,10 +248,10 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         snap.isFadWindow = fad;
         snap.longSide.openInterest = bound(longLots, 0, 40) * CfdTypes.SIZE_QUANTUM;
         snap.shortSide.openInterest = bound(shortLots, 0, 40) * CfdTypes.SIZE_QUANTUM;
-        snap.longSide.maxProfitUsdc = snap.longSide.openInterest / CfdTypes.SIZE_QUANTUM * price;
-        snap.shortSide.maxProfitUsdc = snap.shortSide.openInterest / CfdTypes.SIZE_QUANTUM * price;
+        snap.longSide.maxProfitAssets = snap.longSide.openInterest / CfdTypes.SIZE_QUANTUM * price;
+        snap.shortSide.maxProfitAssets = snap.shortSide.openInterest / CfdTypes.SIZE_QUANTUM * price;
         snap.accountBuckets =
-            MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(bound(cash, 0, 12e6), 0, 0, 0, 0);
+            MarginClearinghouseAccountingLib.buildIsolatedAccountAssetBuckets(bound(cash, 0, 12e6), 0, 0, 0, 0);
         CfdTypes.Order memory order;
         order.account = snap.account;
         order.side = isLong ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;

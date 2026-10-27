@@ -8,7 +8,7 @@ interface ITrancheVaultBootstrap {
     /// @dev Dedicated bootstrap hook because an asynchronous ERC-7540 vault's public `previewDeposit` must revert. Uses
     ///      the HousePool's simulated deposit-side reconcile state and rounds down according to fee-free deposit
     ///      conversion semantics. Bootstrap callers separately require the oracle not to be frozen.
-    /// @param assets USDC asset amount to quote (6 decimals)
+    /// @param assets settlement token asset amount to quote (6 decimals)
     /// @return shares Vault-share amount that would be minted
     function quoteBootstrapDeposit(
         uint256 assets

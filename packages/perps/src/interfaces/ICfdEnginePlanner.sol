@@ -6,7 +6,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 /// @notice Pure planning surface that converts engine snapshots into settlement deltas.
 /// @dev The planner performs no storage reads, authorization, oracle verification, or input authentication. Callers
-///      must supply a canonical, internally consistent snapshot and order. USDC amounts use 6 decimals, prices use
+///      must supply a canonical, internally consistent snapshot and order. settlement token amounts use 6 decimals, prices use
 ///      8 decimals, position sizes use 18 decimals, and timestamps are Unix seconds.
 interface ICfdEnginePlanner {
 
@@ -35,29 +35,29 @@ interface ICfdEnginePlanner {
     ) external pure returns (bool fadWindow, bool oracleFrozen);
 
     /// @notice Projects a side carry index from utilization and elapsed time.
-    /// @dev `poolAssetsUsdc` is economic depth after subtracting outstanding trader claims, floored at zero.
+    /// @dev `poolAssets` is economic depth after subtracting outstanding trader claims, floored at zero.
     function computeCurrentCarryIndex(
         uint256 storedIndex,
         uint64 previousTimestamp,
         uint256 currentTimestamp,
-        uint256 borrowBaseUsdc,
-        uint256 poolAssetsUsdc,
+        uint256 borrowBaseAssets,
+        uint256 poolAssets,
         uint256 baseCarryBps
     ) external pure returns (uint256 index);
 
-    /// @notice Converts a carry-index delta into 6-decimal USDC carry.
-    function computeIndexedCarryUsdc(
-        uint256 borrowBaseUsdc,
+    /// @notice Converts a carry-index delta into 6-decimal settlement token carry.
+    function computeIndexedCarryAssets(
+        uint256 borrowBaseAssets,
         uint256 carryIndexDelta
-    ) external pure returns (uint256 carryUsdc);
+    ) external pure returns (uint256 carryAssets);
 
     /// @notice Returns the exact lot-based price-risk test used by withdrawal and protection health checks.
     function isExactPriceRiskLiquidatable(
         CfdTypes.Position memory pos,
-        uint256 entryCostUsdcAtoms,
+        uint256 entryCostAssetAtoms,
         uint256 price,
         uint256 capPrice,
-        uint256 priceCollateralUsdc,
+        uint256 priceCollateralAssets,
         uint256 requiredBps
     ) external pure returns (bool liquidatable);
 

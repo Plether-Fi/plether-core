@@ -23,7 +23,7 @@ interface IOrderRouterKeeperSidecarBinding {
 
 /// @title OrderRouter (The MEV Shield)
 /// @notice Queues delayed perps orders and permissionlessly executes them in global FIFO order using Pyth prices.
-/// @dev Does not custody trader collateral or USDC bounty reserves; queued value remains in MarginClearinghouse.
+/// @dev Does not custody trader collateral or settlement token bounty reserves; queued value remains in MarginClearinghouse.
 ///      A dedicated `OrderRouterAdmin` deployed by the base contract timelocks configuration and gates new
 ///      risk-increasing commits and protection creation/replacement during an emergency pause. Pending opens through
 ///      the pause cutoff are invalidated; close commits and execution, protection triggers/retries, mark refresh, and
@@ -107,11 +107,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     function commitProtectedClose(
         address account,
         OrderV3Types.OrderRequest calldata request,
-        uint256 triggerBountyRefundUsdc
+        uint256 triggerBountyRefundAssets
     ) external nonReentrant returns (uint64 orderId) {
         account;
         request;
-        triggerBountyRefundUsdc;
+        triggerBountyRefundAssets;
         return uint64(_delegateToKeeperSidecar());
     }
 
@@ -146,7 +146,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint256 targetPrice;
         CfdTypes.Side side;
         uint256 isCloseWord;
-        uint256 executionBountyUsdc;
+        uint256 executionBountyAssets;
         assembly ("memory-safe") {
             orderId := calldataload(4)
             account := calldataload(36)
@@ -155,7 +155,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
             targetPrice := calldataload(132)
             side := calldataload(164)
             isCloseWord := calldataload(196)
-            executionBountyUsdc := calldataload(228)
+            executionBountyAssets := calldataload(228)
         }
         if (orderId != nextCommitId) {
             revert OrderRouter__Unauthorized();
@@ -173,7 +173,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
                 side: side,
                 isClose: isCloseWord != 0
             }),
-            executionBountyUsdc
+            executionBountyAssets
         );
     }
 
@@ -215,10 +215,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
             revert OrderRouter__OrderNotExpired();
         }
         bool protectionAttempt = lifecycleBook.isProtectionAttempt(orderId);
-        uint256 freeUsdc = protectionAttempt ? pending.executionBountyUsdc : pending.commitment.bountyFromFreeUsdc;
-        recovery = clearinghouse.recoverExpiredBounty(order.account, orderId, freeUsdc);
-        if (recovery.freeUsdc != 0) {
-            clearinghouse.releaseReservedExecutionBountyToSource(order.account, recovery.freeUsdc);
+        uint256 freeAssets = protectionAttempt ? pending.executionBountyAssets : pending.commitment.bountyFromFreeAssets;
+        recovery = clearinghouse.recoverExpiredBounty(order.account, orderId, freeAssets);
+        if (recovery.freeAssets != 0) {
+            clearinghouse.releaseReservedExecutionBountyToSource(order.account, recovery.freeAssets);
         }
         // An invalid margin ledger is left protected; expiry must not invent a release.
         try clearinghouse.releaseOrderReservationForTerminalCleanup(orderId) {} catch {}
@@ -319,24 +319,26 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint256 accountingPrice,
         uint64 accountingPublishTime
     ) private returns (IOrderRouterExecutionHost.BountySettlement memory settlement) {
-        uint256 bountyUsdc =
-            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, order.orderId).amountUsdc;
+        uint256 bountyAssets =
+            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, order.orderId).amountAssets;
         if (!success && lifecycleBook.isProtectionAttempt(order.orderId)) {
-            if (bountyUsdc != 0) {
-                revert OrderRouter__ProtectedCloseBountyNonzero(bountyUsdc);
+            if (bountyAssets != 0) {
+                revert OrderRouter__ProtectedCloseBountyNonzero(bountyAssets);
             }
             positionProtectionBook.handleFailedProtectionAttempt(order.orderId, order.account, reason);
         }
         // Even an unpaid attempt has an authenticated Active record that must terminalize.
         clearinghouse.takeBountyReservation(order.account, IMarginClearinghouse.BountyKind.Order, order.orderId);
-        settlement.bountyUsdc = bountyUsdc;
-        if (bountyUsdc != 0) {
+        settlement.bountyAssets = bountyAssets;
+        if (bountyAssets != 0) {
             settlement.bountyRecipient = bountyRecipient;
             settlement.bountyDisposition = OrderV3Types.BountyDisposition.Paid;
             if (bountyRecipient == order.account) {
-                clearinghouse.releaseReservedExecutionBountyToSource(order.account, bountyUsdc);
+                clearinghouse.releaseReservedExecutionBountyToSource(order.account, bountyAssets);
             } else {
-                engine.creditBounty(order.account, bountyRecipient, bountyUsdc, accountingPrice, accountingPublishTime);
+                engine.creditBounty(
+                    order.account, bountyRecipient, bountyAssets, accountingPrice, accountingPublishTime
+                );
             }
         }
     }
@@ -345,22 +347,22 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     function refundRiskOffOrderFromSidecar(
         uint64 orderId,
         uint64 riskOffCutoff
-    ) external returns (uint256 refundedBountyUsdc) {
+    ) external returns (uint256 refundedBountyAssets) {
         _onlySelfCall();
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
         if (!_isRiskOffOpen(orderId, order.isClose, riskOffCutoff)) {
             revert OrderRouter__OrderNotRiskOff();
         }
 
-        refundedBountyUsdc =
+        refundedBountyAssets =
             clearinghouse.takeBountyReservation(order.account, IMarginClearinghouse.BountyKind.Order, orderId);
         uint64[] memory orderIds = new uint64[](1);
         orderIds[0] = orderId;
         emit OrderFailed(orderId, OrderFailReason.RiskOff);
-        uint256 protectionBountyUsdc = _failPendingOpenProtectionForRiskOff(orderId, order.account);
+        uint256 protectionBountyAssets = _failPendingOpenProtectionForRiskOff(orderId, order.account);
         _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
         clearinghouse.releaseInvalidatedOrderReserves(
-            order.account, orderIds, refundedBountyUsdc + protectionBountyUsdc
+            order.account, orderIds, refundedBountyAssets + protectionBountyAssets
         );
     }
 

@@ -24,23 +24,23 @@ contract OrderRouterSlippageTest is OrderRouterPythTestBase {
         vm.warp(1050);
 
         bytes[] memory empty = _pythUpdateData();
-        uint256 keeperUsdcBefore = _settlementBalance(address(this));
+        uint256 keeperAssetsBefore = _settlementBalance(address(this));
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         address account = alice;
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             10_000 * 1e6 - 200_000,
             "Open-order slippage failure should forfeit the reserved execution bounty from trader settlement"
         );
         assertEq(
-            _settlementBalance(address(this)) - keeperUsdcBefore,
+            _settlementBalance(address(this)) - keeperAssetsBefore,
             200_000,
             "Terminal slippage failures currently credit the clearer through the carry-aware settlement path"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             0,
             "Failed binding open-order bounty should not be routed to protocol revenue in this execution path"
         );
@@ -103,7 +103,11 @@ contract OrderRouterSlippageTest is OrderRouterPythTestBase {
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         assertEq(router.nextExecuteId(), 0, "Terminal slippage miss should clear the queue head");
         assertEq(reservation.pendingOrderCount, 0, "Terminal slippage miss should clear pending reservation state");
-        assertEq(usdc.balanceOf(address(router)), 0, "Keeper reserve should not remain reserved after terminal failure");
+        assertEq(
+            settlementToken.balanceOf(address(router)),
+            0,
+            "Keeper reserve should not remain reserved after terminal failure"
+        );
     }
 
     function test_Slippage_CloseOrders_Protected() public {

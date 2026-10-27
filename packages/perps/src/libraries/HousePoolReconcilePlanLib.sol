@@ -7,7 +7,7 @@ import {HousePoolWaterfallAccountingLib} from "@plether/perps/libraries/HousePoo
 
 /// @title HousePoolReconcilePlanLib
 /// @notice Plans coupon checkpointing and mark-dependent reconciliation of HousePool claimant principal.
-/// @dev All monetary fields use 6-decimal USDC, rates use a 10,000 basis-point denominator, and elapsed time is in
+/// @dev All monetary fields use 6-decimal settlement token, rates use a 10,000 basis-point denominator, and elapsed time is in
 ///      seconds. The library mutates only memory and leaves storage application and pending-bucket settlement to callers.
 library HousePoolReconcilePlanLib {
 
@@ -17,7 +17,7 @@ library HousePoolReconcilePlanLib {
     /// @param juniorSupplyZero Whether junior share supply was zero at planning time.
     /// @param claimedEquityZero Whether senior plus junior principal was zero after coupon processing.
     /// @param revenue Whether reconciliation found distributable value above claimed principal.
-    /// @param deltaUsdc Magnitude of revenue or loss; zero for equality, stale-mark early return, or seeded bootstrap.
+    /// @param deltaAssets Magnitude of revenue or loss; zero for equality, stale-mark early return, or seeded bootstrap.
     /// @param juniorPrincipalBeforeRevenue Junior principal immediately before a revenue delta was distributed.
     struct ReconcilePlan {
         HousePoolPendingPreviewLib.PendingAccountingState state;
@@ -25,7 +25,7 @@ library HousePoolReconcilePlanLib {
         bool juniorSupplyZero;
         bool claimedEquityZero;
         bool revenue;
-        uint256 deltaUsdc;
+        uint256 deltaAssets;
         uint256 juniorPrincipalBeforeRevenue;
     }
 
@@ -90,17 +90,17 @@ library HousePoolReconcilePlanLib {
             );
 
         plan.revenue = waterfallPlan.isRevenue;
-        plan.deltaUsdc = waterfallPlan.deltaUsdc;
+        plan.deltaAssets = waterfallPlan.deltaAssets;
 
         if (plan.revenue) {
             plan.juniorPrincipalBeforeRevenue = plan.state.waterfall.juniorPrincipal;
             plan.state.waterfall =
-                HousePoolWaterfallAccountingLib.distributeRevenue(plan.state.waterfall, plan.deltaUsdc);
+                HousePoolWaterfallAccountingLib.distributeRevenue(plan.state.waterfall, plan.deltaAssets);
             return plan;
         }
 
-        if (plan.deltaUsdc > 0) {
-            plan.state.waterfall = HousePoolWaterfallAccountingLib.absorbLoss(plan.state.waterfall, plan.deltaUsdc);
+        if (plan.deltaAssets > 0) {
+            plan.state.waterfall = HousePoolWaterfallAccountingLib.absorbLoss(plan.state.waterfall, plan.deltaAssets);
             return plan;
         }
     }

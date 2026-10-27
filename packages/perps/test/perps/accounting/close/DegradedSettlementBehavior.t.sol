@@ -22,7 +22,7 @@ contract CloseContainmentTransitionsTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -74,7 +74,7 @@ contract CloseContainmentTransitionsTest is BasePerpTest {
         });
 
         uint256 depthBefore = pool.totalAssets();
-        uint256 balanceBefore = clearinghouse.balanceUsdc(newTraderAccount);
+        uint256 balanceBefore = clearinghouse.balanceAssets(newTraderAccount);
         (uint256 sizeBefore, uint256 marginBefore,,,,,) = engine.positions(newTraderAccount);
         assertEq(sizeBefore, 0, "the rejected order must attempt a new position");
         vm.expectRevert(
@@ -91,7 +91,7 @@ contract CloseContainmentTransitionsTest is BasePerpTest {
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(newTraderAccount);
         assertEq(sizeAfter, sizeBefore, "degraded admission must preserve the position size");
         assertEq(marginAfter, marginBefore, "degraded admission must preserve the position margin");
-        assertEq(clearinghouse.balanceUsdc(newTraderAccount), balanceBefore);
+        assertEq(clearinghouse.balanceAssets(newTraderAccount), balanceBefore);
         assertEq(pool.totalAssets(), depthBefore);
     }
 
@@ -113,8 +113,8 @@ contract CloseContainmentTransitionsTest is BasePerpTest {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__StillInsolvent.selector);
         engine.clearDegradedMode();
 
-        usdc.mint(address(this), 500_000e6);
-        usdc.approve(address(engine), 500_000e6);
+        settlementToken.mint(address(this), 500_000e6);
+        settlementToken.approve(address(engine), 500_000e6);
         engine.recapitalizePool(500_000e6);
         assertTrue(engine.degradedMode(), "Funding must not automatically clear degraded mode");
         vm.prank(address(juniorVault));
@@ -134,11 +134,11 @@ contract CloseContainmentTransitionsTest is BasePerpTest {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(longAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
-        assertGt(engine.traderClaimBalanceUsdc(longAccount), 0, "Setup should create a trader claim liability");
+        assertGt(engine.traderClaimBalanceAssets(longAccount), 0, "Setup should create a trader claim liability");
         assertFalse(
             engine.degradedMode(),
             "A standalone trader claim should not force degraded mode once bounded open liability is gone"
@@ -160,7 +160,7 @@ contract LiquidationContainmentTest is BasePerpTest {
             initMarginBps: ((10) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -183,7 +183,7 @@ contract LiquidationContainmentTest is BasePerpTest {
         _open(loserAccount, CfdTypes.Side.SHORT, 100_000e18, 2000e6, 0.5e8);
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 20_000e6);
+        settlementToken.transfer(address(0xDEAD), 20_000e6);
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));

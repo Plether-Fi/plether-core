@@ -8,14 +8,14 @@ This guide maps contract responsibilities, custody, and the flows between trader
 
 | Component | Owns or coordinates | Authority boundary |
 | --- | --- | --- |
-| `MarginClearinghouse` | Trader USDC custody, free balance, position and order reserves, bounty ledger | Broad settlement calls trust the Engine and its settlement sidecar; Router and protection Book have narrower reservation powers. |
+| `MarginClearinghouse` | Trader USDG custody, free balance, position and order reserves, bounty ledger | Broad settlement calls trust the Engine and its settlement sidecar; Router and protection Book have narrower reservation powers. |
 | `OrderRouter` | Global FIFO, per-account pending orders, commitment and execution orchestration | Validates orders and invokes the Engine; it does not price LP shares or independently pay pool cash. |
 | `OrderLifecycleBook` | Permanent client-id identity, pending policy, timing, authenticated terminal outcomes | Only its bound Router registers and finalizes orders. It holds no tokens. |
 | `PositionProtectionBook` | Take-profit/stop-loss state, trigger reward, latest close-attempt linkage | Calls narrow Router hooks to create orders; it cannot execute a trade or move pool cash itself. |
 | `PletherOracle` | Signed basket validation, accepted live basket, historical execution prices | Only the configured Router updates the accepted current basket. Historical helpers do not authenticate arbitrary caller-supplied caches. |
 | `CfdEngine` | Positions, carry, risk admission, trader claims, settlement plans | Uses the Clearinghouse and HousePool for custody; holds no trader or LP funds itself. |
 | `TerminalNavBookV2` | Aggregate account-capped price curves for LP NAV | Only the bound Engine can synchronize curves, deriving them from canonical Engine/Clearinghouse state. It does not measure available cash. |
-| `HousePool` | Recognized pool USDC, Senior/Junior waterfall, LP epoch clock and settlement | Engine/settlement sidecar may request trading payouts/inflows; configured vaults participate in LP settlement. |
+| `HousePool` | Recognized pool USDG, Senior/Junior waterfall, LP epoch clock and settlement | Engine/settlement sidecar may request trading payouts/inflows; configured vaults participate in LP settlement. |
 | `TrancheVault` | LP shares, deposit escrow, redemption queues and funded claims | Chooses request epochs using the Pool clock; only the Pool activates deposits or funds redemptions. |
 | `PerpsPublicLens` | Compact trader, LP and protocol views | Read-only product API. |
 | `SettlementMonitorLens` | Bounded settlement-route, oracle, queue and custody diagnostics | Advisory reads; exact transaction simulation remains necessary. |
@@ -24,7 +24,7 @@ This guide maps contract responsibilities, custody, and the flows between trader
 The contracts are non-upgradeable. Admin contracts apply the configured governance and timelock rules; a sidecar is
 fixed implementation code, not an upgrade mechanism. See [Security model](SECURITY.md) for the full trust model.
 
-## Where USDC lives
+## Where USDG lives
 
 ```mermaid
 flowchart LR
@@ -40,47 +40,47 @@ flowchart LR
 
 The diagram shows token custody flows. The Engine and Router authorize transitions but do not hold the balances.
 Protocol fees and keeper rewards are credited to accounts **inside the Clearinghouse**, then withdrawn through its
-ordinary withdrawal path. A trader claim records a liability; it does not segregate an extra USDC balance.
+ordinary withdrawal path. A trader claim records a liability; it does not segregate an extra USDG balance.
 
 ## Asset buckets
 
 ### Trader custody
 
-`balanceUsdc(account)` is gross Clearinghouse custody, including locked funds. It is not the withdrawable balance.
-`getAccountUsdcBuckets(account)` exposes the split; withdrawal also applies the Engine's carry and safety checks.
+`balanceAssets(account)` is gross Clearinghouse custody, including locked funds. It is not the withdrawable balance.
+`getAccountAssetBuckets(account)` exposes the split; withdrawal also applies the Engine's carry and safety checks.
 
 | Bucket | Purpose | Available for price losses? |
 | --- | --- | --- |
 | Free settlement | Unallocated trader cash; funds new reservations and action charges | Not part of the terminal price-loss collectible cap. It can pay carry. |
-| PnL pledge / active position margin | Isolated position backing, exposed by `pnlPledgeUsdc(account)` | Yes, after applicable carry collection. |
+| PnL pledge / active position margin | Isolated position backing, exposed by `pnlPledgeAssets(account)` | Yes, after applicable carry collection. |
 | Liquidation reserve | Dedicated backing for the capped liquidation charge | No; used for that charge only. |
 | VPI rebate reserve | Protects an outstanding negative virtual price impact (VPI) balance | No; reserved for the matching clawback. |
 | Committed order margin | Margin reserved for an opening/increase order | Not while it remains committed margin. |
 | Execution/trigger bounty reserve | Rewards for opening execution or a protection trigger | No. Ordinary and protection close attempts have zero execution bounty. |
 
 A close still creates an Active zero-amount `BountyKind.Order` record. This authenticates the order's funding identity
-without locking USDC. Amounts and active reservation queues belong to the Clearinghouse; order/protection lifecycle
+without locking USDG. Amounts and active reservation queues belong to the Clearinghouse; order/protection lifecycle
 belongs to the Router and Books. See [Reservation ledger](ACCOUNTING_SPEC.md#reservation-ownership-and-queues).
 
-`CfdEngine.traderClaimBalanceUsdc(account)` is separate from custody. It can offset that account's price loss and count
+`CfdEngine.traderClaimBalanceAssets(account)` is separate from custody. It can offset that account's price loss and count
 in its price-risk equity, but cannot fund an execution bounty or other action charge. Claim payment reduces the
-liability and transfers Pool USDC to the Clearinghouse; payment into an open position becomes PnL pledge.
+liability and transfers Pool USDG to the Clearinghouse; payment into an open position becomes PnL pledge.
 
 ### Pool and LP custody
 
 | Bucket | Custody / source | Accounting treatment |
 | --- | --- | --- |
 | Recognized pool assets | `HousePool.totalAssets()` and accounted-asset ledger | Physical backing used by solvency, payout and LP calculations. |
-| Excess USDC | Raw Pool balance above accounted assets | Excluded until governance accounts for it, or swept under the excess-asset rules. |
+| Excess USDG | Raw Pool balance above accounted assets | Excluded until governance accounts for it, or swept under the excess-asset rules. |
 | Unassigned assets | Recognized Pool assets lacking an LP claimant path | Require explicit assignment; cannot silently become windfall LP ownership. |
-| Pending deposit assets | USDC in a vault | Not yet pool assets or LP NAV. |
+| Pending deposit assets | USDG in a vault | Not yet pool assets or LP NAV. |
 | Activated deposit shares | Shares held by a vault for a controller | Already outstanding and exposed to LP economics; claiming only delivers them. |
 | Pending redemption shares | Shares escrowed in a vault | Remain outstanding and exposed to P&L until funded. |
-| Funded redemption assets | USDC escrowed in a vault after shares burn | No longer Pool cash; irrevocably reserved for the funded claim. |
+| Funded redemption assets | USDG escrowed in a vault after shares burn | No longer Pool cash; irrevocably reserved for the funded claim. |
 
 Do not conflate three measurements:
 
-- **Cash:** recognized Pool USDC, subject to reserves and payout priorities.
+- **Cash:** recognized Pool USDG, subject to reserves and payout priorities.
 - **Economic depth:** `max(pool assets - outstanding trader claims, 0)`, used by carry/skew/VPI calculations.
 - **LP NAV:** Pool assets minus trader claims plus the signed account-capped terminal price delta at the mark.
   Distributable equity is floored at zero; any negative remainder is recorded separately as a terminal deficit.
@@ -90,7 +90,7 @@ address but are not recognized Pool assets. [Accounting specification](ACCOUNTIN
 
 ## Trading flows
 
-1. **Fund:** `depositMargin` transfers the owner's USDC into custody, then checkpoints carry if a position exists.
+1. **Fund:** `depositMargin` transfers the owner's USDG into custody, then checkpoints carry if a position exists.
    `depositFor` instead credits free settlement without a carry checkpoint or position-margin allocation. Neither
    deposit automatically adds isolated position margin; the owner uses `CfdEngine.addMargin` for that.
 2. **Commit:** the Router validates the request, checkpoints applicable carry, reserves opening margin/bounty or

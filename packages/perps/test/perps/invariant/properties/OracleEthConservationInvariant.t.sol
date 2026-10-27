@@ -30,7 +30,7 @@ contract OracleEthConservationInvariantTest is BasePerpTest {
         baseMockPyth.setAllPrices(ids, 100_000_000, -8, vm.getBlockTimestamp());
         baseMockPyth.setSynchronizeLegacyUniquePrices(false);
         handler = new OracleEthConservationHandler(
-            router, engine, clearinghouse, pletherOracle, routerAdmin, baseMockPyth, usdc, ids
+            router, engine, clearinghouse, pletherOracle, routerAdmin, baseMockPyth, settlementToken, ids
         );
         // These are the only ETH topups. Baselines are captured after all three fixed budgets are installed.
         for (uint256 i; i < 3; ++i) {

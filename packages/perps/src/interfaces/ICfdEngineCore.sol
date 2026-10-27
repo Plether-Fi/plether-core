@@ -8,7 +8,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
 /// @notice Core/operator-facing engine surface used by live perps contracts.
-/// @dev Unless stated otherwise, USDC amounts use 6 decimals, prices use 8 decimals, position sizes use 18 decimals,
+/// @dev Unless stated otherwise, settlement token amounts use 6 decimals, prices use 8 decimals, position sizes use 18 decimals,
 ///      basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 interface ICfdEngineCore is ICfdEngineTypes {
 
@@ -40,8 +40,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
     function settlementSidecar() external view returns (address);
 
     /// @notice Settlement token used for margin, fees, and payouts.
-    /// @return USDC-compatible settlement token
-    function USDC() external view returns (IERC20);
+    /// @return settlementToken-compatible settlement token
+    function settlementToken() external view returns (IERC20);
 
     /// @notice Last mark price observed by the engine (8 decimals).
     /// @return Cached engine mark price, or zero before the first mark
@@ -55,7 +55,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return initMarginBps Initial-margin ratio in basis points
     /// @return fadMarginBps Maintenance-margin ratio during FAD in basis points
     /// @return baseCarryBps Annualized base carry rate in basis points
-    /// @return minBountyUsdc Minimum total liquidation charge, also used with bountyBps to derive the economic notional floor, in USDC
+    /// @return minBountyAssets Minimum total liquidation charge, also used with bountyBps to derive the economic notional floor, in settlement token
     /// @return bountyBps Variable total liquidation-charge rate in basis points
     /// @return keeperShareBps Keeper share of the collected liquidation charge in basis points
     /// @return protocolShareBps Protocol-treasury share of the collected liquidation charge in basis points
@@ -69,7 +69,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
             uint256 initMarginBps,
             uint256 fadMarginBps,
             uint256 baseCarryBps,
-            uint256 minBountyUsdc,
+            uint256 minBountyAssets,
             uint256 bountyBps,
             uint256 keeperShareBps,
             uint256 protocolShareBps
@@ -87,19 +87,19 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @dev Unlike terminal-NAV snapshots, this getter is usable while an accounting mutation is in progress.
     function sides(
         uint256 index
-    ) external view returns (uint256 maxProfitUsdc, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
+    ) external view returns (uint256 maxProfitAssets, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
 
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
     /// @dev Callable only by the configured router. The planner computes a delta and the settlement sidecar applies
     ///      clearinghouse, pool, aggregate-side, and position mutations atomically.
     /// @param order Queued order being executed by the router
     /// @param currentOraclePrice Execution oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param poolDepthUsdc HousePool depth used for planning and solvency checks
+    /// @param poolDepthAssets HousePool depth used for planning and solvency checks
     /// @param publishTime Router-validated execution publish time; the Engine caches the execution price only when strictly newer
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 poolDepthUsdc,
+        uint256 poolDepthAssets,
         uint64 publishTime
     ) external;
 
@@ -116,10 +116,10 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @dev Callable only by the router. Reclassifies internal clearinghouse balances without moving ERC20 tokens;
     ///      a zero amount is a no-op.
     /// @param sourceAccount Account whose reserved settlement bounty is forfeited
-    /// @param amountUsdc Reserved USDC amount to transfer into the protocol treasury account
+    /// @param amountAssets Reserved settlement token amount to transfer into the protocol treasury account
     function absorbReservedExecutionBounty(
         address sourceAccount,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external;
 
     /// @notice Credits a reserved execution bounty into the beneficiary's clearinghouse account.
@@ -128,37 +128,37 @@ interface ICfdEngineCore is ICfdEngineTypes {
     ///      The incoming bounty remains untouched until a later checkpoint. A strictly newer mark is capped and cached; zero is a no-op.
     /// @param sourceAccount Account whose reserved settlement bounty funds the credit
     /// @param beneficiary Account receiving the clearinghouse settlement credit
-    /// @param amountUsdc Reserved USDC amount to transfer
+    /// @param amountAssets Reserved settlement token amount to transfer
     /// @param price Fresh mark price used to checkpoint beneficiary carry when needed
     /// @param publishTime Mark publish timestamp used when checkpointing beneficiary carry
     function creditBounty(
         address sourceAccount,
         address beneficiary,
-        uint256 amountUsdc,
+        uint256 amountAssets,
         uint256 price,
         uint64 publishTime
     ) external;
 
     /// @notice Trader claim balance still owed to beneficiaries.
-    /// @return Aggregate senior HousePool payout liability in USDC
-    function totalTraderClaimBalanceUsdc() external view returns (uint256);
+    /// @return Aggregate senior HousePool payout liability in settlement token
+    function totalTraderClaimBalanceAssets() external view returns (uint256);
 
     /// @notice Liquidates an undercollateralized position.
     /// @dev Callable only by the router. Settlement deletes the full position, routes losses or surplus, credits the
     ///      keeper internally, and can latch degraded mode if post-operation adjusted solvency is negative.
     /// @param account Clearinghouse account that owns the position
     /// @param currentOraclePrice Oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param poolDepthUsdc HousePool total assets used for planning and settlement checks
+    /// @param poolDepthAssets HousePool total assets used for planning and settlement checks
     /// @param publishTime Oracle publish timestamp; must not predate `lastMarkTime` and is cached only when strictly newer
     /// @param keeper Keeper that receives any liquidation bounty as clearinghouse credit
-    /// @return keeperBountyUsdc Bounty credited to the liquidation keeper in USDC
+    /// @return keeperBountyAssets Bounty credited to the liquidation keeper in settlement token
     function liquidatePosition(
         address account,
         uint256 currentOraclePrice,
-        uint256 poolDepthUsdc,
+        uint256 poolDepthAssets,
         uint64 publishTime,
         address keeper
-    ) external returns (uint256 keeperBountyUsdc);
+    ) external returns (uint256 keeperBountyAssets);
 
     /// @notice Timestamp of the last mark price update.
     /// @return Oracle publish timestamp associated with `lastMarkPrice`
@@ -223,10 +223,10 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return size Position size (18 decimals)
     /// @return margin Current active position margin (6 decimals)
     /// @return entryPrice Average entry price (8 decimals)
-    /// @return maxProfitUsdc Position maximum profit envelope (6 decimals)
+    /// @return maxProfitAssets Position maximum profit envelope (6 decimals)
     /// @return side Position side
     /// @return lastUpdateTime Last position mutation timestamp
-    /// @return vpiAccrued Lifetime signed VPI in USDC; positive is charged and negative is rebated
+    /// @return vpiAccrued Lifetime signed VPI in settlement token; positive is charged and negative is rebated
     function positions(
         address account
     )
@@ -236,7 +236,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
             uint256 size,
             uint256 margin,
             uint256 entryPrice,
-            uint256 maxProfitUsdc,
+            uint256 maxProfitAssets,
             CfdTypes.Side side,
             uint64 lastUpdateTime,
             int256 vpiAccrued
@@ -245,14 +245,14 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @notice Returns carry checkpointed against an account but not yet collected.
     /// @dev A subsequent claim or bounty credit can cover stored arrears at a later checkpoint.
     /// @param account Account whose stored carry obligation should be inspected
-    /// @return Unsettled carry in six-decimal USDC units
-    function unsettledCarryUsdc(
+    /// @return Unsettled carry in six-decimal settlement token units
+    function unsettledCarryAssets(
         address account
     ) external view returns (uint256);
 
     /// @notice Returns the exact remaining entry basis used by lot-based PnL settlement.
     /// @dev The average entry price in `positions` is display-only and may omit division dust.
-    function positionEntryCostUsdcAtoms(
+    function positionEntryCostAssetAtoms(
         address account
     ) external view returns (uint256);
 

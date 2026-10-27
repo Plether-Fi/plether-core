@@ -25,7 +25,7 @@ contract PartialCloseHealthTest is Test {
         snap.riskParams.maintMarginBps = 200;
         delta = _plan(snap, 1, 100_000_000);
         assertTrue(delta.valid);
-        assertEq(delta.safeMarginReleaseUsdc, 0, "retain extra pledge instead of rejecting a viable reduction");
+        assertEq(delta.safeMarginReleaseAssets, 0, "retain extra pledge instead of rejecting a viable reduction");
         assertEq(delta.posMarginAfter, 2_000_001);
     }
 
@@ -34,14 +34,14 @@ contract PartialCloseHealthTest is Test {
         snap.executionFeeBps = 1;
         CfdEnginePlanTypes.CloseDelta memory delta = _plan(snap, 1, 100_000_000);
         assertTrue(delta.valid);
-        assertEq(delta.actionChargeFromReleasedMarginUsdc, 10_000);
-        assertEq(delta.safeMarginReleaseUsdc, 10_000);
-        assertEq(delta.netReleasedMarginUsdc, 0);
+        assertEq(delta.actionChargeFromReleasedMarginAssets, 10_000);
+        assertEq(delta.safeMarginReleaseAssets, 10_000);
+        assertEq(delta.netReleasedMarginAssets, 0);
         snap = _snapshot(2, 200_020_000, CfdTypes.Side.LONG, 20_000, 0);
         snap.executionFeeBps = 1;
         delta = _plan(snap, 1, 100_010_000);
         assertFalse(delta.valid);
-        assertEq(delta.actionChargeToCollectUsdc, 10_001);
+        assertEq(delta.actionChargeToCollectAssets, 10_001);
         assertEq(uint8(delta.revertCode), uint8(CfdEnginePlanTypes.CloseRevertCode.PARTIAL_ACTION_CHARGE_UNCOLLECTIBLE));
     }
 
@@ -52,7 +52,7 @@ contract PartialCloseHealthTest is Test {
         CfdEnginePlanTypes.CloseDelta memory delta = _plan(snap, 1, 100_000_000);
         assertFalse(delta.valid);
         assertEq(uint8(delta.revertCode), uint8(CfdEnginePlanTypes.CloseRevertCode.PARTIAL_ACTION_CHARGE_UNCOLLECTIBLE));
-        assertEq(delta.pricePnlClaimConsumedUsdc, 0);
+        assertEq(delta.pricePnlClaimConsumedAssets, 0);
     }
 
     function test_ImmediateAndDeferredGainsHaveSameResidualEquity() public pure {
@@ -63,43 +63,43 @@ contract PartialCloseHealthTest is Test {
         snap = _snapshot(2, 200_000_000, CfdTypes.Side.SHORT, 10e6, 0);
         snap.riskParams.maintMarginBps = 200;
         snap.executionFeeBps = 1;
-        snap.poolCashUsdc = 0;
+        snap.poolCashAssets = 0;
         CfdEnginePlanTypes.CloseDelta memory deferred = _plan(snap, 1, 101_000_000);
         assertTrue(immediate.valid && deferred.valid);
         assertTrue(immediate.pricePayoutIsImmediate);
         assertTrue(deferred.pricePayoutCreatesClaim);
-        assertEq(immediate.safeMarginReleaseUsdc, deferred.safeMarginReleaseUsdc);
-        assertEq(immediate.posMarginAfter, deferred.posMarginAfter + deferred.pricePayoutUsdc);
-        assertEq(immediate.actionChargeWithheldUsdc, deferred.actionChargeWithheldUsdc);
+        assertEq(immediate.safeMarginReleaseAssets, deferred.safeMarginReleaseAssets);
+        assertEq(immediate.posMarginAfter, deferred.posMarginAfter + deferred.pricePayoutAssets);
+        assertEq(immediate.actionChargeWithheldAssets, deferred.actionChargeWithheldAssets);
     }
 
     function _snapshot(
         uint256 lots,
-        uint256 entryCostUsdcAtoms,
+        uint256 entryCostAssetAtoms,
         CfdTypes.Side side,
-        uint256 pledgeUsdc,
-        uint256 claimUsdc
+        uint256 pledgeAssets,
+        uint256 claimAssets
     ) private pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         uint256 size = lots * CfdTypes.SIZE_QUANTUM;
-        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, side, CAP_PRICE);
+        uint256 maxProfitAssets = CfdMath.calculateExactMaxProfit(lots, entryCostAssetAtoms, side, CAP_PRICE);
         snap.position = CfdTypes.Position({
             size: size,
-            margin: pledgeUsdc,
-            entryPrice: entryCostUsdcAtoms / lots,
-            maxProfitUsdc: maxProfitUsdc,
+            margin: pledgeAssets,
+            entryPrice: entryCostAssetAtoms / lots,
+            maxProfitAssets: maxProfitAssets,
             side: side,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
-        snap.positionEntryCostUsdcAtoms = entryCostUsdcAtoms;
+        snap.positionEntryCostAssetAtoms = entryCostAssetAtoms;
         snap.account = ACCOUNT;
         CfdEnginePlanTypes.SideSnapshot memory selected = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: maxProfitUsdc,
+            maxProfitAssets: maxProfitAssets,
             openInterest: size,
-            entryNotional: entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
-            totalMargin: pledgeUsdc,
-            borrowBaseUsdc: 0,
+            entryNotional: entryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
+            totalMargin: pledgeAssets,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
         if (side == CfdTypes.Side.LONG) {
@@ -107,23 +107,23 @@ contract PartialCloseHealthTest is Test {
         } else {
             snap.shortSide = selected;
         }
-        snap.poolAssetsUsdc = POOL_LIQUIDITY;
-        snap.poolCashUsdc = POOL_LIQUIDITY;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: pledgeUsdc,
-            totalLockedMarginUsdc: pledgeUsdc,
-            activePositionMarginUsdc: pledgeUsdc,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: 0
+        snap.poolAssets = POOL_LIQUIDITY;
+        snap.poolCashAssets = POOL_LIQUIDITY;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: pledgeAssets,
+            totalLockedMarginAssets: pledgeAssets,
+            activePositionMarginAssets: pledgeAssets,
+            otherLockedMarginAssets: 0,
+            freeSettlementAssets: 0
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: pledgeUsdc,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: pledgeUsdc
+            positionMarginAssets: pledgeAssets,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: 0,
+            totalLockedMarginAssets: pledgeAssets
         });
-        snap.totalTraderClaimBalanceUsdc = claimUsdc;
-        snap.traderClaimBalanceForAccount = claimUsdc;
+        snap.totalTraderClaimBalanceAssets = claimAssets;
+        snap.traderClaimBalanceForAccount = claimAssets;
         snap.capPrice = CAP_PRICE;
         snap.riskParams = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -132,7 +132,7 @@ contract PartialCloseHealthTest is Test {
             initMarginBps: 0,
             fadMarginBps: 0,
             baseCarryBps: 0,
-            minBountyUsdc: 0,
+            minBountyAssets: 0,
             bountyBps: 0,
             keeperShareBps: 0,
             protocolShareBps: 0

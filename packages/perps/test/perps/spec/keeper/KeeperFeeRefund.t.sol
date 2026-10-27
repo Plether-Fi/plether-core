@@ -36,12 +36,12 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract KeeperFeeRefundTest is RecordedOrderReceipts {
 
-    MockUSDC usdc;
+    MockSettlementToken settlementToken;
     CfdEngine engine;
     HousePool pool;
     TrancheVault seniorVault;
@@ -69,7 +69,7 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
     function _settlementBalance(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.balanceUsdc(_accountOf(account));
+        return clearinghouse.balanceAssets(_accountOf(account));
     }
 
     receive() external payable {}
@@ -108,9 +108,9 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         address lp,
         uint256 amount
     ) internal {
-        usdc.mint(lp, amount);
+        settlementToken.mint(lp, amount);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
+        settlementToken.approve(address(juniorVault), amount);
         uint256 requestId = juniorVault.requestDeposit(amount, lp, lp);
         vm.stopPrank();
 
@@ -135,7 +135,7 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
             juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
-            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorExposureAssets: type(uint256).max - 1,
             maxSeniorShareBps: 9999
         });
         pool.proposePoolConfig(config);
@@ -145,8 +145,8 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
 
     function _bootstrapSeededLifecycle() internal {
         uint256 seedAmount = 1000e6;
-        usdc.mint(address(this), seedAmount * 2);
-        usdc.approve(address(pool), seedAmount * 2);
+        settlementToken.mint(address(this), seedAmount * 2);
+        settlementToken.approve(address(pool), seedAmount * 2);
         pool.initializeSeedPosition(false, seedAmount, address(this));
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
@@ -154,7 +154,7 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
 
     function setUp() public {
         vm.warp(1_709_532_000);
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 0,
@@ -163,22 +163,26 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 50);
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
+        engine = new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, params, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(CAP_PRICE))));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC", 0, address(0));
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC", 0, address(0));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        seniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), true, "Senior LP", "sAssets", 0, address(0)
+        );
+        juniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), false, "Junior LP", "jAssets", 0, address(0)
+        );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));
@@ -228,11 +232,11 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.minOpenNotionalAssets = router.minOpenNotionalAssets();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.minOpenOrderExecutionBountyAssets = router.minOpenOrderExecutionBountyAssets();
+        config.maxOpenOrderExecutionBountyAssets = router.maxOpenOrderExecutionBountyAssets();
+        config.positionProtectionTriggerBountyAssets = router.positionProtectionTriggerBountyAssets();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();
         config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
@@ -244,7 +248,7 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
 
         _fundJunior(bob, 1_000_000e6);
         assertEq(router.openOrderExecutionBountyBps(), 1);
-        assertEq(router.maxOpenOrderExecutionBountyUsdc(), 200_000);
+        assertEq(router.maxOpenOrderExecutionBountyAssets(), 200_000);
     }
 
     function test_ExpiredOrderCreditsClearerAndReleasesMargin() public {
@@ -265,8 +269,8 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         _depositTrader(50_000e6);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1.5e8, false);
-        uint256 cashBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 poolBefore = usdc.balanceOf(address(pool));
+        uint256 cashBefore = settlementToken.balanceOf(address(clearinghouse));
+        uint256 poolBefore = settlementToken.balanceOf(address(pool));
         uint256 treasuryBefore = _settlementBalance(engine.protocolTreasury());
         bytes[] memory priceData = _mockPythUpdateData();
         vm.prank(keeper);
@@ -276,8 +280,10 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         assertEq(
             _settlementBalance(engine.protocolTreasury()), treasuryBefore, "slippage bounty is not protocol revenue"
         );
-        assertEq(usdc.balanceOf(address(clearinghouse)), cashBefore, "slippage cleanup preserves physical custody");
-        assertEq(usdc.balanceOf(address(pool)), poolBefore, "rejected open cannot move pool cash");
+        assertEq(
+            settlementToken.balanceOf(address(clearinghouse)), cashBefore, "slippage cleanup preserves physical custody"
+        );
+        assertEq(settlementToken.balanceOf(address(pool)), poolBefore, "rejected open cannot move pool cash");
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 0, "rejected open cannot create a position");
         _assertTerminalCleanup(1, OrderV3Types.TerminalReason.Slippage, 200_000);
@@ -287,9 +293,9 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
     function test_CloseSlippageFailPaysFreeBackedBountyToKeeper() public {
         _startRecordingLogs();
         address account = alice;
-        usdc.mint(alice, 251_500_000);
+        settlementToken.mint(alice, 251_500_000);
         vm.startPrank(alice);
-        usdc.approve(address(clearinghouse), 251_500_000);
+        settlementToken.approve(address(clearinghouse), 251_500_000);
         clearinghouse.deposit(account, 251_500_000);
         vm.stopPrank();
 
@@ -298,7 +304,7 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         bytes[] memory openPrice = _mockPythUpdateData();
         router.executeOrder(1, openPrice);
 
-        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
+        uint256 freeSettlementBefore = clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets;
         assertEq(
             freeSettlementBefore, 1_300_000, "Setup should leave only partial free settlement before the close commit"
         );
@@ -306,8 +312,8 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0.8e8, true);
 
-        uint256 keeperUsdcBefore = _settlementBalance(keeper);
-        uint256 protocolFeesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 keeperAssetsBefore = _settlementBalance(keeper);
+        uint256 protocolFeesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         bytes[] memory closePrice = _mockPythUpdateData();
         vm.prank(keeper);
         router.executeOrder(2, closePrice);
@@ -315,16 +321,18 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 10_000e18, "Terminal slippage failure should leave the position open");
         assertEq(
-            _settlementBalance(keeper) - keeperUsdcBefore,
+            _settlementBalance(keeper) - keeperAssetsBefore,
             0,
             "Terminal close slippage should still pay the clearer through the carry-aware settlement path"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolFeesBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - protocolFeesBefore,
             0,
             "Terminal close slippage should not additionally route bounty value to protocol fees in this path"
         );
-        assertEq(usdc.balanceOf(alice), 0, "Trader wallet should not receive free-backed close bounty refunds");
+        assertEq(
+            settlementToken.balanceOf(alice), 0, "Trader wallet should not receive free-backed close bounty refunds"
+        );
         _assertTerminalCleanup(2, OrderV3Types.TerminalReason.Slippage, 0);
         _assertCleanupReplayRejected(2, false);
     }
@@ -336,9 +344,9 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
     function _depositTrader(
         uint256 amount
     ) internal {
-        usdc.mint(alice, amount);
+        settlementToken.mint(alice, amount);
         vm.startPrank(alice);
-        usdc.approve(address(clearinghouse), amount);
+        settlementToken.approve(address(clearinghouse), amount);
         clearinghouse.deposit(alice, amount);
         vm.stopPrank();
     }
@@ -354,10 +362,10 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
             vm.prank(alice);
             router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
         }
-        assertEq(router.getAccountReservations(alice).committedMarginUsdc, uint256(count) * 1000e6);
-        assertEq(router.getAccountReservations(alice).executionBountyUsdc, uint256(count) * 200_000);
-        uint256 cashBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 poolBefore = usdc.balanceOf(address(pool));
+        assertEq(router.getAccountReservations(alice).committedMarginAssets, uint256(count) * 1000e6);
+        assertEq(router.getAccountReservations(alice).executionBountyAssets, uint256(count) * 200_000);
+        uint256 cashBefore = settlementToken.balanceOf(address(clearinghouse));
+        uint256 poolBefore = settlementToken.balanceOf(address(pool));
         uint256 treasuryBefore = _settlementBalance(engine.protocolTreasury());
         uint256 parseCallsBefore = mockPyth.parseUniqueCallCount();
         vm.warp(block.timestamp + 301);
@@ -377,10 +385,20 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         );
         assertEq(_settlementBalance(keeper), uint256(count) * 200_000, "each expired order pays the clearer once");
         assertEq(_settlementBalance(engine.protocolTreasury()), treasuryBefore, "expiry does not fund protocol fees");
-        assertEq(usdc.balanceOf(address(clearinghouse)), cashBefore, "expiry only transfers internal cash ownership");
-        assertEq(usdc.balanceOf(address(pool)), poolBefore, "expiry does not route physical cash to the pool");
-        assertEq(usdc.balanceOf(alice), 0, "reservation release does not send USDC to the trader wallet");
-        assertEq(usdc.balanceOf(keeper), 0, "keeper entitlement remains in clearinghouse custody");
+        assertEq(
+            settlementToken.balanceOf(address(clearinghouse)),
+            cashBefore,
+            "expiry only transfers internal cash ownership"
+        );
+        assertEq(
+            settlementToken.balanceOf(address(pool)), poolBefore, "expiry does not route physical cash to the pool"
+        );
+        assertEq(
+            settlementToken.balanceOf(alice),
+            0,
+            "reservation release does not send settlementToken to the trader wallet"
+        );
+        assertEq(settlementToken.balanceOf(keeper), 0, "keeper entitlement remains in clearinghouse custody");
         assertEq(mockPyth.parseUniqueCallCount(), parseCallsBefore, "expiry bypasses historical oracle parsing");
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 0, "expired opens cannot create a position");
@@ -402,18 +420,18 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         assertEq(uint8(outcome.reason), uint8(reason));
         assertEq(
             uint8(outcome.bountyDisposition),
-            uint8(outcome.bountyUsdc == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
+            uint8(outcome.bountyAssets == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
         );
         assertEq(outcome.executor, keeper);
-        assertEq(outcome.bountyRecipient, outcome.bountyUsdc == 0 ? address(0) : keeper);
-        assertEq(outcome.bountyUsdc, expectedBounty, "stored bounty for the submitted action");
+        assertEq(outcome.bountyRecipient, outcome.bountyAssets == 0 ? address(0) : keeper);
+        assertEq(outcome.bountyAssets, expectedBounty, "stored bounty for the submitted action");
         assertEq(router.lifecycleBook().pendingIntent(id).account, address(0));
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(id);
-        assertEq(pending.committedMarginUsdc, 0);
-        assertEq(pending.executionBountyUsdc, 0);
+        assertEq(pending.committedMarginAssets, 0);
+        assertEq(pending.executionBountyAssets, 0);
         IOrderRouterAccounting.AccountReservationView memory reserves = router.getAccountReservations(alice);
-        assertEq(reserves.committedMarginUsdc, 0);
-        assertEq(reserves.executionBountyUsdc, 0);
+        assertEq(reserves.committedMarginAssets, 0);
+        assertEq(reserves.executionBountyAssets, 0);
         assertEq(reserves.pendingOrderCount, 0);
         assertEq(router.accountHeadOrderId(alice), 0);
         assertEq(router.nextExecuteId(), 0);

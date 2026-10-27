@@ -4,8 +4,8 @@ pragma solidity 0.8.35;
 /// @notice Input-only close ledger for the mixed campaign's fixed risk configuration.
 /// @dev Inputs describe custody AFTER the ordinary margin/free carry checkpoint and BEFORE the executing order's
 /// bounty is transferred. No production imports, observations, previews or event values enter this calculation.
-/// Lots are whole 100-token lots: lots * eight-decimal price is already six-decimal USDC atoms. The bounded fixture
-/// uses cap 2e8, execution fee 4 bps, frozen spread 50 bps and liquidation reserve 10 bps with a one-USDC floor.
+/// Lots are whole 100-token lots: lots * eight-decimal price is already six-decimal settlement token atoms. The bounded fixture
+/// uses cap 2e8, execution fee 4 bps, frozen spread 50 bps and liquidation reserve 10 bps with a one-settlement token floor.
 /// The caller supplies the independently selected live/FAD maintenance rate. Price settlement solves conservation
 /// and strict-health constraints; it does not assume that a partial close always releases its pro-rata pledge.
 /// This helper classifies Engine close settlement, not Router commitment admission or protected-bounty routing.

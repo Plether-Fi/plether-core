@@ -44,7 +44,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
 
         // Make the terminal action charge large enough to exhaust spendable action reserve and free settlement. This is separate from
         // the adverse price move: only the action slice may reach the queued committed-margin bucket.
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(account)
+        stdstore.target(address(engine)).sig("unsettledCarryAssets(address)").with_key(account)
             .checked_write(uint256(2500e6));
 
         CfdTypes.Order memory closeOrder = CfdTypes.Order({
@@ -59,30 +59,30 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
             isClose: true
         });
         CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
-        uint256 currentPoolDepthUsdc = pool.totalAssets();
+        uint256 currentPoolDepthAssets = pool.totalAssets();
         vm.prank(address(engine));
-        CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(account, currentPoolDepthUsdc);
+        CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(account, currentPoolDepthAssets);
         CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snap, closeOrder, 103_000_000);
 
-        uint256 committedBefore = clearinghouse.getLockedMarginBuckets(account).committedOrderMarginUsdc;
+        uint256 committedBefore = clearinghouse.getLockedMarginBuckets(account).committedOrderMarginAssets;
         assertTrue(delta.valid, "Terminal close plan should remain executable");
-        assertGt(delta.priceLossWrittenOffUsdc, 0, "Adverse price loss must exceed the isolated PnL pledge");
+        assertGt(delta.priceLossWrittenOffAssets, 0, "Adverse price loss must exceed the isolated PnL pledge");
         assertGt(
-            delta.actionCommittedMarginConsumedUsdc,
+            delta.actionCommittedMarginConsumedAssets,
             0,
             "Only the independently assessed terminal action charge should reach committed margin"
         );
         assertEq(
-            delta.priceLossUsdc,
-            delta.pricePnlClaimConsumedUsdc + delta.pricePnlPledgeConsumedUsdc + delta.priceLossWrittenOffUsdc,
+            delta.priceLossAssets,
+            delta.pricePnlClaimConsumedAssets + delta.pricePnlPledgeConsumedAssets + delta.priceLossWrittenOffAssets,
             "Price loss must conserve across claim, PnL pledge, and diagnostic write-off"
         );
 
         _close(account, CfdTypes.Side.LONG, 100_000 * 1e18, 103_000_000);
 
         assertEq(
-            committedBefore - clearinghouse.getLockedMarginBuckets(account).committedOrderMarginUsdc,
-            delta.actionCommittedMarginConsumedUsdc,
+            committedBefore - clearinghouse.getLockedMarginBuckets(account).committedOrderMarginAssets,
+            delta.actionCommittedMarginConsumedAssets,
             "Live FIFO consumption must equal the planned action-only committed-margin slice"
         );
         assertEq(
@@ -153,21 +153,21 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 31);
-        uint256 reserveBeforeFresh = clearinghouse.actionReserveUsdc(account);
+        uint256 reserveBeforeFresh = clearinghouse.actionReserveAssets(account);
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
         assertEq(
-            clearinghouse.actionReserveUsdc(account) - reserveBeforeFresh,
+            clearinghouse.actionReserveAssets(account) - reserveBeforeFresh,
             0,
             "fresh sidecar path must reserve the requested bounty"
         );
 
         vm.warp(block.timestamp + 30 days);
-        uint256 reserveBeforeStale = clearinghouse.actionReserveUsdc(account);
+        uint256 reserveBeforeStale = clearinghouse.actionReserveAssets(account);
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
         assertEq(
-            clearinghouse.actionReserveUsdc(account) - reserveBeforeStale,
+            clearinghouse.actionReserveAssets(account) - reserveBeforeStale,
             0,
             "stale sidecar path must reserve the requested bounty"
         );
@@ -206,21 +206,21 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
 
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+        IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
         assertEq(
-            buckets.otherLockedMarginUsdc,
-            4000e6 + _executionBountyReserve(1) + clearinghouse.liquidationReserveUsdc(account),
+            buckets.otherLockedMarginAssets,
+            4000e6 + _executionBountyReserve(1) + clearinghouse.liquidationReserveAssets(account),
             "Other locked value must include queued margin, execution bounty, and the dedicated liquidation reserve"
         );
         assertEq(
-            buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc,
-            buckets.settlementBalanceUsdc - buckets.otherLockedMarginUsdc,
+            buckets.freeSettlementAssets + buckets.activePositionMarginAssets,
+            buckets.settlementBalanceAssets - buckets.otherLockedMarginAssets,
             "Generic reachability must exclude the queued reservation"
         );
 
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
-        assertEq(clearinghouse.getAccountUsdcBuckets(account).otherLockedMarginUsdc, buckets.otherLockedMarginUsdc);
+        assertEq(clearinghouse.getAccountAssetBuckets(account).otherLockedMarginAssets, buckets.otherLockedMarginAssets);
     }
 
     function test_CheckWithdraw_RevertsWhenOpenPositionHasZeroMarkPrice() public {
@@ -249,24 +249,24 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         _ensureLaterOracleTime();
         vm.prank(address(router));
         engine.updateMarkPrice(102_000_000, uint64(vm.getBlockTimestamp()));
-        assertEq(engine.unsettledCarryUsdc(account), 0, "Fixture must isolate exact price risk from carry");
+        assertEq(engine.unsettledCarryAssets(account), 0, "Fixture must isolate exact price risk from carry");
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         vm.prank(address(clearinghouse));
         engine.checkWithdraw(account);
 
-        uint256 claimUsdc = 3000e6;
-        _seedAuthenticatedTraderClaim(account, claimUsdc);
+        uint256 claimAssets = 3000e6;
+        _seedAuthenticatedTraderClaim(account, claimAssets);
 
         vm.prank(address(clearinghouse));
         engine.checkWithdraw(account);
         assertEq(
-            engine.traderClaimBalanceUsdc(account),
-            claimUsdc,
+            engine.traderClaimBalanceAssets(account),
+            claimAssets,
             "Withdrawal validation may count the typed price claim but must not spend it"
         );
         assertGt(
-            engineAccountLens.getWithdrawableUsdc(account),
+            engineAccountLens.getWithdrawableAssets(account),
             0,
             "Claim-rescued exact price health should expose free cash"
         );
@@ -301,7 +301,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         params.maintMarginBps = 10;
         params.initMarginBps = 15;
         params.fadMarginBps = 1000;
-        params.minBountyUsdc = 1e6;
+        params.minBountyAssets = 1e6;
         params.bountyBps = 1000;
         _setRiskParams(params);
 
@@ -319,8 +319,8 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         engine.updateMarkPrice(1e8, fadTime);
         assertEq(engine.lastMarkTime(), fadTime, "FAD margin rejection must use a fresh FAD mark");
 
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
-        assertEq(withdrawableUsdc, 0, "Active FAD margin must remove all withdrawal headroom");
+        uint256 withdrawableAssets = engineAccountLens.getWithdrawableAssets(account);
+        assertEq(withdrawableAssets, 0, "Active FAD margin must remove all withdrawal headroom");
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         vm.prank(address(clearinghouse));
@@ -343,11 +343,11 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(103_000_000, uint64(vm.getBlockTimestamp()));
 
-        assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
+        assertEq(_freeSettlementAssets(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(account, size);
-        assertEq(clearinghouse.actionReserveUsdc(account), 0);
+        assertEq(clearinghouse.actionReserveAssets(account), 0);
     }
 
     function test_ReserveCloseOrderExecutionBounty_PartialCloseStillRevertsNearMaintenance() public {

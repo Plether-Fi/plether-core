@@ -32,9 +32,9 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _enterFrozenWindow();
 
         assertEq(seniorVault.maxRequestDeposit(entrant), 0, "frozen Senior entry capacity must be zero");
-        usdc.mint(entrant, assets);
+        settlementToken.mint(entrant, assets);
         vm.startPrank(entrant);
-        usdc.approve(address(seniorVault), assets);
+        settlementToken.approve(address(seniorVault), assets);
         vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
         seniorVault.requestDeposit(assets, entrant, entrant);
         vm.stopPrank();
@@ -49,7 +49,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _enterFrozenWindow();
 
         uint256 quotedAssets = juniorVault.estimateRedeemAssets(shares);
-        uint256 balanceBefore = usdc.balanceOf(incumbent);
+        uint256 balanceBefore = settlementToken.balanceOf(incumbent);
         uint256 requestId = _requestRedeem(juniorVault, incumbent, shares);
         _prepareFrozenEpoch(requestId);
         uint256 maturedEstimate = juniorVault.estimateRedeemAssets(shares);
@@ -68,7 +68,9 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertLe(redeemedAssets, quotedAssets, "Junior coupon funding may lower the nonbinding exit estimate");
         assertLt(redeemedAssets, noFeeAssets, "Frozen junior redeem should pay fewer assets than no-fee pricing");
         assertEq(
-            usdc.balanceOf(incumbent), balanceBefore + redeemedAssets, "Redeem claim should transfer the funded assets"
+            settlementToken.balanceOf(incumbent),
+            balanceBefore + redeemedAssets,
+            "Redeem claim should transfer the funded assets"
         );
         assertGt(
             juniorPriceAfter,
@@ -161,11 +163,15 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         _enterFrozenWindow();
 
         uint256 quotedShares = juniorVault.estimateWithdrawShares(netAssets);
-        uint256 balanceBefore = usdc.balanceOf(lp);
+        uint256 balanceBefore = settlementToken.balanceOf(lp);
         uint256 consumedShares = _asyncWithdraw(juniorVault, lp, netAssets, quotedShares + 1e9);
 
         assertGe(consumedShares, quotedShares, "Delayed withdrawal may consume more shares after junior coupon funding");
-        assertEq(usdc.balanceOf(lp), balanceBefore + netAssets, "Withdraw claim should transfer the requested assets");
+        assertEq(
+            settlementToken.balanceOf(lp),
+            balanceBefore + netAssets,
+            "Withdraw claim should transfer the requested assets"
+        );
     }
 
     function test_GovernedFrozenFeeUpdate_FlowsThroughFrozenExitPricing() public {
@@ -261,10 +267,14 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertEq(quotedAssets, result.seniorFundedAssets, "maxWithdraw should expose funded claim escrow");
         assertLe(quotedAssets, expectedAssets, "Settled assets must respect both owner value and the pool budget");
 
-        uint256 balanceBefore = usdc.balanceOf(lp);
+        uint256 balanceBefore = settlementToken.balanceOf(lp);
         vm.prank(lp);
         seniorVault.withdraw(quotedAssets, lp, lp);
-        assertEq(usdc.balanceOf(lp), balanceBefore + quotedAssets, "Withdraw should claim the quoted funded assets");
+        assertEq(
+            settlementToken.balanceOf(lp),
+            balanceBefore + quotedAssets,
+            "Withdraw should claim the quoted funded assets"
+        );
     }
 
     function test_FrozenWindow_MaxRedeem_ExposesSettledFundedShares() public {
@@ -288,11 +298,15 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
             result.juniorFundedAssets, expectedAssetCap, "Funded redeem assets must respect the frozen pool budget"
         );
 
-        uint256 balanceBefore = usdc.balanceOf(lp);
+        uint256 balanceBefore = settlementToken.balanceOf(lp);
         vm.prank(lp);
         uint256 redeemedAssets = juniorVault.redeem(quotedShares, lp, lp);
         assertEq(redeemedAssets, result.juniorFundedAssets, "Redeem should consume the funded epoch payout");
-        assertEq(usdc.balanceOf(lp), balanceBefore + redeemedAssets, "Redeem should claim the quoted funded assets");
+        assertEq(
+            settlementToken.balanceOf(lp),
+            balanceBefore + redeemedAssets,
+            "Redeem should claim the quoted funded assets"
+        );
     }
 
     function _requestRedeem(

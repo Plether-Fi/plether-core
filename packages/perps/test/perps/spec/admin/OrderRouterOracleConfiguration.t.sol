@@ -329,16 +329,16 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
         request.bounds.executionWindowSeconds = 60;
         request.bounds.allowedExecutionModes = 7;
         request.bounds.expectedConfigHash = book.currentExecutionConfigHash();
-        request.bounds.maxExecutionBountyUsdc = type(uint256).max;
-        request.bounds.maxExecutionNotionalUsdc = type(uint256).max;
-        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
-        request.bounds.maxActionChargeUsdc = type(uint256).max;
-        request.bounds.maxExplicitFeesUsdc = type(uint256).max;
+        request.bounds.maxExecutionBountyAssets = type(uint256).max;
+        request.bounds.maxExecutionNotionalAssets = type(uint256).max;
+        request.bounds.maxGrossAccountDebitAssets = type(uint256).max;
+        request.bounds.maxActionChargeAssets = type(uint256).max;
+        request.bounds.maxExplicitFeesAssets = type(uint256).max;
         request.bounds.maxPostPositionSize = type(uint256).max;
         request.bounds.maxPostLeverageBps = type(uint32).max;
         vm.prank(alice);
         uint64 orderId = router.commitOrder(request);
-        uint256 bounty = book.pendingIntent(orderId).executionBountyUsdc;
+        uint256 bounty = book.pendingIntent(orderId).executionBountyAssets;
         uint256 keeperBefore = _settlementBalance(bob);
         uint256 updatesBefore = mockPyth.updatePriceFeedsCallCount();
         uint256 parsesBefore = mockPyth.parseUniqueCallCount();
@@ -367,7 +367,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
         assertEq(uint8(outcome.priceSource), uint8(OrderV3Types.PriceSource.None));
         assertEq(outcome.executionPrice, 0);
         assertEq(outcome.executor, bob);
-        assertEq(outcome.bountyUsdc, bounty);
+        assertEq(outcome.bountyAssets, bounty);
     }
 
     function _newOracle() private returns (PletherOracle) {

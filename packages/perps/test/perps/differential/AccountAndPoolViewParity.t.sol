@@ -24,7 +24,7 @@ contract ProjectedCarryHealthTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -36,27 +36,27 @@ contract ProjectedCarryHealthTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 50_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
-        uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(account);
+        uint256 pledgeBefore = clearinghouse.pnlPledgeAssets(account);
         vm.warp(block.timestamp + 30 days);
         AccountLensViewTypes.AccountLedgerSnapshot memory ledger = engineAccountLens.getAccountLedgerSnapshot(account);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1e8);
-        assertEq(ledger.unrealizedPnlUsdc, 0, "Same-price fixture isolates carry");
-        assertGt(ledger.netEquityUsdc, 0, "Pledge must fully cover this carry interval");
-        assertLt(uint256(ledger.netEquityUsdc), pledgeBefore, "Elapsed carry must reduce projected risk equity");
-        assertEq(ledger.netEquityUsdc, preview.equityUsdc, "Health views use the same carry projection");
+        assertEq(ledger.unrealizedPnlAssets, 0, "Same-price fixture isolates carry");
+        assertGt(ledger.netEquityAssets, 0, "Pledge must fully cover this carry interval");
+        assertLt(uint256(ledger.netEquityAssets), pledgeBefore, "Elapsed carry must reduce projected risk equity");
+        assertEq(ledger.netEquityAssets, preview.equityAssets, "Health views use the same carry projection");
         assertEq(ledger.liquidatable, preview.liquidatable);
-        assertEq(clearinghouse.pnlPledgeUsdc(account), pledgeBefore, "Reading health must not realize carry");
+        assertEq(clearinghouse.pnlPledgeAssets(account), pledgeBefore, "Reading health must not realize carry");
         uint256 poolBefore = pool.totalAssets();
         _fundTrader(account, 1);
         assertEq(
-            clearinghouse.pnlPledgeUsdc(account),
-            uint256(ledger.netEquityUsdc),
+            clearinghouse.pnlPledgeAssets(account),
+            uint256(ledger.netEquityAssets),
             "Checkpoint applies the projected pledge debit"
         );
-        assertEq(pool.totalAssets() - poolBefore, pledgeBefore - uint256(ledger.netEquityUsdc));
+        assertEq(pool.totalAssets() - poolBefore, pledgeBefore - uint256(ledger.netEquityAssets));
         assertEq(
-            engineLens.previewLiquidation(account, 1e8).equityUsdc,
-            preview.equityUsdc,
+            engineLens.previewLiquidation(account, 1e8).equityAssets,
+            preview.equityAssets,
             "Checkpoint must not charge carry twice"
         );
     }
@@ -81,7 +81,7 @@ contract WithdrawalCapacityLivenessTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -124,27 +124,27 @@ contract GrossCashAssetBoundaryTest is BasePerpTest {
         _fundTrader(trader, 50_000e6);
         _open(traderAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
-        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 fees = clearinghouse.balanceAssets(engine.protocolTreasury());
         assertGt(fees, 0, "Setup must accrue protocol fees");
 
         uint256 actualCash = 10_000_000;
         uint256 burnAmount = pool.totalAssets() - actualCash;
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), burnAmount);
+        settlementToken.transfer(address(0xDEAD), burnAmount);
 
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot = harness.buildWithdrawal(snapshot);
         harness.buildReconcile(snapshot);
 
-        assertEq(snapshot.netPhysicalAssetsUsdc, actualCash, "Treasury fees cannot erase remaining pool cash");
+        assertEq(snapshot.netPhysicalAssets, actualCash, "Treasury fees cannot erase remaining pool cash");
         assertEq(pool.totalAssets(), actualCash, "Test must leave the pool with less cash than the fee ledger");
         assertLe(
             withdrawalSnapshot.physicalAssets,
             pool.totalAssets(),
             "Withdrawal snapshot gross assets must not exceed actual cash"
         );
-        assertLe(snapshot.physicalAssetsUsdc, pool.totalAssets(), "Reconcile input must not exceed actual cash");
+        assertLe(snapshot.physicalAssets, pool.totalAssets(), "Reconcile input must not exceed actual cash");
     }
 
 }

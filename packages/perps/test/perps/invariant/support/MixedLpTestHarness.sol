@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {PerpMixedAccountingHandler} from "../handlers/PerpMixedAccountingHandler.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
@@ -8,13 +9,12 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 /// @dev Fixed environmental inputs for constrained-liquidity histories; no observed production state feeds the model.
 contract MixedLpTestHarness is PerpMixedAccountingHandler {
 
     constructor(
-        MockUSDC usdc_,
+        MockSettlementToken settlementToken_,
         MockPyth pyth_,
         CfdEngine engine_,
         MarginClearinghouse clearinghouse_,
@@ -23,7 +23,11 @@ contract MixedLpTestHarness is PerpMixedAccountingHandler {
         TrancheVault senior_,
         OrderRouter router_,
         address owner_
-    ) PerpMixedAccountingHandler(usdc_, pyth_, engine_, clearinghouse_, pool_, junior_, senior_, router_, owner_) {}
+    )
+        PerpMixedAccountingHandler(
+            settlementToken_, pyth_, engine_, clearinghouse_, pool_, junior_, senior_, router_, owner_
+        )
+    {}
 
     /// @dev Deterministic admission probe, outside the generated positive-size action domain.
     function rejectZeroSizeClose(
@@ -40,11 +44,11 @@ contract MixedLpTestHarness is PerpMixedAccountingHandler {
         carry.advance(vm.getBlockTimestamp());
         if (nextCash < expectedPoolCash) {
             uint256 removed = expectedPoolCash - nextCash;
-            usdc.burn(address(pool), removed);
+            settlementToken.burn(address(pool), removed);
             externalShockOut += removed;
         } else {
             uint256 added = nextCash - expectedPoolCash;
-            usdc.mint(address(pool), added);
+            settlementToken.mint(address(pool), added);
             externalShockIn += added;
         }
         expectedPoolCash = nextCash;

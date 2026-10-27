@@ -48,22 +48,22 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
             executor,
             executionPrice,
             IHousePool(engine.pool()).totalAssets(),
-            pending.executionBountyUsdc
+            pending.executionBountyAssets
         );
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
-            _buildRawSnapshot(engine, planner, order.account, context.poolDepthUsdc, context.poolDepthUsdc);
+            _buildRawSnapshot(engine, planner, order.account, context.poolDepthAssets, context.poolDepthAssets);
         // Execution releases this order's classification before assessment. A public read projects the same
         // release; a call inside execution observes zero and does not release it twice.
-        uint256 release = viewOrder.committedMarginUsdc;
-        snapshot.lockedBuckets.committedOrderMarginUsdc -= release;
-        snapshot.lockedBuckets.totalLockedMarginUsdc -= release;
-        snapshot.accountBuckets.otherLockedMarginUsdc -= release;
-        snapshot.accountBuckets.totalLockedMarginUsdc -= release;
-        snapshot.accountBuckets.freeSettlementUsdc += release;
+        uint256 release = viewOrder.committedMarginAssets;
+        snapshot.lockedBuckets.committedOrderMarginAssets -= release;
+        snapshot.lockedBuckets.totalLockedMarginAssets -= release;
+        snapshot.accountBuckets.otherLockedMarginAssets -= release;
+        snapshot.accountBuckets.totalLockedMarginAssets -= release;
+        snapshot.accountBuckets.freeSettlementAssets += release;
         assessment = _assessSnapshot(context, order, pending.bounds, planner, snapshot);
         if (order.isClose) {
-            _includeCommitment(assessment, pending.commitment, pending.bounds, pending.executionBountyUsdc);
+            _includeCommitment(assessment, pending.commitment, pending.bounds, pending.executionBountyAssets);
         }
     }
 
@@ -91,16 +91,16 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         CfdTypes.Order calldata order,
         address executor,
         uint256 currentOraclePrice,
-        uint256 poolDepthUsdc,
+        uint256 poolDepthAssets,
         OrderV3Types.ExecutionBounds calldata bounds,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) external view returns (OrderV3Types.ExecutionAssessment memory assessment) {
         AssessmentContext memory context;
         context.engineAddress = engineAddress;
         context.executor = executor;
         context.currentOraclePrice = currentOraclePrice;
-        context.poolDepthUsdc = poolDepthUsdc;
-        context.executionBountyUsdc = executionBountyUsdc;
+        context.poolDepthAssets = poolDepthAssets;
+        context.executionBountyAssets = executionBountyAssets;
         return _assessOrder(context, order, bounds);
     }
 
@@ -109,12 +109,12 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         CfdEnginePlanTypes.RawSnapshot calldata snapshot,
         CfdEnginePlanTypes.OpenDelta calldata delta,
         OrderV3Types.ExecutionBounds calldata bounds,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) external pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         CfdEnginePlanTypes.RawSnapshot memory snapshotCopy = snapshot;
         CfdEnginePlanTypes.OpenDelta memory deltaCopy = delta;
         OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
-        return _evaluateOpen(snapshotCopy, deltaCopy, boundsCopy, executionBountyUsdc, false);
+        return _evaluateOpen(snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false);
     }
 
     /// @inheritdoc ICfdOrderPolicyEvaluator
@@ -122,12 +122,12 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         CfdEnginePlanTypes.RawSnapshot calldata snapshot,
         CfdEnginePlanTypes.CloseDelta calldata delta,
         OrderV3Types.ExecutionBounds calldata bounds,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) external pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         CfdEnginePlanTypes.RawSnapshot memory snapshotCopy = snapshot;
         CfdEnginePlanTypes.CloseDelta memory deltaCopy = delta;
         OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
-        return _evaluateClose(snapshotCopy, deltaCopy, boundsCopy, executionBountyUsdc, false);
+        return _evaluateClose(snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false);
     }
 
 }

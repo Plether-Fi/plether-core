@@ -39,7 +39,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
             initMarginBps: 150,
             fadMarginBps: 300,
             baseCarryBps: 0,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -52,20 +52,20 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
 
         ICfdEngineTypes.TerminalNavSnapshot memory snapshot = engine.terminalNavSnapshot();
         ITerminalNavBookV2.BookState memory bookState = terminalNavBook.bookState();
-        int256 directBookValue = terminalNavBook.terminalLpPriceDeltaUsdcAtoms(snapshot.markPrice);
+        int256 directBookValue = terminalNavBook.terminalLpPriceDeltaAssetAtoms(snapshot.markPrice);
 
         assertEq(snapshot.markPrice, MARK_PRICE, "snapshot must authenticate the fixed close mark");
         assertEq(snapshot.markTime, block.timestamp, "snapshot must authenticate the mark publish time");
         assertEq(snapshot.bookVersion, bookState.bookVersion, "snapshot must authenticate the exact book version");
-        assertEq(snapshot.terminalLpPriceDeltaUsdc, directBookValue, "Engine snapshot must equal its bound book");
-        assertEq(snapshot.terminalLpPriceDeltaUsdc, -int256(20_000e6), "book must preserve exact marked price PnL");
+        assertEq(snapshot.terminalLpPriceDeltaAssets, directBookValue, "Engine snapshot must equal its bound book");
+        assertEq(snapshot.terminalLpPriceDeltaAssets, -int256(20_000e6), "book must preserve exact marked price PnL");
         assertTrue(snapshot.hasOpenPositions, "open book must be reported by the authenticated snapshot");
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(TRADER, POSITION_SIZE, MARK_PRICE);
         assertTrue(preview.valid, "fixed-mark full close must be valid");
         assertEq(
-            snapshot.terminalLpPriceDeltaUsdc,
-            -preview.realizedPnlUsdc,
+            snapshot.terminalLpPriceDeltaAssets,
+            -preview.realizedPnlAssets,
             "terminal LP delta must be the inverse of the actual close price PnL"
         );
 
@@ -77,11 +77,11 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         ICfdEngineTypes.TerminalNavSnapshot memory afterClose = engine.terminalNavSnapshot();
         ITerminalNavBookV2.BookState memory afterBookState = terminalNavBook.bookState();
         assertFalse(afterClose.hasOpenPositions, "full close must remove the final live curve");
-        assertEq(afterClose.terminalLpPriceDeltaUsdc, 0, "closed price PnL must not survive as unrealized NAV");
+        assertEq(afterClose.terminalLpPriceDeltaAssets, 0, "closed price PnL must not survive as unrealized NAV");
         assertEq(terminalNavBook.curveHashOf(TRADER), bytes32(0), "closed account curve must be removed");
         assertEq(afterBookState.activeCurveCount, 0, "book must contain no active curves after the full close");
         assertEq(afterBookState.totalLots, 0, "book lots must return to zero after the full close");
-        assertEq(afterBookState.totalEntryCostUsdcAtoms, 0, "book basis must return to zero after the full close");
+        assertEq(afterBookState.totalEntryCostAssetAtoms, 0, "book basis must return to zero after the full close");
     }
 
     function test_PartialCloseCashPayoutAndDeferredClaimPreserveCurveThroughClaimSettlement() public {
@@ -92,36 +92,36 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory liquidPreview =
             engineLens.previewClose(TRADER, HALF_POSITION_SIZE, MARK_PRICE);
         assertTrue(liquidPreview.valid, "liquid partial close must be valid");
-        assertGt(liquidPreview.immediatePayoutUsdc, 0, "liquid branch must pay fresh price gain immediately");
-        assertEq(liquidPreview.traderClaimBalanceUsdc, 0, "liquid branch must not leave a trader claim");
+        assertGt(liquidPreview.immediatePayoutAssets, 0, "liquid branch must pay fresh price gain immediately");
+        assertEq(liquidPreview.traderClaimBalanceAssets, 0, "liquid branch must not leave a trader claim");
         _close(TRADER, CfdTypes.Side.LONG, HALF_POSITION_SIZE, MARK_PRICE);
 
         CurveObservation memory liquidCurve = _observeCurve(TRADER);
-        uint256 liquidPledge = clearinghouse.pnlPledgeUsdc(TRADER);
-        uint256 liquidClaim = engine.traderClaimBalanceUsdc(TRADER);
+        uint256 liquidPledge = clearinghouse.pnlPledgeAssets(TRADER);
+        uint256 liquidClaim = engine.traderClaimBalanceAssets(TRADER);
         assertEq(liquidCurve.valueAtMark, -int256(10_000e6), "remaining half must retain exact marked price PnL");
 
         vm.revertToState(branchPoint);
 
-        uint256 removedPoolCash = usdc.balanceOf(address(pool));
-        usdc.burn(address(pool), removedPoolCash);
+        uint256 removedPoolCash = settlementToken.balanceOf(address(pool));
+        settlementToken.burn(address(pool), removedPoolCash);
         ICfdEngineTypes.ClosePreview memory deferredPreview =
             engineLens.previewClose(TRADER, HALF_POSITION_SIZE, MARK_PRICE);
         assertTrue(deferredPreview.valid, "illiquid partial close must remain valid");
-        assertEq(deferredPreview.immediatePayoutUsdc, 0, "illiquid branch must not manufacture cash payout");
+        assertEq(deferredPreview.immediatePayoutAssets, 0, "illiquid branch must not manufacture cash payout");
         assertEq(
-            deferredPreview.freshTraderPayoutUsdc,
-            liquidPreview.freshTraderPayoutUsdc,
+            deferredPreview.freshTraderPayoutAssets,
+            liquidPreview.freshTraderPayoutAssets,
             "cash availability must not change the fresh price-gain entitlement"
         );
         _close(TRADER, CfdTypes.Side.LONG, HALF_POSITION_SIZE, MARK_PRICE);
 
         CurveObservation memory deferredCurve = _observeCurve(TRADER);
-        uint256 deferredPledge = clearinghouse.pnlPledgeUsdc(TRADER);
-        uint256 deferredClaim = engine.traderClaimBalanceUsdc(TRADER);
+        uint256 deferredPledge = clearinghouse.pnlPledgeAssets(TRADER);
+        uint256 deferredClaim = engine.traderClaimBalanceAssets(TRADER);
         assertEq(
             deferredClaim,
-            deferredPreview.freshTraderPayoutUsdc,
+            deferredPreview.freshTraderPayoutAssets,
             "unfunded fresh payout must become exactly one senior trader claim"
         );
         assertEq(
@@ -131,18 +131,18 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         );
         _assertSameCurve(liquidCurve, deferredCurve, "partial payout mode must not change the remaining terminal curve");
 
-        usdc.mint(address(pool), removedPoolCash);
+        settlementToken.mint(address(pool), removedPoolCash);
         bytes32 hashBeforeClaimSettlement = terminalNavBook.curveHashOf(TRADER);
         uint64 versionBeforeClaimSettlement = terminalNavBook.bookState().bookVersion;
-        uint256 pledgeBeforeClaimSettlement = clearinghouse.pnlPledgeUsdc(TRADER);
+        uint256 pledgeBeforeClaimSettlement = clearinghouse.pnlPledgeAssets(TRADER);
 
         vm.prank(TRADER);
         engine.settleTraderClaim(TRADER);
 
         CurveObservation memory settledCurve = _observeCurve(TRADER);
-        assertEq(engine.traderClaimBalanceUsdc(TRADER), 0, "claim settlement must consume the recorded liability");
+        assertEq(engine.traderClaimBalanceAssets(TRADER), 0, "claim settlement must consume the recorded liability");
         assertEq(
-            clearinghouse.pnlPledgeUsdc(TRADER),
+            clearinghouse.pnlPledgeAssets(TRADER),
             pledgeBeforeClaimSettlement + deferredClaim,
             "paid claim on a live position must become PnL pledge"
         );
@@ -158,31 +158,31 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     }
 
     function test_LiveClaimSettlementSynchronizesMarginAndBorrowCachesAndAllowsClose() public {
-        uint256 settledClaimUsdc = _settleDeferredClaimOnLivePosition();
+        uint256 settledClaimAssets = _settleDeferredClaimOnLivePosition();
 
-        (uint256 remainingSize,, uint256 remainingEntryPrice, uint256 remainingMaxProfitUsdc,,,) =
+        (uint256 remainingSize,, uint256 remainingEntryPrice, uint256 remainingMaxProfitAssets,,,) =
             engine.positions(TRADER);
-        uint256 livePledgeUsdc = clearinghouse.pnlPledgeUsdc(TRADER);
-        uint256 expectedBorrowBaseUsdc =
-            remainingMaxProfitUsdc > livePledgeUsdc ? remainingMaxProfitUsdc - livePledgeUsdc : 0;
-        (uint256 positionBorrowBaseUsdc,,) = engine.positionCarryState(TRADER);
+        uint256 livePledgeAssets = clearinghouse.pnlPledgeAssets(TRADER);
+        uint256 expectedBorrowBaseAssets =
+            remainingMaxProfitAssets > livePledgeAssets ? remainingMaxProfitAssets - livePledgeAssets : 0;
+        (uint256 positionBorrowBaseAssets,,) = engine.positionCarryState(TRADER);
 
-        assertGt(settledClaimUsdc, 0, "setup must service a nonzero deferred claim");
+        assertGt(settledClaimAssets, 0, "setup must service a nonzero deferred claim");
         assertEq(remainingSize, HALF_POSITION_SIZE, "claim settlement must leave the live position open");
         assertEq(remainingEntryPrice, ENTRY_PRICE, "claim settlement must not change the remaining entry price");
         assertEq(
             _sideTotalMargin(CfdTypes.Side.LONG),
-            livePledgeUsdc,
+            livePledgeAssets,
             "side total margin must include claim value converted into live PnL pledge"
         );
         assertEq(
-            positionBorrowBaseUsdc,
-            expectedBorrowBaseUsdc,
+            positionBorrowBaseAssets,
+            expectedBorrowBaseAssets,
             "position borrow base must be recomputed from the increased live PnL pledge"
         );
         assertEq(
-            engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.LONG)),
-            expectedBorrowBaseUsdc,
+            engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.LONG)),
+            expectedBorrowBaseAssets,
             "single-position side borrow base must match its recomputed position borrow base"
         );
 
@@ -193,7 +193,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         (uint256 sizeAfter,,,,,,) = engine.positions(TRADER);
         assertEq(sizeAfter, 0, "full close after claim settlement must remove the position");
         assertEq(_sideTotalMargin(CfdTypes.Side.LONG), 0, "full close must clear side margin");
-        assertEq(engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.LONG)), 0, "full close must clear side borrow base");
+        assertEq(engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.LONG)), 0, "full close must clear side borrow base");
     }
 
     function test_LiveClaimSettlementSynchronizesCachesAndAllowsLiquidation() public {
@@ -203,16 +203,18 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(TRADER, liquidationPrice);
         assertTrue(preview.liquidatable, "setup must make the post-settlement live position liquidatable at the cap");
 
-        uint256 poolDepthUsdc = pool.totalAssets();
+        uint256 poolDepthAssets = pool.totalAssets();
         _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.liquidatePosition(TRADER, liquidationPrice, poolDepthUsdc, uint64(vm.getBlockTimestamp()), address(this));
+        engine.liquidatePosition(
+            TRADER, liquidationPrice, poolDepthAssets, uint64(vm.getBlockTimestamp()), address(this)
+        );
 
         (uint256 sizeAfter,,,,,,) = engine.positions(TRADER);
         assertEq(sizeAfter, 0, "liquidation after claim settlement must remove the position");
         assertEq(_sideTotalMargin(CfdTypes.Side.LONG), 0, "liquidation must clear side margin without underflow");
         assertEq(
-            engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.LONG)),
+            engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.LONG)),
             0,
             "liquidation must clear side borrow base without underflow"
         );
@@ -225,7 +227,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
 
         {
             ICfdEngineTypes.TerminalNavSnapshot memory initialSnapshot = engine.terminalNavSnapshot();
-            assertLt(initialSnapshot.terminalLpPriceDeltaUsdc, 0, "setup requires a live trader-profit liability");
+            assertLt(initialSnapshot.terminalLpPriceDeltaAssets, 0, "setup requires a live trader-profit liability");
         }
 
         uint256 depositAssets = 25_000e6;
@@ -282,8 +284,8 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
 
         ICfdEngineTypes.TerminalNavSnapshot memory afterSettlement = engine.terminalNavSnapshot();
         assertEq(
-            afterSettlement.terminalLpPriceDeltaUsdc,
-            pricingSnapshot.terminalLpPriceDeltaUsdc,
+            afterSettlement.terminalLpPriceDeltaAssets,
+            pricingSnapshot.terminalLpPriceDeltaAssets,
             "LP queue settlement must not mutate the live position's terminal delta"
         );
         assertEq(
@@ -296,13 +298,13 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     function test_EngineRejectsStaleCurveInsteadOfHealingUnsynchronizedPnlPledge() public {
         _openWinningLongPosition();
         bytes32 committedHash = terminalNavBook.curveHashOf(TRADER);
-        uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(TRADER);
+        uint256 pledgeBefore = clearinghouse.pnlPledgeAssets(TRADER);
 
         // Model a cross-contract accounting defect: the clearinghouse cap changes without the Engine book mutation.
         vm.prank(address(engine));
         clearinghouse.creditPnlPledge(TRADER, 1);
 
-        assertEq(clearinghouse.pnlPledgeUsdc(TRADER), pledgeBefore + 1, "setup must diverge semantic cap state");
+        assertEq(clearinghouse.pnlPledgeAssets(TRADER), pledgeBefore + 1, "setup must diverge semantic cap state");
         assertEq(terminalNavBook.curveHashOf(TRADER), committedHash, "setup must leave the stale commitment untouched");
 
         vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__TerminalNavBookHashMismatch.selector);
@@ -321,7 +323,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
 
         // Model an Engine accounting defect after canonical synchronization: erase the packed lots and entry-cost
         // slot without touching the book, leaving the previously valid curve orphaned.
-        uint256 packedPositionSlot = stdstore.target(address(engine)).sig("positionEntryCostUsdcAtoms(address)")
+        uint256 packedPositionSlot = stdstore.target(address(engine)).sig("positionEntryCostAssetAtoms(address)")
             .with_key(DEPOSITOR).enable_packed_slots().find();
         vm.store(address(engine), bytes32(packedPositionSlot), bytes32(0));
 
@@ -346,7 +348,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         uint256 liquidationPrice = 101_000_000;
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(TRADER, liquidationPrice);
         assertTrue(preview.liquidatable, "setup must make the target liquidatable");
-        assertGt(preview.keeperBountyUsdc, 0, "setup must credit a nonzero keeper bounty");
+        assertGt(preview.keeperBountyAssets, 0, "setup must credit a nonzero keeper bounty");
 
         bytes32 targetHashBefore = terminalNavBook.curveHashOf(TRADER);
         bytes32 keeperHashBefore = terminalNavBook.curveHashOf(KEEPER);
@@ -357,10 +359,10 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         vm.expectCall(
             address(terminalNavBook), abi.encodeCall(ITerminalNavBookV2.syncFromEngine, (KEEPER, keeperHashBefore))
         );
-        uint256 poolDepthUsdc = pool.totalAssets();
+        uint256 poolDepthAssets = pool.totalAssets();
         _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.liquidatePosition(TRADER, liquidationPrice, poolDepthUsdc, uint64(vm.getBlockTimestamp()), KEEPER);
+        engine.liquidatePosition(TRADER, liquidationPrice, poolDepthAssets, uint64(vm.getBlockTimestamp()), KEEPER);
 
         (uint256 targetSizeAfter,,,,,,) = engine.positions(TRADER);
         (uint256 keeperSizeAfter,,,,,,) = engine.positions(KEEPER);
@@ -417,25 +419,25 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         _open(TRADER, CfdTypes.Side.LONG, POSITION_SIZE, 40_000e6, ENTRY_PRICE);
     }
 
-    function _settleDeferredClaimOnLivePosition() private returns (uint256 claimAmountUsdc) {
+    function _settleDeferredClaimOnLivePosition() private returns (uint256 claimAmountAssets) {
         _openWinningLongPosition();
         _refreshMark(MARK_PRICE);
 
-        uint256 removedPoolCash = usdc.balanceOf(address(pool));
-        usdc.burn(address(pool), removedPoolCash);
+        uint256 removedPoolCash = settlementToken.balanceOf(address(pool));
+        settlementToken.burn(address(pool), removedPoolCash);
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(TRADER, HALF_POSITION_SIZE, MARK_PRICE);
         assertTrue(preview.valid, "illiquid partial-close setup must be valid");
-        assertGt(preview.freshTraderPayoutUsdc, 0, "setup must create a fresh trader entitlement");
-        assertEq(preview.immediatePayoutUsdc, 0, "empty pool must defer the fresh payout");
+        assertGt(preview.freshTraderPayoutAssets, 0, "setup must create a fresh trader entitlement");
+        assertEq(preview.immediatePayoutAssets, 0, "empty pool must defer the fresh payout");
 
         _close(TRADER, CfdTypes.Side.LONG, HALF_POSITION_SIZE, MARK_PRICE);
-        claimAmountUsdc = engine.traderClaimBalanceUsdc(TRADER);
-        assertEq(claimAmountUsdc, preview.freshTraderPayoutUsdc, "fresh payout must become the deferred claim");
+        claimAmountAssets = engine.traderClaimBalanceAssets(TRADER);
+        assertEq(claimAmountAssets, preview.freshTraderPayoutAssets, "fresh payout must become the deferred claim");
 
-        usdc.mint(address(pool), removedPoolCash);
+        settlementToken.mint(address(pool), removedPoolCash);
         vm.prank(TRADER);
         engine.settleTraderClaim(TRADER);
-        assertEq(engine.traderClaimBalanceUsdc(TRADER), 0, "claim settlement must consume the deferred liability");
+        assertEq(engine.traderClaimBalanceAssets(TRADER), 0, "claim settlement must consume the deferred liability");
     }
 
     function _refreshMark(
@@ -454,9 +456,9 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         observed.curve = terminalNavBook.curveOf(account);
         observed.curveHash = terminalNavBook.curveHashOf(account);
         observed.bookVersion = terminalNavBook.bookState().bookVersion;
-        observed.valueAtZero = terminalNavBook.terminalLpPriceDeltaUsdcAtoms(0);
-        observed.valueAtMark = terminalNavBook.terminalLpPriceDeltaUsdcAtoms(MARK_PRICE);
-        observed.valueAtCap = terminalNavBook.terminalLpPriceDeltaUsdcAtoms(uint32(CAP_PRICE));
+        observed.valueAtZero = terminalNavBook.terminalLpPriceDeltaAssetAtoms(0);
+        observed.valueAtMark = terminalNavBook.terminalLpPriceDeltaAssetAtoms(MARK_PRICE);
+        observed.valueAtCap = terminalNavBook.terminalLpPriceDeltaAssetAtoms(uint32(CAP_PRICE));
     }
 
     function _engineStateHash(
@@ -472,23 +474,24 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
             uint256 size,
             uint256 margin,
             uint256 entryPrice,
-            uint256 maxProfitUsdc,
+            uint256 maxProfitAssets,
             CfdTypes.Side side,
             uint64 lastUpdateTime,
             int256 vpiAccrued
         ) = engine.positions(account);
-        bytes32 economicsHash = keccak256(abi.encode(size, margin, entryPrice, maxProfitUsdc));
+        bytes32 economicsHash = keccak256(abi.encode(size, margin, entryPrice, maxProfitAssets));
         stateHash = keccak256(
-            abi.encode(economicsHash, side, lastUpdateTime, vpiAccrued, engine.positionEntryCostUsdcAtoms(account))
+            abi.encode(economicsHash, side, lastUpdateTime, vpiAccrued, engine.positionEntryCostAssetAtoms(account))
         );
     }
 
     function _carryStateHash(
         address account
     ) private view returns (bytes32 stateHash) {
-        (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp) = engine.positionCarryState(account);
+        (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp) =
+            engine.positionCarryState(account);
         stateHash = keccak256(
-            abi.encode(borrowBaseUsdc, lastCarryIndex, lastCarryTimestamp, engine.unsettledCarryUsdc(account))
+            abi.encode(borrowBaseAssets, lastCarryIndex, lastCarryTimestamp, engine.unsettledCarryAssets(account))
         );
     }
 
@@ -497,8 +500,8 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
             abi.encode(
                 _sideState(CfdTypes.Side.LONG),
                 _sideState(CfdTypes.Side.SHORT),
-                engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.LONG)),
-                engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.SHORT)),
+                engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.LONG)),
+                engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.SHORT)),
                 engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)),
                 engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)),
                 engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG)),
@@ -512,9 +515,9 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     ) private view returns (bytes32 stateHash) {
         stateHash = keccak256(
             abi.encode(
-                clearinghouse.getAccountUsdcBuckets(account),
+                clearinghouse.getAccountAssetBuckets(account),
                 clearinghouse.getPnlIsolationBuckets(account),
-                usdc.balanceOf(address(clearinghouse))
+                settlementToken.balanceOf(address(clearinghouse))
             )
         );
     }
@@ -525,8 +528,8 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         string memory reason
     ) private pure {
         assertEq(actual.curve.lots, expected.curve.lots, reason);
-        assertEq(actual.curve.entryCostUsdcAtoms, expected.curve.entryCostUsdcAtoms, reason);
-        assertEq(actual.curve.effectiveCapUsdcAtoms, expected.curve.effectiveCapUsdcAtoms, reason);
+        assertEq(actual.curve.entryCostAssetAtoms, expected.curve.entryCostAssetAtoms, reason);
+        assertEq(actual.curve.effectiveCapAssetAtoms, expected.curve.effectiveCapAssetAtoms, reason);
         assertEq(uint8(actual.curve.side), uint8(expected.curve.side), reason);
         assertEq(actual.curveHash, expected.curveHash, reason);
         assertEq(actual.valueAtZero, expected.valueAtZero, reason);
@@ -538,9 +541,9 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         address depositor,
         uint256 assets
     ) private returns (uint256 requestId) {
-        usdc.mint(depositor, assets);
+        settlementToken.mint(depositor, assets);
         vm.startPrank(depositor);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         requestId = juniorVault.requestDeposit(assets, depositor, depositor);
         vm.stopPrank();
     }

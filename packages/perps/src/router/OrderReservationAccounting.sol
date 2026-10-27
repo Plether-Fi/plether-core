@@ -11,8 +11,8 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 
 /// @title OrderReservationAccounting
 /// @notice Router-side pending records and per-account queue links shared by commit, execution, and liquidation.
-/// @dev The clearinghouse is canonical for USDC custody and committed-margin values. This contract stores
-///      order metadata and lifecycle queue indexes; it never holds the reserved USDC itself.
+/// @dev The clearinghouse is canonical for settlement token custody and committed-margin values. This contract stores
+///      order metadata and lifecycle queue indexes; it never holds the reserved settlement token itself.
 abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRouterErrors {
 
     function _onOrderCommitted(
@@ -73,10 +73,10 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     function getAccountReservations(
         address account
     ) public view override returns (IOrderRouterAccounting.AccountReservationView memory reservation) {
-        reservation.committedMarginUsdc =
-        clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc;
+        reservation.committedMarginAssets =
+        clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginAssets;
         reservation.pendingOrderCount = pendingOrderCounts[account];
-        reservation.executionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
+        reservation.executionBountyAssets = clearinghouse.totalBountyReservationsAssets(account);
     }
 
     /// @notice Compatibility view over the clearinghouse-owned active reservation FIFO.
@@ -103,7 +103,7 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     ///      the router base. Open-order bounties are locked from free settlement.
     /// @param account Account committing the order and funding any open-order bounty.
     /// @param sizeDelta Order size used by close admission (18 decimals).
-    /// @param bounty Bounty to reserve for an open, or zero for a close (6-decimal USDC).
+    /// @param bounty Bounty to reserve for an open, or zero for a close (6-decimal settlement token).
     /// @param isClose Whether to use the zero-bounty close admission path.
     function _reserveExecutionBounty(
         address account,
@@ -117,11 +117,11 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
             }
             return _reserveCloseExecutionBounty(account, sizeDelta);
         }
-        effects.bountyFromFreeUsdc = bounty;
+        effects.bountyFromFreeAssets = bounty;
         if (bounty == 0) {
             return effects;
         }
-        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < bounty) {
+        if (clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets < bounty) {
             revert OrderRouter__InsufficientFreeEquity();
         }
         clearinghouse.lockReservedSettlement(account, bounty);
@@ -132,7 +132,7 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     /// @param account Account funding committed margin.
     /// @param orderId Order whose reservation is created.
     /// @param isClose Whether the order is a strict close.
-    /// @param marginDelta Margin to reserve (6-decimal USDC).
+    /// @param marginDelta Margin to reserve (6-decimal settlement token).
     function _reserveCommittedMargin(
         address account,
         uint64 orderId,

@@ -15,7 +15,7 @@ library OrderRouterDebugLens {
     struct OrderRecord {
         CfdTypes.Order core;
         IOrderRouterAccounting.OrderStatus status;
-        uint256 executionBountyUsdc;
+        uint256 executionBountyAssets;
         uint64 nextGlobalOrderId;
         uint64 prevGlobalOrderId;
         uint64 nextAccountOrderId;
@@ -34,8 +34,8 @@ library OrderRouterDebugLens {
         record = loadRawOrderRecord(vm_, router, orderId);
         record.status = _legacyCompatibleStatus(router, orderId, record.status);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(router.engine().clearinghouse());
-        record.executionBountyUsdc =
-        clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId).amountUsdc;
+        record.executionBountyAssets =
+        clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId).amountAssets;
         IMarginClearinghouse.OrderReservation memory margin = clearinghouse.getOrderReservation(orderId);
         record.inMarginQueue = margin.status == IMarginClearinghouse.ReservationStatus.Active;
         record.nextMarginOrderId = margin.nextOrderId;

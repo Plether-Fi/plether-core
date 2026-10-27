@@ -7,11 +7,11 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 contract CfdEngineHarness is CfdEngine {
 
     constructor(
-        address _usdc,
+        address _settlementToken,
         address _clearinghouse,
         uint256 _capPrice,
         CfdTypes.RiskParams memory _riskParams,
         uint256 _frozenCloseSpreadBps
-    ) CfdEngine(_usdc, _clearinghouse, _capPrice, _riskParams, _frozenCloseSpreadBps) {}
+    ) CfdEngine(_settlementToken, _clearinghouse, _capPrice, _riskParams, _frozenCloseSpreadBps) {}
 
 }

@@ -21,7 +21,7 @@ contract PositionLotAdmissionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1,
+            minBountyAssets: 1,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -52,7 +52,7 @@ contract PositionLotAdmissionTest is BasePerpTest {
         );
 
         (uint256 sizeBefore,, uint256 entryPriceBefore,,,,) = engine.positions(account);
-        uint256 entryCostBefore = engine.positionEntryCostUsdcAtoms(account);
+        uint256 entryCostBefore = engine.positionEntryCostAssetAtoms(account);
         uint256 sideEntryNotionalBefore = _sideEntryNotional(CfdTypes.Side.LONG);
         uint256 poolDepth = pool.totalAssets();
 
@@ -86,7 +86,7 @@ contract PositionLotAdmissionTest is BasePerpTest {
         assertEq(size, sizeBefore, "Rejected sub-lot increase must not change position size");
         assertEq(entryPrice, entryPriceBefore, "Rejected sub-lot increase must not change entry price");
         assertEq(
-            engine.positionEntryCostUsdcAtoms(account),
+            engine.positionEntryCostAssetAtoms(account),
             entryCostBefore,
             "Rejected sub-lot increase must not change exact entry-cost atoms"
         );
@@ -111,7 +111,7 @@ contract SingleDeltaSkewAdmissionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -295,7 +295,7 @@ contract AccountPriceCollateralPositionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -396,7 +396,7 @@ contract VpiCollateralAdmissionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -519,7 +519,7 @@ contract EmptyMarketSkewAdmissionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -557,7 +557,7 @@ contract SingleTradeSkewAdmissionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0

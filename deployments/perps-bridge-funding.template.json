@@ -78,7 +78,7 @@
       "transactionHash": null,
       "payer": null,
       "beneficiary": null,
-      "amountUsdc": null
+      "amountAssets": null
     }
   }
 }

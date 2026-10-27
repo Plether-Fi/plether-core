@@ -24,7 +24,7 @@ contract OrderRouterInitialMarkTest is BasePerpTest {
         assertEq(engine.lastMarkPrice(), 0);
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.minOpenNotionalUsdc = 1000e6;
+        config.minOpenNotionalAssets = 1000e6;
         _setRouterConfig(config);
         _fundTrader(TRADER, 500e6);
 
@@ -42,7 +42,7 @@ contract OrderRouterInitialMarkTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 7 * CfdTypes.SIZE_QUANTUM, 200e6, 1e8, false);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(nextOrderId);
         assertEq(pending.orderId, nextOrderId);
-        assertEq(pending.executionBountyUsdc, 112_000);
+        assertEq(pending.executionBountyAssets, 112_000);
     }
 
 }

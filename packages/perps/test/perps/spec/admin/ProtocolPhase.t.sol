@@ -28,7 +28,7 @@ contract ProtocolPhaseTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -60,7 +60,7 @@ contract ProtocolPhaseTest is BasePerpTest {
             "Insolvency-revealing close should latch Degraded"
         );
 
-        usdc.mint(address(pool), 500_000e6);
+        settlementToken.mint(address(pool), 500_000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             500_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -77,8 +77,9 @@ contract ProtocolPhaseTest is BasePerpTest {
     }
 
     function test_ConfiguringPhase() public {
-        CfdEngine unconfigured =
-            new CfdEngine(address(usdc), address(clearinghouse), 2e8, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEngine unconfigured = new CfdEngine(
+            address(settlementToken), address(clearinghouse), 2e8, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+        );
         PerpsPublicLens unconfiguredLens =
             new PerpsPublicLens(address(engineAccountLens), address(unconfigured), address(router), address(0));
         assertEq(

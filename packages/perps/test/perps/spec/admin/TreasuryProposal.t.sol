@@ -326,25 +326,25 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         _fundTrader(firstTrader, 50_000e6);
         _fundTrader(secondTrader, 50_000e6);
         _open(firstTrader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
-        assertEq(clearinghouse.balanceUsdc(TREASURY_A), 40e6);
-        assertEq(clearinghouse.balanceUsdc(TREASURY_B), 0);
-        assertEq(engineProtocolLens.getProtocolAccountingSnapshot().protocolTreasuryBalanceUsdc, 40e6);
+        assertEq(clearinghouse.balanceAssets(TREASURY_A), 40e6);
+        assertEq(clearinghouse.balanceAssets(TREASURY_B), 0);
+        assertEq(engineProtocolLens.getProtocolAccountingSnapshot().protocolTreasuryBalanceAssets, 40e6);
 
         vm.warp(expiry);
-        assertEq(engineProtocolLens.getProtocolAccountingSnapshot().protocolTreasuryBalanceUsdc, 0);
+        assertEq(engineProtocolLens.getProtocolAccountingSnapshot().protocolTreasuryBalanceAssets, 0);
         _open(secondTrader, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
 
-        assertEq(clearinghouse.balanceUsdc(TREASURY_A), 40e6);
-        assertEq(clearinghouse.balanceUsdc(TREASURY_B), 40e6);
-        assertEq(engineProtocolLens.getProtocolAccountingSnapshot().protocolTreasuryBalanceUsdc, 40e6);
+        assertEq(clearinghouse.balanceAssets(TREASURY_A), 40e6);
+        assertEq(clearinghouse.balanceAssets(TREASURY_B), 40e6);
+        assertEq(engineProtocolLens.getProtocolAccountingSnapshot().protocolTreasuryBalanceAssets, 40e6);
         vm.prank(TREASURY_A);
         clearinghouse.withdraw(TREASURY_A, 40e6);
         vm.prank(TREASURY_B);
         clearinghouse.withdraw(TREASURY_B, 40e6);
-        assertEq(usdc.balanceOf(TREASURY_A), 40e6);
-        assertEq(usdc.balanceOf(TREASURY_B), 40e6);
-        assertEq(clearinghouse.balanceUsdc(TREASURY_A), 0);
-        assertEq(clearinghouse.balanceUsdc(TREASURY_B), 0);
+        assertEq(settlementToken.balanceOf(TREASURY_A), 40e6);
+        assertEq(settlementToken.balanceOf(TREASURY_B), 40e6);
+        assertEq(clearinghouse.balanceAssets(TREASURY_A), 0);
+        assertEq(clearinghouse.balanceAssets(TREASURY_B), 0);
     }
 
     function test_TreasuryProposal_ForfeitedBountyUsesAutomaticallyActivatedTreasury() public {
@@ -364,8 +364,8 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
         uint256 forfeitedBounty = _executionBountyReserve(1);
         assertGt(forfeitedBounty, 0);
-        uint256 oldTreasuryBalance = clearinghouse.balanceUsdc(TREASURY_A);
-        assertEq(clearinghouse.balanceUsdc(TREASURY_B), 0);
+        uint256 oldTreasuryBalance = clearinghouse.balanceAssets(TREASURY_A);
+        assertEq(clearinghouse.balanceAssets(TREASURY_B), 0);
 
         vm.warp(expiry);
         vm.roll(block.number + 1);
@@ -377,8 +377,8 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         vm.prank(keeper);
         router.executeLiquidation(trader, priceData);
 
-        assertEq(clearinghouse.balanceUsdc(TREASURY_A), oldTreasuryBalance);
-        assertEq(clearinghouse.balanceUsdc(TREASURY_B), forfeitedBounty);
+        assertEq(clearinghouse.balanceAssets(TREASURY_A), oldTreasuryBalance);
+        assertEq(clearinghouse.balanceAssets(TREASURY_B), forfeitedBounty);
     }
 
     function testFuzz_TreasuryProposal_ReplacementAlwaysActivatesOnOriginalExpiry(

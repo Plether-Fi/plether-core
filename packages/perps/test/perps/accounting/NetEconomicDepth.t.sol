@@ -51,7 +51,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         uint256 assets = pool.totalAssets();
         uint256 claim = 400_000e6;
         _seedAuthenticatedTraderClaim(CLAIMANT, claim);
-        uint256 borrowBase = engine.sideBorrowBaseUsdc(0);
+        uint256 borrowBase = engine.sideBorrowBaseAssets(0);
         uint256 startIndex = engine.sideCarryIndex(0);
         uint256 increment = _indexIncrement(borrowBase, assets - claim, 1 days);
         uint256 start = vm.getBlockTimestamp();
@@ -61,8 +61,8 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         engine.settleTraderClaim(CLAIMANT);
         assertEq(engine.sideCarryIndex(0), startIndex + increment, "pre-payment carry uses net depth");
         assertEq(pool.totalAssets(), assets - claim, "payment removes exactly the claim cash");
-        assertEq(engine.totalTraderClaimBalanceUsdc(), 0);
-        assertEq(engine.sideBorrowBaseUsdc(0), borrowBase, "flat claimant cannot change borrower collateral");
+        assertEq(engine.totalTraderClaimBalanceAssets(), 0);
+        assertEq(engine.sideBorrowBaseAssets(0), borrowBase, "flat claimant cannot change borrower collateral");
 
         vm.warp(start + 2 days);
         engine.checkpointCarryIndexes();
@@ -75,14 +75,14 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _seedAuthenticatedTraderClaim(CLAIMANT, 400_000e6);
         (uint256 borrowBase,,) = engine.positionCarryState(TRADER);
         uint256 expectedCarry = borrowBase * _indexIncrement(borrowBase, assets - 400_000e6, 1 days) / 1e18;
-        uint256 beforeMargin = clearinghouse.pnlPledgeUsdc(TRADER);
+        uint256 beforeMargin = clearinghouse.pnlPledgeAssets(TRADER);
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(address(router));
         CfdEnginePlanTypes.CloseCommitment memory effects = engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18);
-        assertEq(effects.carryCollectedUsdc, expectedCarry, "commitment snapshot includes aggregate claims");
-        assertEq(effects.carryOutstandingUsdc, 0);
+        assertEq(effects.carryCollectedAssets, expectedCarry, "commitment snapshot includes aggregate claims");
+        assertEq(effects.carryOutstandingAssets, 0);
         assertEq(pool.totalAssets(), assets + expectedCarry);
-        assertEq(clearinghouse.pnlPledgeUsdc(TRADER), beforeMargin - expectedCarry);
+        assertEq(clearinghouse.pnlPledgeAssets(TRADER), beforeMargin - expectedCarry);
     }
 
     function test_SeededClaimsOpenPreviewProjectsNetCarryAndMatchesExecution() public {
@@ -95,16 +95,16 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         ICfdEngineTypes.OpenPreview memory preview =
             engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 1000e18, 10_000e6, 1e8);
         assertTrue(preview.valid);
-        assertEq(preview.pendingCarryUsdc, expectedCarry, "preview carry uses actual cash net of claims");
+        assertEq(preview.pendingCarryAssets, expectedCarry, "preview carry uses actual cash net of claims");
         _open(TRADER, CfdTypes.Side.LONG, 1000e18, 10_000e6, 1e8);
-        assertEq(clearinghouse.pnlPledgeUsdc(TRADER), preview.postMarginUsdc);
-        assertEq(pool.totalAssets(), assets + expectedCarry + uint256(preview.vpiUsdc));
+        assertEq(clearinghouse.pnlPledgeAssets(TRADER), preview.postMarginAssets);
+        assertEq(pool.totalAssets(), assets + expectedCarry + uint256(preview.vpiAssets));
     }
 
     function test_ClaimCreationHookCheckpointsOldDepthBeforeIncreasingLiability() public {
         _openBorrower();
         uint256 assets = pool.totalAssets();
-        uint256 borrowBase = engine.sideBorrowBaseUsdc(0);
+        uint256 borrowBase = engine.sideBorrowBaseAssets(0);
         uint256 startIndex = engine.sideCarryIndex(0);
         uint256 start = vm.getBlockTimestamp();
         vm.warp(start + 1 days);
@@ -115,7 +115,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         uint256 oldIncrement = _indexIncrement(borrowBase, assets, 1 days);
         assertEq(engine.sideCarryIndex(0), startIndex + oldIncrement, "creation checkpoints the old denominator");
         assertEq(pool.totalAssets(), assets);
-        assertEq(engine.totalTraderClaimBalanceUsdc(), assets + 1);
+        assertEq(engine.totalTraderClaimBalanceAssets(), assets + 1);
 
         vm.warp(start + 2 days);
         engine.checkpointCarryIndexes();
@@ -127,7 +127,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         uint256 assets = pool.totalAssets();
         uint256 claim = 400_000e6;
         _seedAuthenticatedTraderClaim(CLAIMANT, claim);
-        uint256 borrowBase = engine.sideBorrowBaseUsdc(0);
+        uint256 borrowBase = engine.sideBorrowBaseAssets(0);
         uint256 startIndex = engine.sideCarryIndex(0);
         uint256 start = vm.getBlockTimestamp();
         vm.warp(start + 1 days);
@@ -151,7 +151,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         uint256 startIndex = engine.sideCarryIndex(0);
         vm.warp(vm.getBlockTimestamp() + 1 days);
         engine.checkpointCarryIndexes();
-        assertEq(engine.sideCarryIndex(0), startIndex + _indexIncrement(engine.sideBorrowBaseUsdc(0), 0, 1 days));
+        assertEq(engine.sideCarryIndex(0), startIndex + _indexIncrement(engine.sideBorrowBaseAssets(0), 0, 1 days));
         assertEq(engine.sideCarryIndex(1), 0, "zero borrowing never accrues carry, even at zero net depth");
     }
 
@@ -165,11 +165,11 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         assertTrue(beforePreview.valid);
         // C(S) = k*S*S/(2*D), with exact operands chosen to avoid intermediate rounding differences.
         int256 expectedVpi = int256(uint256(100_000e6) * 100_000e6 / (200 * (assets - claim)));
-        assertEq(beforePreview.vpiUsdc, expectedVpi, "VPI uses LP capital net of claims");
+        assertEq(beforePreview.vpiAssets, expectedVpi, "VPI uses LP capital net of claims");
         ICfdEngineLens.MaxOpenQuote memory beforeQuote =
             engineLens.quoteMaxOpen(TRADER, CfdTypes.Side.LONG, 100_000e6, 1e8);
-        uint256 skewUsdc = (assets - claim) * 4 / 10;
-        uint256 expectedSize = skewUsdc / 100e6 * CfdTypes.SIZE_QUANTUM;
+        uint256 skewAssets = (assets - claim) * 4 / 10;
+        uint256 expectedSize = skewAssets / 100e6 * CfdTypes.SIZE_QUANTUM;
         assertEq(beforeQuote.maxSizeDelta, expectedSize, "skew capacity uses net depth and canonical lots");
         assertEq(uint256(beforeQuote.limitingReason), uint256(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH));
 
@@ -179,11 +179,11 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
             engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, 1e8);
         ICfdEngineLens.MaxOpenQuote memory afterQuote =
             engineLens.quoteMaxOpen(TRADER, CfdTypes.Side.LONG, 100_000e6, 1e8);
-        assertEq(afterPreview.vpiUsdc, beforePreview.vpiUsdc);
+        assertEq(afterPreview.vpiAssets, beforePreview.vpiAssets);
         assertEq(afterQuote.maxSizeDelta, beforeQuote.maxSizeDelta);
         assertEq(keccak256(abi.encode(afterQuote.preview)), keccak256(abi.encode(beforeQuote.preview)));
         _open(TRADER, CfdTypes.Side.LONG, afterQuote.maxSizeDelta, 100_000e6, 1e8);
-        assertEq(clearinghouse.pnlPledgeUsdc(TRADER), afterQuote.preview.postMarginUsdc, "quote/live parity");
+        assertEq(clearinghouse.pnlPledgeAssets(TRADER), afterQuote.preview.postMarginAssets, "quote/live parity");
     }
 
     function test_SeededClaimPaymentPreservesCloseVpi() public {
@@ -196,15 +196,16 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         ICfdEngineTypes.ClosePreview memory beforePreview = engineLens.previewClose(TRADER, 100_000e18, 1e8);
         int256 expectedVpi = int256(uint256(200_000e6) * 200_000e6 / (200 * depth))
             - int256(uint256(100_000e6) * 100_000e6 / (200 * depth));
-        assertEq(beforePreview.vpiDeltaUsdc, expectedVpi, "skew-worsening close is priced from net depth");
+        assertEq(beforePreview.vpiDeltaAssets, expectedVpi, "skew-worsening close is priced from net depth");
         vm.prank(CLAIMANT);
         engine.settleTraderClaim(CLAIMANT);
         ICfdEngineTypes.ClosePreview memory afterPreview = engineLens.previewClose(TRADER, 100_000e18, 1e8);
-        assertEq(afterPreview.vpiDeltaUsdc, beforePreview.vpiDeltaUsdc);
-        uint256 settlementBefore = clearinghouse.balanceUsdc(TRADER);
+        assertEq(afterPreview.vpiDeltaAssets, beforePreview.vpiDeltaAssets);
+        uint256 settlementBefore = clearinghouse.balanceAssets(TRADER);
         _close(TRADER, CfdTypes.Side.SHORT, 100_000e18, 1e8);
         assertEq(
-            clearinghouse.balanceUsdc(TRADER), settlementBefore - uint256(expectedVpi) - afterPreview.executionFeeUsdc
+            clearinghouse.balanceAssets(TRADER),
+            settlementBefore - uint256(expectedVpi) - afterPreview.executionFeeAssets
         );
     }
 
@@ -239,12 +240,12 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _seedAuthenticatedTraderClaim(CLAIMANT, pool.totalAssets() + (excess ? 1e6 : 0));
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(TRADER, 100_000e18, 1e8);
         assertTrue(preview.valid, "protective close remains available");
-        assertEq(preview.vpiDeltaUsdc, 0, "zero-depth curve produces no new rebate");
-        uint256 settlementBefore = clearinghouse.balanceUsdc(TRADER);
+        assertEq(preview.vpiDeltaAssets, 0, "zero-depth curve produces no new rebate");
+        uint256 settlementBefore = clearinghouse.balanceAssets(TRADER);
         _close(TRADER, CfdTypes.Side.LONG, 100_000e18, 1e8);
         (uint256 size,,,,,,) = engine.positions(TRADER);
         assertEq(size, 0);
-        assertEq(clearinghouse.balanceUsdc(TRADER), settlementBefore - preview.executionFeeUsdc);
+        assertEq(clearinghouse.balanceAssets(TRADER), settlementBefore - preview.executionFeeAssets);
     }
 
     function test_ZeroNetDepthRouterClosePreservesLifetimeRebateClawback() public {
@@ -262,11 +263,11 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         vm.roll(block.number + 1);
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(TRADER, 100_000e18, 1e8);
         assertTrue(preview.valid);
-        assertEq(preview.vpiDeltaUsdc, -accrued, "zero-depth close must still recover lifetime negative VPI");
+        assertEq(preview.vpiDeltaAssets, -accrued, "zero-depth close must still recover lifetime negative VPI");
         router.executeOrder(orderId, _mockPythUpdateData());
         (uint256 size,,,,,,) = engine.positions(TRADER);
         assertEq(size, 0, "public router close must finish");
-        assertEq(clearinghouse.vpiRebateReserveUsdc(TRADER), 0);
+        assertEq(clearinghouse.vpiRebateReserveAssets(TRADER), 0);
     }
 
     function test_CashShortfallCloseCreatesClaimAndRefillPaymentPreservesCarryDepth() public {
@@ -275,16 +276,16 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _open(CLAIMANT, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
         // Model a physical cash shortfall; claim creation and payment themselves use production entrypoints.
         uint256 assetsBeforeLoss = pool.totalAssets();
-        usdc.burn(address(pool), assetsBeforeLoss);
+        settlementToken.burn(address(pool), assetsBeforeLoss);
         _close(CLAIMANT, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
-        uint256 claim = engine.traderClaimBalanceUsdc(CLAIMANT);
+        uint256 claim = engine.traderClaimBalanceAssets(CLAIMANT);
         assertGt(claim, 0);
         (uint256 remaining,,,,,,) = engine.positions(CLAIMANT);
         assertEq(remaining, 0, "claimant must be flat for payment invariance");
         _assertTerminalCurveAuthenticated(CLAIMANT);
-        usdc.mint(address(pool), assetsBeforeLoss);
+        settlementToken.mint(address(pool), assetsBeforeLoss);
         uint256 depth = pool.totalAssets() - claim;
-        uint256 expected = _indexIncrement(engine.sideBorrowBaseUsdc(0), depth, 1 days);
+        uint256 expected = _indexIncrement(engine.sideBorrowBaseAssets(0), depth, 1 days);
         uint256 startIndex = engine.sideCarryIndex(0);
         uint256 start = vm.getBlockTimestamp();
         vm.warp(start + 1 days);
@@ -292,7 +293,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         engine.settleTraderClaim(CLAIMANT);
         assertEq(engine.sideCarryIndex(0), startIndex + expected);
         assertEq(pool.totalAssets(), depth);
-        assertEq(engine.totalTraderClaimBalanceUsdc(), 0);
+        assertEq(engine.totalTraderClaimBalanceAssets(), 0);
         _assertTerminalCurveAuthenticated(CLAIMANT);
         vm.warp(start + 2 days);
         engine.checkpointCarryIndexes();

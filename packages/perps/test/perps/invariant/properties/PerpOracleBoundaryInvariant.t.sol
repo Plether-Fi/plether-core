@@ -30,7 +30,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         _openMarginProbe(LONG_MARGIN_PROBE, CfdTypes.Side.LONG, 0.8e8, 200e6);
         _openMarginProbe(SHORT_MARGIN_PROBE, CfdTypes.Side.SHORT, 1.2e8, 300e6);
 
-        handler = new PerpOracleHandler(usdc, mockPyth, engine, clearinghouse, router);
+        handler = new PerpOracleHandler(settlementToken, mockPyth, engine, clearinghouse, router);
         handler.seedPositions();
 
         bytes4[] memory selectors = new bytes4[](6);
@@ -109,8 +109,8 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         assertTrue(shortPreview.valid, "Funded reference short must be admitted");
         // Known policy examples: $8,000/$12,000 notional require 1% ordinarily and 3% in FAD.
         // Read the production planner result; do not calculate and compare a test-only margin helper.
-        assertEq(longPreview.maintenanceMarginUsdc, fad ? 240e6 : 80e6, "Long maintenance must match known policy");
-        assertEq(shortPreview.maintenanceMarginUsdc, fad ? 360e6 : 120e6, "Short maintenance must match known policy");
+        assertEq(longPreview.maintenanceMarginAssets, fad ? 240e6 : 80e6, "Long maintenance must match known policy");
+        assertEq(shortPreview.maintenanceMarginAssets, fad ? 360e6 : 120e6, "Short maintenance must match known policy");
     }
 
     function _assertInvariant_HousePoolSnapshotUsesCorrectFreshnessLimit() internal view {
@@ -137,8 +137,8 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
             engineLens.previewLiquidation(SHORT_MARGIN_PROBE, 1.2e8);
         // $200 less $3.20 execution fee and $7.20 liquidation reserve leaves $189.60 price equity;
         // $300 less $4.80 and $10.80 leaves $284.40. Both exceed weekday maintenance and fail FAD.
-        assertEq(longPreview.equityUsdc, 189.6e6, "Long reference equity must remain fixed");
-        assertEq(shortPreview.equityUsdc, 284.4e6, "Short reference equity must remain fixed");
+        assertEq(longPreview.equityAssets, 189.6e6, "Long reference equity must remain fixed");
+        assertEq(shortPreview.equityAssets, 284.4e6, "Short reference equity must remain fixed");
         assertEq(longPreview.liquidatable, fad, "Long eligibility must cross the known FAD margin boundary");
         assertEq(shortPreview.liquidatable, fad, "Short eligibility must cross the known FAD margin boundary");
     }
@@ -163,7 +163,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
             handler.warpToOracleBoundary(mode);
             ICfdEngineTypes.OpenPreview memory corrupt =
                 engineLens.previewOpen(OPEN_MARGIN_PROBE, CfdTypes.Side.LONG, 10_000e18, 1000e6, 0.8e8);
-            corrupt.maintenanceMarginUsdc += 1;
+            corrupt.maintenanceMarginAssets += 1;
             vm.mockCall(
                 address(engineLens),
                 abi.encodeCall(
@@ -204,19 +204,21 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         PerpsViewTypes.PositionView memory position = publicLens.getPosition(LONG_MARGIN_PROBE);
         assertTrue(snapshot.hasPosition, "Reference position must exist");
         assertEq(
-            snapshot.netEquityUsdc, 189.6e6, "Reference price equity must stay between weekday and FAD maintenance"
+            snapshot.netEquityAssets, 189.6e6, "Reference price equity must stay between weekday and FAD maintenance"
         );
         assertEq(snapshot.liquidatable, expectedLiquidatable, "Real account health must follow the FAD threshold");
-        assertEq(position.maintenanceMarginUsdc, expectedMaintenance, "Public margin must report the known requirement");
+        assertEq(
+            position.maintenanceMarginAssets, expectedMaintenance, "Public margin must report the known requirement"
+        );
         assertEq(position.liquidatable, expectedLiquidatable, "Public health must follow the FAD threshold");
     }
 
     function _depositMarginProbe(
         address account
     ) internal {
-        usdc.mint(account, 10_000e6);
+        settlementToken.mint(account, 10_000e6);
         vm.startPrank(account);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(account, 10_000e6);
         vm.stopPrank();
     }

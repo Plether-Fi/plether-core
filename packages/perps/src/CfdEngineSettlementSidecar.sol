@@ -30,25 +30,25 @@ interface ICfdEngineAccountActionView {
             uint256 size,
             uint256 margin,
             uint256 entryPrice,
-            uint256 maxProfitUsdc,
+            uint256 maxProfitAssets,
             CfdTypes.Side side,
             uint64 lastUpdateTime,
             int256 vpiAccrued
         );
 
-    function positionEntryCostUsdcAtoms(
+    function positionEntryCostAssetAtoms(
         address account
     ) external view returns (uint256);
 
     function positionCarryState(
         address account
-    ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
+    ) external view returns (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
 
     function sides(
         uint256 index
-    ) external view returns (uint256 maxProfitUsdc, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
+    ) external view returns (uint256 maxProfitAssets, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
 
-    function sideBorrowBaseUsdc(
+    function sideBorrowBaseAssets(
         uint256 index
     ) external view returns (uint256);
 
@@ -70,15 +70,15 @@ interface ICfdEngineAccountActionView {
 
     function CAP_PRICE() external view returns (uint256);
 
-    function traderClaimBalanceUsdc(
+    function traderClaimBalanceAssets(
         address account
     ) external view returns (uint256);
 
-    function unsettledCarryUsdc(
+    function unsettledCarryAssets(
         address account
     ) external view returns (uint256);
 
-    function totalTraderClaimBalanceUsdc() external view returns (uint256);
+    function totalTraderClaimBalanceAssets() external view returns (uint256);
 
     function degradedMode() external view returns (bool);
 
@@ -106,7 +106,7 @@ interface ICfdEngineAccountActionView {
             uint256 initMarginBps,
             uint256 fadMarginBps,
             uint256 baseCarryBps,
-            uint256 minBountyUsdc,
+            uint256 minBountyAssets,
             uint256 bountyBps,
             uint256 keeperShareBps,
             uint256 protocolShareBps
@@ -118,7 +118,7 @@ interface ICfdEngineAccountActionView {
 /// @notice Externalized settlement executor for `CfdEngine` open, close, and liquidation flows.
 /// @dev `CfdEngine` remains the storage owner and grants this sidecar access only through narrow
 ///      settlement-host hooks. The sidecar does not own independent protocol state and does not validate planner deltas;
-///      the bound engine must supply a valid delta derived from matching live state. Unless stated otherwise, USDC
+///      the bound engine must supply a valid delta derived from matching live state. Unless stated otherwise, settlement token
 ///      amounts use 6 decimals, prices use 8 decimals, sizes use 18 decimals, and timestamps are Unix seconds.
 contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
@@ -151,15 +151,15 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @inheritdoc ICfdEngineSettlementSidecar
     function buildRawSnapshot(
         address account,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) public view onlyEngine returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        return _buildRawSnapshot(account, poolDepthUsdc, false);
+        return _buildRawSnapshot(account, poolDepthAssets, false);
     }
 
     /// @dev Commitment needs only its position side and funding/health state. Execution still reads the full snapshot.
     function _buildRawSnapshot(
         address account,
-        uint256 poolDepthUsdc,
+        uint256 poolDepthAssets,
         bool closeCommit
     ) private view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
@@ -168,13 +168,13 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             snap.position.size,
             snap.position.margin,
             snap.position.entryPrice,
-            snap.position.maxProfitUsdc,
+            snap.position.maxProfitAssets,
             snap.position.side,
             snap.position.lastUpdateTime,
             snap.position.vpiAccrued
         ) = engine.positions(account);
-        snap.positionEntryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
-        (snap.positionBorrowBaseUsdc, snap.positionLastCarryIndex, snap.position.lastCarryTimestamp) =
+        snap.positionEntryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
+        (snap.positionBorrowBaseAssets, snap.positionLastCarryIndex, snap.position.lastCarryTimestamp) =
             engine.positionCarryState(account);
         snap.account = account;
         snap.currentTimestamp = block.timestamp;
@@ -184,30 +184,31 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
         // Historical carry uses live assets net of claims, even for commitment or hypothetical trade depth.
         IHousePool pool = IHousePool(host.pool());
-        snap.poolCashUsdc = pool.totalAssets();
-        snap.poolAdditionalReservedUsdc =
-            pool.pendingRecapitalizationUsdc() + pool.pendingTradingRevenueUsdc() + pool.unassignedAssets();
+        snap.poolCashAssets = pool.totalAssets();
+        snap.poolAdditionalReservedAssets =
+            pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
         snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
-        snap.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();
-        uint256 carryDepthUsdc =
-            PositionRiskAccountingLib.computeNetPoolDepthUsdc(snap.poolCashUsdc, snap.totalTraderClaimBalanceUsdc);
+        snap.totalTraderClaimBalanceAssets = engine.totalTraderClaimBalanceAssets();
+        uint256 carryDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
+            snap.poolCashAssets, snap.totalTraderClaimBalanceAssets
+        );
         // Exact enum dispatch selects the exposed side; this is not a target token-balance equality.
         // slither-disable-next-line incorrect-equality
         if (!closeCommit || snap.position.side == CfdTypes.Side.LONG) {
-            snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG, carryDepthUsdc, snap.riskParams.baseCarryBps);
+            snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG, carryDepthAssets, snap.riskParams.baseCarryBps);
         }
         // The other exact enum value selects the SHORT borrow-base snapshot.
         // slither-disable-next-line incorrect-equality
         if (!closeCommit || snap.position.side == CfdTypes.Side.SHORT) {
-            snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT, carryDepthUsdc, snap.riskParams.baseCarryBps);
+            snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT, carryDepthAssets, snap.riskParams.baseCarryBps);
         }
-        snap.poolAssetsUsdc = closeCommit ? snap.poolCashUsdc : poolDepthUsdc;
+        snap.poolAssets = closeCommit ? snap.poolCashAssets : poolDepthAssets;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
         CfdEngineCollateralSnapshotLib.load(snap, clearinghouse, account, closeCommit);
 
-        snap.unsettledCarryUsdc = engine.unsettledCarryUsdc(account);
-        snap.traderClaimBalanceForAccount = engine.traderClaimBalanceUsdc(account);
+        snap.unsettledCarryAssets = engine.unsettledCarryAssets(account);
+        snap.traderClaimBalanceForAccount = engine.traderClaimBalanceAssets(account);
         snap.capPrice = engine.CAP_PRICE();
         snap.isFadWindow = engine.isFadWindow();
         if (!closeCommit) {
@@ -228,19 +229,19 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function _sideSnapshot(
         ICfdEngineAccountActionView engine,
         CfdTypes.Side side,
-        uint256 poolDepthUsdc,
+        uint256 poolDepthAssets,
         uint256 baseCarryBps
     ) private view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
         uint256 index = uint256(side);
-        (snap.maxProfitUsdc, snap.openInterest, snap.entryNotional, snap.totalMargin) = engine.sides(index);
-        snap.borrowBaseUsdc = engine.sideBorrowBaseUsdc(index);
+        (snap.maxProfitAssets, snap.openInterest, snap.entryNotional, snap.totalMargin) = engine.sides(index);
+        snap.borrowBaseAssets = engine.sideBorrowBaseAssets(index);
         snap.carryIndex = ICfdEnginePlanner(engine.planner())
             .computeCurrentCarryIndex(
                 engine.sideCarryIndex(index),
                 engine.sideCarryTimestamp(index),
                 block.timestamp,
-                snap.borrowBaseUsdc,
-                poolDepthUsdc,
+                snap.borrowBaseAssets,
+                poolDepthAssets,
                 baseCarryBps
             );
     }
@@ -256,7 +257,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             (uint64 orderId, uint256 minimum, uint256 maxDebit) =
                 OrderSettlementFloorLib.load(engine.orderRouter(), account);
             if (minimum != 0) {
-                uint256 balance = IMarginClearinghouse(host.clearinghouse()).balanceUsdc(account);
+                uint256 balance = IMarginClearinghouse(host.clearinghouse()).balanceAssets(account);
                 if (balance < minimum || balance - minimum < maxDebit) {
                     revert IOrderRouterErrors.OrderRouter__SettlementFloorWithdrawal(
                         orderId, balance, minimum, maxDebit
@@ -285,15 +286,15 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         uint256 price
     ) private view {
         CfdTypes.Position memory pos = _loadPosition(engine, account);
-        if (engine.unsettledCarryUsdc(account) != 0) {
+        if (engine.unsettledCarryAssets(account) != 0) {
             revert ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition();
         }
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
-        if (clearinghouse.vpiRebateReserveUsdc(account) < _negativeVpiReserveTarget(pos.vpiAccrued)) {
+        if (clearinghouse.vpiRebateReserveAssets(account) < _negativeVpiReserveTarget(pos.vpiAccrued)) {
             revert ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition();
         }
-        uint256 reachableUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
-        if (_withdrawPositionLiquidatable(engine, pos, account, price, reachableUsdc)) {
+        uint256 reachableAssets = clearinghouse.pnlPledgeAssets(account) + engine.traderClaimBalanceAssets(account);
+        if (_withdrawPositionLiquidatable(engine, pos, account, price, reachableAssets)) {
             revert ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition();
         }
     }
@@ -303,16 +304,16 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         CfdTypes.Position memory pos,
         address account,
         uint256 price,
-        uint256 reachableUsdc
+        uint256 reachableAssets
     ) private view returns (bool) {
         uint256 effectiveMarginBps = _withdrawEffectiveMarginBps(engine);
         return ICfdEnginePlanner(engine.planner())
             .isExactPriceRiskLiquidatable(
                 pos,
-                engine.positionEntryCostUsdcAtoms(account),
+                engine.positionEntryCostAssetAtoms(account),
                 price,
                 engine.CAP_PRICE(),
-                reachableUsdc,
+                reachableAssets,
                 effectiveMarginBps
             );
     }
@@ -336,10 +337,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         effects = ICfdEnginePlanner(engine.planner()).planCloseCommit(snap, sizeDelta);
         host.settlementRealizeCarry(account);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
-        IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets = clearinghouse.getAccountUsdcBuckets(account);
+        IMarginClearinghouse.AccountAssetBuckets memory afterBuckets = clearinghouse.getAccountAssetBuckets(account);
         if (
-            afterBuckets.settlementBalanceUsdc != effects.settlementAfterUsdc
-                || afterBuckets.freeSettlementUsdc != effects.freeSettlementAfterUsdc
+            afterBuckets.settlementBalanceAssets != effects.settlementAfterAssets
+                || afterBuckets.freeSettlementAssets != effects.freeSettlementAfterAssets
         ) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
@@ -349,7 +350,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         ICfdEngineAccountActionView engine,
         address account
     ) private view returns (CfdTypes.Position memory pos) {
-        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
+        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitAssets, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engine.positions(account);
     }
 
@@ -357,18 +358,18 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function _requireVpiReserve(
         IMarginClearinghouse clearinghouse,
         address account,
-        uint256 expectedUsdc
+        uint256 expectedAssets
     ) private view {
-        if (clearinghouse.vpiRebateReserveUsdc(account) != expectedUsdc) {
+        if (clearinghouse.vpiRebateReserveAssets(account) != expectedAssets) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
     }
 
     function _negativeVpiReserveTarget(
-        int256 vpiAccruedUsdc
-    ) private pure returns (uint256 targetUsdc) {
-        if (vpiAccruedUsdc < 0) {
-            targetUsdc = uint256(-(vpiAccruedUsdc + 1)) + 1;
+        int256 vpiAccruedAssets
+    ) private pure returns (uint256 targetAssets) {
+        if (vpiAccruedAssets < 0) {
+            targetAssets = uint256(-(vpiAccruedAssets + 1)) + 1;
         }
     }
 
@@ -411,7 +412,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     ///      margin/open interest/entry notional/max-profit state, funds collectible protocol fees from unreserved pool
     ///      cash, and writes the position with `block.timestamp` as its update/carry time. Existing-position carry is
     ///      realized by the engine before invoking the sidecar.
-    /// @param delta Valid planned open/increase delta; prices are 8 decimals, size 18, and USDC fields 6.
+    /// @param delta Valid planned open/increase delta; prices are 8 decimals, size 18, and settlement token fields 6.
     /// @param currentPosition Position loaded by the engine immediately before settlement.
     /// @param publishTime Oracle publish timestamp proposed for the execution mark.
     function executeOpen(
@@ -423,60 +424,62 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         CfdTypes.Side marginSide = currentPosition.size > 0 ? currentPosition.side : delta.posSide;
         uint256 marginBefore =
-            IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.account).positionMarginUsdc;
+            IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.account).positionMarginAssets;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
 
-        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveBeforeUsdc);
-        if (delta.vpiRebateReserveBeforeUsdc > delta.vpiRebateReserveAfterUsdc) {
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveBeforeAssets);
+        if (delta.vpiRebateReserveBeforeAssets > delta.vpiRebateReserveAfterAssets) {
             clearinghouse.releaseVpiRebateReserve(
-                delta.account, delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc
+                delta.account, delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
             );
         }
 
-        if (delta.poolRebatePayoutUsdc > 0) {
-            IHousePool(host.pool()).payOut(host.clearinghouse(), delta.poolRebatePayoutUsdc);
+        if (delta.poolRebatePayoutAssets > 0) {
+            IHousePool(host.pool()).payOut(host.clearinghouse(), delta.poolRebatePayoutAssets);
         }
 
-        (int256 netMarginChange, uint256 protocolFeeCreditedUsdc) = clearinghouse.applyOpenCost(
+        (int256 netMarginChange, uint256 protocolFeeCreditedAssets) = clearinghouse.applyOpenCost(
             delta.account,
-            delta.marginDeltaUsdc,
-            delta.tradeCostUsdc,
+            delta.marginDeltaAssets,
+            delta.tradeCostAssets,
             host.pool(),
             host.protocolTreasury(),
-            delta.executionFeeUsdc
+            delta.executionFeeAssets
         );
-        if (delta.tradeCostUsdc > 0) {
-            uint256 poolCashInflowUsdc = uint256(delta.tradeCostUsdc) - protocolFeeCreditedUsdc;
-            if (poolCashInflowUsdc > 0) {
+        if (delta.tradeCostAssets > 0) {
+            uint256 poolCashInflowAssets = uint256(delta.tradeCostAssets) - protocolFeeCreditedAssets;
+            if (poolCashInflowAssets > 0) {
                 IHousePool(host.pool())
                     .recordClaimantInflow(
-                        poolCashInflowUsdc,
+                        poolCashInflowAssets,
                         IHousePool.ClaimantInflowKind.Revenue,
                         IHousePool.ClaimantInflowCashMode.CashArrived
                     );
             }
         }
 
-        if (delta.vpiRebateReserveAfterUsdc > delta.vpiRebateReserveBeforeUsdc) {
-            uint256 reserveIncreaseUsdc = delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveBeforeUsdc;
-            uint256 reserveFromFreeUsdc = reserveIncreaseUsdc - delta.vpiRebateReserveFromPledgeUsdc;
-            if (reserveFromFreeUsdc > 0) {
-                clearinghouse.lockVpiRebateReserve(delta.account, reserveFromFreeUsdc);
+        if (delta.vpiRebateReserveAfterAssets > delta.vpiRebateReserveBeforeAssets) {
+            uint256 reserveIncreaseAssets = delta.vpiRebateReserveAfterAssets - delta.vpiRebateReserveBeforeAssets;
+            uint256 reserveFromFreeAssets = reserveIncreaseAssets - delta.vpiRebateReserveFromPledgeAssets;
+            if (reserveFromFreeAssets > 0) {
+                clearinghouse.lockVpiRebateReserve(delta.account, reserveFromFreeAssets);
             }
-            if (delta.vpiRebateReserveFromPledgeUsdc > 0) {
-                clearinghouse.reclassifyPnlPledgeToVpiRebateReserve(delta.account, delta.vpiRebateReserveFromPledgeUsdc);
+            if (delta.vpiRebateReserveFromPledgeAssets > 0) {
+                clearinghouse.reclassifyPnlPledgeToVpiRebateReserve(
+                    delta.account, delta.vpiRebateReserveFromPledgeAssets
+                );
             }
         }
-        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveAfterUsdc);
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveAfterAssets);
 
-        if (delta.liquidationReserveAfterUsdc > delta.liquidationReserveBeforeUsdc) {
+        if (delta.liquidationReserveAfterAssets > delta.liquidationReserveBeforeAssets) {
             clearinghouse.reclassifyPnlPledgeToLiquidationReserve(
-                delta.account, delta.liquidationReserveAfterUsdc - delta.liquidationReserveBeforeUsdc
+                delta.account, delta.liquidationReserveAfterAssets - delta.liquidationReserveBeforeAssets
             );
         }
 
         netMarginChange;
-        uint256 marginAfterOpen = IMarginClearinghouse(host.clearinghouse()).pnlPledgeUsdc(delta.account);
+        uint256 marginAfterOpen = IMarginClearinghouse(host.clearinghouse()).pnlPledgeAssets(delta.account);
         if (marginAfterOpen != delta.positionMarginAfterOpen) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
@@ -487,9 +490,9 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             int256(delta.sideOiIncrease),
             delta.sideEntryNotionalDelta
         );
-        _settleProtocolFeeTopUp(host, delta.executionFeeUsdc, protocolFeeCreditedUsdc);
+        _settleProtocolFeeTopUp(host, delta.executionFeeAssets, protocolFeeCreditedAssets);
         _writeOpenPosition(host, delta, currentPosition);
-        _assertRequiredEffectiveAssets(host, delta.requiredEffectiveAssetsAfterUsdc);
+        _assertRequiredEffectiveAssets(host, delta.requiredEffectiveAssetsAfterAssets);
     }
 
     /// @dev Isolates position-write ABI encoding from the settlement frame for minimum-IR coverage compilation.
@@ -502,8 +505,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             delta.account,
             CfdEngineSettlementTypes.PositionState({
                 size: delta.newPosSize,
-                entryCostUsdcAtoms: delta.newPosEntryCostUsdcAtoms,
-                maxProfitUsdc: currentPosition.maxProfitUsdc + delta.posMaxProfitIncrease,
+                entryCostAssetAtoms: delta.newPosEntryCostAssetAtoms,
+                maxProfitAssets: currentPosition.maxProfitAssets + delta.posMaxProfitIncrease,
                 lastUpdateTime: uint64(block.timestamp),
                 lastCarryTimestamp: uint64(block.timestamp),
                 vpiAccrued: currentPosition.vpiAccrued + delta.posVpiAccruedDelta,
@@ -515,12 +518,12 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @notice Verifies the planner's protected-solvency target against canonical post-open cash and claims.
     function _assertRequiredEffectiveAssets(
         ICfdEngineSettlementHost host,
-        uint256 requiredEffectiveAssetsUsdc
+        uint256 requiredEffectiveAssets
     ) private view {
-        uint256 physicalAssetsUsdc = IHousePool(host.pool()).totalAssets();
-        uint256 traderClaimsUsdc = host.totalTraderClaimBalanceUsdc();
-        uint256 effectiveAssetsUsdc = physicalAssetsUsdc > traderClaimsUsdc ? physicalAssetsUsdc - traderClaimsUsdc : 0;
-        if (effectiveAssetsUsdc < requiredEffectiveAssetsUsdc) {
+        uint256 physicalAssets = IHousePool(host.pool()).totalAssets();
+        uint256 traderClaimsAssets = host.totalTraderClaimBalanceAssets();
+        uint256 effectiveAssets = physicalAssets > traderClaimsAssets ? physicalAssets - traderClaimsAssets : 0;
+        if (effectiveAssets < requiredEffectiveAssets) {
             revert ICfdEngineTypes.CfdEngine__PostOpSolvencyBreach();
         }
     }
@@ -533,8 +536,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     ///      consumes eligible collateral and claims for collectible losses, and consumes or releases negative-VPI
     ///      reserve while preserving the residual target. It records LP revenue, funds collectible protocol fees from
     ///      unreserved pool cash, and writes or deletes the position. When a frozen spread was assessed it emits
-    ///      `FrozenCloseSpreadSettled` with assessed, recovered, and waived USDC.
-    /// @param delta Valid planned close/decrease delta; prices are 8 decimals, size 18, and USDC fields 6.
+    ///      `FrozenCloseSpreadSettled` with assessed, recovered, and waived settlement token.
+    /// @param delta Valid planned close/decrease delta; prices are 8 decimals, size 18, and settlement token fields 6.
     /// @param currentPosition Position loaded by the engine immediately before settlement.
     /// @param publishTime Oracle publish timestamp proposed for the execution mark.
     function executeClose(
@@ -556,7 +559,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         IMarginClearinghouse clearinghouse
     ) private {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
-        uint256 marginBefore = clearinghouse.pnlPledgeUsdc(delta.account);
+        uint256 marginBefore = clearinghouse.pnlPledgeAssets(delta.account);
         host.settlementApplySideDelta(
             delta.side,
             -int256(delta.sideMaxProfitReduction),
@@ -564,59 +567,62 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             -int256(delta.sideEntryNotionalReduction)
         );
 
-        if (delta.pricePnlClaimConsumedUsdc > 0) {
-            host.settlementConsumeTraderClaim(delta.account, delta.pricePnlClaimConsumedUsdc);
+        if (delta.pricePnlClaimConsumedAssets > 0) {
+            host.settlementConsumeTraderClaim(delta.account, delta.pricePnlClaimConsumedAssets);
         }
-        if (delta.pricePnlPledgeConsumedUsdc > 0) {
-            (uint256 consumedUsdc, uint256 shortfallUsdc) =
-                clearinghouse.consumePnlPledgeLoss(delta.account, delta.pricePnlPledgeConsumedUsdc, host.pool());
-            if (consumedUsdc != delta.pricePnlPledgeConsumedUsdc || shortfallUsdc != 0) {
+        if (delta.pricePnlPledgeConsumedAssets > 0) {
+            (uint256 consumedAssets, uint256 shortfallAssets) =
+                clearinghouse.consumePnlPledgeLoss(delta.account, delta.pricePnlPledgeConsumedAssets, host.pool());
+            if (consumedAssets != delta.pricePnlPledgeConsumedAssets || shortfallAssets != 0) {
                 revert CfdEngineSettlementSidecar__SettlementMismatch();
             }
         }
 
-        if (delta.safeMarginReleaseUsdc != delta.unlockMarginUsdc) {
+        if (delta.safeMarginReleaseAssets != delta.unlockMarginAssets) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
         if (delta.deletePosition) {
             // Make terminal reserve surplus free before validating how much charge needs released pledge.
-            clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseUsdc);
+            clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseAssets);
         }
         clearinghouse.unlockCloseMargin(
             delta.account,
-            delta.safeMarginReleaseUsdc,
-            delta.actionChargeFromReleasedMarginUsdc,
-            delta.netReleasedMarginUsdc,
-            delta.actionChargeToCollectUsdc - delta.vpiRebateReserveConsumedUsdc,
-            delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc
+            delta.safeMarginReleaseAssets,
+            delta.actionChargeFromReleasedMarginAssets,
+            delta.netReleasedMarginAssets,
+            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets,
+            delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
+                - delta.vpiRebateReserveConsumedAssets
         );
-        uint256 protocolFeeCreditedUsdc = _settleCloseActionCharge(host, clearinghouse, delta);
+        uint256 protocolFeeCreditedAssets = _settleCloseActionCharge(host, clearinghouse, delta);
 
-        uint256 cashArrivedRevenueUsdc =
-            delta.pricePnlPledgeConsumedUsdc + delta.actionChargeCollectedUsdc - protocolFeeCreditedUsdc;
-        if (cashArrivedRevenueUsdc > 0) {
+        uint256 cashArrivedRevenueAssets =
+            delta.pricePnlPledgeConsumedAssets + delta.actionChargeCollectedAssets - protocolFeeCreditedAssets;
+        if (cashArrivedRevenueAssets > 0) {
             IHousePool(host.pool())
                 .recordClaimantInflow(
-                    cashArrivedRevenueUsdc,
+                    cashArrivedRevenueAssets,
                     IHousePool.ClaimantInflowKind.Revenue,
                     IHousePool.ClaimantInflowCashMode.CashArrived
                 );
         }
 
-        uint256 feeWithheldUsdc = delta.executionFeeUsdc - protocolFeeCreditedUsdc;
-        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldUsdc - feeWithheldUsdc);
+        uint256 feeWithheldAssets = delta.executionFeeAssets - protocolFeeCreditedAssets;
+        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldAssets - feeWithheldAssets);
 
-        if (delta.pricePayoutUsdc > 0) {
-            host.settlementRecordTraderClaim(delta.account, delta.pricePayoutUsdc, !delta.deletePosition);
+        if (delta.pricePayoutAssets > 0) {
+            host.settlementRecordTraderClaim(delta.account, delta.pricePayoutAssets, !delta.deletePosition);
         }
-        if (delta.actionRebatePaidUsdc > 0) {
-            IHousePool(host.pool()).payOut(address(clearinghouse), delta.actionRebatePaidUsdc);
-            clearinghouse.settleUsdc(delta.account, int256(delta.actionRebatePaidUsdc));
+        if (delta.actionRebatePaidAssets > 0) {
+            IHousePool(host.pool()).payOut(address(clearinghouse), delta.actionRebatePaidAssets);
+            clearinghouse.settleAssets(delta.account, int256(delta.actionRebatePaidAssets));
         }
 
-        _settleProtocolFeeTopUp(host, protocolFeeCreditedUsdc + delta.protocolFeeTopUpUsdc, protocolFeeCreditedUsdc);
+        _settleProtocolFeeTopUp(
+            host, protocolFeeCreditedAssets + delta.protocolFeeTopUpAssets, protocolFeeCreditedAssets
+        );
 
-        uint256 marginAfter = clearinghouse.pnlPledgeUsdc(delta.account);
+        uint256 marginAfter = clearinghouse.pnlPledgeAssets(delta.account);
         if (marginAfter != delta.posMarginAfter) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
@@ -629,8 +635,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 delta.account,
                 CfdEngineSettlementTypes.PositionState({
                     size: delta.closeState.remainingSize,
-                    entryCostUsdcAtoms: delta.posEntryCostAfterUsdcAtoms,
-                    maxProfitUsdc: currentPosition.maxProfitUsdc - delta.posMaxProfitReduction,
+                    entryCostAssetAtoms: delta.posEntryCostAfterAssetAtoms,
+                    maxProfitAssets: currentPosition.maxProfitAssets - delta.posMaxProfitReduction,
                     lastUpdateTime: uint64(block.timestamp),
                     lastCarryTimestamp: uint64(block.timestamp),
                     vpiAccrued: currentPosition.vpiAccrued - delta.posVpiAccruedReduction,
@@ -638,33 +644,33 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 })
             );
         }
-        if (!delta.deletePosition && delta.liquidationReserveReleaseUsdc > 0) {
-            clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseUsdc);
+        if (!delta.deletePosition && delta.liquidationReserveReleaseAssets > 0) {
+            clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseAssets);
         }
 
-        if (delta.closeState.frozenSpreadUsdc > 0) {
-            uint256 frozenSpreadPaidUsdc = _recoveredFrozenSpreadUsdc(delta);
+        if (delta.closeState.frozenSpreadAssets > 0) {
+            uint256 frozenSpreadPaidAssets = _recoveredFrozenSpreadAssets(delta);
             emit FrozenCloseSpreadSettled(
                 delta.account,
-                delta.closeState.frozenSpreadUsdc,
-                frozenSpreadPaidUsdc,
-                delta.closeState.frozenSpreadUsdc - frozenSpreadPaidUsdc
+                delta.closeState.frozenSpreadAssets,
+                frozenSpreadPaidAssets,
+                delta.closeState.frozenSpreadAssets - frozenSpreadPaidAssets
             );
         }
-        if (delta.priceLossWrittenOffUsdc > 0) {
-            emit PriceLossWrittenOff(delta.account, delta.priceLossWrittenOffUsdc);
+        if (delta.priceLossWrittenOffAssets > 0) {
+            emit PriceLossWrittenOff(delta.account, delta.priceLossWrittenOffAssets);
         }
-        if (delta.actionRebateUsdc > 0) {
+        if (delta.actionRebateAssets > 0) {
             emit ActionRebateSettled(
-                delta.account, delta.actionRebateUsdc, delta.actionRebatePaidUsdc, delta.actionRebateWaivedUsdc
+                delta.account, delta.actionRebateAssets, delta.actionRebatePaidAssets, delta.actionRebateWaivedAssets
             );
         }
-        if (delta.actionChargeAssessedUsdc > 0) {
+        if (delta.actionChargeAssessedAssets > 0) {
             emit ActionChargeSettled(
                 delta.account,
-                delta.actionChargeAssessedUsdc,
-                delta.actionChargeWithheldUsdc + delta.actionChargeCollectedUsdc,
-                delta.actionChargeWaivedUsdc
+                delta.actionChargeAssessedAssets,
+                delta.actionChargeWithheldAssets + delta.actionChargeCollectedAssets,
+                delta.actionChargeWaivedAssets
             );
         }
     }
@@ -675,78 +681,80 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         ICfdEngineSettlementHost host,
         IMarginClearinghouse clearinghouse,
         CfdEnginePlanTypes.CloseDelta calldata delta
-    ) private returns (uint256 protocolFeeCreditedUsdc) {
-        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveBeforeUsdc);
-        if (delta.vpiRebateReserveConsumedUsdc > 0) {
-            clearinghouse.consumeVpiRebateReserve(delta.account, host.pool(), delta.vpiRebateReserveConsumedUsdc);
+    ) private returns (uint256 protocolFeeCreditedAssets) {
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveBeforeAssets);
+        if (delta.vpiRebateReserveConsumedAssets > 0) {
+            clearinghouse.consumeVpiRebateReserve(delta.account, host.pool(), delta.vpiRebateReserveConsumedAssets);
         }
-        uint256 vpiReserveReleaseUsdc =
-            delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc;
-        if (vpiReserveReleaseUsdc > 0) {
-            clearinghouse.releaseVpiRebateReserve(delta.account, vpiReserveReleaseUsdc);
+        uint256 vpiReserveReleaseAssets = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
+            - delta.vpiRebateReserveConsumedAssets;
+        if (vpiReserveReleaseAssets > 0) {
+            clearinghouse.releaseVpiRebateReserve(delta.account, vpiReserveReleaseAssets);
         }
 
-        uint256 genericActionChargeToCollectUsdc = delta.actionChargeToCollectUsdc - delta.vpiRebateReserveConsumedUsdc;
-        if (genericActionChargeToCollectUsdc > 0) {
-            (uint256 collectedUsdc, uint256 creditedUsdc) = clearinghouse.consumeActionCharge(
+        uint256 genericActionChargeToCollectAssets =
+            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
+        if (genericActionChargeToCollectAssets > 0) {
+            (uint256 collectedAssets, uint256 creditedAssets) = clearinghouse.consumeActionCharge(
                 delta.account,
-                genericActionChargeToCollectUsdc,
-                delta.actionReserveConsumedUsdc,
-                delta.actionCommittedMarginConsumedUsdc,
+                genericActionChargeToCollectAssets,
+                delta.actionReserveConsumedAssets,
+                delta.actionCommittedMarginConsumedAssets,
                 host.pool(),
                 host.protocolTreasury(),
-                delta.actionProtocolFeeCreditedUsdc
+                delta.actionProtocolFeeCreditedAssets
             );
             if (
-                collectedUsdc != delta.actionChargeCollectedUsdc - delta.vpiRebateReserveConsumedUsdc
-                    || creditedUsdc != delta.actionProtocolFeeCreditedUsdc
+                collectedAssets != delta.actionChargeCollectedAssets - delta.vpiRebateReserveConsumedAssets
+                    || creditedAssets != delta.actionProtocolFeeCreditedAssets
             ) {
                 revert CfdEngineSettlementSidecar__SettlementMismatch();
             }
-            protocolFeeCreditedUsdc = creditedUsdc;
+            protocolFeeCreditedAssets = creditedAssets;
         }
-        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveAfterUsdc);
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveAfterAssets);
     }
 
     /// @notice Attributes recovered action charges to frozen spread after fee, carry, and positive VPI priority.
-    function _recoveredFrozenSpreadUsdc(
+    function _recoveredFrozenSpreadAssets(
         CfdEnginePlanTypes.CloseDelta calldata delta
-    ) private pure returns (uint256 recoveredUsdc) {
-        uint256 priorChargesUsdc = delta.closeState.executionFeeUsdc + delta.pendingCarryUsdc - delta.realizedCarryUsdc;
-        if (delta.closeState.vpiDeltaUsdc > 0) {
-            priorChargesUsdc += uint256(delta.closeState.vpiDeltaUsdc);
+    ) private pure returns (uint256 recoveredAssets) {
+        uint256 priorChargesAssets =
+            delta.closeState.executionFeeAssets + delta.pendingCarryAssets - delta.realizedCarryAssets;
+        if (delta.closeState.vpiDeltaAssets > 0) {
+            priorChargesAssets += uint256(delta.closeState.vpiDeltaAssets);
         }
 
-        uint256 effectiveSpreadUsdc;
-        if (delta.actionChargeAssessedUsdc > priorChargesUsdc) {
-            effectiveSpreadUsdc = delta.actionChargeAssessedUsdc - priorChargesUsdc;
-            if (effectiveSpreadUsdc > delta.closeState.frozenSpreadUsdc) {
-                effectiveSpreadUsdc = delta.closeState.frozenSpreadUsdc;
+        uint256 effectiveSpreadAssets;
+        if (delta.actionChargeAssessedAssets > priorChargesAssets) {
+            effectiveSpreadAssets = delta.actionChargeAssessedAssets - priorChargesAssets;
+            if (effectiveSpreadAssets > delta.closeState.frozenSpreadAssets) {
+                effectiveSpreadAssets = delta.closeState.frozenSpreadAssets;
             }
         }
 
-        uint256 totalRecoveredUsdc = delta.actionChargeWithheldUsdc + delta.actionChargeCollectedUsdc;
-        if (totalRecoveredUsdc > priorChargesUsdc) {
-            recoveredUsdc = totalRecoveredUsdc - priorChargesUsdc;
-            if (recoveredUsdc > effectiveSpreadUsdc) {
-                recoveredUsdc = effectiveSpreadUsdc;
+        uint256 totalRecoveredAssets = delta.actionChargeWithheldAssets + delta.actionChargeCollectedAssets;
+        if (totalRecoveredAssets > priorChargesAssets) {
+            recoveredAssets = totalRecoveredAssets - priorChargesAssets;
+            if (recoveredAssets > effectiveSpreadAssets) {
+                recoveredAssets = effectiveSpreadAssets;
             }
         }
     }
 
     /// @notice Records nonzero LP revenue whose cash is already retained in pool accounting.
     /// @param host Bound engine settlement host.
-    /// @param amountUsdc Revenue to record, in 6-decimal USDC units.
+    /// @param amountAssets Revenue to record, in 6-decimal settlement token units.
     function _recordRetainedCloseRevenue(
         ICfdEngineSettlementHost host,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) private {
-        if (amountUsdc == 0) {
+        if (amountAssets == 0) {
             return;
         }
         IHousePool(host.pool())
             .recordClaimantInflow(
-                amountUsdc, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.AlreadyRetained
+                amountAssets, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.AlreadyRetained
             );
     }
 
@@ -758,19 +766,19 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     ///      seized pool inflow, synchronizes consumed order reservations, nets existing claims, settles the gross
     ///      negative lifetime-VPI clawback from its dedicated reserve or equivalent withheld gain, pays or records
     ///      fresh trader value, records applicable carry revenue, and deletes the position.
-    /// @param delta Valid planned full-liquidation delta; prices are 8 decimals, size 18, and USDC fields 6.
+    /// @param delta Valid planned full-liquidation delta; prices are 8 decimals, size 18, and settlement token fields 6.
     /// @param publishTime Oracle publish timestamp proposed for the liquidation mark.
     /// @param keeper Clearinghouse account credited with the planned bounty.
-    /// @return keeperBountyUsdc Planned bounty forwarded to clearinghouse settlement, in 6-decimal USDC units.
+    /// @return keeperBountyAssets Planned bounty forwarded to clearinghouse settlement, in 6-decimal settlement token units.
     function executeLiquidation(
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
         uint64 publishTime,
         address keeper
-    ) external onlyEngine returns (uint256 keeperBountyUsdc) {
+    ) external onlyEngine returns (uint256 keeperBountyAssets) {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
-        uint256 marginBefore = clearinghouse.pnlPledgeUsdc(delta.account);
+        uint256 marginBefore = clearinghouse.pnlPledgeAssets(delta.account);
         if (marginBefore != delta.posMargin) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
@@ -781,74 +789,75 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             -int256(delta.sideEntryNotionalReduction)
         );
 
-        if (delta.pricePnlClaimConsumedUsdc > 0) {
-            host.settlementConsumeTraderClaim(delta.account, delta.pricePnlClaimConsumedUsdc);
+        if (delta.pricePnlClaimConsumedAssets > 0) {
+            host.settlementConsumeTraderClaim(delta.account, delta.pricePnlClaimConsumedAssets);
         }
 
-        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveBeforeUsdc);
-        if (delta.vpiRebateReserveConsumedUsdc > 0) {
-            clearinghouse.consumeVpiRebateReserve(delta.account, host.pool(), delta.vpiRebateReserveConsumedUsdc);
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveBeforeAssets);
+        if (delta.vpiRebateReserveConsumedAssets > 0) {
+            clearinghouse.consumeVpiRebateReserve(delta.account, host.pool(), delta.vpiRebateReserveConsumedAssets);
         }
-        uint256 vpiReserveReleaseUsdc =
-            delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc;
-        if (vpiReserveReleaseUsdc > 0) {
-            clearinghouse.releaseVpiRebateReserve(delta.account, vpiReserveReleaseUsdc);
+        uint256 vpiReserveReleaseAssets = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
+            - delta.vpiRebateReserveConsumedAssets;
+        if (vpiReserveReleaseAssets > 0) {
+            clearinghouse.releaseVpiRebateReserve(delta.account, vpiReserveReleaseAssets);
         }
-        uint256 genericActionChargeToCollectUsdc = delta.actionChargeToCollectUsdc - delta.vpiRebateReserveConsumedUsdc;
-        if (genericActionChargeToCollectUsdc > 0) {
-            (uint256 collectedUsdc, uint256 protocolCreditedUsdc) = clearinghouse.consumeActionCharge(
+        uint256 genericActionChargeToCollectAssets =
+            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
+        if (genericActionChargeToCollectAssets > 0) {
+            (uint256 collectedAssets, uint256 protocolCreditedAssets) = clearinghouse.consumeActionCharge(
                 delta.account,
-                genericActionChargeToCollectUsdc,
-                delta.actionReserveConsumedUsdc,
-                delta.actionCommittedMarginConsumedUsdc,
+                genericActionChargeToCollectAssets,
+                delta.actionReserveConsumedAssets,
+                delta.actionCommittedMarginConsumedAssets,
                 host.pool(),
                 address(0),
                 0
             );
             if (
-                collectedUsdc != delta.actionChargeCollectedUsdc - delta.vpiRebateReserveConsumedUsdc
-                    || protocolCreditedUsdc != 0
+                collectedAssets != delta.actionChargeCollectedAssets - delta.vpiRebateReserveConsumedAssets
+                    || protocolCreditedAssets != 0
             ) {
                 revert CfdEngineSettlementSidecar__SettlementMismatch();
             }
         }
-        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveAfterUsdc);
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveAfterAssets);
 
-        keeperBountyUsdc = delta.keeperBountyUsdc;
-        uint256 seizedUsdc = _applyLiquidationSettlementPlan(host, delta, keeper);
-        if (seizedUsdc != delta.settlementSeizedUsdc) {
+        keeperBountyAssets = delta.keeperBountyAssets;
+        uint256 seizedAssets = _applyLiquidationSettlementPlan(host, delta, keeper);
+        if (seizedAssets != delta.settlementSeizedAssets) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
-        uint256 cashArrivedRevenueUsdc = seizedUsdc + delta.actionChargeCollectedUsdc;
-        if (cashArrivedRevenueUsdc > 0) {
+        uint256 cashArrivedRevenueAssets = seizedAssets + delta.actionChargeCollectedAssets;
+        if (cashArrivedRevenueAssets > 0) {
             IHousePool(host.pool())
                 .recordClaimantInflow(
-                    cashArrivedRevenueUsdc,
+                    cashArrivedRevenueAssets,
                     IHousePool.ClaimantInflowKind.Revenue,
                     IHousePool.ClaimantInflowCashMode.CashArrived
                 );
         }
-        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldUsdc);
+        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldAssets);
 
-        if (delta.freshTraderPayoutUsdc > 0) {
-            host.settlementRecordTraderClaim(delta.account, delta.freshTraderPayoutUsdc, false);
+        if (delta.freshTraderPayoutAssets > 0) {
+            host.settlementRecordTraderClaim(delta.account, delta.freshTraderPayoutAssets, false);
         }
-        uint256 marginAfter = clearinghouse.pnlPledgeUsdc(delta.account);
+        uint256 marginAfter = clearinghouse.pnlPledgeAssets(delta.account);
         if (marginAfter != 0) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
         host.settlementSyncTotalSideMargin(delta.side, marginBefore, 0);
         host.settlementDeletePosition(delta.account);
 
-        if (delta.priceLossWrittenOffUsdc > 0) {
-            emit PriceLossWrittenOff(delta.account, delta.priceLossWrittenOffUsdc);
+        if (delta.priceLossWrittenOffAssets > 0) {
+            emit PriceLossWrittenOff(delta.account, delta.priceLossWrittenOffAssets);
         }
-        if (delta.actionChargeAssessedUsdc > 0) {
+        if (delta.actionChargeAssessedAssets > 0) {
             emit ActionChargeSettled(
                 delta.account,
-                delta.actionChargeAssessedUsdc,
-                delta.actionChargeWithheldUsdc + delta.actionChargeCollectedUsdc,
-                delta.actionChargeWaivedUsdc
+                delta.actionChargeAssessedAssets,
+                delta.actionChargeWithheldAssets + delta.actionChargeCollectedAssets,
+                delta.actionChargeWaivedAssets
             );
         }
     }
@@ -857,28 +866,28 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @param host Bound engine settlement host.
     /// @param delta Valid planned full-liquidation delta.
     /// @param keeper Clearinghouse account credited with the planned bounty.
-    /// @return seizedUsdc Amount transferred to the pool by the clearinghouse, in 6-decimal USDC units.
+    /// @return seizedAssets Amount transferred to the pool by the clearinghouse, in 6-decimal settlement token units.
     function _applyLiquidationSettlementPlan(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
         address keeper
-    ) private returns (uint256 seizedUsdc) {
+    ) private returns (uint256 seizedAssets) {
         IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan =
             IMarginClearinghouse.LiquidationSettlementPlan({
-                settlementSeizedUsdc: delta.settlementSeizedUsdc,
-                positionMarginUnlockedUsdc: delta.residualPlan.mutation.positionMarginUnlockedUsdc,
-                otherLockedMarginUnlockedUsdc: delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc
+                settlementSeizedAssets: delta.settlementSeizedAssets,
+                positionMarginUnlockedAssets: delta.residualPlan.mutation.positionMarginUnlockedAssets,
+                otherLockedMarginUnlockedAssets: delta.residualPlan.mutation.otherLockedMarginUnlockedAssets
             });
-        seizedUsdc = IMarginClearinghouse(host.clearinghouse())
+        seizedAssets = IMarginClearinghouse(host.clearinghouse())
             .applyLiquidationSettlementPlan(
                 delta.account,
                 settlementPlan,
                 host.pool(),
                 keeper,
-                delta.keeperBountyUsdc,
+                delta.keeperBountyAssets,
                 host.protocolTreasury(),
-                delta.protocolLiquidationFeeUsdc,
-                delta.lpLiquidationFeeUsdc
+                delta.protocolLiquidationFeeAssets,
+                delta.lpLiquidationFeeAssets
             );
     }
 
@@ -886,29 +895,29 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @dev The top-up is capped by both the requested shortfall and current free pool cash, then paid to the clearinghouse
     ///      and credited to the host's protocol-treasury account.
     /// @param host Bound engine settlement host.
-    /// @param amountUsdc Total protocol-fee amount intended to be credited.
-    /// @param clearinghouseCreditedUsdc Portion already credited from clearinghouse cash collection.
+    /// @param amountAssets Total protocol-fee amount intended to be credited.
+    /// @param clearinghouseCreditedAssets Portion already credited from clearinghouse cash collection.
     function _settleProtocolFeeTopUp(
         ICfdEngineSettlementHost host,
-        uint256 amountUsdc,
-        uint256 clearinghouseCreditedUsdc
+        uint256 amountAssets,
+        uint256 clearinghouseCreditedAssets
     ) private {
-        if (clearinghouseCreditedUsdc > amountUsdc) {
-            clearinghouseCreditedUsdc = amountUsdc;
+        if (clearinghouseCreditedAssets > amountAssets) {
+            clearinghouseCreditedAssets = amountAssets;
         }
-        uint256 poolFundedUsdc = amountUsdc - clearinghouseCreditedUsdc;
-        if (poolFundedUsdc == 0) {
+        uint256 poolFundedAssets = amountAssets - clearinghouseCreditedAssets;
+        if (poolFundedAssets == 0) {
             return;
         }
 
         IHousePool pool = IHousePool(host.pool());
-        uint256 freeCashUsdc = pool.getSettlementFreeUSDC();
-        uint256 topUpUsdc = poolFundedUsdc < freeCashUsdc ? poolFundedUsdc : freeCashUsdc;
-        if (topUpUsdc == 0) {
+        uint256 freeCashAssets = pool.getSettlementFreeAssets();
+        uint256 topUpAssets = poolFundedAssets < freeCashAssets ? poolFundedAssets : freeCashAssets;
+        if (topUpAssets == 0) {
             return;
         }
-        pool.payOut(host.clearinghouse(), topUpUsdc);
-        IMarginClearinghouse(host.clearinghouse()).settleUsdc(host.protocolTreasury(), int256(topUpUsdc));
+        pool.payOut(host.clearinghouse(), topUpAssets);
+        IMarginClearinghouse(host.clearinghouse()).settleAssets(host.protocolTreasury(), int256(topUpAssets));
     }
 
 }

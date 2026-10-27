@@ -90,7 +90,7 @@ size quantum.
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `seniorFrozenLpFeeBps`, `juniorFrozenLpFeeBps` | `HousePool` | `onlyOwner`, 48-hour timelock; each fee is capped at `1,000` bps |
-| `maxSeniorExposureUsdc`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 48-hour timelock; finalized values must be finite and below 100%, respectively |
+| `maxSeniorExposureAssets`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 48-hour timelock; finalized values must be finite and below 100%, respectively |
 | Junior `maintenanceFeeAprBps`, `maintenanceFeeRecipient` | `TrancheVault` | current `HousePool.owner()` only, 48-hour timelock; fee is capped at `1,000` bps nominal APR |
 | `RouterConfig` (`maxExecutionWindowSeconds`, staleness limits, confidence policy, historical settlement window, component skew, opening minimum, bounty rates/limits, pending-order cap, minimum execution gas, cleanup cap) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
@@ -139,8 +139,8 @@ without a new deployment.
 
 ### Owner-funded recapitalization
 
-`CfdEngine.recapitalizePool(amountUsdc)` is an immediate, owner-only, non-reentrant recovery action.
-The engine owner approves the engine to pull USDC from its own wallet directly into the configured HousePool.
+`CfdEngine.recapitalizePool(amountAssets)` is an immediate, owner-only, non-reentrant recovery action.
+The engine owner approves the engine to pull USDG from its own wallet directly into the configured HousePool.
 The engine checkpoints carry against the old pool depth, verifies the exact token balance increase, and records
 `Recapitalization` with `CashArrived` atomically. Existing excess cannot substitute for the incoming transfer.
 The pool queues claimant allocation for normal reconciliation; no shares are minted and degraded mode is not
@@ -422,9 +422,9 @@ Risks:
 - the basket-only confidence gate deliberately favors liveness over an individual-feed hard ceiling: a low-weight component with a wide confidence interval can pass when its weighted contribution keeps aggregate basket confidence within the configured limit,
 - all live execution still depends on external oracle availability.
 
-### USDC
+### USDG
 
-The protocol assumes standard ERC-20 behavior and practical dollar parity from USDC.
+The protocol assumes standard ERC-20 behavior and practical dollar parity from USDG.
 
 Risks:
 
@@ -549,7 +549,7 @@ orders retain the ordinary degraded-mode restriction on new risk.
 
 When existing-position protection locks its trigger bounty, admission is checked after the lock.
 The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
-duplicating it. Inputs use `positionEntryCostUsdcAtoms`; price collateral is only `position.margin` (the PnL pledge) plus
+duplicating it. Inputs use `positionEntryCostAssetAtoms`; price collateral is only `position.margin` (the PnL pledge) plus
 that account's trader claim. Free settlement and generic action, order, liquidation, VPI, and protection reserves cannot
 rescue the test. Nonzero uncovered carry or a VPI reserve below `max(-vpiAccrued, 0)` rejects independently, and price
 equity must be strictly greater than `max(initMargin, active maintenance/FAD margin)`.
@@ -561,7 +561,7 @@ equity must be strictly greater than `max(initMargin, active maintenance/FAD mar
 The broad operators can:
 
 - lock and unlock margin,
-- settle USDC balances,
+- settle USDG balances,
 - seize settlement into protocol-authorized flows.
 
 The router reservation paths can:
@@ -588,7 +588,7 @@ terminal-NAV book. Existing carry remains due under normal health projections an
 `DepositFor` as payer metadata for the accompanying `Deposit`, not a second credit.
 
 Across funding uses an existing destination handler rather than a per-intent custody contract. The reviewed route
-must bind the destination chain, SpokePool, handler, canonical USDC, clearinghouse, and trading-account beneficiary.
+must bind the destination chain, SpokePool, handler, canonical USDG, clearinghouse, and trading-account beneficiary.
 Its balance-based approval and `depositFor` calldata must use that exact token/clearinghouse/account. The explicit
 call sequence then clears the allowance and emits the unique quote identifier through the pinned Across EventEmitter.
 The fallback recipient must equal the beneficiary; a provider response cannot introduce a different recipient or extend
@@ -713,7 +713,7 @@ Terminal classification is deliberately allow-listed:
 - when the exact protected position remains after a registered protection-attempt failure, cleanup settles that
   attempt's zero record, pays no executor, and moves `Triggered -> Latched`; retry creates a fresh zero record,
 - terminal-invalid closes move no bounty value. The separate protection-trigger bounty is paid only on trigger,
-- open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
+- open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDG transfers,
 - persistent risk-off cancellation is administrative invalidation, precedes expiry, needs no oracle, and fully refunds
   the trader's order plus attached `PendingOpen` protection reserves internally in one no-checkpoint clearinghouse
   release without paying the cleanup caller; its receipt records no price source and, for a nonzero order bounty,
@@ -831,7 +831,7 @@ This is a deliberate trade-off: preserve close and liquidation liveness during r
 
 LP entry and exit pricing consume the same authenticated terminal snapshot. The Engine stores whole 100-token lots
 and exact entry cost, while `TerminalNavBookV2` aggregates each account's LP-side marked price PnL. A positive LP
-receivable is capped by that account's `pnlPledgeUsdc + traderClaimBalanceUsdc`. Liquidation, order and action
+receivable is capped by that account's `pnlPledgeAssets + traderClaimBalanceAssets`. Liquidation, order and action
 reserves cannot inflate it. A negative value is the exact marked price amount LPs owe the trader within the bounded
 market. Ordinary and protection close attempts have zero bounty and no collectible escrow component.
 
@@ -888,7 +888,7 @@ for invariant and differential testing of every settlement path.
 
 A settlement pass that advances no queue item reverts, rolling back both waterfall reconciliation and engine carry
 checkpoints. This prevents per-block no-op checkpoint grief. Senior coupon arithmetic still floors independently at
-each settlement that advances real epoch work, so sub-micro-USDC rounding remains execution-frequency dependent; the
+each settlement that advances real epoch work, so sub-micro-USDG rounding remains execution-frequency dependent; the
 hourly aggregation of requests bounds that residual rather than making coupon accrual mathematically remainder-exact.
 
 Async allocation uses per-controller floor rounding against immutable epoch totals. Splitting a request among more
@@ -927,12 +927,12 @@ still latches only at `E < L` and may be cleared at `E >= L`; the full buffer ne
 
 The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
 
-- carry base: `max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)`
-- utilization denominator: `max(pool.totalAssets() - totalTraderClaimBalanceUsdc, 0)`; a positive base at zero depth
+- carry base: `max(positionMaxProfitAssets - activePositionMarginAssets, 0)`
+- utilization denominator: `max(pool.totalAssets() - totalTraderClaimBalanceAssets, 0)`; a positive base at zero depth
   uses full utilization. Claim creation, consumption, and payment checkpoint both side indexes before changing depth
 - accrual clock: wall-clock time
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
-- claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryUsdc`,
+- claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryAssets`,
   then apply the full incoming credit. The credit can fund retained arrears at a later checkpoint, including at the same
   timestamp; it is not collected or waived in this call. Claim liquidity checks run after collection, and any failure
   rolls back the collection and credit
@@ -977,7 +977,7 @@ This preserves risk reduction and liquidation liveness under temporary cash shor
 Same-account trader claim balance is price-risk backing, not generic cash or action collateral.
 
 - open/increase, trader-withdraw, close, and liquidation health use the exact same-account price-risk cap:
-  `pnlPledgeUsdc + traderClaimBalanceUsdc`; VPI never adds to or subtracts from this price-risk equity,
+  `pnlPledgeAssets + traderClaimBalanceAssets`; VPI never adds to or subtracts from this price-risk equity,
 - the separately funded VPI reserve backs only that account's typed VPI obligation: overfunding never adds price
   collateral, while backing below `max(-vpiAccrued, 0)` independently blocks withdrawal and sets the account lens's
   liquidation flag; close planning returns a typed failure and liquidation planning reverts on that reserve mismatch,
@@ -1145,7 +1145,7 @@ The current HousePool owner may configure it through a 48-hour delay, subject to
 Finalization must checkpoint elapsed fees to the old recipient before changing the rate or recipient; enabling from
 zero starts prospectively.
 
-The fee mints ordinary Junior shares and never transfers USDC or mutates tranche principal, the Senior HWM, reserves,
+The fee mints ordinary Junior shares and never transfers USDG or mutates tranche principal, the Senior HWM, reserves,
 claim escrows, or waterfall accounting. Security review must distinguish raw ERC-20 supply from effective pricing
 supply (`raw + pending fee shares`). Every Junior conversion, preview, and settlement price uses effective supply,
 while raw supply remains the conservation quantity for actually issued balances. Pending deposits are excluded until
@@ -1171,10 +1171,10 @@ This removes unpaid senior-coupon debt queues while making the cost of the fixed
 ### Senior exposure limits and passive overage
 
 Active protected senior exposure is `E = max(projected senior principal, projected senior high-water mark)`. Counted
-admission exposure is `C = E + R`, where `R` is the gross USDC reserved in unfinalized senior deposit epochs. The
+admission exposure is `C = E + R`, where `R` is the gross USDG reserved in unfinalized senior deposit epochs. The
 absolute and share admission tests use `C`, and the Junior redemption-funding covenant protects the same committed
 exposure `C`.
-Governance sets both an absolute USDC limit and a maximum share of senior-plus-junior claimant capital. The high-water
+Governance sets both an absolute USDG limit and a maximum share of senior-plus-junior claimant capital. The high-water
 term prevents an impaired principal balance from falsely reopening capacity while its restoration entitlement remains.
 
 Senior deposit reservations are firm once accepted. They consume quoted headroom when requested and settle even if
@@ -1286,7 +1286,7 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
 2. Price settlement uses same-account claim and PnL pledge up to the collectible cap. Separate action obligations use
    their eligible gain withholding, protected VPI backing, spendable action reserve, free settlement, and committed
    order margin according to the canonical plan; those sources do not enlarge the price-loss cap.
-3. Collected spread belongs to LPs. Any terminally uncollectible spread is recorded as `frozenSpreadWaivedUsdc`, and
+3. Collected spread belongs to LPs. Any terminally uncollectible spread is recorded as `frozenSpreadWaivedAssets`, and
    excess price loss is recorded as `PriceLossWrittenOff`; neither creates a new liability or deficit.
 4. The Engine removes the position and curve. Terminal close liveness does not waive oracle validation, FIFO,
    timing, slippage, or caller-pinned financial bounds.
@@ -1382,8 +1382,8 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
 ### LP claim and allocation limitations
 
 - Deposit/mint share claims, redemption cancellation, and refundable-share claims require `receiver == controller`,
-  including zero-share acknowledgements. An approved operator may act for that controller. Funded USDC claims and
-  pending-deposit USDC refunds have separate receiver rules.
+  including zero-share acknowledgements. An approved operator may act for that controller. Funded USDG claims and
+  pending-deposit USDG refunds have separate receiver rules.
 - Partial deposit claims or funded-redemption claims can revert at rounding boundaries even when the full remainder
   is claimable. A tiny asset-denominated deposit claim can round to zero shares. Clients should offer full-remainder
   claims and preserve the entitlement display after a failed partial claim.
@@ -1395,15 +1395,15 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
   required; insufficient cash or persistent Senior demand can independently defer Junior funding.
 - Terminal allocation dust follows fixed ownership rules: deposit-share dust is burned, funded-asset dust returns to
   HousePool as excess, and refundable-share dust goes to the seed receiver. It is not awarded to the final caller.
-- An impaired Senior withdrawal may retain less than one extra USDC atom of high-water-mark protection per funded
+- An impaired Senior withdrawal may retain less than one extra USDG atom of high-water-mark protection per funded
   pass because of conservative rounding. This can accumulate across passes and does not describe a universal bound
   on all LP allocation dust.
 
 ### Rounding limitations
 
-- **Position carry rounding:** Converting a position's carry-index delta to six-decimal USDC rounds down.
+- **Position carry rounding:** Converting a position's carry-index delta to six-decimal USDG rounds down.
   The checkpoint advances even when the result is zero, without retaining the fractional remainder. Each such
-  conversion can discard less than one USDC atom (`0.000001 USDC`). User-triggered checkpoints, including
+  conversion can discard less than one USDG atom (`0.000001 USDG`). User-triggered checkpoints, including
   zero-amount withdrawals, can therefore reduce LP carry revenue; an interval whose entire accrual is below one atom
   contributes no collectible carry. Practical savings depend on borrow size, utilization, checkpoint frequency, and
   transaction costs. The implementation does not persist fractional carry.
@@ -1426,15 +1426,15 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
 
 ### Clearinghouse limitations
 
-- settlement uses USDC only; each account has one directional position and separate typed collateral buckets,
-- the owner may rescue accidentally transferred non-settlement ERC-20 tokens through `rescueToken`; settlement USDC
+- settlement uses USDG only; each account has one directional position and separate typed collateral buckets,
+- the owner may rescue accidentally transferred non-settlement ERC-20 tokens through `rescueToken`; settlement USDG
   is always excluded, including uncredited direct transfers, and rescue does not alter account balances or margin,
-- **Settlement-USDC recovery limitation:** Direct USDC transfers to the clearinghouse outside its
+- **Settlement-USDG recovery limitation:** Direct USDG transfers to the clearinghouse outside its
   deposit APIs do not credit a margin account and remain unrecoverable through the current APIs, including by the
   owner. They are not allocated to HousePool or LPs. The clearinghouse has no aggregate credited-balance counter
   with which to distinguish recoverable surplus from funds backing account obligations.
   Integrations must use the supported `deposit`, `depositMargin`, or `depositFor` APIs to fund margin accounts,
-- non-USDC collateral pricing and staleness policy are intentionally out of scope.
+- non-USDG collateral pricing and staleness policy are intentionally out of scope.
 
 ## Emergency Procedures
 
@@ -1493,7 +1493,7 @@ create neither condition; the current accounting model has no accumulated-debt l
 
 ## Asset Isolation
 
-Core perps LP capital must remain pure, immediately accessible USDC.
+Core perps LP capital must remain pure, immediately accessible USDG.
 
 The protocol explicitly rejects embedding third-party yield or lending-market exposure into the core `HousePool` because that would:
 
@@ -1508,7 +1508,7 @@ If yield overlays are desired, they should sit above the base protocol as opt-in
 
 | Quantity | Decimals |
 |----------|----------|
-| USDC | 6 |
+| USDG | 6 |
 | Position size | 18 |
 | Oracle / basket price | 8 |
 | PnL | 6 |

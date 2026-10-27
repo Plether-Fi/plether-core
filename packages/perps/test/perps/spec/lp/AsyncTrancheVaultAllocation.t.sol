@@ -35,7 +35,7 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
             initMarginBps: 150,
             fadMarginBps: 300,
             baseCarryBps: 0,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -171,7 +171,7 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
     function test_RedeemAllocationReturnsAggregateAssetDustToPool() public {
         uint256 requestId = _prepareTwoControllerRedeem();
         uint256 fundedAssets = USER_ASSETS;
-        usdc.mint(address(juniorVault), fundedAssets);
+        settlementToken.mint(address(juniorVault), fundedAssets);
 
         _warpToEpoch(requestId);
         vm.prank(address(pool));
@@ -184,17 +184,21 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         assertGt(assetDust, 0, "fixture must create aggregate asset dust");
         assertEq(_async().claimableRedeemAssets(requestId, BOB), 0, "one-share controller must round to zero assets");
 
-        uint256 poolBalanceBeforeClaims = usdc.balanceOf(address(pool));
+        uint256 poolBalanceBeforeClaims = settlementToken.balanceOf(address(pool));
         vm.prank(BOB);
         assertEq(_async().claimRedeem(requestId, 1, BOB, BOB), bobAssets);
         vm.prank(ALICE);
         assertEq(_async().claimRedeem(requestId, aliceShares, ALICE, ALICE), aliceAssets);
 
-        assertEq(usdc.balanceOf(ALICE), aliceAssets);
-        assertEq(usdc.balanceOf(BOB), bobAssets);
-        assertEq(usdc.balanceOf(address(pool)), poolBalanceBeforeClaims + assetDust, "asset dust must return to Pool");
+        assertEq(settlementToken.balanceOf(ALICE), aliceAssets);
+        assertEq(settlementToken.balanceOf(BOB), bobAssets);
+        assertEq(
+            settlementToken.balanceOf(address(pool)),
+            poolBalanceBeforeClaims + assetDust,
+            "asset dust must return to Pool"
+        );
         assertEq(juniorVault.withdrawalEscrowAssets(), 0, "withdrawal escrow accounting must be empty");
-        assertEq(usdc.balanceOf(address(juniorVault)), 0, "withdrawal escrow custody must be empty");
+        assertEq(settlementToken.balanceOf(address(juniorVault)), 0, "withdrawal escrow custody must be empty");
         assertEq(juniorVault.controllerRedeemHead(ALICE), 0);
         assertEq(juniorVault.controllerRedeemHead(BOB), 0);
         _assertRedeemEpochFullyBooked(requestId);
@@ -220,7 +224,7 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         assertGt(secondRequestId, firstRequestId, "fixture needs two FIFO epochs");
 
         uint256 fundedAssets = firstRedeemShares + 1;
-        usdc.mint(address(juniorVault), fundedAssets);
+        settlementToken.mint(address(juniorVault), fundedAssets);
         vm.prank(address(pool));
         juniorVault.fundRedeemEpoch(firstRequestId, firstRedeemShares, fundedAssets);
 
@@ -250,7 +254,7 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         uint256 requestId = _prepareTwoControllerRedeem();
         uint256 fundedShares = USER_SHARES - 1;
         uint256 fundedAssets = USER_ASSETS - 1;
-        usdc.mint(address(juniorVault), fundedAssets);
+        settlementToken.mint(address(juniorVault), fundedAssets);
 
         _warpToEpoch(requestId);
         vm.prank(address(pool));
@@ -293,7 +297,7 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         uint256 aliceFundedShares = Math.mulDiv(USER_SHARES - 1, fundedShares, USER_SHARES, Math.Rounding.Floor);
         uint256 aliceFundedAssets = Math.mulDiv(USER_SHARES - 1, fundedAssets, USER_SHARES, Math.Rounding.Floor);
         uint256 assetDust = fundedAssets - aliceFundedAssets;
-        uint256 poolBalanceBeforeClaim = usdc.balanceOf(address(pool));
+        uint256 poolBalanceBeforeClaim = settlementToken.balanceOf(address(pool));
         assertEq(_async().claimableRedeemRequest(requestId, BOB), 0);
         assertEq(_async().claimableRedeemRequest(requestId, ALICE), aliceFundedShares);
 
@@ -301,10 +305,12 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         assertEq(_async().claimRedeem(requestId, aliceFundedShares, ALICE, ALICE), aliceFundedAssets);
 
         assertEq(
-            usdc.balanceOf(address(pool)), poolBalanceBeforeClaim + assetDust, "funding asset dust must return to Pool"
+            settlementToken.balanceOf(address(pool)),
+            poolBalanceBeforeClaim + assetDust,
+            "funding asset dust must return to Pool"
         );
         assertEq(juniorVault.withdrawalEscrowAssets(), 0);
-        assertEq(usdc.balanceOf(address(juniorVault)), 0);
+        assertEq(settlementToken.balanceOf(address(juniorVault)), 0);
         assertEq(juniorVault.controllerRedeemHead(ALICE), 0);
         assertEq(juniorVault.controllerRedeemHead(BOB), 0);
         _assertRedeemEpochFullyBooked(requestId);
@@ -350,9 +356,9 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         address controller,
         uint256 assets
     ) internal returns (uint256 requestId) {
-        usdc.mint(controller, assets);
+        settlementToken.mint(controller, assets);
         vm.startPrank(controller);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         requestId = _async().requestDeposit(assets, controller, controller);
         vm.stopPrank();
     }

@@ -32,7 +32,7 @@ interface ILiquidationPreviewRouter is IOrderRouterAccounting {
 /// @dev The lens reads cached protocol state and caller-supplied hypothetical values but does not ingest oracle updates,
 ///      validate router/order timing policy, refresh the mark, checkpoint carry, or mutate state. Expected planner
 ///      business failures are encoded in preview fields; inconsistent dependencies, malformed inputs, and arithmetic
-///      violations can still revert. Unless stated otherwise, USDC amounts use 6 decimals, prices use 8 decimals, sizes
+///      violations can still revert. Unless stated otherwise, settlement token amounts use 6 decimals, prices use 8 decimals, sizes
 ///      use 18 decimals, basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 contract CfdEngineLens is ICfdEngineLens {
 
@@ -86,7 +86,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param account Account that would open or increase a position.
     /// @param side Resulting position side; an existing opposite-side position produces a typed failure.
     /// @param sizeDelta Position size increase, with 18 decimals.
-    /// @param marginDelta Margin supplied by the order, in 6-decimal USDC units.
+    /// @param marginDelta Margin supplied by the order, in 6-decimal settlement token units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
     /// @return preview Open economics and projected post-trade position, health, and liquidation threshold.
     function previewOpen(
@@ -106,7 +106,7 @@ contract CfdEngineLens is ICfdEngineLens {
     ///      gates remain outside the quote; price/time and dependency/numeric assumptions match `previewOpen`.
     /// @param account Account that would open or increase a position.
     /// @param side Resulting position side.
-    /// @param marginDelta Margin supplied by the hypothetical order, in 6-decimal USDC units.
+    /// @param marginDelta Margin supplied by the hypothetical order, in 6-decimal settlement token units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
     /// @return quote Largest planner-valid increase, its economics, and a limiting rejection code.
     function quoteMaxOpen(
@@ -139,7 +139,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param account Account that would open or increase a position.
     /// @param side Resulting position side.
     /// @param sizeDelta Position size increase, with 18 decimals.
-    /// @param marginDelta Margin supplied by the order, in 6-decimal USDC units.
+    /// @param marginDelta Margin supplied by the order, in 6-decimal settlement token units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
     /// @return code Numeric value of `CfdEnginePlanTypes.OpenRevertCode`; zero is `OK`.
     function previewOpenRevertCode(
@@ -158,7 +158,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param account Account that would open or increase a position.
     /// @param side Resulting position side.
     /// @param sizeDelta Position size increase, with 18 decimals.
-    /// @param marginDelta Margin supplied by the order, in 6-decimal USDC units.
+    /// @param marginDelta Margin supplied by the order, in 6-decimal settlement token units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
     /// @return category Commit-time-rejectable, execution-time user/protocol invalidation, or `None`.
     function previewOpenFailurePolicyCategory(
@@ -172,20 +172,20 @@ contract CfdEngineLens is ICfdEngineLens {
     }
 
     /// @notice Simulates a close/decrease with caller-supplied hypothetical pool accounting depth and cash.
-    /// @dev Matches `previewClose` except `poolDepthUsdc` replaces current pool assets for VPI, payout affordability,
+    /// @dev Matches `previewClose` except `poolDepthAssets` replaces current pool assets for VPI, payout affordability,
     ///      and solvency calculations. Side carry-index projection still uses the live pool's actual `totalAssets`.
     /// @param account Account whose current position is hypothetically reduced.
     /// @param sizeDelta Position size to close, with 18 decimals.
     /// @param oraclePrice Candidate close price, with 8 decimals.
-    /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
+    /// @param poolDepthAssets Hypothetical pool assets and cash, in 6-decimal settlement token units.
     /// @return preview Close economics, settlement routing, claim effects, and projected solvency.
     function simulateClose(
         address account,
         uint256 sizeDelta,
         uint256 oraclePrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) external view returns (ICfdEngineTypes.ClosePreview memory preview) {
-        preview = _previewClose(account, sizeDelta, oraclePrice, poolDepthUsdc);
+        preview = _previewClose(account, sizeDelta, oraclePrice, poolDepthAssets);
     }
 
     /// @notice Previews full liquidation using current pool assets as both accounting depth and available cash.
@@ -222,34 +222,34 @@ contract CfdEngineLens is ICfdEngineLens {
     }
 
     /// @notice Simulates full liquidation with caller-supplied hypothetical pool accounting depth and cash.
-    /// @dev Matches `previewLiquidation` except `poolDepthUsdc` replaces current pool assets for payout-affordability and
+    /// @dev Matches `previewLiquidation` except `poolDepthAssets` replaces current pool assets for payout-affordability and
     ///      solvency calculations. Side carry-index projection still uses the live pool's actual `totalAssets`.
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
-    /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
+    /// @param poolDepthAssets Hypothetical pool assets and cash, in 6-decimal settlement token units.
     /// @return preview Liquidation eligibility, P+C equity, charge split, settlement, claims, and projected solvency.
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview) {
-        preview = _previewLiquidation(account, oraclePrice, poolDepthUsdc);
+        preview = _previewLiquidation(account, oraclePrice, poolDepthAssets);
     }
 
     /// @notice Returns the canonical liquidation-eligibility bit at an explicit pool depth.
     function isLiquidatableAt(
         address account,
         uint256 oraclePrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) external view returns (bool liquidatable) {
-        return _previewLiquidation(account, oraclePrice, poolDepthUsdc).liquidatable;
+        return _previewLiquidation(account, oraclePrice, poolDepthAssets).liquidatable;
     }
 
     /// @notice Builds an open plan and, on success, projects post-trade risk and a liquidation threshold.
     /// @param account Account whose position and collateral seed the plan.
     /// @param side Requested position side.
     /// @param sizeDelta Requested size increase, with 18 decimals.
-    /// @param marginDelta Requested margin contribution, in 6-decimal USDC units.
+    /// @param marginDelta Requested margin contribution, in 6-decimal settlement token units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
     /// @return preview Typed open result and projected position/risk fields.
     function _previewOpen(
@@ -275,21 +275,21 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 price = delta.price;
         preview.executionPrice = price;
         preview.sizeDelta = delta.sizeDelta;
-        preview.marginDeltaUsdc = marginDelta;
+        preview.marginDeltaAssets = marginDelta;
 
         preview.valid = delta.valid;
         preview.invalidReason = delta.revertCode;
         preview.failureCategory = planner.getOpenFailurePolicyCategory(delta.revertCode);
-        preview.notionalUsdc = delta.openState.notionalUsdc;
-        preview.vpiUsdc = delta.openState.vpiUsdc;
-        preview.executionFeeUsdc = delta.executionFeeUsdc;
-        preview.tradeCostUsdc = delta.tradeCostUsdc;
-        preview.poolRebatePayoutUsdc = delta.poolRebatePayoutUsdc;
-        preview.pendingCarryUsdc = delta.pendingCarryUsdc;
-        preview.initialMarginRequirementUsdc = delta.openState.initialMarginRequirementUsdc;
-        preview.maintenanceMarginUsdc = delta.openState.maintenanceMarginUsdc;
+        preview.notionalAssets = delta.openState.notionalAssets;
+        preview.vpiAssets = delta.openState.vpiAssets;
+        preview.executionFeeAssets = delta.executionFeeAssets;
+        preview.tradeCostAssets = delta.tradeCostAssets;
+        preview.poolRebatePayoutAssets = delta.poolRebatePayoutAssets;
+        preview.pendingCarryAssets = delta.pendingCarryAssets;
+        preview.initialMarginRequirementAssets = delta.openState.initialMarginRequirementAssets;
+        preview.maintenanceMarginAssets = delta.openState.maintenanceMarginAssets;
         preview.postSize = delta.newPosSize;
-        preview.postMarginUsdc = delta.positionMarginAfterOpen;
+        preview.postMarginAssets = delta.positionMarginAfterOpen;
         preview.postEntryPrice = delta.newPosEntryPrice;
         if (delta.revertCode == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED) {
             return preview;
@@ -299,7 +299,7 @@ contract CfdEngineLens is ICfdEngineLens {
             // Early failures may have no open economics. Only correct a constructed position's requirement;
             // do not turn an uncomputed diagnostic into an apparently complete preview.
             if (delta.openState.newSize != 0) {
-                preview.maintenanceMarginUsdc = Math.mulDiv(
+                preview.maintenanceMarginAssets = Math.mulDiv(
                     delta.openState.newSize / CfdTypes.SIZE_QUANTUM * price,
                     snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps,
                     10_000
@@ -309,19 +309,19 @@ contract CfdEngineLens is ICfdEngineLens {
         }
 
         CfdTypes.Position memory projected = _projectOpenPosition(snap.position, delta);
-        uint256 reachableCollateralUsdc = delta.positionMarginAfterOpen + snap.traderClaimBalanceForAccount;
+        uint256 reachableCollateralAssets = delta.positionMarginAfterOpen + snap.traderClaimBalanceForAccount;
         uint256 maintenanceBps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
         PositionRiskAccountingLib.PositionRiskState memory risk = PositionRiskAccountingLib.buildExactPriceRiskState(
-            projected, delta.newPosEntryCostUsdcAtoms, price, snap.capPrice, reachableCollateralUsdc, maintenanceBps
+            projected, delta.newPosEntryCostAssetAtoms, price, snap.capPrice, reachableCollateralAssets, maintenanceBps
         );
 
-        preview.postUnrealizedPnlUsdc = risk.unrealizedPnlUsdc;
-        preview.postEquityUsdc = risk.equityUsdc;
-        preview.maintenanceMarginUsdc = risk.maintenanceMarginUsdc;
+        preview.postUnrealizedPnlAssets = risk.unrealizedPnlAssets;
+        preview.postEquityAssets = risk.equityAssets;
+        preview.maintenanceMarginAssets = risk.maintenanceMarginAssets;
         preview.postLiquidatable = risk.liquidatable;
-        preview.postHealthBps = _healthBps(risk.equityUsdc, risk.maintenanceMarginUsdc);
+        preview.postHealthBps = _healthBps(risk.equityAssets, risk.maintenanceMarginAssets);
         (preview.hasLiquidationPrice, preview.liquidationPrice) = _findLiquidationPrice(
-            projected, delta.newPosEntryCostUsdcAtoms, snap.capPrice, reachableCollateralUsdc, maintenanceBps
+            projected, delta.newPosEntryCostAssetAtoms, snap.capPrice, reachableCollateralAssets, maintenanceBps
         );
     }
 
@@ -352,13 +352,13 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param account Account whose position is reduced.
     /// @param sizeDelta Requested size reduction, with 18 decimals.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
-    /// @param poolDepthUsdc Pool assets and cash used by the plan, in 6-decimal USDC units.
+    /// @param poolDepthAssets Pool assets and cash used by the plan, in 6-decimal settlement token units.
     /// @return preview Typed close result, settlement routing, and projected solvency.
     function _previewClose(
         address account,
         uint256 sizeDelta,
         uint256 oraclePrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) internal view returns (ICfdEngineTypes.ClosePreview memory preview) {
         uint256 price = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
         preview.executionPrice = price;
@@ -375,7 +375,7 @@ contract CfdEngineLens is ICfdEngineLens {
             return preview;
         }
 
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, poolDepthUsdc);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, poolDepthAssets);
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: sizeDelta,
@@ -389,17 +389,17 @@ contract CfdEngineLens is ICfdEngineLens {
         });
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, oraclePrice);
 
-        preview.realizedPnlUsdc = delta.realizedPnlUsdc;
+        preview.realizedPnlAssets = delta.realizedPnlAssets;
         preview.remainingMargin = delta.posMarginAfter;
         preview.remainingSize = pos.size - sizeDelta;
-        preview.vpiDeltaUsdc = delta.closeState.vpiDeltaUsdc;
-        if (delta.closeState.vpiDeltaUsdc > 0) {
-            preview.vpiUsdc = uint256(delta.closeState.vpiDeltaUsdc);
+        preview.vpiDeltaAssets = delta.closeState.vpiDeltaAssets;
+        if (delta.closeState.vpiDeltaAssets > 0) {
+            preview.vpiAssets = uint256(delta.closeState.vpiDeltaAssets);
         }
-        preview.executionFeeUsdc = delta.executionFeeUsdc;
-        preview.frozenSpreadUsdc = delta.closeState.frozenSpreadUsdc;
-        preview.frozenSpreadPaidUsdc = _frozenSpreadPaidUsdc(delta);
-        preview.frozenSpreadWaivedUsdc = preview.frozenSpreadUsdc - preview.frozenSpreadPaidUsdc;
+        preview.executionFeeAssets = delta.executionFeeAssets;
+        preview.frozenSpreadAssets = delta.closeState.frozenSpreadAssets;
+        preview.frozenSpreadPaidAssets = _frozenSpreadPaidAssets(delta);
+        preview.frozenSpreadWaivedAssets = preview.frozenSpreadAssets - preview.frozenSpreadPaidAssets;
 
         if (delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.DUST_POSITION) {
             preview.invalidReason = CfdTypes.CloseInvalidReason.DustPosition;
@@ -424,54 +424,55 @@ contract CfdEngineLens is ICfdEngineLens {
             preview.invalidReason = CfdTypes.CloseInvalidReason.PartialCloseUnhealthy;
             return preview;
         }
-        preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
-        preview.existingTraderClaimConsumedUsdc = delta.existingTraderClaimConsumedUsdc;
-        preview.existingTraderClaimRemainingUsdc = delta.existingTraderClaimRemainingUsdc;
+        preview.freshTraderPayoutAssets = delta.freshTraderPayoutAssets;
+        preview.existingTraderClaimConsumedAssets = delta.existingTraderClaimConsumedAssets;
+        preview.existingTraderClaimRemainingAssets = delta.existingTraderClaimRemainingAssets;
         // Mirror settlement routing: partial-close price cash stays pledged; action rebates are always free.
-        preview.payoutToFreeSettlementUsdc = delta.actionRebatePaidUsdc;
+        preview.payoutToFreeSettlementAssets = delta.actionRebatePaidAssets;
         if (delta.pricePayoutIsImmediate) {
             if (delta.deletePosition) {
-                preview.payoutToFreeSettlementUsdc += delta.pricePayoutUsdc;
+                preview.payoutToFreeSettlementAssets += delta.pricePayoutAssets;
             } else {
-                preview.payoutToPnlPledgeUsdc = delta.pricePayoutUsdc;
+                preview.payoutToPnlPledgeAssets = delta.pricePayoutAssets;
             }
         }
-        preview.deferredPayoutUsdc = delta.pricePayoutCreatesClaim ? delta.pricePayoutUsdc : 0;
-        preview.immediatePayoutUsdc = preview.payoutToPnlPledgeUsdc + preview.payoutToFreeSettlementUsdc;
-        preview.traderClaimBalanceUsdc = delta.existingTraderClaimRemainingUsdc + preview.deferredPayoutUsdc;
-        preview.seizedCollateralUsdc = delta.pricePnlPledgeConsumedUsdc;
+        preview.deferredPayoutAssets = delta.pricePayoutCreatesClaim ? delta.pricePayoutAssets : 0;
+        preview.immediatePayoutAssets = preview.payoutToPnlPledgeAssets + preview.payoutToFreeSettlementAssets;
+        preview.traderClaimBalanceAssets = delta.existingTraderClaimRemainingAssets + preview.deferredPayoutAssets;
+        preview.seizedCollateralAssets = delta.pricePnlPledgeConsumedAssets;
 
         preview.valid = delta.valid;
         preview.triggersDegradedMode = delta.solvency.triggersDegradedMode;
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
-        preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
-        preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
+        preview.effectiveAssetsAfterAssets = delta.solvency.effectiveAssetsAfterAssets;
+        preview.maxLiabilityAfterAssets = delta.solvency.maxLiabilityAfterAssets;
     }
 
     /// @notice Derives assessed frozen-market spread recovered from new price gain and eligible action collateral.
     /// @param delta Planned close result.
-    /// @return paidUsdc Collectible frozen spread in 6-decimal USDC units.
-    function _frozenSpreadPaidUsdc(
+    /// @return paidAssets Collectible frozen spread in 6-decimal settlement token units.
+    function _frozenSpreadPaidAssets(
         CfdEnginePlanTypes.CloseDelta memory delta
-    ) private pure returns (uint256 paidUsdc) {
-        uint256 priorChargesUsdc = delta.closeState.executionFeeUsdc + delta.pendingCarryUsdc - delta.realizedCarryUsdc;
-        if (delta.closeState.vpiDeltaUsdc > 0) {
-            priorChargesUsdc += uint256(delta.closeState.vpiDeltaUsdc);
+    ) private pure returns (uint256 paidAssets) {
+        uint256 priorChargesAssets =
+            delta.closeState.executionFeeAssets + delta.pendingCarryAssets - delta.realizedCarryAssets;
+        if (delta.closeState.vpiDeltaAssets > 0) {
+            priorChargesAssets += uint256(delta.closeState.vpiDeltaAssets);
         }
-        uint256 effectiveSpreadUsdc;
-        if (delta.actionChargeAssessedUsdc > priorChargesUsdc) {
-            effectiveSpreadUsdc = delta.actionChargeAssessedUsdc - priorChargesUsdc;
-            if (effectiveSpreadUsdc > delta.closeState.frozenSpreadUsdc) {
-                effectiveSpreadUsdc = delta.closeState.frozenSpreadUsdc;
+        uint256 effectiveSpreadAssets;
+        if (delta.actionChargeAssessedAssets > priorChargesAssets) {
+            effectiveSpreadAssets = delta.actionChargeAssessedAssets - priorChargesAssets;
+            if (effectiveSpreadAssets > delta.closeState.frozenSpreadAssets) {
+                effectiveSpreadAssets = delta.closeState.frozenSpreadAssets;
             }
         }
-        uint256 recoveredActionUsdc = delta.actionChargeWithheldUsdc + delta.actionChargeCollectedUsdc;
-        if (recoveredActionUsdc <= priorChargesUsdc) {
+        uint256 recoveredActionAssets = delta.actionChargeWithheldAssets + delta.actionChargeCollectedAssets;
+        if (recoveredActionAssets <= priorChargesAssets) {
             return 0;
         }
-        paidUsdc = recoveredActionUsdc - priorChargesUsdc;
-        if (paidUsdc > effectiveSpreadUsdc) {
-            paidUsdc = effectiveSpreadUsdc;
+        paidAssets = recoveredActionAssets - priorChargesAssets;
+        if (paidAssets > effectiveSpreadAssets) {
+            paidAssets = effectiveSpreadAssets;
         }
     }
 
@@ -489,23 +490,23 @@ contract CfdEngineLens is ICfdEngineLens {
         projected.size = delta.newPosSize;
         projected.margin = delta.positionMarginAfterOpen;
         projected.entryPrice = delta.newPosEntryPrice;
-        projected.maxProfitUsdc = current.maxProfitUsdc + delta.posMaxProfitIncrease;
+        projected.maxProfitAssets = current.maxProfitAssets + delta.posMaxProfitIncrease;
         projected.vpiAccrued = current.vpiAccrued + delta.posVpiAccruedDelta;
     }
 
     /// @notice Expresses positive equity as a percentage of maintenance requirement.
     /// @dev Returns zero when equity is nonpositive or the requirement is zero; otherwise it is not capped at 10,000.
-    /// @param equityUsdc Signed projected equity in 6-decimal USDC units.
-    /// @param maintenanceMarginUsdc Projected maintenance requirement in 6-decimal USDC units.
+    /// @param equityAssets Signed projected equity in 6-decimal settlement token units.
+    /// @param maintenanceMarginAssets Projected maintenance requirement in 6-decimal settlement token units.
     /// @return healthBps Equity divided by maintenance margin, using a 10,000 denominator.
     function _healthBps(
-        int256 equityUsdc,
-        uint256 maintenanceMarginUsdc
+        int256 equityAssets,
+        uint256 maintenanceMarginAssets
     ) internal pure returns (uint256 healthBps) {
-        if (equityUsdc <= 0 || maintenanceMarginUsdc == 0) {
+        if (equityAssets <= 0 || maintenanceMarginAssets == 0) {
             return 0;
         }
-        return (SafeCast.toUint256(equityUsdc) * 10_000) / maintenanceMarginUsdc;
+        return (SafeCast.toUint256(equityAssets) * 10_000) / maintenanceMarginAssets;
     }
 
     /// @notice Finds the integer liquidation boundary within the engine price domain.
@@ -513,22 +514,22 @@ contract CfdEngineLens is ICfdEngineLens {
     ///      position is never liquidatable within `[0, capPrice]`, the boolean is false and price is zero.
     /// @param projected Position whose threshold is searched.
     /// @param capPrice Inclusive upper price bound, with 8 decimals.
-    /// @param reachableCollateralUsdc Projected PnL pledge plus same-account claim, in 6-decimal USDC units.
+    /// @param reachableCollateralAssets Projected PnL pledge plus same-account claim, in 6-decimal settlement token units.
     /// @param maintenanceBps Active maintenance or FAD margin rate.
     /// @return hasLiquidationPrice Whether a liquidation boundary exists in the searched domain.
     /// @return liquidationPrice Integer boundary price, with 8 decimals.
     function _findLiquidationPrice(
         CfdTypes.Position memory projected,
-        uint256 entryCostUsdcAtoms,
+        uint256 entryCostAssetAtoms,
         uint256 capPrice,
-        uint256 reachableCollateralUsdc,
+        uint256 reachableCollateralAssets,
         uint256 maintenanceBps
     ) internal pure returns (bool hasLiquidationPrice, uint256 liquidationPrice) {
         bool liquidatableAtZero = _isProjectedLiquidatable(
-            projected, entryCostUsdcAtoms, 0, capPrice, reachableCollateralUsdc, maintenanceBps
+            projected, entryCostAssetAtoms, 0, capPrice, reachableCollateralAssets, maintenanceBps
         );
         bool liquidatableAtCap = _isProjectedLiquidatable(
-            projected, entryCostUsdcAtoms, capPrice, capPrice, reachableCollateralUsdc, maintenanceBps
+            projected, entryCostAssetAtoms, capPrice, capPrice, reachableCollateralAssets, maintenanceBps
         );
 
         if (projected.side == CfdTypes.Side.LONG) {
@@ -543,7 +544,7 @@ contract CfdEngineLens is ICfdEngineLens {
             while (low < high) {
                 uint256 mid = (low + high) / 2;
                 if (_isProjectedLiquidatable(
-                        projected, entryCostUsdcAtoms, mid, capPrice, reachableCollateralUsdc, maintenanceBps
+                        projected, entryCostAssetAtoms, mid, capPrice, reachableCollateralAssets, maintenanceBps
                     )) {
                     high = mid;
                 } else {
@@ -564,7 +565,7 @@ contract CfdEngineLens is ICfdEngineLens {
         while (lo < hi) {
             uint256 mid = (lo + hi + 1) / 2;
             if (_isProjectedLiquidatable(
-                    projected, entryCostUsdcAtoms, mid, capPrice, reachableCollateralUsdc, maintenanceBps
+                    projected, entryCostAssetAtoms, mid, capPrice, reachableCollateralAssets, maintenanceBps
                 )) {
                 lo = mid;
             } else {
@@ -578,19 +579,19 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param projected Position to test.
     /// @param price Candidate price, with 8 decimals.
     /// @param capPrice Engine price cap, with 8 decimals.
-    /// @param reachableCollateralUsdc Projected PnL pledge plus same-account claim, in 6-decimal USDC units.
+    /// @param reachableCollateralAssets Projected PnL pledge plus same-account claim, in 6-decimal settlement token units.
     /// @param maintenanceBps Active maintenance or FAD margin rate.
     /// @return Whether equity is at or below the requirement.
     function _isProjectedLiquidatable(
         CfdTypes.Position memory projected,
-        uint256 entryCostUsdcAtoms,
+        uint256 entryCostAssetAtoms,
         uint256 price,
         uint256 capPrice,
-        uint256 reachableCollateralUsdc,
+        uint256 reachableCollateralAssets,
         uint256 maintenanceBps
     ) internal pure returns (bool) {
         return PositionRiskAccountingLib.buildExactPriceRiskState(
-            projected, entryCostUsdcAtoms, price, capPrice, reachableCollateralUsdc, maintenanceBps
+            projected, entryCostAssetAtoms, price, capPrice, reachableCollateralAssets, maintenanceBps
         )
         .liquidatable;
     }
@@ -598,12 +599,12 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @notice Builds liquidation diagnostics using current account state and supplied hypothetical pool depth.
     /// @param account Account whose position is tested.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
-    /// @param poolDepthUsdc Pool assets and cash used by the plan, in 6-decimal USDC units.
+    /// @param poolDepthAssets Pool assets and cash used by the plan, in 6-decimal settlement token units.
     /// @return preview Eligibility, settlement routing, claims, and projected solvency.
     function _previewLiquidation(
         address account,
         uint256 oraclePrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) internal view returns (ICfdEngineTypes.LiquidationPreview memory preview) {
         uint256 price = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
         preview.oraclePrice = price;
@@ -611,7 +612,7 @@ contract CfdEngineLens is ICfdEngineLens {
             return preview;
         }
 
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, poolDepthUsdc);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, poolDepthAssets);
         _applyLiquidationPreviewForfeiture(snap);
         return _liquidationPreviewFromSnapshot(snap, oraclePrice);
     }
@@ -624,31 +625,31 @@ contract CfdEngineLens is ICfdEngineLens {
         CfdEnginePlanTypes.LiquidationDelta memory delta = engineContract.planner().planLiquidation(snap, oraclePrice);
 
         preview.liquidatable = delta.liquidatable;
-        preview.reachableCollateralUsdc = delta.liquidationReachableCollateralUsdc;
-        preview.pnlUsdc = delta.riskState.unrealizedPnlUsdc;
-        preview.equityUsdc = delta.riskState.equityUsdc;
-        preview.liquidationChargeUsdc = delta.liquidationChargeUsdc;
-        preview.keeperBountyUsdc = delta.keeperBountyUsdc;
-        preview.protocolLiquidationFeeUsdc = delta.protocolLiquidationFeeUsdc;
-        preview.lpLiquidationFeeUsdc = delta.lpLiquidationFeeUsdc;
-        preview.seizedCollateralUsdc = delta.settlementSeizedUsdc;
-        preview.settlementRetainedUsdc = delta.settlementRetainedUsdc;
-        preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
-        preview.existingTraderClaimConsumedUsdc = delta.existingTraderClaimConsumedUsdc;
-        preview.existingTraderClaimRemainingUsdc = delta.existingTraderClaimRemainingUsdc;
-        preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
-        preview.traderClaimBalanceUsdc = delta.existingTraderClaimRemainingUsdc;
+        preview.reachableCollateralAssets = delta.liquidationReachableCollateralAssets;
+        preview.pnlAssets = delta.riskState.unrealizedPnlAssets;
+        preview.equityAssets = delta.riskState.equityAssets;
+        preview.liquidationChargeAssets = delta.liquidationChargeAssets;
+        preview.keeperBountyAssets = delta.keeperBountyAssets;
+        preview.protocolLiquidationFeeAssets = delta.protocolLiquidationFeeAssets;
+        preview.lpLiquidationFeeAssets = delta.lpLiquidationFeeAssets;
+        preview.seizedCollateralAssets = delta.settlementSeizedAssets;
+        preview.settlementRetainedAssets = delta.settlementRetainedAssets;
+        preview.freshTraderPayoutAssets = delta.freshTraderPayoutAssets;
+        preview.existingTraderClaimConsumedAssets = delta.existingTraderClaimConsumedAssets;
+        preview.existingTraderClaimRemainingAssets = delta.existingTraderClaimRemainingAssets;
+        preview.immediatePayoutAssets = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutAssets : 0;
+        preview.traderClaimBalanceAssets = delta.existingTraderClaimRemainingAssets;
         if (delta.freshPayoutCreatesClaim) {
-            preview.traderClaimBalanceUsdc += delta.freshTraderPayoutUsdc;
+            preview.traderClaimBalanceAssets += delta.freshTraderPayoutAssets;
         }
         preview.triggersDegradedMode = delta.solvency.triggersDegradedMode;
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
-        preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
-        preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
+        preview.effectiveAssetsAfterAssets = delta.solvency.effectiveAssetsAfterAssets;
+        preview.maxLiabilityAfterAssets = delta.solvency.maxLiabilityAfterAssets;
     }
 
     /// @dev Mirrors only the custody reclassification performed by releaseInvalidatedOrderReserves. It neither
-    ///      transfers USDC nor checkpoints carry; the subsequent planner sees newly free settlement for carry payment.
+    ///      transfers settlement token nor checkpoints carry; the subsequent planner sees newly free settlement for carry payment.
     function _applyRouterRiskOffRefunds(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         RouterLiquidationPreview memory preview
@@ -673,73 +674,73 @@ contract CfdEngineLens is ICfdEngineLens {
             (IOrderRouterAccounting.PendingOrderView memory pending, uint64 next) = router.getPendingOrderView(orderId);
             if (!pending.isClose && orderId <= preview.riskOffCutoff) {
                 ++preview.refundedOrderCount;
-                preview.releasedCommittedMarginUsdc += pending.committedMarginUsdc;
-                preview.releasedBountyUsdc += pending.executionBountyUsdc;
+                preview.releasedCommittedMarginAssets += pending.committedMarginAssets;
+                preview.releasedBountyAssets += pending.executionBountyAssets;
                 if (
                     protection.status == PositionProtectionTypes.PositionProtectionStatus.PendingOpen
                         && protection.parentOrderId == orderId && protection.account == snap.account
                 ) {
-                    preview.releasedBountyUsdc += IMarginClearinghouse(engineContract.clearinghouse())
+                    preview.releasedBountyAssets += IMarginClearinghouse(engineContract.clearinghouse())
                     .getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionTrigger, protectionId)
-                    .amountUsdc;
+                    .amountAssets;
                 }
             }
             orderId = next;
         }
-        uint256 released = preview.releasedCommittedMarginUsdc + preview.releasedBountyUsdc;
-        snap.lockedBuckets.committedOrderMarginUsdc -= preview.releasedCommittedMarginUsdc;
-        snap.lockedBuckets.reservedSettlementUsdc -= preview.releasedBountyUsdc;
-        snap.lockedBuckets.totalLockedMarginUsdc -= released;
-        snap.actionReserveUsdc -= preview.releasedBountyUsdc;
-        snap.protectedExecutionBountyUsdc -= preview.releasedBountyUsdc;
-        snap.accountBuckets.otherLockedMarginUsdc -= released;
-        snap.accountBuckets.totalLockedMarginUsdc -= released;
-        snap.accountBuckets.freeSettlementUsdc = snap.accountBuckets.settlementBalanceUsdc
-            > snap.accountBuckets.totalLockedMarginUsdc
-            ? snap.accountBuckets.settlementBalanceUsdc - snap.accountBuckets.totalLockedMarginUsdc
+        uint256 released = preview.releasedCommittedMarginAssets + preview.releasedBountyAssets;
+        snap.lockedBuckets.committedOrderMarginAssets -= preview.releasedCommittedMarginAssets;
+        snap.lockedBuckets.reservedSettlementAssets -= preview.releasedBountyAssets;
+        snap.lockedBuckets.totalLockedMarginAssets -= released;
+        snap.actionReserveAssets -= preview.releasedBountyAssets;
+        snap.protectedExecutionBountyAssets -= preview.releasedBountyAssets;
+        snap.accountBuckets.otherLockedMarginAssets -= released;
+        snap.accountBuckets.totalLockedMarginAssets -= released;
+        snap.accountBuckets.freeSettlementAssets = snap.accountBuckets.settlementBalanceAssets
+            > snap.accountBuckets.totalLockedMarginAssets
+            ? snap.accountBuckets.settlementBalanceAssets - snap.accountBuckets.totalLockedMarginAssets
             : 0;
     }
 
     /// @notice Reconstructs planner input from engine and clearinghouse state plus hypothetical pool depth.
-    /// @dev `poolDepthUsdc` populates both asset and cash fields. This lens does not populate the last-mark context
+    /// @dev `poolDepthAssets` populates both asset and cash fields. This lens does not populate the last-mark context
     ///      used only by close-commitment planning. Current carry indexes use actual assets net of claims rather than
     ///      hypothetical depth. VPI and skew subtract claims from the gross planning input.
     /// @param account Account whose position, buckets, carry, and claims are loaded.
-    /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
+    /// @param poolDepthAssets Hypothetical pool assets and cash, in 6-decimal settlement token units.
     /// @return snap Raw planner snapshot.
     function _buildRawSnapshot(
         address account,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         ICfdEngineTypes.SideState memory long;
         ICfdEngineTypes.SideState memory short;
-        (long.maxProfitUsdc, long.openInterest, long.entryNotional, long.totalMargin) =
+        (long.maxProfitAssets, long.openInterest, long.entryNotional, long.totalMargin) =
             engineContract.sides(uint8(CfdTypes.Side.LONG));
-        (short.maxProfitUsdc, short.openInterest, short.entryNotional, short.totalMargin) =
+        (short.maxProfitAssets, short.openInterest, short.entryNotional, short.totalMargin) =
             engineContract.sides(uint8(CfdTypes.Side.SHORT));
         snap.position = _position(account);
-        snap.positionEntryCostUsdcAtoms = engineContract.positionEntryCostUsdcAtoms(account);
+        snap.positionEntryCostAssetAtoms = engineContract.positionEntryCostAssetAtoms(account);
         snap.account = account;
         snap.currentTimestamp = block.timestamp;
-        (snap.positionBorrowBaseUsdc, snap.positionLastCarryIndex,) = engineContract.positionCarryState(account);
+        (snap.positionBorrowBaseAssets, snap.positionLastCarryIndex,) = engineContract.positionCarryState(account);
         snap.longSide = _sideSnapshot(CfdTypes.Side.LONG, long);
         snap.shortSide = _sideSnapshot(CfdTypes.Side.SHORT, short);
-        snap.poolAssetsUsdc = poolDepthUsdc;
-        snap.poolCashUsdc = poolDepthUsdc;
+        snap.poolAssets = poolDepthAssets;
+        snap.poolCashAssets = poolDepthAssets;
         IHousePool pool = IHousePool(address(engineContract.pool()));
-        snap.poolAdditionalReservedUsdc =
-            pool.pendingRecapitalizationUsdc() + pool.pendingTradingRevenueUsdc() + pool.unassignedAssets();
+        snap.poolAdditionalReservedAssets =
+            pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
         snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
-        snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
+        snap.accountBuckets = clearinghouse.getAccountAssetBuckets(account);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        snap.liquidationReserveUsdc = clearinghouse.liquidationReserveUsdc(account);
-        snap.actionReserveUsdc = clearinghouse.actionReserveUsdc(account);
-        snap.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
-        snap.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
-        snap.unsettledCarryUsdc = engineContract.unsettledCarryUsdc(account);
-        snap.totalTraderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
-        snap.traderClaimBalanceForAccount = engineContract.traderClaimBalanceUsdc(account);
+        snap.liquidationReserveAssets = clearinghouse.liquidationReserveAssets(account);
+        snap.actionReserveAssets = clearinghouse.actionReserveAssets(account);
+        snap.vpiRebateReserveAssets = clearinghouse.vpiRebateReserveAssets(account);
+        snap.protectedExecutionBountyAssets = clearinghouse.totalBountyReservationsAssets(account);
+        snap.unsettledCarryAssets = engineContract.unsettledCarryAssets(account);
+        snap.totalTraderClaimBalanceAssets = engineContract.totalTraderClaimBalanceAssets();
+        snap.traderClaimBalanceForAccount = engineContract.traderClaimBalanceAssets(account);
         snap.degradedMode = engineContract.degradedMode();
         snap.capPrice = engineContract.CAP_PRICE();
         snap.riskParams = _riskParams();
@@ -757,33 +758,33 @@ contract CfdEngineLens is ICfdEngineLens {
     function _applyLiquidationPreviewForfeiture(
         CfdEnginePlanTypes.RawSnapshot memory snap
     ) internal pure {
-        uint256 forfeitedUsdc = snap.protectedExecutionBountyUsdc;
-        if (forfeitedUsdc == 0) {
+        uint256 forfeitedAssets = snap.protectedExecutionBountyAssets;
+        if (forfeitedAssets == 0) {
             return;
         }
-        if (forfeitedUsdc > snap.accountBuckets.settlementBalanceUsdc) {
-            forfeitedUsdc = snap.accountBuckets.settlementBalanceUsdc;
+        if (forfeitedAssets > snap.accountBuckets.settlementBalanceAssets) {
+            forfeitedAssets = snap.accountBuckets.settlementBalanceAssets;
         }
-        snap.accountBuckets.settlementBalanceUsdc -= forfeitedUsdc;
+        snap.accountBuckets.settlementBalanceAssets -= forfeitedAssets;
 
-        uint256 releasedReserveUsdc = forfeitedUsdc;
-        if (releasedReserveUsdc > snap.lockedBuckets.reservedSettlementUsdc) {
-            releasedReserveUsdc = snap.lockedBuckets.reservedSettlementUsdc;
+        uint256 releasedReserveAssets = forfeitedAssets;
+        if (releasedReserveAssets > snap.lockedBuckets.reservedSettlementAssets) {
+            releasedReserveAssets = snap.lockedBuckets.reservedSettlementAssets;
         }
-        snap.lockedBuckets.reservedSettlementUsdc -= releasedReserveUsdc;
-        snap.lockedBuckets.totalLockedMarginUsdc -= releasedReserveUsdc;
-        snap.actionReserveUsdc =
-            snap.actionReserveUsdc > releasedReserveUsdc ? snap.actionReserveUsdc - releasedReserveUsdc : 0;
-        snap.protectedExecutionBountyUsdc = 0;
-        uint256 accountReserveReleaseUsdc = releasedReserveUsdc;
-        if (accountReserveReleaseUsdc > snap.accountBuckets.otherLockedMarginUsdc) {
-            accountReserveReleaseUsdc = snap.accountBuckets.otherLockedMarginUsdc;
+        snap.lockedBuckets.reservedSettlementAssets -= releasedReserveAssets;
+        snap.lockedBuckets.totalLockedMarginAssets -= releasedReserveAssets;
+        snap.actionReserveAssets =
+            snap.actionReserveAssets > releasedReserveAssets ? snap.actionReserveAssets - releasedReserveAssets : 0;
+        snap.protectedExecutionBountyAssets = 0;
+        uint256 accountReserveReleaseAssets = releasedReserveAssets;
+        if (accountReserveReleaseAssets > snap.accountBuckets.otherLockedMarginAssets) {
+            accountReserveReleaseAssets = snap.accountBuckets.otherLockedMarginAssets;
         }
-        snap.accountBuckets.otherLockedMarginUsdc -= accountReserveReleaseUsdc;
-        snap.accountBuckets.totalLockedMarginUsdc -= accountReserveReleaseUsdc;
-        snap.accountBuckets.freeSettlementUsdc = snap.accountBuckets.settlementBalanceUsdc
-            > snap.accountBuckets.totalLockedMarginUsdc
-            ? snap.accountBuckets.settlementBalanceUsdc - snap.accountBuckets.totalLockedMarginUsdc
+        snap.accountBuckets.otherLockedMarginAssets -= accountReserveReleaseAssets;
+        snap.accountBuckets.totalLockedMarginAssets -= accountReserveReleaseAssets;
+        snap.accountBuckets.freeSettlementAssets = snap.accountBuckets.settlementBalanceAssets
+            > snap.accountBuckets.totalLockedMarginAssets
+            ? snap.accountBuckets.settlementBalanceAssets - snap.accountBuckets.totalLockedMarginAssets
             : 0;
     }
 
@@ -793,7 +794,7 @@ contract CfdEngineLens is ICfdEngineLens {
     function _position(
         address account
     ) internal view returns (CfdTypes.Position memory pos) {
-        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
+        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitAssets, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engineContract.positions(account);
         (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
     }
@@ -807,11 +808,11 @@ contract CfdEngineLens is ICfdEngineLens {
         ICfdEngineTypes.SideState memory side
     ) internal view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
         snap = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: side.maxProfitUsdc,
+            maxProfitAssets: side.maxProfitAssets,
             openInterest: side.openInterest,
             entryNotional: side.entryNotional,
             totalMargin: side.totalMargin,
-            borrowBaseUsdc: engineContract.sideBorrowBaseUsdc(uint256(sideId)),
+            borrowBaseAssets: engineContract.sideBorrowBaseAssets(uint256(sideId)),
             carryIndex: _currentSideCarryIndex(sideId)
         });
     }
@@ -829,9 +830,9 @@ contract CfdEngineLens is ICfdEngineLens {
             engineContract.sideCarryIndex(sideIndex),
             engineContract.sideCarryTimestamp(sideIndex),
             block.timestamp,
-            engineContract.sideBorrowBaseUsdc(sideIndex),
-            PositionRiskAccountingLib.computeNetPoolDepthUsdc(
-                engineContract.pool().totalAssets(), engineContract.totalTraderClaimBalanceUsdc()
+            engineContract.sideBorrowBaseAssets(sideIndex),
+            PositionRiskAccountingLib.computeNetPoolDepthAssets(
+                engineContract.pool().totalAssets(), engineContract.totalTraderClaimBalanceAssets()
             ),
             baseCarryBps
         );

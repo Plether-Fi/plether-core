@@ -1,7 +1,10 @@
 # Plether Perps
 
 Plether Perps is a perpetuals protocol for leveraged exposure to the strength of the US dollar.
-Traders post USDC margin, while liquidity providers supply the capital backing trades through senior and junior vaults.
+Traders post USDG as margin, while liquidity providers supply the capital backing trades through senior
+and junior vaults.
+
+Testnet USDG can be minted whenever you need it.
 
 The market uses a capped price range to bound potential trader payouts. Orders execute through a delayed queue,
 and traders pay carry for the LP capital supporting their positions.
@@ -23,10 +26,10 @@ virtual price impact (VPI), prices the effect of a trade on directional imbalanc
 
 ## Trading
 
-1. Deposit USDC into your margin account.
+1. Deposit USDG into your margin account.
 2. Submit an order with your execution limits and deadline.
 3. A keeper executes the order through the queue using validated oracle data.
-4. Close through the same order flow and withdraw available USDC.
+4. Close through the same order flow and withdraw available USDG.
 
 Deposited cash and isolated position margin are different balances. An opening order allocates margin to a position;
 `CfdEngine.addMargin` can allocate more without increasing its size. Funds reserved for orders or position obligations
@@ -49,7 +52,7 @@ settled once pool cash covers all outstanding trader claims. A claim is an unpai
 
 ## Providing liquidity
 
-LPs deposit USDC through one of two vaults that share a common pool:
+LPs deposit USDG through one of two vaults that share a common pool:
 
 - **Senior:** has priority in the capital waterfall and a configured coupon funded by Junior capital.
 - **Junior:** absorbs losses first and receives the residual economics after Senior obligations.
@@ -67,7 +70,7 @@ for request, cancellation, claim and reserve rules.
 
 | Component | Responsibility |
 | --- | --- |
-| `MarginClearinghouse` | Holds trader USDC and manages margin balances. |
+| `MarginClearinghouse` | Holds traders’ USDG and manages margin balances. |
 | `OrderRouter` | Queues orders and coordinates oracle-backed execution and liquidations. |
 | `OrderLifecycleBook` | Retains order identity, timing, policy and authenticated outcomes. |
 | `PletherOracle` | Validates signed basket data and applies live, historical and frozen price rules. |
@@ -119,6 +122,10 @@ The lock expiry getter retains the latest effective expiry after it passes. Thes
 this feature requires a new deployment and does not change existing deployments.
 
 ## Development
+
+For testnet funding, mint USDG to your trading account, then approve and deposit it. You’ll need testnet gas.
+See [testnet funding](DEPLOYMENT.md#repeat-testnet-funding) for instructions and
+[future rewards readiness](DEPLOYMENT.md#future-rewards-readiness) for GDN setup notes.
 
 This package uses Foundry and depends on the shared package and third-party libraries. From the repository root:
 

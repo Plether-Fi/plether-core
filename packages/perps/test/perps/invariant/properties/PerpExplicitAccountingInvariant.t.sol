@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
@@ -12,32 +13,31 @@ import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract PerpExplicitAccountingHandler is Test {
 
     struct CloseObserved {
-        uint256 immediatePayoutUsdc;
-        uint256 traderClaimBalanceUsdc;
+        uint256 immediatePayoutAssets;
+        uint256 traderClaimBalanceAssets;
         uint256 remainingSize;
         uint256 remainingMargin;
         bool degradedMode;
-        uint256 effectiveAssetsAfterUsdc;
-        uint256 maxLiabilityAfterUsdc;
+        uint256 effectiveAssetsAfterAssets;
+        uint256 maxLiabilityAfterAssets;
         bool terminalCurveMatchesEngine;
         bool terminalSnapshotMatchesBook;
     }
 
     struct LiquidationObserved {
-        uint256 immediatePayoutUsdc;
-        uint256 traderClaimBalanceUsdc;
-        uint256 keeperBountyUsdc;
-        uint256 protocolLiquidationFeeUsdc;
+        uint256 immediatePayoutAssets;
+        uint256 traderClaimBalanceAssets;
+        uint256 keeperBountyAssets;
+        uint256 protocolLiquidationFeeAssets;
         uint256 remainingSize;
         bool degradedMode;
-        uint256 effectiveAssetsAfterUsdc;
-        uint256 maxLiabilityAfterUsdc;
+        uint256 effectiveAssetsAfterAssets;
+        uint256 maxLiabilityAfterAssets;
         bool terminalCurveMatchesEngine;
         bool terminalSnapshotMatchesBook;
     }
@@ -52,7 +52,7 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 actual;
     }
 
-    MockUSDC internal immutable usdc;
+    MockSettlementToken internal immutable settlementToken;
     CfdEngine internal immutable engine;
     CfdEngineLens internal immutable engineLens;
     CfdEngineProtocolLens internal immutable engineProtocolLens;
@@ -80,7 +80,7 @@ contract PerpExplicitAccountingHandler is Test {
     uint256 public unexpectedScenarioFailures;
 
     constructor(
-        MockUSDC usdc_,
+        MockSettlementToken settlementToken_,
         CfdEngine engine_,
         CfdEngineLens engineLens_,
         CfdEngineProtocolLens engineProtocolLens_,
@@ -88,7 +88,7 @@ contract PerpExplicitAccountingHandler is Test {
         HousePool pool_,
         OrderRouter router_
     ) {
-        usdc = usdc_;
+        settlementToken = settlementToken_;
         engine = engine_;
         engineLens = engineLens_;
         engineProtocolLens = engineProtocolLens_;
@@ -218,7 +218,7 @@ contract PerpExplicitAccountingHandler is Test {
             return result;
         }
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(LONG_TRADER);
+        uint256 settlementBefore = clearinghouse.balanceAssets(LONG_TRADER);
         bool degradedBefore = engine.degradedMode();
         if (!_close(LONG_TRADER, CfdTypes.Side.LONG, closeSize, closePrice)) {
             result.mismatch = true;
@@ -241,9 +241,9 @@ contract PerpExplicitAccountingHandler is Test {
             return result;
         }
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(LONG_TRADER);
-        uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
-        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 settlementBefore = clearinghouse.balanceAssets(LONG_TRADER);
+        uint256 keeperBefore = clearinghouse.balanceAssets(KEEPER);
+        uint256 protocolTreasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         bool degradedBefore = engine.degradedMode();
         if (!_liquidate(LONG_TRADER, liquidationPrice, KEEPER)) {
             result.mismatch = true;
@@ -302,12 +302,12 @@ contract PerpExplicitAccountingHandler is Test {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         (observed.remainingSize, observed.remainingMargin,,,,,) = engine.positions(account);
-        uint256 settlementAfter = clearinghouse.balanceUsdc(account);
-        observed.immediatePayoutUsdc = settlementAfter > settlementBefore ? settlementAfter - settlementBefore : 0;
-        observed.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
+        uint256 settlementAfter = clearinghouse.balanceAssets(account);
+        observed.immediatePayoutAssets = settlementAfter > settlementBefore ? settlementAfter - settlementBefore : 0;
+        observed.traderClaimBalanceAssets = engine.traderClaimBalanceAssets(account);
         observed.degradedMode = engine.degradedMode();
-        observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
-        observed.maxLiabilityAfterUsdc = afterSnapshot.maxLiabilityUsdc;
+        observed.effectiveAssetsAfterAssets = afterSnapshot.effectiveSolvencyAssets;
+        observed.maxLiabilityAfterAssets = afterSnapshot.maxLiabilityAssets;
         observed.terminalCurveMatchesEngine = _terminalCurveMatchesEngine(account);
         observed.terminalSnapshotMatchesBook = _terminalSnapshotMatchesBook();
     }
@@ -322,17 +322,17 @@ contract PerpExplicitAccountingHandler is Test {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         (observed.remainingSize,,,,,,) = engine.positions(account);
-        uint256 settlementAfter = clearinghouse.balanceUsdc(account);
-        observed.immediatePayoutUsdc = settlementAfter > settlementBefore ? settlementAfter - settlementBefore : 0;
-        observed.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
-        uint256 keeperAfter = clearinghouse.balanceUsdc(keeper);
-        observed.keeperBountyUsdc = keeperAfter > keeperBefore ? keeperAfter - keeperBefore : 0;
-        observed.protocolLiquidationFeeUsdc = afterSnapshot.protocolTreasuryBalanceUsdc > protocolTreasuryBefore
-            ? afterSnapshot.protocolTreasuryBalanceUsdc - protocolTreasuryBefore
+        uint256 settlementAfter = clearinghouse.balanceAssets(account);
+        observed.immediatePayoutAssets = settlementAfter > settlementBefore ? settlementAfter - settlementBefore : 0;
+        observed.traderClaimBalanceAssets = engine.traderClaimBalanceAssets(account);
+        uint256 keeperAfter = clearinghouse.balanceAssets(keeper);
+        observed.keeperBountyAssets = keeperAfter > keeperBefore ? keeperAfter - keeperBefore : 0;
+        observed.protocolLiquidationFeeAssets = afterSnapshot.protocolTreasuryBalanceAssets > protocolTreasuryBefore
+            ? afterSnapshot.protocolTreasuryBalanceAssets - protocolTreasuryBefore
             : 0;
         observed.degradedMode = engine.degradedMode();
-        observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
-        observed.maxLiabilityAfterUsdc = afterSnapshot.maxLiabilityUsdc;
+        observed.effectiveAssetsAfterAssets = afterSnapshot.effectiveSolvencyAssets;
+        observed.maxLiabilityAfterAssets = afterSnapshot.maxLiabilityAssets;
         observed.terminalCurveMatchesEngine = _terminalCurveMatchesEngine(account);
         observed.terminalSnapshotMatchesBook = _terminalSnapshotMatchesBook();
     }
@@ -342,11 +342,11 @@ contract PerpExplicitAccountingHandler is Test {
         CloseObserved memory observed,
         bool degradedBefore
     ) internal pure returns (bool mismatch, uint8 code, uint256 expected, uint256 actual) {
-        if (observed.immediatePayoutUsdc != preview.immediatePayoutUsdc) {
-            return (true, 2, preview.immediatePayoutUsdc, observed.immediatePayoutUsdc);
+        if (observed.immediatePayoutAssets != preview.immediatePayoutAssets) {
+            return (true, 2, preview.immediatePayoutAssets, observed.immediatePayoutAssets);
         }
-        if (observed.traderClaimBalanceUsdc != preview.traderClaimBalanceUsdc) {
-            return (true, 3, preview.traderClaimBalanceUsdc, observed.traderClaimBalanceUsdc);
+        if (observed.traderClaimBalanceAssets != preview.traderClaimBalanceAssets) {
+            return (true, 3, preview.traderClaimBalanceAssets, observed.traderClaimBalanceAssets);
         }
         if (observed.remainingSize != preview.remainingSize) {
             return (true, 5, preview.remainingSize, observed.remainingSize);
@@ -358,11 +358,11 @@ contract PerpExplicitAccountingHandler is Test {
         if (observed.degradedMode != expectedDegraded) {
             return (true, 7, expectedDegraded ? 1 : 0, observed.degradedMode ? 1 : 0);
         }
-        if (observed.effectiveAssetsAfterUsdc != preview.effectiveAssetsAfterUsdc) {
-            return (true, 8, preview.effectiveAssetsAfterUsdc, observed.effectiveAssetsAfterUsdc);
+        if (observed.effectiveAssetsAfterAssets != preview.effectiveAssetsAfterAssets) {
+            return (true, 8, preview.effectiveAssetsAfterAssets, observed.effectiveAssetsAfterAssets);
         }
-        if (observed.maxLiabilityAfterUsdc != preview.maxLiabilityAfterUsdc) {
-            return (true, 9, preview.maxLiabilityAfterUsdc, observed.maxLiabilityAfterUsdc);
+        if (observed.maxLiabilityAfterAssets != preview.maxLiabilityAfterAssets) {
+            return (true, 9, preview.maxLiabilityAfterAssets, observed.maxLiabilityAfterAssets);
         }
         if (!observed.terminalCurveMatchesEngine) {
             return (true, 10, 1, 0);
@@ -378,17 +378,17 @@ contract PerpExplicitAccountingHandler is Test {
         LiquidationObserved memory observed,
         bool degradedBefore
     ) internal pure returns (bool mismatch, uint8 code, uint256 expected, uint256 actual) {
-        if (observed.immediatePayoutUsdc != preview.immediatePayoutUsdc) {
-            return (true, 2, preview.immediatePayoutUsdc, observed.immediatePayoutUsdc);
+        if (observed.immediatePayoutAssets != preview.immediatePayoutAssets) {
+            return (true, 2, preview.immediatePayoutAssets, observed.immediatePayoutAssets);
         }
-        if (observed.traderClaimBalanceUsdc != preview.traderClaimBalanceUsdc) {
-            return (true, 3, preview.traderClaimBalanceUsdc, observed.traderClaimBalanceUsdc);
+        if (observed.traderClaimBalanceAssets != preview.traderClaimBalanceAssets) {
+            return (true, 3, preview.traderClaimBalanceAssets, observed.traderClaimBalanceAssets);
         }
-        if (observed.keeperBountyUsdc != preview.keeperBountyUsdc) {
-            return (true, 5, preview.keeperBountyUsdc, observed.keeperBountyUsdc);
+        if (observed.keeperBountyAssets != preview.keeperBountyAssets) {
+            return (true, 5, preview.keeperBountyAssets, observed.keeperBountyAssets);
         }
-        if (observed.protocolLiquidationFeeUsdc != preview.protocolLiquidationFeeUsdc) {
-            return (true, 6, preview.protocolLiquidationFeeUsdc, observed.protocolLiquidationFeeUsdc);
+        if (observed.protocolLiquidationFeeAssets != preview.protocolLiquidationFeeAssets) {
+            return (true, 6, preview.protocolLiquidationFeeAssets, observed.protocolLiquidationFeeAssets);
         }
         if (observed.remainingSize != 0) {
             return (true, 7, 0, observed.remainingSize);
@@ -397,11 +397,11 @@ contract PerpExplicitAccountingHandler is Test {
         if (observed.degradedMode != expectedDegraded) {
             return (true, 8, expectedDegraded ? 1 : 0, observed.degradedMode ? 1 : 0);
         }
-        if (observed.effectiveAssetsAfterUsdc != preview.effectiveAssetsAfterUsdc) {
-            return (true, 9, preview.effectiveAssetsAfterUsdc, observed.effectiveAssetsAfterUsdc);
+        if (observed.effectiveAssetsAfterAssets != preview.effectiveAssetsAfterAssets) {
+            return (true, 9, preview.effectiveAssetsAfterAssets, observed.effectiveAssetsAfterAssets);
         }
-        if (observed.maxLiabilityAfterUsdc != preview.maxLiabilityAfterUsdc) {
-            return (true, 10, preview.maxLiabilityAfterUsdc, observed.maxLiabilityAfterUsdc);
+        if (observed.maxLiabilityAfterAssets != preview.maxLiabilityAfterAssets) {
+            return (true, 10, preview.maxLiabilityAfterAssets, observed.maxLiabilityAfterAssets);
         }
         if (!observed.terminalCurveMatchesEngine) {
             return (true, 11, 1, 0);
@@ -420,22 +420,23 @@ contract PerpExplicitAccountingHandler is Test {
         bytes32 curveHash = book.curveHashOf(account);
         (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
-            return curveHash == bytes32(0) && curve.lots == 0 && curve.entryCostUsdcAtoms == 0
-                && curve.effectiveCapUsdcAtoms == 0;
+            return curveHash == bytes32(0) && curve.lots == 0 && curve.entryCostAssetAtoms == 0
+                && curve.effectiveCapAssetAtoms == 0;
         }
         if (curveHash == bytes32(0) || size % CfdTypes.SIZE_QUANTUM != 0) {
             return false;
         }
 
         uint256 lots = size / CfdTypes.SIZE_QUANTUM;
-        uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
-        uint256 maximumCollectibleUsdc =
-            side == CfdTypes.Side.LONG ? lots * engine.CAP_PRICE() - entryCostUsdcAtoms : entryCostUsdcAtoms;
-        uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
-        uint256 expectedCapUsdc = candidateCapUsdc < maximumCollectibleUsdc ? candidateCapUsdc : maximumCollectibleUsdc;
+        uint256 entryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
+        uint256 maximumCollectibleAssets =
+            side == CfdTypes.Side.LONG ? lots * engine.CAP_PRICE() - entryCostAssetAtoms : entryCostAssetAtoms;
+        uint256 candidateCapAssets = clearinghouse.pnlPledgeAssets(account) + engine.traderClaimBalanceAssets(account);
+        uint256 expectedCapAssets =
+            candidateCapAssets < maximumCollectibleAssets ? candidateCapAssets : maximumCollectibleAssets;
 
-        return uint256(curve.lots) == lots && uint256(curve.entryCostUsdcAtoms) == entryCostUsdcAtoms
-            && uint256(curve.effectiveCapUsdcAtoms) == expectedCapUsdc && curve.side == side;
+        return uint256(curve.lots) == lots && uint256(curve.entryCostAssetAtoms) == entryCostAssetAtoms
+            && uint256(curve.effectiveCapAssetAtoms) == expectedCapAssets && curve.side == side;
     }
 
     function _terminalSnapshotMatchesBook() internal view returns (bool) {
@@ -444,14 +445,14 @@ contract PerpExplicitAccountingHandler is Test {
         ICfdEngineTypes.TerminalNavSnapshot memory snapshot = engine.terminalNavSnapshot();
         (uint256 longMaxProfit, uint256 longOpenInterest,,) = engine.sides(uint8(CfdTypes.Side.LONG));
         (uint256 shortMaxProfit, uint256 shortOpenInterest,,) = engine.sides(uint8(CfdTypes.Side.SHORT));
-        uint256 maxDirectionalLiabilityUsdc = longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
+        uint256 maxDirectionalLiabilityAssets = longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
         bool hasOpenPositions = longOpenInterest > 0 || shortOpenInterest > 0;
 
         return snapshot.markPrice == engine.lastMarkPrice() && snapshot.markTime == engine.lastMarkTime()
             && snapshot.bookVersion == bookState.bookVersion
-            && snapshot.terminalLpPriceDeltaUsdc == book.terminalLpPriceDeltaUsdcAtoms(snapshot.markPrice)
-            && snapshot.totalTraderClaimsUsdc == engine.totalTraderClaimBalanceUsdc()
-            && snapshot.maxDirectionalLiabilityUsdc == maxDirectionalLiabilityUsdc
+            && snapshot.terminalLpPriceDeltaAssets == book.terminalLpPriceDeltaAssetAtoms(snapshot.markPrice)
+            && snapshot.totalTraderClaimsAssets == engine.totalTraderClaimBalanceAssets()
+            && snapshot.maxDirectionalLiabilityAssets == maxDirectionalLiabilityAssets
             && snapshot.hasOpenPositions == hasOpenPositions
             && snapshot.hasOpenPositions == (bookState.activeCurveCount > 0)
             && snapshot.degradedMode == engine.degradedMode();
@@ -548,41 +549,42 @@ contract PerpExplicitAccountingHandler is Test {
         address account,
         uint256 amount
     ) internal {
-        usdc.mint(account, amount);
+        settlementToken.mint(account, amount);
         vm.startPrank(account);
-        usdc.approve(address(clearinghouse), amount);
+        settlementToken.approve(address(clearinghouse), amount);
         clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
 
     function _lpTraderProtocolValue() internal view returns (uint256) {
-        uint256 traderClaims = engine.traderClaimBalanceUsdc(LONG_TRADER) + engine.traderClaimBalanceUsdc(SHORT_TRADER);
+        uint256 traderClaims =
+            engine.traderClaimBalanceAssets(LONG_TRADER) + engine.traderClaimBalanceAssets(SHORT_TRADER);
         uint256 lpNetAssets = pool.totalAssets() > traderClaims ? pool.totalAssets() - traderClaims : 0;
-        return lpNetAssets + traderClaims + clearinghouse.balanceUsdc(LONG_TRADER)
-            + clearinghouse.balanceUsdc(SHORT_TRADER) + clearinghouse.balanceUsdc(KEEPER)
-            + clearinghouse.balanceUsdc(engine.protocolTreasury());
+        return lpNetAssets + traderClaims + clearinghouse.balanceAssets(LONG_TRADER)
+            + clearinghouse.balanceAssets(SHORT_TRADER) + clearinghouse.balanceAssets(KEEPER)
+            + clearinghouse.balanceAssets(engine.protocolTreasury());
     }
 
     function _protocolPhysicalCash() internal view returns (uint256) {
-        return usdc.balanceOf(address(pool)) + usdc.balanceOf(address(clearinghouse)) + usdc.balanceOf(address(engine))
-            + usdc.balanceOf(address(router));
+        return settlementToken.balanceOf(address(pool)) + settlementToken.balanceOf(address(clearinghouse))
+            + settlementToken.balanceOf(address(engine)) + settlementToken.balanceOf(address(router));
     }
 
     function _boundedHealthyMargin(
         uint256 size,
         uint256 marginFuzz
     ) internal pure returns (uint256) {
-        uint256 notionalUsdc = _notional(size, 1e8);
-        uint256 minMargin = (notionalUsdc * 2000) / 10_000;
-        uint256 maxMargin = (notionalUsdc * 7000) / 10_000;
+        uint256 notionalAssets = _notional(size, 1e8);
+        uint256 minMargin = (notionalAssets * 2000) / 10_000;
+        uint256 maxMargin = (notionalAssets * 7000) / 10_000;
         return bound(marginFuzz, minMargin, maxMargin);
     }
 
     function _initialishMargin(
         uint256 size
     ) internal pure returns (uint256) {
-        uint256 notionalUsdc = _notional(size, 1e8);
-        return (notionalUsdc * 200) / 10_000;
+        uint256 notionalAssets = _notional(size, 1e8);
+        return (notionalAssets * 200) / 10_000;
     }
 
     function _executionFee(
@@ -615,7 +617,7 @@ contract PerpExplicitAccountingInvariantTest is BasePerpTest {
         super.setUp();
 
         handler = new PerpExplicitAccountingHandler(
-            usdc, engine, engineLens, engineProtocolLens, clearinghouse, pool, router
+            settlementToken, engine, engineLens, engineProtocolLens, clearinghouse, pool, router
         );
 
         handler.closePreviewMatchesLive(200, 10_000e6, 1, 1e8);

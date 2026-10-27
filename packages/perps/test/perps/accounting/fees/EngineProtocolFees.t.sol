@@ -27,18 +27,18 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 closePrice = 80_000_000;
-        uint256 executionFeeUsdc = _engineExecutionFeeUsdc(100_000e18, closePrice);
+        uint256 executionFeeAssets = _engineExecutionFeeAssets(100_000e18, closePrice);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - executionFeeUsdc);
+        settlementToken.transfer(address(0xDEAD), poolAssets - executionFeeAssets);
 
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
         assertTrue(preview.valid, "Setup close preview should be valid");
-        assertEq(preview.immediatePayoutUsdc, 0, "Setup must record the trader payout as a claim");
-        assertGt(preview.traderClaimBalanceUsdc, 0, "Setup must create a trader claim");
-        assertEq(pool.totalAssets(), executionFeeUsdc, "Setup leaves only the fee amount physically available");
+        assertEq(preview.immediatePayoutAssets, 0, "Setup must record the trader payout as a claim");
+        assertGt(preview.traderClaimBalanceAssets, 0, "Setup must create a trader claim");
+        assertEq(pool.totalAssets(), executionFeeAssets, "Setup leaves only the fee amount physically available");
 
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         CfdTypes.Order memory closeOrder = CfdTypes.Order({
             account: account,
             sizeDelta: 100_000e18,
@@ -56,9 +56,9 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Close should still destroy the position");
-        assertGt(engine.traderClaimBalanceUsdc(account), 0, "Trader claim should be recorded");
+        assertGt(engine.traderClaimBalanceAssets(account), 0, "Trader claim should be recorded");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             feesBefore,
             "Fee top-up must not leapfrog trader claims"
         );
@@ -76,33 +76,35 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
 
         uint256 closePrice = 80_000_000;
         CfdEngine.ClosePreview memory liquidPreview = engineLens.previewClose(account, 100_000e18, closePrice);
-        assertGt(liquidPreview.freshTraderPayoutUsdc, 0, "Setup must create a trader payout");
-        assertGt(liquidPreview.executionFeeUsdc, 0, "Setup must create a protocol fee");
+        assertGt(liquidPreview.freshTraderPayoutAssets, 0, "Setup must create a trader payout");
+        assertGt(liquidPreview.executionFeeAssets, 0, "Setup must create a protocol fee");
 
         uint256 poolAssets = pool.totalAssets();
-        uint256 drainAmount = poolAssets - liquidPreview.freshTraderPayoutUsdc;
+        uint256 drainAmount = poolAssets - liquidPreview.freshTraderPayoutAssets;
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), drainAmount);
+        settlementToken.transfer(address(0xDEAD), drainAmount);
 
         CfdEngine.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, closePrice);
         assertTrue(preview.valid, "Setup close preview should be valid");
-        assertEq(pool.totalAssets(), preview.freshTraderPayoutUsdc, "Setup leaves exactly trader payout cash");
+        assertEq(pool.totalAssets(), preview.freshTraderPayoutAssets, "Setup leaves exactly trader payout cash");
         assertLt(
             pool.totalAssets(),
-            preview.freshTraderPayoutUsdc + preview.executionFeeUsdc,
+            preview.freshTraderPayoutAssets + preview.executionFeeAssets,
             "Setup cannot also fund the protocol fee top-up"
         );
-        assertEq(preview.immediatePayoutUsdc, preview.freshTraderPayoutUsdc, "Preview should follow trader payout cash");
-        assertEq(preview.traderClaimBalanceUsdc, 0, "Preview should not defer when payout cash is free");
+        assertEq(
+            preview.immediatePayoutAssets, preview.freshTraderPayoutAssets, "Preview should follow trader payout cash"
+        );
+        assertEq(preview.traderClaimBalanceAssets, 0, "Preview should not defer when payout cash is free");
 
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         _close(account, CfdTypes.Side.LONG, 100_000e18, closePrice);
 
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()), feesBefore, "Unfunded fee top-up should not accrue"
+            clearinghouse.balanceAssets(engine.protocolTreasury()), feesBefore, "Unfunded fee top-up should not accrue"
         );
     }
 
@@ -114,37 +116,39 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
         address longAccount = address(0xD311);
         address shortAccount = address(0xD312);
         uint256 size = 100_000e18;
-        uint256 reservedRecapitalizationUsdc = 1_000_000e6;
+        uint256 reservedRecapitalizationAssets = 1_000_000e6;
         _fundTrader(longAccount, 20_000e6);
         _fundTrader(shortAccount, 20_000e6);
         _open(longAccount, CfdTypes.Side.LONG, size, 10_000e6, 1e8);
 
-        usdc.mint(address(pool), reservedRecapitalizationUsdc);
+        settlementToken.mint(address(pool), reservedRecapitalizationAssets);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
-            reservedRecapitalizationUsdc,
+            reservedRecapitalizationAssets,
             IHousePool.ClaimantInflowKind.Recapitalization,
             IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        uint256 cashToDrainUsdc = pool.totalAssets() - reservedRecapitalizationUsdc;
+        uint256 cashToDrainAssets = pool.totalAssets() - reservedRecapitalizationAssets;
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), cashToDrainUsdc);
-        assertEq(pool.getFreeUSDC(), 0, "Recapitalization reserves the remaining cash");
+        settlementToken.transfer(address(0xDEAD), cashToDrainAssets);
+        assertEq(pool.getFreeAssets(), 0, "Recapitalization reserves the remaining cash");
 
         ICfdEngineTypes.OpenPreview memory preview =
             engineLens.previewOpen(shortAccount, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
         assertTrue(preview.valid, "Skew-healing open should remain valid");
-        assertGt(preview.tradeCostUsdc, 0, "Trade cost should fund part of the execution fee");
-        assertLt(uint256(preview.tradeCostUsdc), preview.executionFeeUsdc, "Setup requires a pool-funded fee shortfall");
+        assertGt(preview.tradeCostAssets, 0, "Trade cost should fund part of the execution fee");
+        assertLt(
+            uint256(preview.tradeCostAssets), preview.executionFeeAssets, "Setup requires a pool-funded fee shortfall"
+        );
 
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         _open(shortAccount, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
 
-        assertEq(pool.totalAssets(), reservedRecapitalizationUsdc, "Fee top-up must preserve recapitalization cash");
-        assertEq(pool.pendingRecapitalizationUsdc(), reservedRecapitalizationUsdc);
+        assertEq(pool.totalAssets(), reservedRecapitalizationAssets, "Fee top-up must preserve recapitalization cash");
+        assertEq(pool.pendingRecapitalizationAssets(), reservedRecapitalizationAssets);
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            uint256(preview.tradeCostUsdc),
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
+            uint256(preview.tradeCostAssets),
             "Only the directly collected trade cost reaches the treasury"
         );
     }
@@ -173,33 +177,33 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
             isClose: false
         });
         ICfdEngineSettlementSidecar sidecar = engine.settlementSidecar();
-        uint256 poolDepthUsdc = pool.totalAssets();
+        uint256 poolDepthAssets = pool.totalAssets();
         vm.prank(address(engine));
-        CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(shortAccount, poolDepthUsdc);
+        CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(shortAccount, poolDepthAssets);
         CfdEnginePlanTypes.OpenDelta memory roomy = engine.planner().planOpen(snap, shortOrder, 1e8);
         assertTrue(roomy.valid, "Setup must admit the offsetting open before cash is tightened");
-        assertEq(engine.totalTraderClaimBalanceUsdc(), 0);
+        assertEq(engine.totalTraderClaimBalanceAssets(), 0);
 
-        uint256 freeAfterOpenUsdc = 1e6;
-        uint256 targetCashUsdc = roomy.requiredEffectiveAssetsAfterUsdc + freeAfterOpenUsdc;
+        uint256 freeAfterOpenAssets = 1e6;
+        uint256 targetCashAssets = roomy.requiredEffectiveAssetsAfterAssets + freeAfterOpenAssets;
         uint256 cashBefore = pool.totalAssets();
-        assertGt(cashBefore, targetCashUsdc);
+        assertGt(cashBefore, targetCashAssets);
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), cashBefore - targetCashUsdc);
+        settlementToken.transfer(address(0xDEAD), cashBefore - targetCashAssets);
 
         ICfdEngineTypes.OpenPreview memory preview =
             engineLens.previewOpen(shortAccount, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
         assertTrue(preview.valid, "Affordable top-up should preserve the settlement buffer");
-        assertGt(preview.tradeCostUsdc, 0);
-        assertGt(preview.executionFeeUsdc - uint256(preview.tradeCostUsdc), freeAfterOpenUsdc);
+        assertGt(preview.tradeCostAssets, 0);
+        assertGt(preview.executionFeeAssets - uint256(preview.tradeCostAssets), freeAfterOpenAssets);
 
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         _open(shortAccount, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
-        assertEq(pool.totalAssets(), targetCashUsdc - freeAfterOpenUsdc);
-        assertEq(pool.getSettlementFreeUSDC(), 0, "Top-up must stop at the protected buffer");
+        assertEq(pool.totalAssets(), targetCashAssets - freeAfterOpenAssets);
+        assertEq(pool.getSettlementFreeAssets(), 0, "Top-up must stop at the protected buffer");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            uint256(preview.tradeCostUsdc) + freeAfterOpenUsdc,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
+            uint256(preview.tradeCostAssets) + freeAfterOpenAssets,
             "Treasury receives only direct collection and affordable pool cash"
         );
     }
@@ -223,16 +227,18 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
         engine.processOrderTyped(order, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
         // 100k LONG at $1.00: execFee = notional * 4bps = $100k * 0.0004 = $40
-        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 fees = clearinghouse.balanceAssets(engine.protocolTreasury());
         assertEq(fees, 40_000_000, "Exec fee should be 4bps of $100k notional");
 
         address treasury = engine.protocolTreasury();
-        uint256 treasuryBalanceBefore = usdc.balanceOf(treasury);
+        uint256 treasuryBalanceBefore = settlementToken.balanceOf(treasury);
         uint256 assetsBeforeWithdrawal = pool.totalAssets();
         _withdrawProtocolTreasury(fees);
 
-        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), 0, "Fees should reset to zero");
-        assertEq(usdc.balanceOf(treasury) - treasuryBalanceBefore, fees, "Treasury receives exact fee amount");
+        assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), 0, "Fees should reset to zero");
+        assertEq(
+            settlementToken.balanceOf(treasury) - treasuryBalanceBefore, fees, "Treasury receives exact fee amount"
+        );
         assertEq(pool.totalAssets(), assetsBeforeWithdrawal, "Treasury withdrawal should not touch vault assets");
         assertEq(pool.excessAssets(), 0, "Fee inflows should not remain stranded as vault excess");
 
@@ -248,7 +254,7 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
     function test_TreasuryLock_KeepsOldBalancesAndAllowsCurrentTreasuryWithdrawal() public {
         _checkTreasuryRotationBalances(true);
         _withdrawProtocolTreasury(40e6);
-        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), 0);
+        assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), 0);
         assertGt(engine.protocolTreasuryLockedUntil(), block.timestamp);
     }
 
@@ -266,19 +272,21 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
         }
 
         assertEq(engine.protocolTreasury(), newTreasury, "Treasury should rotate despite the old balance");
-        assertEq(clearinghouse.balanceUsdc(oldTreasury), 1e6, "Old treasury retains its balance");
-        assertEq(clearinghouse.balanceUsdc(newTreasury), 0, "New treasury starts empty");
+        assertEq(clearinghouse.balanceAssets(oldTreasury), 1e6, "Old treasury retains its balance");
+        assertEq(clearinghouse.balanceAssets(newTreasury), 0, "New treasury starts empty");
 
         address account = address(0xFEE9A);
         _fundTrader(account, 5000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
-        assertEq(clearinghouse.balanceUsdc(newTreasury), 40e6, "Future fees go to the new treasury");
-        assertEq(clearinghouse.balanceUsdc(oldTreasury), 1e6, "Old balance stays with the old treasury");
+        assertEq(clearinghouse.balanceAssets(newTreasury), 40e6, "Future fees go to the new treasury");
+        assertEq(clearinghouse.balanceAssets(oldTreasury), 1e6, "Old balance stays with the old treasury");
 
-        uint256 oldWalletBalance = usdc.balanceOf(oldTreasury);
+        uint256 oldWalletBalance = settlementToken.balanceOf(oldTreasury);
         vm.prank(oldTreasury);
         clearinghouse.withdraw(oldTreasury, 1e6);
-        assertEq(usdc.balanceOf(oldTreasury), oldWalletBalance + 1e6, "Old treasury can withdraw its balance");
+        assertEq(
+            settlementToken.balanceOf(oldTreasury), oldWalletBalance + 1e6, "Old treasury can withdraw its balance"
+        );
     }
 
     function test_SetProtocolTreasury_AllowsRotationAfterCurrentTreasuryBalanceIsWithdrawn() public {
@@ -291,7 +299,7 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
 
         assertEq(engine.protocolTreasury(), newTreasury, "Treasury should rotate after the old account is drained");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()), 0, "New treasury starts with no reported balance"
+            clearinghouse.balanceAssets(engine.protocolTreasury()), 0, "New treasury starts with no reported balance"
         );
     }
 
@@ -307,7 +315,7 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
         _close(account, CfdTypes.Side.LONG, 100_000e18, 100_030_000);
         uint256 assetsAfterClose = pool.totalAssets();
 
-        usdc.mint(address(pool), 5e6);
+        settlementToken.mint(address(pool), 5e6);
 
         assertEq(
             pool.totalAssets(),
@@ -327,66 +335,72 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
 
         _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
-        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 fees = clearinghouse.balanceAssets(engine.protocolTreasury());
         address trader = address(0xFEE2);
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(trader)
+        stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(trader)
             .checked_write(uint256(25e6));
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(25e6));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(uint256(25e6));
 
         uint256 poolAssetsBeforeDrain = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssetsBeforeDrain);
+        settlementToken.transfer(address(0xDEAD), poolAssetsBeforeDrain);
 
         address treasury = engine.protocolTreasury();
-        uint256 treasuryBalanceBefore = usdc.balanceOf(treasury);
+        uint256 treasuryBalanceBefore = settlementToken.balanceOf(treasury);
         _withdrawProtocolTreasury(fees);
 
         assertEq(
-            usdc.balanceOf(treasury) - treasuryBalanceBefore,
+            settlementToken.balanceOf(treasury) - treasuryBalanceBefore,
             fees,
             "Treasury withdrawal should use clearinghouse custody"
         );
-        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), 0, "Treasury balance should be withdrawn");
+        assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), 0, "Treasury balance should be withdrawn");
         assertEq(pool.totalAssets(), 0, "Treasury withdrawal should not require or consume vault cash");
-        usdc.mint(address(pool), poolAssetsBeforeDrain);
+        settlementToken.mint(address(pool), poolAssetsBeforeDrain);
     }
 
     function test_TreasuryWithdrawal_ThenTraderClaims_DrainsResidualCashWithoutDeadlock() public {
         address trader = address(0xFEA1);
         address traderAccount = trader;
 
-        usdc.burn(address(pool), pool.totalAssets());
-        usdc.mint(address(pool), 100e6);
+        settlementToken.burn(address(pool), pool.totalAssets());
+        settlementToken.mint(address(pool), 100e6);
 
         _fundProtocolTreasury(60e6);
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(traderAccount)
+        stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(traderAccount)
             .checked_write(uint256(40e6));
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(40e6));
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(uint256(40e6));
 
         address treasury = engine.protocolTreasury();
-        uint256 treasuryBalanceBefore = usdc.balanceOf(treasury);
+        uint256 treasuryBalanceBefore = settlementToken.balanceOf(treasury);
         _withdrawProtocolTreasury(60e6);
 
-        assertEq(usdc.balanceOf(treasury) - treasuryBalanceBefore, 60e6, "Treasury should receive its margin balance");
+        assertEq(
+            settlementToken.balanceOf(treasury) - treasuryBalanceBefore,
+            60e6,
+            "Treasury should receive its margin balance"
+        );
         assertEq(pool.totalAssets(), 100e6, "Treasury withdrawal should leave vault cash untouched");
-        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), 0, "Treasury balance should be fully withdrawn");
+        assertEq(
+            clearinghouse.balanceAssets(engine.protocolTreasury()), 0, "Treasury balance should be fully withdrawn"
+        );
 
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
+        uint256 traderSettlementBefore = clearinghouse.balanceAssets(traderAccount);
         vm.prank(trader);
         engine.settleTraderClaim(traderAccount);
 
         assertEq(
-            clearinghouse.balanceUsdc(traderAccount) - traderSettlementBefore,
+            clearinghouse.balanceAssets(traderAccount) - traderSettlementBefore,
             40e6,
             "Trader should receive the first trader claim ahead of remaining protocol fees"
         );
         assertEq(pool.totalAssets(), 60e6, "Trader claim should consume only its reserved pool cash");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             0,
             "Servicing trader claims must not affect treasury accounting"
         );
-        assertEq(engine.traderClaimBalanceUsdc(traderAccount), 0, "Trader claim balance should be fully consumed");
+        assertEq(engine.traderClaimBalanceAssets(traderAccount), 0, "Trader claim balance should be fully consumed");
     }
 
     function test_ProtocolTreasury_AllowsPartialWithdrawal() public {
@@ -408,20 +422,20 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, 1_000_000e6, uint64(block.timestamp));
 
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint256 partialAmount = feesBefore / 2;
 
         address treasury = engine.protocolTreasury();
-        uint256 treasuryBalanceBefore = usdc.balanceOf(treasury);
+        uint256 treasuryBalanceBefore = settlementToken.balanceOf(treasury);
         _withdrawProtocolTreasury(partialAmount);
 
         assertEq(
-            usdc.balanceOf(treasury) - treasuryBalanceBefore,
+            settlementToken.balanceOf(treasury) - treasuryBalanceBefore,
             partialAmount,
             "Treasury should receive the requested partial fee amount"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             feesBefore - partialAmount,
             "Partial fee withdrawal should leave the remainder booked"
         );

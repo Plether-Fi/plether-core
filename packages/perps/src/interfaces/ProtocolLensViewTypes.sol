@@ -6,27 +6,27 @@ pragma solidity 0.8.35;
 library ProtocolLensViewTypes {
 
     /// @notice Conservative protocol accounting and solvency snapshot.
-    /// @dev All monetary fields use USDC's 6 decimals.
-    /// @param poolAssetsUsdc Canonical physical assets recognized by the HousePool.
-    /// @param netPhysicalAssetsUsdc Canonical pool assets, equal to poolAssetsUsdc. Treasury settlement is held
+    /// @dev All monetary fields use settlement token's 6 decimals.
+    /// @param poolAssets Canonical physical assets recognized by the HousePool.
+    /// @param netPhysicalAssets Canonical pool assets, equal to poolAssets. Treasury settlement is held
     ///        separately in the clearinghouse and must not be subtracted again; trader claims are also separate.
-    /// @param maxLiabilityUsdc Larger of the long-side and short-side maximum-profit envelopes.
-    /// @param effectiveSolvencyAssetsUsdc Pool assets after aggregate trader claims, floored at zero.
-    /// @param withdrawalReservedUsdc Maximum position liability, aggregate trader claims, and settlement buffer.
-    /// @param freeUsdc Pool assets above maximum position liability, aggregate trader claims, and settlement buffer.
-    /// @param protocolTreasuryBalanceUsdc Settlement credited to the protocol treasury in the clearinghouse.
-    /// @param totalTraderClaimBalanceUsdc Aggregate unpaid trader claims.
+    /// @param maxLiabilityAssets Larger of the long-side and short-side maximum-profit envelopes.
+    /// @param effectiveSolvencyAssets Pool assets after aggregate trader claims, floored at zero.
+    /// @param withdrawalReservedAssets Maximum position liability, aggregate trader claims, and settlement buffer.
+    /// @param freeAssets Pool assets above maximum position liability, aggregate trader claims, and settlement buffer.
+    /// @param protocolTreasuryBalanceAssets Settlement credited to the protocol treasury in the clearinghouse.
+    /// @param totalTraderClaimBalanceAssets Aggregate unpaid trader claims.
     /// @param degradedMode Whether the engine has entered insolvency-protection mode.
     /// @param hasLiveLiability Whether either side has a nonzero maximum-profit liability.
     struct ProtocolAccountingSnapshot {
-        uint256 poolAssetsUsdc;
-        uint256 netPhysicalAssetsUsdc;
-        uint256 maxLiabilityUsdc;
-        uint256 effectiveSolvencyAssetsUsdc;
-        uint256 withdrawalReservedUsdc;
-        uint256 freeUsdc;
-        uint256 protocolTreasuryBalanceUsdc;
-        uint256 totalTraderClaimBalanceUsdc;
+        uint256 poolAssets;
+        uint256 netPhysicalAssets;
+        uint256 maxLiabilityAssets;
+        uint256 effectiveSolvencyAssets;
+        uint256 withdrawalReservedAssets;
+        uint256 freeAssets;
+        uint256 protocolTreasuryBalanceAssets;
+        uint256 totalTraderClaimBalanceAssets;
         bool degradedMode;
         bool hasLiveLiability;
     }

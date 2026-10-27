@@ -26,7 +26,7 @@ interface INativeSimpleAccount {
 
 }
 
-/// @dev Real pinned SimpleAccount v0.8 code, fresh local perps stack, MockUSDC and MockPyth.
+/// @dev Real pinned SimpleAccount v0.8 code, fresh local perps stack, MockSettlementToken and MockPyth.
 /// No public-chain transaction, UserOperation, EntryPoint, paymaster, bundler or protocol API is used.
 contract NativeCloseFallbackTest is SourceBoundBountyFixture {
 
@@ -53,15 +53,15 @@ contract NativeCloseFallbackTest is SourceBoundBountyFixture {
         _fundTrader(address(account), 1000e6);
         _ownerCommit(false, BOUNTY_SIZE, 250e6);
         _bountyExecute(1, BOUNTY_PRICE, OWNER, OrderV3Types.LifecycleStatus.Executed);
-        uint256 free = clearinghouse.getFreeBuyingPowerUsdc(address(account));
+        uint256 free = clearinghouse.getFreeBuyingPowerAssets(address(account));
         vm.prank(OWNER);
         account.execute(
             address(clearinghouse), 0, abi.encodeWithSignature("withdraw(address,uint256)", address(account), free)
         );
         // Withdrawn wallet cash is not needed for either commitment or execution.
-        usdc.burn(address(account), usdc.balanceOf(address(account)));
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(address(account)), 0);
-        assertEq(usdc.balanceOf(OWNER), 0);
+        settlementToken.burn(address(account), settlementToken.balanceOf(address(account)));
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(address(account)), 0);
+        assertEq(settlementToken.balanceOf(OWNER), 0);
     }
 
     function _ownerCommit(
@@ -77,12 +77,12 @@ contract NativeCloseFallbackTest is SourceBoundBountyFixture {
         assertEq(router.pendingOrderCounts(OWNER), 0, "owner never becomes the trader");
     }
 
-    function testFork_OwnerClosesSameAccountWithoutSponsorOrUsdc() public {
+    function testFork_OwnerClosesSameAccountWithoutSponsorOrAssets() public {
         uint64 id = _ownerCommit(true, BOUNTY_SIZE / 2, 0);
         OrderV3Types.OrderReceipt memory receipt =
             _bountyExecute(id, BOUNTY_PRICE, OWNER, OrderV3Types.LifecycleStatus.Executed);
         assertEq(receipt.account, address(account));
-        assertEq(receipt.bountyUsdc, 0);
+        assertEq(receipt.bountyAssets, 0);
         assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None));
         id = _ownerCommit(true, BOUNTY_SIZE / 2, 0);
         receipt = _bountyExecute(id, BOUNTY_PRICE, OWNER, OrderV3Types.LifecycleStatus.Executed);
@@ -95,7 +95,7 @@ contract NativeCloseFallbackTest is SourceBoundBountyFixture {
     function testFork_ExpiredOwnerCommitCleansWithoutOracleAndCanRetry() public {
         uint64 id = _ownerCommit(true, BOUNTY_SIZE, 0);
         _bountyExpire(id, OWNER);
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(address(account)), 0);
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(address(account)), 0);
         id = _ownerCommit(true, BOUNTY_SIZE, 0);
         _bountyExecute(id, BOUNTY_PRICE, OWNER, OrderV3Types.LifecycleStatus.Executed);
     }

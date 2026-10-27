@@ -17,16 +17,16 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
         assertEq(book.ENGINE(), address(driver));
         assertEq(book.CAP_PRICE(), CAP_PRICE);
         assertEq(book.SIZE_QUANTUM(), 1e20);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(0), 0);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), 0);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(0), 0);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE), 0);
 
         ITerminalNavBookV2.BookState memory state = book.bookState();
         assertEq(state.capPrice, CAP_PRICE);
         assertEq(state.activeCurveCount, 0);
         assertEq(state.bookVersion, 0);
         assertEq(state.totalLots, 0);
-        assertEq(state.totalEntryCostUsdcAtoms, 0);
-        assertEq(state.totalEffectiveCapUsdcAtoms, 0);
+        assertEq(state.totalEntryCostAssetAtoms, 0);
+        assertEq(state.totalEffectiveCapAssetAtoms, 0);
         assertEq(state.base.slope, 0);
         assertEq(state.base.intercept, 0);
     }
@@ -72,9 +72,9 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
 
         _set(account, _curveInput(lots, entryCost, maximumCollectible, CfdTypes.Side.LONG));
 
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(0), -int256(uint256(entryCost)));
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(1e8), 0);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), int256(uint256(maximumCollectible)));
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(0), -int256(uint256(entryCost)));
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(1e8), 0);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE), int256(uint256(maximumCollectible)));
 
         ITerminalNavBookV2.BookState memory state = book.bookState();
         assertEq(state.base.slope, int256(uint256(lots)));
@@ -91,11 +91,11 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
         _set(account, _curveInput(lots, entryCost, cap, CfdTypes.Side.LONG));
 
         assertEq(
-            book.terminalLpPriceDeltaUsdcAtoms(breakpoint - 1),
+            book.terminalLpPriceDeltaAssetAtoms(breakpoint - 1),
             int256(uint256(lots) * uint256(breakpoint - 1)) - int256(uint256(entryCost))
         );
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(breakpoint), int256(uint256(cap)));
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), int256(uint256(cap)));
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(breakpoint), int256(uint256(cap)));
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE), int256(uint256(cap)));
 
         ITerminalNavBookV2.Coeff memory leaf = book.radixNode(8, breakpoint);
         assertEq(leaf.slope, -int256(uint256(lots)));
@@ -111,14 +111,14 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
 
         _set(account, _curveInput(lots, entryCost, cap, CfdTypes.Side.SHORT));
 
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(0), int256(uint256(cap)));
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(breakpoint - 1), int256(uint256(cap)));
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(0), int256(uint256(cap)));
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(breakpoint - 1), int256(uint256(cap)));
         assertEq(
-            book.terminalLpPriceDeltaUsdcAtoms(breakpoint),
+            book.terminalLpPriceDeltaAssetAtoms(breakpoint),
             int256(uint256(entryCost)) - int256(uint256(lots) * uint256(breakpoint))
         );
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(1e8), 0);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), -int256(100_000e6));
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(1e8), 0);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE), -int256(100_000e6));
     }
 
     function test_CeilingBreakpointsAreExactForNonDivisibleNumerators() public {
@@ -126,20 +126,20 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
         address short = address(2);
 
         _set(long, _curveInput(3, 10, 2, CfdTypes.Side.LONG));
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(3), -1);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(4), 2);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(3), -1);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(4), 2);
 
         _set(short, _curveInput(3, 10, 2, CfdTypes.Side.SHORT));
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(2), -2); // LONG is -4 and SHORT is capped at +2.
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(3), 0); // LONG is -1 and SHORT affine value is +1.
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(4), 0); // LONG is +2 and SHORT is -2.
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(2), -2); // LONG is -4 and SHORT is capped at +2.
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(3), 0); // LONG is -1 and SHORT affine value is +1.
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(4), 0); // LONG is +2 and SHORT is -2.
     }
 
     function test_LongZeroBreakpointIsIncludedAtMarkZero() public {
         _set(address(1), _curveInput(17, 0, 0, CfdTypes.Side.LONG));
 
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(0), 0);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), 0);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(0), 0);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE), 0);
 
         ITerminalNavBookV2.Coeff memory leaf = book.radixNode(8, 0);
         assertEq(leaf.slope, -17);
@@ -149,13 +149,13 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
     function test_BreakpointCanEqualCapForEitherSide() public {
         uint144 longEntryCost = uint144(uint256(2) * CAP_PRICE - 2);
         _set(address(1), _curveInput(2, longEntryCost, 1, CfdTypes.Side.LONG));
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE - 1), 0);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), 1);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE - 1), 0);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE), 1);
 
         uint144 shortEntryCost = uint144(uint256(2) * CAP_PRICE);
         _set(address(2), _curveInput(2, shortEntryCost, 1, CfdTypes.Side.SHORT));
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE - 1), 1);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), 1); // LONG contributes one; SHORT contributes zero.
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE - 1), 1);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE), 1); // LONG contributes one; SHORT contributes zero.
     }
 
     function test_ExcessCollateralIsCanonicalizedAndIdenticalReplacementIsNoOp() public {
@@ -165,7 +165,7 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
         assertEq(firstVersion, 1);
 
         ITerminalNavBookV2.CurveRecord memory stored = book.curveOf(account);
-        assertEq(stored.effectiveCapUsdcAtoms, 500);
+        assertEq(stored.effectiveCapAssetAtoms, 500);
 
         TestCurveInput memory sameCanonical = _curveInput(10, 500, 5000, CfdTypes.Side.SHORT);
         driver.setPosition(account, sameCanonical);
@@ -176,7 +176,7 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
         ITerminalNavBookV2.BookState memory state = book.bookState();
         assertEq(state.activeCurveCount, 1);
         assertEq(state.bookVersion, 1);
-        assertEq(state.totalEffectiveCapUsdcAtoms, 500);
+        assertEq(state.totalEffectiveCapAssetAtoms, 500);
     }
 
     function test_CurveHashIsDeploymentAndAccountDomainSeparated() public {
@@ -282,14 +282,14 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
         (, uint64 removalVersion) = _remove(account, replacementHash);
         assertEq(removalVersion, 3);
         assertEq(book.curveHashOf(account), bytes32(0));
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(0), 0);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), 0);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(0), 0);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE), 0);
 
         ITerminalNavBookV2.BookState memory state = book.bookState();
         assertEq(state.activeCurveCount, 0);
         assertEq(state.totalLots, 0);
-        assertEq(state.totalEntryCostUsdcAtoms, 0);
-        assertEq(state.totalEffectiveCapUsdcAtoms, 0);
+        assertEq(state.totalEntryCostAssetAtoms, 0);
+        assertEq(state.totalEffectiveCapAssetAtoms, 0);
         assertEq(state.base.slope, 0);
         assertEq(state.base.intercept, 0);
     }
@@ -303,13 +303,13 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
         ITerminalNavBookV2.Coeff memory leaf = book.radixNode(8, 4);
         assertEq(leaf.slope, -6);
         assertEq(leaf.intercept, 24);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(4), 4);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(4), 4);
 
         _remove(address(1), firstHash);
         leaf = book.radixNode(8, 4);
         assertEq(leaf.slope, -3);
         assertEq(leaf.intercept, 12);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(4), 2);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(4), 2);
     }
 
     function test_MarkAboveCapAndInvalidRadixQueriesRevert() public {
@@ -318,7 +318,7 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
                 ITerminalNavBookV2.TerminalNavBookV2__MarkPriceAboveCap.selector, uint32(CAP_PRICE + 1), CAP_PRICE
             )
         );
-        book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE + 1);
+        book.terminalLpPriceDeltaAssetAtoms(CAP_PRICE + 1);
 
         vm.expectRevert(abi.encodeWithSelector(ITerminalNavBookV2.TerminalNavBookV2__InvalidRadixNode.selector, 0, 0));
         book.radixNode(0, 0);
@@ -354,7 +354,7 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
 
         ITerminalNavBookV2.BookState memory state = maxBook.bookState();
         assertEq(
-            uint256(state.totalEntryCostUsdcAtoms) + uint256(state.totalEffectiveCapUsdcAtoms), maximumSignedIntercept
+            uint256(state.totalEntryCostAssetAtoms) + uint256(state.totalEffectiveCapAssetAtoms), maximumSignedIntercept
         );
 
         TestCurveInput memory tooLarge =
@@ -381,7 +381,7 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
 
         _set(account, _curveInput(lots, entryCost, cap, side));
 
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(mark), _directValue(book.curveOf(account), mark));
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(mark), _directValue(book.curveOf(account), mark));
         _assertCriticalMarks(account);
     }
 

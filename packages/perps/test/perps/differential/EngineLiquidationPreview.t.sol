@@ -30,16 +30,16 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
         assertTrue(preview.liquidatable);
-        assertEq(preview.liquidationChargeUsdc, 10_000_000, "Charge must cap at the entry-time liquidation reserve");
-        assertEq(preview.keeperBountyUsdc, 5_000_000, "Keeper should receive exactly half the reserved charge");
-        assertEq(preview.protocolLiquidationFeeUsdc, 0, "Protocol fee should default to zero");
-        assertEq(preview.lpLiquidationFeeUsdc, 5_000_000, "LPs should receive exactly half the reserved charge");
+        assertEq(preview.liquidationChargeAssets, 10_000_000, "Charge must cap at the entry-time liquidation reserve");
+        assertEq(preview.keeperBountyAssets, 5_000_000, "Keeper should receive exactly half the reserved charge");
+        assertEq(preview.protocolLiquidationFeeAssets, 0, "Protocol fee should default to zero");
+        assertEq(preview.lpLiquidationFeeAssets, 5_000_000, "LPs should receive exactly half the reserved charge");
         assertEq(
-            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
-            preview.liquidationChargeUsdc,
+            preview.keeperBountyAssets + preview.protocolLiquidationFeeAssets + preview.lpLiquidationFeeAssets,
+            preview.liquidationChargeAssets,
             "Liquidation charge allocation should conserve value"
         );
-        assertLe(preview.liquidationChargeUsdc, uint256(preview.equityUsdc));
+        assertLe(preview.liquidationChargeAssets, uint256(preview.equityAssets));
     }
 
     function test_PreviewLiquidation_PreservesExistingTraderClaimOnPositivePhysicalResidual() public {
@@ -71,38 +71,38 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         if (!liquid) {
             uint256 poolAssets = pool.totalAssets();
             vm.prank(address(pool));
-            usdc.transfer(address(0xDEAD), poolAssets - 30e6);
+            settlementToken.transfer(address(0xDEAD), poolAssets - 30e6);
         }
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 100_000_000);
 
         assertTrue(preview.liquidatable, "Preview should not revert for positive physical residual");
-        assertGt(preview.keeperBountyUsdc, 0, "Dedicated liquidation reserve should fund a keeper bounty");
-        assertGt(preview.settlementRetainedUsdc, 0, "Unused PnL pledge should remain as terminal settlement");
-        assertEq(preview.freshTraderPayoutUsdc, 30e6, "Preview should surface the exact positive price PnL");
+        assertGt(preview.keeperBountyAssets, 0, "Dedicated liquidation reserve should fund a keeper bounty");
+        assertGt(preview.settlementRetainedAssets, 0, "Unused PnL pledge should remain as terminal settlement");
+        assertEq(preview.freshTraderPayoutAssets, 30e6, "Preview should surface the exact positive price PnL");
         assertEq(
-            preview.existingTraderClaimConsumedUsdc,
+            preview.existingTraderClaimConsumedAssets,
             0,
             "Positive physical residual should not consume legacy trader claim"
         );
         assertEq(
-            preview.existingTraderClaimRemainingUsdc, 10e6, "Preview should keep the legacy trader claim outstanding"
+            preview.existingTraderClaimRemainingAssets, 10e6, "Preview should keep the legacy trader claim outstanding"
         );
         assertEq(
-            preview.immediatePayoutUsdc,
+            preview.immediatePayoutAssets,
             liquid ? 30e6 : 0,
             "Liquid cash pays the gain now; insufficient cash defers it behind the existing claim"
         );
         assertEq(
-            preview.traderClaimBalanceUsdc,
+            preview.traderClaimBalanceAssets,
             liquid ? 10e6 : 40e6,
             "Claims include the old $10 plus the new $30 only when deferred"
         );
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
         assertEq(
-            preview.settlementRetainedUsdc,
-            settlementBefore - preview.liquidationChargeUsdc + (liquid ? 30e6 : 0),
+            preview.settlementRetainedAssets,
+            settlementBefore - preview.liquidationChargeAssets + (liquid ? 30e6 : 0),
             "Retained settlement includes the $30 cash gain exactly once, after liquidation charges"
         );
 
@@ -112,21 +112,21 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         router.executeLiquidation(account, liquidationPriceData);
 
         uint256 liveEffective = pool.totalAssets();
-        uint256 traderClaimTotal = engine.totalTraderClaimBalanceUsdc();
+        uint256 traderClaimTotal = engine.totalTraderClaimBalanceAssets();
         liveEffective = liveEffective > traderClaimTotal ? liveEffective - traderClaimTotal : 0;
 
         assertEq(
-            clearinghouse.balanceUsdc(account),
-            preview.settlementRetainedUsdc,
+            clearinghouse.balanceAssets(account),
+            preview.settlementRetainedAssets,
             "Live settlement must equal the retained total, which already includes any immediate payout"
         );
         assertEq(
-            engine.traderClaimBalanceUsdc(account),
+            engine.traderClaimBalanceAssets(account),
             liquid ? 10e6 : 40e6,
             "Live claims must exclude a fresh payout already paid in cash"
         );
         assertEq(
-            preview.effectiveAssetsAfterUsdc,
+            preview.effectiveAssetsAfterAssets,
             liveEffective,
             "Preview solvency should use net trader claim liabilities after consumption"
         );
@@ -163,26 +163,26 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
             engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertGe(
-            observed.protocolLiquidationFeeUsdc,
-            reservationBefore.executionBountyUsdc,
+            observed.protocolLiquidationFeeAssets,
+            reservationBefore.executionBountyAssets,
             "Treasury inflow should include the forfeited execution reservation"
         );
-        observed.protocolLiquidationFeeUsdc -= reservationBefore.executionBountyUsdc;
+        observed.protocolLiquidationFeeAssets -= reservationBefore.executionBountyAssets;
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
-            engine.traderClaimBalanceUsdc(account),
-            preview.traderClaimBalanceUsdc,
+            engine.traderClaimBalanceAssets(account),
+            preview.traderClaimBalanceAssets,
             "Preview trader claim should match live liquidation after staged forfeiture"
         );
         assertEq(
-            afterSnapshot.protocolTreasuryBalanceUsdc - beforeSnapshot.protocol.protocolTreasuryBalanceUsdc,
-            reservationBefore.executionBountyUsdc + preview.protocolLiquidationFeeUsdc,
+            afterSnapshot.protocolTreasuryBalanceAssets - beforeSnapshot.protocol.protocolTreasuryBalanceAssets,
+            reservationBefore.executionBountyAssets + preview.protocolLiquidationFeeAssets,
             "Live liquidation should book forfeited reservations and the configured protocol liquidation fee"
         );
         assertEq(
-            observed.effectiveAssetsAfterUsdc,
-            preview.effectiveAssetsAfterUsdc,
+            observed.effectiveAssetsAfterAssets,
+            preview.effectiveAssetsAfterAssets,
             "Preview solvency should match live liquidation after staged forfeiture"
         );
     }
@@ -205,25 +205,25 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 102_500_000);
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
 
-        assertGt(reservation.executionBountyUsdc, 0, "Setup must create clearinghouse-reserved execution bounty");
+        assertGt(reservation.executionBountyAssets, 0, "Setup must create clearinghouse-reserved execution bounty");
         assertEq(
-            preview.reachableCollateralUsdc,
-            snapshot.terminalPriceCollectibleCapUsdc,
+            preview.reachableCollateralAssets,
+            snapshot.terminalPriceCollectibleCapAssets,
             "Liquidation preview must use only the exact PnL pledge/claim price-loss cap"
         );
         assertEq(
-            snapshot.liquidationReachableSettlementUsdc,
-            snapshot.settlementBalanceUsdc - reservation.executionBountyUsdc,
+            snapshot.liquidationReachableSettlementAssets,
+            snapshot.settlementBalanceAssets - reservation.executionBountyAssets,
             "Account-ledger terminal reachability must exclude reserved execution bounty"
         );
         assertLt(
-            preview.reachableCollateralUsdc,
-            snapshot.liquidationReachableSettlementUsdc,
+            preview.reachableCollateralAssets,
+            snapshot.liquidationReachableSettlementAssets,
             "Generic free settlement must remain outside the exact terminal price-loss cap"
         );
         assertEq(
-            snapshot.executionBountyReserveUsdc,
-            reservation.executionBountyUsdc,
+            snapshot.executionBountyReserveAssets,
+            reservation.executionBountyAssets,
             "Expanded account ledger must continue to report execution reservation outside liquidation reachability"
         );
     }

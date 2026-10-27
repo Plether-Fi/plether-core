@@ -14,7 +14,7 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
     /// @param account Liquidated account whose bounties are forfeited.
     function _forfeitReservedOrderBountiesOnLiquidation(
         address account
-    ) internal returns (uint64[] memory orderIds, uint256[] memory orderBountiesUsdc) {
+    ) internal returns (uint64[] memory orderIds, uint256[] memory orderBountiesAssets) {
         uint256 orderCount = 0;
         for (
             uint64 cursor = accountHeadOrderId[account]; cursor != 0; cursor = orderRecords[cursor].nextAccountOrderId) {
@@ -22,38 +22,38 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
             ++orderCount;
         }
         orderIds = new uint64[](orderCount);
-        orderBountiesUsdc = new uint256[](orderCount);
+        orderBountiesAssets = new uint256[](orderCount);
 
-        uint256 forfeitedUsdc = _protectionBountiesToForfeitOnLiquidation(account);
+        uint256 forfeitedAssets = _protectionBountiesToForfeitOnLiquidation(account);
         uint256 index = 0;
         for (
             uint64 orderId = accountHeadOrderId[account];
             orderId != 0;
             orderId = orderRecords[orderId].nextAccountOrderId
         ) {
-            uint256 executionBountyUsdc =
+            uint256 executionBountyAssets =
                 clearinghouse.takeBountyReservation(account, IMarginClearinghouse.BountyKind.Order, orderId);
             orderIds[index] = orderId;
-            orderBountiesUsdc[index] = executionBountyUsdc;
+            orderBountiesAssets[index] = executionBountyAssets;
             ++index;
-            forfeitedUsdc += executionBountyUsdc;
+            forfeitedAssets += executionBountyAssets;
         }
 
-        if (forfeitedUsdc == 0) {
-            return (orderIds, orderBountiesUsdc);
+        if (forfeitedAssets == 0) {
+            return (orderIds, orderBountiesAssets);
         }
 
-        engine.absorbReservedExecutionBounty(account, forfeitedUsdc);
+        engine.absorbReservedExecutionBounty(account, forfeitedAssets);
     }
 
     /// @notice Terminalizes and returns any unpaid non-order bounty reservation owned by account protection.
     /// @dev The default router has no such reservation. Position-protection handling overrides this hook so its
     ///      amount is transferred together with ordinary queued-order bounties in one engine call.
     /// @param account Account being liquidated.
-    /// @return forfeitedUsdc Additional reserved bounty value to transfer to the protocol treasury.
+    /// @return forfeitedAssets Additional reserved bounty value to transfer to the protocol treasury.
     function _protectionBountiesToForfeitOnLiquidation(
         address account
-    ) internal virtual returns (uint256 forfeitedUsdc) {
+    ) internal virtual returns (uint256 forfeitedAssets) {
         account;
         return 0;
     }

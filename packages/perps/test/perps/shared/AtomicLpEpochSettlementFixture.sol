@@ -65,8 +65,8 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
         uint256 juniorPrincipal;
         uint256 seniorHighWaterMark;
         uint256 accountedAssets;
-        uint256 poolUsdc;
-        uint256 vaultUsdc;
+        uint256 poolAssets;
+        uint256 vaultAssets;
         uint256 juniorSupply;
         uint256 accruedJuniorSupply;
         uint256 maintenanceFeeRecipientShares;
@@ -99,7 +99,8 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
     }
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
-    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_529;
+    // Measured after the token-neutral API rename (solc 0.8.35, via-IR, optimizer runs 200).
+    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_571;
     uint256 internal constant REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT = 1200;
     // Production runtime including configurable treasury locks and automatic successor scheduling.
     uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 24_563;
@@ -136,7 +137,7 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
             initMarginBps: 150,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -217,7 +218,11 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
             0,
             "redemption must materialize the fee before the injected failure"
         );
-        assertEq(usdc.balanceOf(address(juniorVault)), fixture.depositAssets, "fixture isolates deposit escrow cash");
+        assertEq(
+            settlementToken.balanceOf(address(juniorVault)),
+            fixture.depositAssets,
+            "fixture isolates deposit escrow cash"
+        );
         fixture.injectedFailure = bytes4(keccak256("InjectedDepositTransferFailure()"));
         _mockDepositTransferFailure(fixture.depositAssets, fixture.injectedFailure);
     }
@@ -227,7 +232,7 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
         bytes4 injectedFailure
     ) internal {
         vm.mockCallRevert(
-            address(usdc),
+            address(settlementToken),
             abi.encodeWithSelector(bytes4(keccak256("transfer(address,uint256)")), address(pool), depositAssets),
             abi.encodeWithSelector(injectedFailure)
         );
@@ -247,9 +252,9 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
         address owner,
         uint256 assets
     ) internal returns (uint256 requestId) {
-        usdc.mint(owner, assets);
+        settlementToken.mint(owner, assets);
         vm.startPrank(owner);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         requestId = juniorVault.requestDeposit(assets, owner, owner);
         vm.stopPrank();
     }
@@ -355,8 +360,8 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
         snapshot.juniorPrincipal = pool.juniorPrincipal();
         snapshot.seniorHighWaterMark = pool.seniorHighWaterMark();
         snapshot.accountedAssets = pool.accountedAssets();
-        snapshot.poolUsdc = usdc.balanceOf(address(pool));
-        snapshot.vaultUsdc = usdc.balanceOf(address(juniorVault));
+        snapshot.poolAssets = settlementToken.balanceOf(address(pool));
+        snapshot.vaultAssets = settlementToken.balanceOf(address(juniorVault));
         snapshot.juniorSupply = juniorVault.totalSupply();
         snapshot.accruedJuniorSupply = juniorVault.accruedTotalSupply();
         snapshot.maintenanceFeeRecipientShares = juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT);
@@ -406,8 +411,12 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
         assertEq(pool.juniorPrincipal(), expected.juniorPrincipal, "Junior principal must roll back");
         assertEq(pool.seniorHighWaterMark(), expected.seniorHighWaterMark, "Senior HWM must roll back");
         assertEq(pool.accountedAssets(), expected.accountedAssets, "accounted assets must roll back");
-        assertEq(usdc.balanceOf(address(pool)), expected.poolUsdc, "pool USDC must roll back");
-        assertEq(usdc.balanceOf(address(juniorVault)), expected.vaultUsdc, "vault USDC must roll back");
+        assertEq(settlementToken.balanceOf(address(pool)), expected.poolAssets, "pool settlementToken must roll back");
+        assertEq(
+            settlementToken.balanceOf(address(juniorVault)),
+            expected.vaultAssets,
+            "vault settlementToken must roll back"
+        );
         assertEq(juniorVault.totalSupply(), expected.juniorSupply, "vault supply must roll back");
         assertEq(juniorVault.accruedTotalSupply(), expected.accruedJuniorSupply, "accrued supply must roll back");
         assertEq(

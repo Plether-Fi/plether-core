@@ -92,15 +92,15 @@ contract PerpsPublicLensTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 withdrawable = engineAccountLens.getWithdrawableUsdc(trader);
+        uint256 withdrawable = engineAccountLens.getWithdrawableAssets(trader);
         assertGt(withdrawable, 0, "healthy account must retain withdrawal headroom");
-        assertEq(withdrawable, clearinghouse.getAccountUsdcBuckets(trader).freeSettlementUsdc);
-        assertEq(publicLens.getTraderAccount(trader).withdrawableUsdc, withdrawable);
+        assertEq(withdrawable, clearinghouse.getAccountAssetBuckets(trader).freeSettlementAssets);
+        assertEq(publicLens.getTraderAccount(trader).withdrawableAssets, withdrawable);
         vm.prank(trader);
         clearinghouse.withdraw(trader, withdrawable);
     }
 
-    function test_GetWithdrawableUsdc_PreservesFutureAndInclusiveFreshnessBoundary() public {
+    function test_GetWithdrawableAssets_PreservesFutureAndInclusiveFreshnessBoundary() public {
         address trader = address(0xA11CE);
         _fundTrader(trader, 50_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
@@ -108,7 +108,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, futureMarkTime);
 
-        assertGt(engineAccountLens.getWithdrawableUsdc(trader), 0, "future cached mark retains zero age");
+        assertGt(engineAccountLens.getWithdrawableAssets(trader), 0, "future cached mark retains zero age");
         vm.prank(address(clearinghouse));
         engine.checkWithdraw(trader);
 
@@ -117,9 +117,9 @@ contract PerpsPublicLensTest is BasePerpTest {
             limit = pool.markStalenessLimit();
         }
         vm.warp(uint256(futureMarkTime) + limit);
-        assertGt(engineAccountLens.getWithdrawableUsdc(trader), 0, "exact age limit remains fresh");
+        assertGt(engineAccountLens.getWithdrawableAssets(trader), 0, "exact age limit remains fresh");
         vm.warp(block.timestamp + 1);
-        assertEq(engineAccountLens.getWithdrawableUsdc(trader), 0, "age beyond limit is stale");
+        assertEq(engineAccountLens.getWithdrawableAssets(trader), 0, "age beyond limit is stale");
     }
 
     function test_GetTraderAccount_UsesNetEquityAndEngineAwareWithdrawable() public {
@@ -138,18 +138,18 @@ contract PerpsPublicLensTest is BasePerpTest {
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
-        assertGt(clearinghouse.getFreeBuyingPowerUsdc(account), 0, "setup should leave free buying power");
+        assertGt(clearinghouse.getFreeBuyingPowerAssets(account), 0, "setup should leave free buying power");
         assertEq(
-            viewData.equityUsdc,
-            snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0,
+            viewData.equityAssets,
+            snapshot.netEquityAssets > 0 ? uint256(snapshot.netEquityAssets) : 0,
             "public equity should use floored net economic equity"
         );
         assertEq(
-            viewData.withdrawableUsdc,
-            engineAccountLens.getWithdrawableUsdc(account),
+            viewData.withdrawableAssets,
+            engineAccountLens.getWithdrawableAssets(account),
             "lens should use account-lens withdrawability"
         );
-        assertEq(viewData.withdrawableUsdc, 0, "withdrawable should zero when engine withdraws are stale-blocked");
+        assertEq(viewData.withdrawableAssets, 0, "withdrawable should zero when engine withdraws are stale-blocked");
     }
 
     function test_GetTraderAccount_WithdrawableMatchesEngineAndActualWithdrawBound() public {
@@ -163,21 +163,21 @@ contract PerpsPublicLensTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(105_000_000, uint64(vm.getBlockTimestamp()));
 
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
+        uint256 withdrawableAssets = engineAccountLens.getWithdrawableAssets(account);
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
-        assertGt(withdrawableUsdc, 0, "setup should produce a positive withdrawable amount");
+        assertGt(withdrawableAssets, 0, "setup should produce a positive withdrawable amount");
         assertEq(
-            withdrawableUsdc,
-            clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
+            withdrawableAssets,
+            clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets,
             "A healthy isolated position should expose all free settlement"
         );
         assertEq(
-            viewData.withdrawableUsdc, withdrawableUsdc, "lens should delegate withdrawability to the account lens"
+            viewData.withdrawableAssets, withdrawableAssets, "lens should delegate withdrawability to the account lens"
         );
 
         vm.prank(trader);
-        clearinghouse.withdraw(account, withdrawableUsdc);
+        clearinghouse.withdraw(account, withdrawableAssets);
 
         vm.prank(trader);
         vm.expectRevert();
@@ -192,8 +192,8 @@ contract PerpsPublicLensTest is BasePerpTest {
 
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
-        assertEq(viewData.equityUsdc, 12_345e6, "flat accounts should report settlement equity");
-        assertEq(viewData.withdrawableUsdc, 12_345e6, "flat accounts should expose full engine withdrawability");
+        assertEq(viewData.equityAssets, 12_345e6, "flat accounts should report settlement equity");
+        assertEq(viewData.withdrawableAssets, 12_345e6, "flat accounts should expose full engine withdrawability");
         assertFalse(viewData.hasOpenPosition, "flat account should not report an open position");
     }
 
@@ -210,8 +210,8 @@ contract PerpsPublicLensTest is BasePerpTest {
 
         PerpsViewTypes.PositionView memory viewData = publicLens.getPosition(account);
         assertEq(
-            viewData.maintenanceMarginUsdc,
-            _maintenanceMarginUsdc(viewData.size, engine.lastMarkPrice()),
+            viewData.maintenanceMarginAssets,
+            _maintenanceMarginAssets(viewData.size, engine.lastMarkPrice()),
             "position view should expose the live maintenance margin requirement"
         );
     }
@@ -235,10 +235,10 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertEq(uint8(viewData.side), uint8(snapshot.side), "Public position side should match account lens");
         assertEq(viewData.size, snapshot.size, "Public position size should match account lens");
         assertEq(viewData.entryPrice, snapshot.entryPrice, "Public position entry price should match account lens");
-        assertEq(viewData.marginUsdc, snapshot.margin, "Public position margin should match account lens");
+        assertEq(viewData.marginAssets, snapshot.margin, "Public position margin should match account lens");
         assertEq(
-            viewData.unrealizedPnlUsdc,
-            snapshot.unrealizedPnlUsdc,
+            viewData.unrealizedPnlAssets,
+            snapshot.unrealizedPnlAssets,
             "Public unrealized pnl should match carry-aware account lens state"
         );
         assertEq(
@@ -262,7 +262,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         expected.size = 42_000e18;
         expected.takeProfitTriggerPrice = 120_000_000;
         expected.stopLossTriggerPrice = 80_000_000;
-        expected.triggerBountyUsdc = 200_000;
+        expected.triggerBountyAssets = 200_000;
         expected.armedAt = 1_720_000_000;
         expected.armedBlock = 12_345;
         expected.status = PositionProtectionTypes.PositionProtectionStatus.Armed;
@@ -336,13 +336,13 @@ contract PerpsPublicLensTest is BasePerpTest {
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
         assertLt(
-            snapshot.netEquityUsdc,
-            int256(snapshot.accountEquityUsdc),
+            snapshot.netEquityAssets,
+            int256(snapshot.accountEquityAssets),
             "Carry-aware lens equity should be below raw settlement equity"
         );
         assertEq(
-            viewData.equityUsdc,
-            snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0,
+            viewData.equityAssets,
+            snapshot.netEquityAssets > 0 ? uint256(snapshot.netEquityAssets) : 0,
             "Public equity should inherit floored carry-aware net equity"
         );
     }
@@ -358,11 +358,13 @@ contract PerpsPublicLensTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
+        uint256 withdrawableAssets = engineAccountLens.getWithdrawableAssets(account);
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
-        assertEq(withdrawableUsdc, 0, "Account lens withdrawable should drop to zero after large live carry accrual");
-        assertEq(viewData.withdrawableUsdc, withdrawableUsdc, "Public lens withdrawable should match the account lens");
+        assertEq(withdrawableAssets, 0, "Account lens withdrawable should drop to zero after large live carry accrual");
+        assertEq(
+            viewData.withdrawableAssets, withdrawableAssets, "Public lens withdrawable should match the account lens"
+        );
 
         vm.prank(trader);
         vm.expectRevert();
@@ -376,22 +378,24 @@ contract PerpsPublicLensTest is BasePerpTest {
         _fundTrader(trader, 5000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 1700e6, 1e8);
 
-        uint256 withdrawableBeforeCarry = engineAccountLens.getWithdrawableUsdc(account);
+        uint256 withdrawableBeforeCarry = engineAccountLens.getWithdrawableAssets(account);
         assertGt(withdrawableBeforeCarry, 0, "Setup should start with positive withdrawable headroom");
 
         vm.warp(block.timestamp + 5 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
+        uint256 withdrawableAssets = engineAccountLens.getWithdrawableAssets(account);
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
 
-        assertLt(withdrawableUsdc, withdrawableBeforeCarry, "Live carry accrual should reduce withdrawable headroom");
-        assertEq(viewData.withdrawableUsdc, withdrawableUsdc, "Public lens withdrawable should match the account lens");
+        assertLt(withdrawableAssets, withdrawableBeforeCarry, "Live carry accrual should reduce withdrawable headroom");
+        assertEq(
+            viewData.withdrawableAssets, withdrawableAssets, "Public lens withdrawable should match the account lens"
+        );
 
-        if (withdrawableUsdc > 0) {
+        if (withdrawableAssets > 0) {
             vm.prank(trader);
-            clearinghouse.withdraw(account, withdrawableUsdc);
+            clearinghouse.withdraw(account, withdrawableAssets);
 
             vm.prank(trader);
             vm.expectRevert();
@@ -515,7 +519,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertEq(senior.maintenanceFeeRecipient, address(0), "Senior should never report a maintenance recipient");
         assertEq(
             senior.sharePrice,
-            (senior.totalAssetsUsdc * 1e18) / senior.effectiveTotalShares,
+            (senior.totalAssets * 1e18) / senior.effectiveTotalShares,
             "Senior price should use its effective supply"
         );
 
@@ -530,7 +534,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertEq(junior.maintenanceFeeRecipient, address(0), "Default Junior fee recipient should be unset");
         assertEq(
             junior.sharePrice,
-            (junior.totalAssetsUsdc * 1e18) / junior.effectiveTotalShares,
+            (junior.totalAssets * 1e18) / junior.effectiveTotalShares,
             "Default Junior price should use effective supply"
         );
     }
@@ -558,12 +562,12 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertEq(viewData.maintenanceFeeRecipient, feeRecipient, "Lens must expose the active fee recipient");
         assertEq(
             viewData.sharePrice,
-            (viewData.totalAssetsUsdc * 1e18) / effectiveSupply,
+            (viewData.totalAssets * 1e18) / effectiveSupply,
             "Junior price must use effective rather than raw supply"
         );
         assertLt(
             viewData.sharePrice,
-            (viewData.totalAssetsUsdc * 1e18) / rawSupply,
+            (viewData.totalAssets * 1e18) / rawSupply,
             "Pending dilution should reduce the reported Junior share price"
         );
     }
@@ -722,9 +726,9 @@ contract PerpsPublicLensTest is BasePerpTest {
             vm.warp(cooldownEnd);
         }
 
-        usdc.mint(LENS_LP, depositAssets);
+        settlementToken.mint(LENS_LP, depositAssets);
         vm.startPrank(LENS_LP);
-        usdc.approve(address(juniorVault), depositAssets);
+        settlementToken.approve(address(juniorVault), depositAssets);
         requestId = IAsyncTrancheVault(address(juniorVault)).requestDeposit(depositAssets, LENS_LP, LENS_LP);
         vm.stopPrank();
 

@@ -29,7 +29,7 @@ import {Test} from "forge-std/Test.sol";
 /// @dev Generate env vars with scripts/fetch-pyth-real-update-fixture.sh before running.
 contract PythRealUpdateForkTest is Test {
 
-    address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address internal constant settlementToken = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address internal constant REAL_PYTH = 0x4305FB66699C3B2702D4d05CF36551390A4c69C6;
     bytes32 internal constant EUR_USD_FEED_ID = 0xa995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30b;
     uint256 internal constant CAP_PRICE = 2e8;
@@ -138,14 +138,14 @@ contract PythRealUpdateForkTest is Test {
             initMarginBps: 150,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
 
-        clearinghouse = new MarginClearinghouse(USDC);
-        engine = new CfdEngine(USDC, address(clearinghouse), CAP_PRICE, params, 50);
+        clearinghouse = new MarginClearinghouse(settlementToken);
+        engine = new CfdEngine(settlementToken, address(clearinghouse), CAP_PRICE, params, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
@@ -153,9 +153,11 @@ contract PythRealUpdateForkTest is Test {
         TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
 
-        pool = new HousePool(USDC, address(engine), address(new HousePoolRedemptionMathSidecar()));
-        seniorVault = new TrancheVault(IERC20(USDC), address(pool), true, "Senior LP", "senUSDC", 0, address(0));
-        juniorVault = new TrancheVault(IERC20(USDC), address(pool), false, "Junior LP", "junUSDC", 0, address(0));
+        pool = new HousePool(settlementToken, address(engine), address(new HousePoolRedemptionMathSidecar()));
+        seniorVault =
+            new TrancheVault(IERC20(settlementToken), address(pool), true, "Senior LP", "senAssets", 0, address(0));
+        juniorVault =
+            new TrancheVault(IERC20(settlementToken), address(pool), false, "Junior LP", "junAssets", 0, address(0));
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));
@@ -196,7 +198,7 @@ contract PythRealUpdateForkTest is Test {
                 markStalenessLimit: pool.markStalenessLimit(),
                 seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
                 juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
-                maxSeniorExposureUsdc: type(uint256).max - 1,
+                maxSeniorExposureAssets: type(uint256).max - 1,
                 maxSeniorShareBps: 9999
             })
         );
@@ -204,15 +206,15 @@ contract PythRealUpdateForkTest is Test {
         pool.finalizePoolConfig();
         vm.warp(setupTime);
 
-        deal(USDC, address(this), 2000e6);
-        IERC20(USDC).approve(address(pool), 2000e6);
+        deal(settlementToken, address(this), 2000e6);
+        IERC20(settlementToken).approve(address(pool), 2000e6);
         pool.initializeSeedPosition(false, 1000e6, address(this));
         pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
 
-        deal(USDC, lp, 1_000_000e6);
+        deal(settlementToken, lp, 1_000_000e6);
         vm.startPrank(lp);
-        IERC20(USDC).approve(address(juniorVault), type(uint256).max);
+        IERC20(settlementToken).approve(address(juniorVault), type(uint256).max);
         juniorVault.deposit(1_000_000e6, lp);
         vm.stopPrank();
     }
@@ -239,14 +241,14 @@ contract PythRealUpdateForkTest is Test {
                 ),
                 allowedExecutionModes: 7,
                 expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
-                maxExecutionBountyUsdc: type(uint256).max,
-                maxExecutionNotionalUsdc: type(uint256).max,
-                maxGrossAccountDebitUsdc: type(uint256).max,
-                maxActionChargeUsdc: type(uint256).max,
-                maxExplicitFeesUsdc: type(uint256).max,
+                maxExecutionBountyAssets: type(uint256).max,
+                maxExecutionNotionalAssets: type(uint256).max,
+                maxGrossAccountDebitAssets: type(uint256).max,
+                maxActionChargeAssets: type(uint256).max,
+                maxExplicitFeesAssets: type(uint256).max,
                 maxPostPositionSize: type(uint256).max,
-                minPostSettlementBalanceUsdc: 0,
-                minPostPositionEquityUsdc: 0,
+                minPostSettlementBalanceAssets: 0,
+                minPostPositionEquityAssets: 0,
                 maxPostLeverageBps: type(uint32).max
             })
         });
@@ -256,9 +258,9 @@ contract PythRealUpdateForkTest is Test {
         address trader,
         uint256 amount
     ) internal {
-        deal(USDC, trader, amount);
+        deal(settlementToken, trader, amount);
         vm.startPrank(trader);
-        IERC20(USDC).approve(address(clearinghouse), amount);
+        IERC20(settlementToken).approve(address(clearinghouse), amount);
         clearinghouse.deposit(trader, amount);
         vm.stopPrank();
     }

@@ -5,7 +5,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title HousePoolWaterfallAccountingLib
 /// @notice Pure senior/junior principal accounting for coupon, revenue, loss, and senior withdrawal events.
-/// @dev Principal and coupon values use 6-decimal USDC, rates use basis points, and elapsed time uses seconds.
+/// @dev Principal and coupon values use 6-decimal settlement token, rates use basis points, and elapsed time uses seconds.
 ///      Integer divisions round down. The high-water mark tracks unimpaired senior entitlement: losses do not reduce
 ///      it, while senior withdrawals scale it and senior gains above it increase it. Unless a function explicitly
 ///      saturates a subtraction, arithmetic is checked and reverts on overflow or underflow.
@@ -28,20 +28,20 @@ library HousePoolWaterfallAccountingLib {
 
     /// @notice Difference between distributable assets and claimed principal.
     /// @param isRevenue True when distributable assets exceed claimed principal; false for loss or exact equality.
-    /// @param deltaUsdc Absolute difference; zero when the two values are equal.
+    /// @param deltaAssets Absolute difference; zero when the two values are equal.
     struct ReconcilePlan {
         bool isRevenue;
-        uint256 deltaUsdc;
+        uint256 deltaAssets;
     }
 
     /// @notice Calculates coupon due by applying the nominal annual rate linearly over one accrual interval.
     /// @dev Returns zero when elapsed time or principal is zero. The result is
     ///      `floor(seniorPrincipal * seniorRateBps * elapsed / (10_000 * 365 days))`.
     ///      Paid coupon becomes part of senior principal, so subsequent intervals accrue on the capitalized amount.
-    /// @param seniorPrincipal Coupon-bearing senior principal in 6-decimal USDC.
+    /// @param seniorPrincipal Coupon-bearing senior principal in 6-decimal settlement token.
     /// @param seniorRateBps Nominal annual coupon rate in basis points.
     /// @param elapsed Accrual interval in seconds.
-    /// @return Coupon due in 6-decimal USDC, rounded down.
+    /// @return Coupon due in 6-decimal settlement token, rounded down.
     function calculateSeniorCoupon(
         uint256 seniorPrincipal,
         uint256 seniorRateBps,
@@ -91,58 +91,58 @@ library HousePoolWaterfallAccountingLib {
     }
 
     /// @notice Compares distributable assets with total senior and junior principal.
-    /// @param seniorPrincipal Current senior claim in 6-decimal USDC.
-    /// @param juniorPrincipal Current junior claim in 6-decimal USDC.
-    /// @param distributableUsdc Assets available to back claimant principal.
+    /// @param seniorPrincipal Current senior claim in 6-decimal settlement token.
+    /// @param juniorPrincipal Current junior claim in 6-decimal settlement token.
+    /// @param distributableAssets Assets available to back claimant principal.
     /// @return plan Revenue/loss direction and absolute delta; exact equality returns zero and `isRevenue == false`.
     function planReconcile(
         uint256 seniorPrincipal,
         uint256 juniorPrincipal,
-        uint256 distributableUsdc
+        uint256 distributableAssets
     ) internal pure returns (ReconcilePlan memory plan) {
         uint256 claimedEquity = seniorPrincipal + juniorPrincipal;
-        if (distributableUsdc > claimedEquity) {
+        if (distributableAssets > claimedEquity) {
             plan.isRevenue = true;
-            plan.deltaUsdc = distributableUsdc - claimedEquity;
-        } else if (distributableUsdc < claimedEquity) {
-            plan.deltaUsdc = claimedEquity - distributableUsdc;
+            plan.deltaAssets = distributableAssets - claimedEquity;
+        } else if (distributableAssets < claimedEquity) {
+            plan.deltaAssets = claimedEquity - distributableAssets;
         }
     }
 
     /// @notice Removes senior principal and the same economic fraction of its high-water-mark entitlement.
-    /// @dev Callers must supply `fundedAssetsUsdc <= state.seniorPrincipal`. The removed HWM rounds down,
+    /// @dev Callers must supply `fundedAssets <= state.seniorPrincipal`. The removed HWM rounds down,
     ///      preserving remaining protection conservatively. Zero funding preserves even a wiped-out Senior's HWM.
     ///      Retained fees stay protected, and junior is unchanged.
     /// @param state Waterfall state before withdrawal.
-    /// @param fundedAssetsUsdc Net senior principal funded in 6-decimal USDC.
+    /// @param fundedAssets Net senior principal funded in 6-decimal settlement token.
     /// @return nextState State with reduced senior principal and HWM entitlement.
     function scaleSeniorOnWithdraw(
         WaterfallState memory state,
-        uint256 fundedAssetsUsdc
+        uint256 fundedAssets
     ) internal pure returns (WaterfallState memory nextState) {
         nextState = state;
-        if (fundedAssetsUsdc == 0) {
+        if (fundedAssets == 0) {
             return nextState;
         }
         nextState.seniorHighWaterMark -= Math.mulDiv(
-            state.seniorHighWaterMark, fundedAssetsUsdc, state.seniorPrincipal, Math.Rounding.Floor
+            state.seniorHighWaterMark, fundedAssets, state.seniorPrincipal, Math.Rounding.Floor
         );
-        nextState.seniorPrincipal -= fundedAssetsUsdc;
+        nextState.seniorPrincipal -= fundedAssets;
     }
 
     /// @notice Distributes revenue by restoring impaired senior principal before crediting junior principal.
     /// @dev Revenue first fills `seniorHighWaterMark - seniorPrincipal`. Remaining revenue accrues to junior principal.
     ///      Independently, a senior principal already above its high-water mark raises the mark to current principal,
-    ///      including when `revenueUsdc` is zero.
+    ///      including when `revenueAssets` is zero.
     /// @param state Waterfall state before revenue.
-    /// @param revenueUsdc Revenue to distribute in 6-decimal USDC.
+    /// @param revenueAssets Revenue to distribute in 6-decimal settlement token.
     /// @return nextState State after senior restoration and junior allocation.
     function distributeRevenue(
         WaterfallState memory state,
-        uint256 revenueUsdc
+        uint256 revenueAssets
     ) internal pure returns (WaterfallState memory nextState) {
         nextState = state;
-        uint256 remaining = revenueUsdc;
+        uint256 remaining = revenueAssets;
 
         if (remaining > 0 && nextState.seniorPrincipal < nextState.seniorHighWaterMark) {
             uint256 deficit = nextState.seniorHighWaterMark - nextState.seniorPrincipal;
@@ -162,19 +162,19 @@ library HousePoolWaterfallAccountingLib {
     /// @dev Principal subtraction saturates at zero if loss exceeds all claimed equity. The senior high-water mark is
     ///      deliberately unchanged so future revenue continues to restore senior impairment.
     /// @param state Waterfall state before loss.
-    /// @param lossUsdc Loss to absorb in 6-decimal USDC.
+    /// @param lossAssets Loss to absorb in 6-decimal settlement token.
     /// @return nextState State after the junior-first loss waterfall.
     function absorbLoss(
         WaterfallState memory state,
-        uint256 lossUsdc
+        uint256 lossAssets
     ) internal pure returns (WaterfallState memory nextState) {
         nextState = state;
-        if (lossUsdc <= nextState.juniorPrincipal) {
-            nextState.juniorPrincipal -= lossUsdc;
+        if (lossAssets <= nextState.juniorPrincipal) {
+            nextState.juniorPrincipal -= lossAssets;
             return nextState;
         }
 
-        uint256 seniorLoss = lossUsdc - nextState.juniorPrincipal;
+        uint256 seniorLoss = lossAssets - nextState.juniorPrincipal;
         nextState.juniorPrincipal = 0;
         if (nextState.seniorPrincipal > seniorLoss) {
             nextState.seniorPrincipal -= seniorLoss;

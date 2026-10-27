@@ -121,9 +121,9 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
     uint8 internal constant BINDING_BOOK = 9;
     uint8 internal constant BINDING_SENIOR_VAULT = 10;
     uint8 internal constant BINDING_JUNIOR_VAULT = 11;
-    uint8 internal constant BINDING_USDC = 12;
-    uint8 internal constant BINDING_POOL_USDC = 13;
-    uint8 internal constant BINDING_CLEARINGHOUSE_USDC = 14;
+    uint8 internal constant BINDING_SETTLEMENT_TOKEN = 12;
+    uint8 internal constant BINDING_POOL_SETTLEMENT_TOKEN = 13;
+    uint8 internal constant BINDING_CLEARINGHOUSE_SETTLEMENT_TOKEN = 14;
     uint8 internal constant BINDING_CLEARINGHOUSE_ENGINE = 15;
     uint8 internal constant BINDING_BOOK_ENGINE = 16;
     uint8 internal constant BINDING_SENIOR_ASSET = 17;
@@ -139,7 +139,7 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
     TerminalNavBookV2 public immutable TERMINAL_NAV_BOOK;
     TrancheVault public immutable SENIOR_VAULT;
     TrancheVault public immutable JUNIOR_VAULT;
-    IERC20 public immutable USDC;
+    IERC20 public immutable settlementToken;
     SettlementMonitorLensSidecar public immutable SIDECAR;
 
     error SettlementMonitorLens__InvalidDependency(uint8 dependency, address observed);
@@ -197,10 +197,10 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         SENIOR_VAULT = TrancheVault(seniorVault_);
         JUNIOR_VAULT = TrancheVault(juniorVault_);
 
-        address usdc_ = address(ENGINE.USDC());
-        _requireCode(BINDING_USDC, usdc_);
-        USDC = IERC20(usdc_);
-        _validateStaticBindings(engine_, pool_, clearinghouse_, book_, seniorVault_, juniorVault_, usdc_);
+        address settlementToken_ = address(ENGINE.settlementToken());
+        _requireCode(BINDING_SETTLEMENT_TOKEN, settlementToken_);
+        settlementToken = IERC20(settlementToken_);
+        _validateStaticBindings(engine_, pool_, clearinghouse_, book_, seniorVault_, juniorVault_, settlementToken_);
         SIDECAR = new SettlementMonitorLensSidecar(router_);
     }
 
@@ -1102,8 +1102,8 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
             }
         } else {
             validity.liquidity = true;
-            status.freeUsdc = liquidity[1];
-            status.cachedPreviewTerminalDeficitUsdc = liquidity[8];
+            status.freeAssets = liquidity[1];
+            status.cachedPreviewTerminalDeficitAssets = liquidity[8];
             status.markFresh = liquidity[9] == 1;
             status.oracleFrozen = liquidity[10] == 1;
             status.engineDegraded = status.engineDegraded || liquidity[11] == 1;
@@ -1235,7 +1235,7 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         if (status.engineDegraded) {
             common |= _deferralBit(SettlementMonitorViewTypes.DepositDeferral.EngineDegraded);
         }
-        if (status.cachedPreviewTerminalDeficitUsdc != 0) {
+        if (status.cachedPreviewTerminalDeficitAssets != 0) {
             common |= _deferralBit(SettlementMonitorViewTypes.DepositDeferral.TerminalDeficit);
         }
         if (validity.terminal && validity.liquidity && status.hasOpenPositions && !status.markFresh) {
@@ -1345,10 +1345,10 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         if (status.oracleFrozen) {
             status.warningMask |= _warningBit(SettlementMonitorViewTypes.Warning.OracleFrozen);
         }
-        if (status.cachedPreviewTerminalDeficitUsdc != 0) {
+        if (status.cachedPreviewTerminalDeficitAssets != 0) {
             status.warningMask |= _warningBit(SettlementMonitorViewTypes.Warning.TerminalDeficit);
         }
-        if (validity.liquidity && status.freeUsdc == 0) {
+        if (validity.liquidity && status.freeAssets == 0) {
             status.warningMask |= _warningBit(SettlementMonitorViewTypes.Warning.NoFreeCash);
         }
         if (status.senior.maturedRedeemHeadShares != 0) {
@@ -1379,14 +1379,16 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         address book_,
         address seniorVault_,
         address juniorVault_,
-        address usdc_
+        address settlementToken_
     ) private view {
-        if (address(HOUSE_POOL.USDC()) != usdc_) {
-            revert SettlementMonitorLens__BindingMismatch(BINDING_POOL_USDC, usdc_, address(HOUSE_POOL.USDC()));
-        }
-        if (address(CLEARINGHOUSE.settlementAsset()) != usdc_) {
+        if (address(HOUSE_POOL.settlementToken()) != settlementToken_) {
             revert SettlementMonitorLens__BindingMismatch(
-                BINDING_CLEARINGHOUSE_USDC, usdc_, address(CLEARINGHOUSE.settlementAsset())
+                BINDING_POOL_SETTLEMENT_TOKEN, settlementToken_, address(HOUSE_POOL.settlementToken())
+            );
+        }
+        if (address(CLEARINGHOUSE.settlementAsset()) != settlementToken_) {
+            revert SettlementMonitorLens__BindingMismatch(
+                BINDING_CLEARINGHOUSE_SETTLEMENT_TOKEN, settlementToken_, address(CLEARINGHOUSE.settlementAsset())
             );
         }
         if (CLEARINGHOUSE.engine() != engine_) {
@@ -1401,11 +1403,11 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         if (address(JUNIOR_VAULT.POOL()) != pool_ || JUNIOR_VAULT.IS_SENIOR()) {
             revert SettlementMonitorLens__BindingMismatch(BINDING_JUNIOR_VAULT, pool_, juniorVault_);
         }
-        if (SENIOR_VAULT.asset() != usdc_) {
-            revert SettlementMonitorLens__BindingMismatch(BINDING_SENIOR_ASSET, usdc_, SENIOR_VAULT.asset());
+        if (SENIOR_VAULT.asset() != settlementToken_) {
+            revert SettlementMonitorLens__BindingMismatch(BINDING_SENIOR_ASSET, settlementToken_, SENIOR_VAULT.asset());
         }
-        if (JUNIOR_VAULT.asset() != usdc_) {
-            revert SettlementMonitorLens__BindingMismatch(BINDING_JUNIOR_ASSET, usdc_, JUNIOR_VAULT.asset());
+        if (JUNIOR_VAULT.asset() != settlementToken_) {
+            revert SettlementMonitorLens__BindingMismatch(BINDING_JUNIOR_ASSET, settlementToken_, JUNIOR_VAULT.asset());
         }
         if (address(ENGINE.clearinghouse()) != clearinghouse_ || address(ENGINE.terminalNavBook()) != book_) {
             revert SettlementMonitorLens__BindingMismatch(BINDING_ENGINE_DEPENDENCIES, engine_, address(0));

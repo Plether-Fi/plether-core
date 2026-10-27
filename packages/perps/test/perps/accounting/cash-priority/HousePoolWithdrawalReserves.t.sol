@@ -76,11 +76,13 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
         vm.prank(bob);
         juniorVault.withdraw(quotedAssets, bob, bob);
 
-        assertEq(usdc.balanceOf(bob), quotedAssets, "maxWithdraw quote should remain executable after reconcile");
+        assertEq(
+            settlementToken.balanceOf(bob), quotedAssets, "maxWithdraw quote should remain executable after reconcile"
+        );
         assertLt(juniorVault.balanceOf(bob), sharesBefore, "withdraw should burn shares using the quoted max");
     }
 
-    function test_GetFreeUSDC_DoesNotReserveTreasuryFees() public {
+    function test_GetFreeAssets_DoesNotReserveTreasuryFees() public {
         _fundJunior(bob, 500_000 * 1e6);
 
         address trader = address(0x444);
@@ -89,20 +91,20 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
         _open(trader, CfdTypes.Side.LONG, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
         // 100k LONG at $1.00: protocol accrues the full $40 execution fee.
-        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 fees = clearinghouse.balanceAssets(engine.protocolTreasury());
         assertEq(fees, 40_000_000, "Protocol fees should remain separate from reserved execution bounty reservation");
 
-        uint256 freeUSDC = pool.getFreeUSDC();
+        uint256 freeAssets = pool.getFreeAssets();
         uint256 vaultBal = pool.totalAssets();
         uint256 maxLiability = _maxLiability();
         uint256 settlementBuffer =
-            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
+            SolvencyAccountingLib.settlementBufferTargetAssets(maxLiability, engine.settlementBufferBps());
         uint256 expectedReserved = maxLiability + settlementBuffer;
 
         assertEq(
-            freeUSDC,
+            freeAssets,
             vaultBal - expectedReserved,
-            "Free USDC should reserve directional liability and its settlement buffer, but not treasury fees"
+            "Free settlementToken should reserve directional liability and its settlement buffer, but not treasury fees"
         );
     }
 
@@ -128,7 +130,7 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
     }
 
     function test_MinWithdrawal_AllowsFullDustExit() public {
-        uint256 minimum = pool.minTrancheDepositUsdc();
+        uint256 minimum = pool.minTrancheDepositAssets();
         _fundJunior(alice, minimum);
         _fundJunior(bob, minimum);
 
@@ -148,7 +150,7 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
         vm.prank(alice);
         uint256 aliceSharesBurned = juniorVault.withdraw(aliceWithdrawable, alice, alice);
         assertEq(juniorVault.balanceOf(alice), 0, "Full dust withdraw should clear the user position");
-        assertEq(usdc.balanceOf(alice), aliceWithdrawable, "Alice should receive the full dust value");
+        assertEq(settlementToken.balanceOf(alice), aliceWithdrawable, "Alice should receive the full dust value");
         assertGt(aliceSharesBurned, 0, "Withdraw should burn shares");
 
         uint256 bobShares = juniorVault.maxRedeem(bob);
@@ -178,7 +180,7 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
         assertEq(pool.seniorHighWaterMark(), expectedSenior, "HWM scales proportionally on withdraw");
     }
 
-    function test_GetFreeUSDC_OnlySettlementBufferSupplementalReserveInCarryModel() public {
+    function test_GetFreeAssets_OnlySettlementBufferSupplementalReserveInCarryModel() public {
         _setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
@@ -187,7 +189,7 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
-                minBountyUsdc: 5 * 1e6,
+                minBountyAssets: 5 * 1e6,
                 bountyBps: 10,
                 keeperShareBps: 5000,
                 protocolShareBps: 0
@@ -211,15 +213,15 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
 
         uint256 maxLiability = _maxLiability();
         uint256 supplementalReserve =
-            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit()).supplementalReservedUsdc;
+            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit()).supplementalReservedAssets;
         assertEq(
             supplementalReserve,
-            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps()),
+            SolvencyAccountingLib.settlementBufferTargetAssets(maxLiability, engine.settlementBufferBps()),
             "Carry mode should add no supplemental reserve beyond the settlement buffer"
         );
 
-        uint256 freeUSDC = pool.getFreeUSDC();
-        assertGt(freeUSDC, 0, "getFreeUSDC should remain positive in the carry model");
+        uint256 freeAssets = pool.getFreeAssets();
+        assertGt(freeAssets, 0, "getFreeAssets should remain positive in the carry model");
     }
 
     function test_Reconcile_KeepsSettlementBufferOutOfNav() public {
@@ -231,7 +233,7 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
-                minBountyUsdc: 5 * 1e6,
+                minBountyAssets: 5 * 1e6,
                 bountyBps: 10,
                 keeperShareBps: 5000,
                 protocolShareBps: 0
@@ -254,10 +256,10 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
 
         uint256 maxLiability = _maxLiability();
         uint256 supplementalReserve =
-            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit()).supplementalReservedUsdc;
+            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit()).supplementalReservedAssets;
         assertEq(
             supplementalReserve,
-            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps()),
+            SolvencyAccountingLib.settlementBufferTargetAssets(maxLiability, engine.settlementBufferBps()),
             "Carry mode should add no supplemental reserve beyond the settlement buffer"
         );
 
@@ -265,9 +267,9 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
         pool.reconcile();
 
         // Pool cash must cover LP claims + fees + conservative unrealized liabilities
-        uint256 poolBalance = usdc.balanceOf(address(pool));
+        uint256 poolBalance = settlementToken.balanceOf(address(pool));
         uint256 juniorAfter = pool.juniorPrincipal();
-        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 fees = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint256 reserved = fees;
         assertGe(poolBalance, juniorAfter + reserved, "Pool cash must cover LP claims + reserved obligations");
     }

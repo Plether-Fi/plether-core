@@ -78,14 +78,14 @@ contract OrderRouterQueueRecoveryTest is OrderRouterPythTestBase {
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         assertEq(router.nextExecuteId(), 1, "Unavailable history should keep queue head pending");
         assertEq(reservation.pendingOrderCount, 1, "Unavailable history should preserve reserved order state");
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody the keeper reserve");
+        assertEq(settlementToken.balanceOf(address(router)), 0, "Router should not custody the keeper reserve");
         assertEq(
-            reservation.executionBountyUsdc,
+            reservation.executionBountyAssets,
             200_000,
             "Reservation view should continue tracking the pending keeper reserve"
         );
         assertEq(
-            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementAssets,
             200_000,
             "Clearinghouse should continue reserving the pending keeper reserve"
         );

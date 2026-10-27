@@ -7,10 +7,10 @@ import { positionProtectionBookAbi } from "../src/protectionAbi.js";
 const account = "0x1111111111111111111111111111111111111111";
 const book = "0x2222222222222222222222222222222222222222";
 const closeLimits = {
-  maxExecutionNotionalUsdc: 20_000_000n,
-  maxGrossAccountDebitUsdc: 2_000_000n,
-  maxActionChargeUsdc: 100_000n,
-  maxExplicitFeesUsdc: 300_000n,
+  maxExecutionNotionalAssets: 20_000_000n,
+  maxGrossAccountDebitAssets: 2_000_000n,
+  maxActionChargeAssets: 100_000n,
+  maxExplicitFeesAssets: 300_000n,
 };
 const params = { takeProfitTriggerPrice: 70_000_000n, stopLossTriggerPrice: 90_000_000n, closeLimits };
 
@@ -42,7 +42,7 @@ describe("v1.2.1 protection actions", () => {
     expect(() => buildProtectedOpenAction({ account, book, params, request: { isClose: true } as never })).toThrow("bounded");
   });
   it("requires four explicit uint256 close ceilings for protection creation and amendment", () => {
-    expect(() => buildCreateProtectionAction({ account, book, params: { ...params, closeLimits: undefined as never } })).toThrow("closeLimits.maxExecutionNotionalUsdc");
+    expect(() => buildCreateProtectionAction({ account, book, params: { ...params, closeLimits: undefined as never } })).toThrow("closeLimits.maxExecutionNotionalAssets");
     for (const field of Object.keys(closeLimits) as (keyof typeof closeLimits)[]) {
       for (const invalid of [undefined, -1n, 1n << 256n]) {
         const changed = { ...closeLimits, [field]: invalid } as typeof closeLimits;
@@ -59,9 +59,9 @@ describe("atomic protection cancellation and close", () => {
     marginDelta: 0n, targetPrice: 80_000_000n, isClose: true,
     bounds: {
       submitBy: 1_900_000_000n, executionWindowSeconds: 60, allowedExecutionModes: 7,
-      expectedConfigHash: `0x${"cd".repeat(32)}`, maxExecutionBountyUsdc: 0n,
-      ...closeLimits, maxPostPositionSize: 0n, minPostSettlementBalanceUsdc: 0n,
-      minPostPositionEquityUsdc: 500_000n, maxPostLeverageBps: 50_000,
+      expectedConfigHash: `0x${"cd".repeat(32)}`, maxExecutionBountyAssets: 0n,
+      ...closeLimits, maxPostPositionSize: 0n, minPostSettlementBalanceAssets: 0n,
+      minPostPositionEquityAssets: 500_000n, maxPostLeverageBps: 50_000,
     },
   };
   const build = (changed: OrderRequestV3 = request, protectionId = 42n) =>
@@ -86,8 +86,8 @@ describe("atomic protection cancellation and close", () => {
   });
 
   it("retains explicit unlimited ceilings and the maximum uint64 protection ID", () => {
-    const changed = { ...request, bounds: { ...request.bounds, maxExecutionNotionalUsdc: maxUint256,
-      maxGrossAccountDebitUsdc: maxUint256, maxActionChargeUsdc: 0n, maxExplicitFeesUsdc: maxUint256 } };
+    const changed = { ...request, bounds: { ...request.bounds, maxExecutionNotionalAssets: maxUint256,
+      maxGrossAccountDebitAssets: maxUint256, maxActionChargeAssets: 0n, maxExplicitFeesAssets: maxUint256 } };
     const protectionId = (1n << 64n) - 1n;
     expect(decodeFunctionData({ abi: positionProtectionBookAbi, data: build(changed, protectionId).calls[0].data }).args).toEqual([protectionId, changed]);
   });
@@ -123,13 +123,13 @@ describe("atomic protection cancellation and close", () => {
   });
 
   it("rejects a positive settlement floor without clearing it", () => {
-    const changed = { ...request, bounds: { ...request.bounds, minPostSettlementBalanceUsdc: 1n } };
+    const changed = { ...request, bounds: { ...request.bounds, minPostSettlementBalanceAssets: 1n } };
     expect(() => build(changed)).toThrow("zero settlement balance floor");
-    expect(changed.bounds.minPostSettlementBalanceUsdc).toBe(1n);
+    expect(changed.bounds.minPostSettlementBalanceAssets).toBe(1n);
   });
 
   it("requires explicit uint256 financial bounds without inserting defaults", () => {
-    for (const field of ["maxExecutionBountyUsdc", ...Object.keys(closeLimits), "maxPostPositionSize", "minPostPositionEquityUsdc"]) {
+    for (const field of ["maxExecutionBountyAssets", ...Object.keys(closeLimits), "maxPostPositionSize", "minPostPositionEquityAssets"]) {
       for (const invalid of [undefined, -1n, 1n << 256n]) {
         expect(() => build({ ...request, bounds: { ...request.bounds, [field]: invalid } } as OrderRequestV3)).toThrow(`bounds.${field}`);
       }

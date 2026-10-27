@@ -30,7 +30,7 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -206,13 +206,13 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         assertEq(remainingSize, openSize, "Rejected reduction leaves size unchanged");
         assertEq(remainingMargin, openMargin, "Rejected reduction preserves pledge");
         assertEq(
-            clearinghouse.pnlPledgeUsdc(account),
+            clearinghouse.pnlPledgeAssets(account),
             remainingMargin,
             "The surviving position's canonical PnL pledge must stay locked"
         );
 
-        uint256 balAfter = clearinghouse.balanceUsdc(account);
-        uint256 lockedAfter = clearinghouse.lockedMarginUsdc(account);
+        uint256 balAfter = clearinghouse.balanceAssets(account);
+        uint256 lockedAfter = clearinghouse.lockedMarginAssets(account);
         assertGe(balAfter, lockedAfter, "Physical balance must cover locked margin (zombie prevention)");
 
         router.executeLiquidation(account, priceData);
@@ -227,11 +227,11 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         uint256 utilizationBps;
         uint256 oldRateIndex;
         uint256 finalIndex;
-        uint256 expectedCarryUsdc;
+        uint256 expectedCarryAssets;
         uint256 poolBefore;
         uint256 settlementBefore;
-        uint256 initialPledgeUsdc;
-        uint256 initialBorrowBaseUsdc;
+        uint256 initialPledgeAssets;
+        uint256 initialBorrowBaseAssets;
     }
 
     function test_FinalizeRiskParams_NoRetroactiveCarryEffect() public {
@@ -242,23 +242,23 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         CarryRateChangeModel memory model;
         model.openedAt = block.timestamp;
         model.finalizedAt = model.openedAt + 3 days + 1;
-        model.poolBefore = usdc.balanceOf(address(pool));
-        model.settlementBefore = clearinghouse.balanceUsdc(carol);
+        model.poolBefore = settlementToken.balanceOf(address(pool));
+        model.settlementBefore = clearinghouse.balanceAssets(carol);
         // The supplied $10,000 first pays a 4-bps execution fee and funds a 10-bps liquidation reserve.
         // The remaining $9,860 pledge funds part of the $100,000 maximum-profit envelope.
         assertEq(engine.executionFeeBps(), 4);
-        model.initialPledgeUsdc = 10_000e6 - 100_000e6 * 4 / 10_000 - 100_000e6 * 10 / 10_000;
-        model.initialBorrowBaseUsdc = 100_000e6 - model.initialPledgeUsdc;
-        assertEq(clearinghouse.liquidationReserveUsdc(carol), 100_000e6 * 10 / 10_000);
-        assertEq(clearinghouse.pnlPledgeUsdc(carol), model.initialPledgeUsdc);
-        assertEq(engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.LONG)), model.initialBorrowBaseUsdc);
+        model.initialPledgeAssets = 10_000e6 - 100_000e6 * 4 / 10_000 - 100_000e6 * 10 / 10_000;
+        model.initialBorrowBaseAssets = 100_000e6 - model.initialPledgeAssets;
+        assertEq(clearinghouse.liquidationReserveAssets(carol), 100_000e6 * 10 / 10_000);
+        assertEq(clearinghouse.pnlPledgeAssets(carol), model.initialPledgeAssets);
+        assertEq(engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.LONG)), model.initialBorrowBaseAssets);
         assertEq(pool.totalAssets(), model.poolBefore);
         assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), 0);
         (uint256 borrowBase, uint256 accountIndex, uint64 accountTime) = engine.positionCarryState(carol);
-        assertEq(borrowBase, model.initialBorrowBaseUsdc);
+        assertEq(borrowBase, model.initialBorrowBaseAssets);
         assertEq(accountIndex, 0);
         assertEq(accountTime, model.openedAt);
-        model.utilizationBps = model.initialBorrowBaseUsdc * 10_000 / model.poolBefore;
+        model.utilizationBps = model.initialBorrowBaseAssets * 10_000 / model.poolBefore;
         assertGt(model.utilizationBps, 0);
         assertLt(model.utilizationBps, 10_000);
 
@@ -266,7 +266,7 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         assertEq(config.riskParams.baseCarryBps, 500);
         assertEq(config.riskParams.bountyBps, 10);
-        assertEq(config.riskParams.minBountyUsdc, 1e6);
+        assertEq(config.riskParams.minBountyAssets, 1e6);
         config.riskParams.baseCarryBps = 1500;
         engineAdmin.proposeRiskConfig(config);
 
@@ -281,8 +281,8 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         (, accountIndex, accountTime) = engine.positionCarryState(carol);
         assertEq(accountIndex, 0, "changing the rate checkpoints global indexes without collecting the position");
         assertEq(accountTime, model.openedAt);
-        assertEq(clearinghouse.balanceUsdc(carol), model.settlementBefore);
-        assertEq(usdc.balanceOf(address(pool)), model.poolBefore);
+        assertEq(clearinghouse.balanceAssets(carol), model.settlementBefore);
+        assertEq(settlementToken.balanceOf(address(pool)), model.poolBefore);
 
         vm.warp(model.finalizedAt + 1 days);
         vm.prank(address(router));
@@ -291,18 +291,18 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
             model.oldRateIndex + 1500 * model.utilizationBps * 1e18 * 1 days / (365 days * 10_000 * 10_000);
         assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), model.finalIndex);
         assertGt(model.finalIndex, model.oldRateIndex);
-        model.expectedCarryUsdc = model.initialBorrowBaseUsdc * model.finalIndex / 1e18;
-        assertGt(model.expectedCarryUsdc, 0);
+        model.expectedCarryAssets = model.initialBorrowBaseAssets * model.finalIndex / 1e18;
+        assertGt(model.expectedCarryAssets, 0);
 
         vm.prank(carol);
         engine.addMargin(carol, 1e6);
-        assertEq(clearinghouse.balanceUsdc(carol), model.settlementBefore - model.expectedCarryUsdc);
-        assertEq(usdc.balanceOf(address(pool)), model.poolBefore + model.expectedCarryUsdc);
-        assertEq(engine.unsettledCarryUsdc(carol), 0);
+        assertEq(clearinghouse.balanceAssets(carol), model.settlementBefore - model.expectedCarryAssets);
+        assertEq(settlementToken.balanceOf(address(pool)), model.poolBefore + model.expectedCarryAssets);
+        assertEq(engine.unsettledCarryAssets(carol), 0);
         (, uint256 marginAfter,,,,,) = engine.positions(carol);
-        assertEq(marginAfter, model.initialPledgeUsdc - model.expectedCarryUsdc + 1e6);
+        assertEq(marginAfter, model.initialPledgeAssets - model.expectedCarryAssets + 1e6);
         (borrowBase, accountIndex, accountTime) = engine.positionCarryState(carol);
-        assertEq(borrowBase, model.initialBorrowBaseUsdc + model.expectedCarryUsdc - 1e6);
+        assertEq(borrowBase, model.initialBorrowBaseAssets + model.expectedCarryAssets - 1e6);
         assertEq(accountIndex, model.finalIndex);
         assertEq(accountTime, block.timestamp);
     }
@@ -322,15 +322,15 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(account);
         assertGt(size, 0, "Position should be open");
 
-        uint256 locked = clearinghouse.lockedMarginUsdc(account);
-        uint256 usdcBal = clearinghouse.balanceUsdc(account);
-        uint256 free = usdcBal - locked;
-        assertGt(free, 0, "Alice should have free USDC to withdraw");
+        uint256 locked = clearinghouse.lockedMarginAssets(account);
+        uint256 settlementTokenBal = clearinghouse.balanceAssets(account);
+        uint256 free = settlementTokenBal - locked;
+        assertGt(free, 0, "Alice should have free settlementToken to withdraw");
 
-        uint256 balBefore = usdc.balanceOf(alice);
+        uint256 balBefore = settlementToken.balanceOf(alice);
         vm.prank(alice);
         clearinghouse.withdraw(account, free);
-        assertEq(usdc.balanceOf(alice), balBefore + free, "Free equity withdrawn");
+        assertEq(settlementToken.balanceOf(alice), balBefore + free, "Free equity withdrawn");
     }
 
     function test_Withdraw_BlocksAfterFreeEquityIsFullyConsumed() public {
@@ -347,11 +347,11 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(account);
         assertGt(size, 0, "Setup must leave an open position");
 
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
-        assertGt(withdrawableUsdc, 0, "Setup must leave some withdrawable free equity");
+        uint256 withdrawableAssets = engineAccountLens.getWithdrawableAssets(account);
+        assertGt(withdrawableAssets, 0, "Setup must leave some withdrawable free equity");
 
         vm.prank(alice);
-        clearinghouse.withdraw(account, withdrawableUsdc);
+        clearinghouse.withdraw(account, withdrawableAssets);
 
         vm.expectRevert();
         vm.prank(alice);

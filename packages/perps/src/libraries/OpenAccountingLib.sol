@@ -7,67 +7,67 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 /// @title OpenAccountingLib
 /// @notice Calculates entry-price, VPI, fee, maximum-profit, and margin requirements for an open or increase.
-/// @dev USDC values use 6 decimals, prices use 8 decimals, sizes use 18 decimals, basis points use a 10,000
+/// @dev settlement token values use 6 decimals, prices use 8 decimals, sizes use 18 decimals, basis points use a 10,000
 ///      denominator, and VPI parameters use 18-decimal WAD precision. Integer divisions round down.
 library OpenAccountingLib {
 
     /// @notice Inputs needed to value an open or same-side position increase.
     /// @param currentSize Existing position size, or zero for a new position.
-    /// @param currentEntryCostUsdcAtoms Exact existing entry cost in 6-decimal USDC atoms.
+    /// @param currentEntryCostAssetAtoms Exact existing entry cost in 6-decimal settlement token atoms.
     /// @param side Side of the new or increased position.
     /// @param sizeDelta Size added by the order.
     /// @param price Execution and margin-reference price.
     /// @param capPrice Protocol price cap used to calculate the added maximum-profit envelope.
-    /// @param preSkewUsdc Absolute directional skew before the trade.
-    /// @param postSkewUsdc Absolute directional skew after the trade.
-    /// @param poolDepthUsdc Pool depth used by the VPI curve.
+    /// @param preSkewAssets Absolute directional skew before the trade.
+    /// @param postSkewAssets Absolute directional skew after the trade.
+    /// @param poolDepthAssets Pool depth used by the VPI curve.
     /// @param executionFeeBps Execution fee rate on added notional, in basis points.
     /// @param riskParams VPI factor, initial/maintenance margin rates, and minimum bounty.
     struct OpenInputs {
         uint256 currentSize;
-        uint256 currentEntryCostUsdcAtoms;
+        uint256 currentEntryCostAssetAtoms;
         CfdTypes.Side side;
         uint256 sizeDelta;
         uint256 price;
         uint256 capPrice;
-        uint256 preSkewUsdc;
-        uint256 postSkewUsdc;
-        uint256 poolDepthUsdc;
+        uint256 preSkewAssets;
+        uint256 postSkewAssets;
+        uint256 poolDepthAssets;
         uint256 executionFeeBps;
         CfdTypes.RiskParams riskParams;
     }
 
     /// @notice Calculated economic and risk state for an open or increase.
-    /// @param addedMaxProfitUsdc Maximum-profit liability added by `sizeDelta` at the execution price.
+    /// @param addedMaxProfitAssets Maximum-profit liability added by `sizeDelta` at the execution price.
     /// @param oldEntryNotional Existing exact entry cost scaled by `1e20`, with 26-decimal precision.
     /// @param newEntryPrice Display-only average entry price, rounded down to 8 decimals.
-    /// @param newEntryCostUsdcAtoms Exact resulting entry cost in 6-decimal USDC atoms.
+    /// @param newEntryCostAssetAtoms Exact resulting entry cost in 6-decimal settlement token atoms.
     /// @param newSize Resulting position size.
     /// @param newEntryNotional Exact resulting entry cost scaled by `1e20`, preserving basis dust at 26-decimal precision.
-    /// @param postSkewUsdc Caller-supplied post-trade skew copied into the result.
-    /// @param vpiUsdc Signed VPI; positive charges the trader and negative rebates the trader.
-    /// @param notionalUsdc Added trade notional at `price`.
-    /// @param executionFeeUsdc Execution fee on added notional.
-    /// @param tradeCostUsdc Signed `vpiUsdc + executionFeeUsdc`.
-    /// @param maintenanceMarginUsdc Maintenance requirement on the entire resulting position at `price`.
-    /// @param initialMarginRequirementUsdc Initial requirement on the entire resulting position, floored by
-    ///        `riskParams.minBountyUsdc`.
-    /// @param liquidationReserveTargetUsdc Notional-based liquidation charge, floored by `riskParams.minBountyUsdc`.
+    /// @param postSkewAssets Caller-supplied post-trade skew copied into the result.
+    /// @param vpiAssets Signed VPI; positive charges the trader and negative rebates the trader.
+    /// @param notionalAssets Added trade notional at `price`.
+    /// @param executionFeeAssets Execution fee on added notional.
+    /// @param tradeCostAssets Signed `vpiAssets + executionFeeAssets`.
+    /// @param maintenanceMarginAssets Maintenance requirement on the entire resulting position at `price`.
+    /// @param initialMarginRequirementAssets Initial requirement on the entire resulting position, floored by
+    ///        `riskParams.minBountyAssets`.
+    /// @param liquidationReserveTargetAssets Notional-based liquidation charge, floored by `riskParams.minBountyAssets`.
     struct OpenState {
-        uint256 addedMaxProfitUsdc;
+        uint256 addedMaxProfitAssets;
         uint256 oldEntryNotional;
         uint256 newEntryPrice;
-        uint256 newEntryCostUsdcAtoms;
+        uint256 newEntryCostAssetAtoms;
         uint256 newSize;
         uint256 newEntryNotional;
-        uint256 postSkewUsdc;
-        int256 vpiUsdc;
-        uint256 notionalUsdc;
-        uint256 executionFeeUsdc;
-        int256 tradeCostUsdc;
-        uint256 maintenanceMarginUsdc;
-        uint256 initialMarginRequirementUsdc;
-        uint256 liquidationReserveTargetUsdc;
+        uint256 postSkewAssets;
+        int256 vpiAssets;
+        uint256 notionalAssets;
+        uint256 executionFeeAssets;
+        int256 tradeCostAssets;
+        uint256 maintenanceMarginAssets;
+        uint256 initialMarginRequirementAssets;
+        uint256 liquidationReserveTargetAssets;
     }
 
     /// @notice Builds entry, economic-cost, and risk-requirement state for an open or increase.
@@ -95,10 +95,10 @@ library OpenAccountingLib {
     ///      10,000-bps rate fits uint256. The checked VPI product bounds cost plus the fee below int256.max.
     /// @return valid Whether every request-dependent numeric operation is representable.
     /// @return state Open economics, diagnostic only when invalid.
-    /// @return rawLiquidationRequirementUsdc Unfloored notional liquidation requirement used for minimum-size policy.
+    /// @return rawLiquidationRequirementAssets Unfloored notional liquidation requirement used for minimum-size policy.
     function tryBuildOpenState(
         OpenInputs memory inputs
-    ) internal pure returns (bool valid, OpenState memory state, uint256 rawLiquidationRequirementUsdc) {
+    ) internal pure returns (bool valid, OpenState memory state, uint256 rawLiquidationRequirementAssets) {
         if (inputs.sizeDelta % CfdTypes.SIZE_QUANTUM != 0 || inputs.currentSize % CfdTypes.SIZE_QUANTUM != 0) {
             return (false, state, 0);
         }
@@ -106,49 +106,51 @@ library OpenAccountingLib {
         uint256 currentLots = inputs.currentSize / CfdTypes.SIZE_QUANTUM;
         if (
             currentLots > type(uint112).max || addedLots > type(uint112).max - currentLots
-                || inputs.currentEntryCostUsdcAtoms > type(uint144).max
+                || inputs.currentEntryCostAssetAtoms > type(uint144).max
         ) {
             return (false, state, 0);
         }
-        uint256 addedEntryCostUsdcAtoms = addedLots * inputs.price;
-        if (addedEntryCostUsdcAtoms > type(uint144).max - inputs.currentEntryCostUsdcAtoms) {
+        uint256 addedEntryCostAssetAtoms = addedLots * inputs.price;
+        if (addedEntryCostAssetAtoms > type(uint144).max - inputs.currentEntryCostAssetAtoms) {
             return (false, state, 0);
         }
-        state.addedMaxProfitUsdc =
-            CfdMath.calculateExactMaxProfit(addedLots, addedEntryCostUsdcAtoms, inputs.side, inputs.capPrice);
-        state.oldEntryNotional = inputs.currentEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
+        state.addedMaxProfitAssets =
+            CfdMath.calculateExactMaxProfit(addedLots, addedEntryCostAssetAtoms, inputs.side, inputs.capPrice);
+        state.oldEntryNotional = inputs.currentEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE;
         state.newSize = inputs.currentSize + inputs.sizeDelta;
-        state.newEntryCostUsdcAtoms = inputs.currentEntryCostUsdcAtoms + addedEntryCostUsdcAtoms;
+        state.newEntryCostAssetAtoms = inputs.currentEntryCostAssetAtoms + addedEntryCostAssetAtoms;
         uint256 newLots = currentLots + addedLots;
-        state.newEntryPrice = newLots == 0 ? inputs.price : state.newEntryCostUsdcAtoms / newLots;
-        state.newEntryNotional = state.newEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
-        state.postSkewUsdc = inputs.postSkewUsdc;
+        state.newEntryPrice = newLots == 0 ? inputs.price : state.newEntryCostAssetAtoms / newLots;
+        state.newEntryNotional = state.newEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE;
+        state.postSkewAssets = inputs.postSkewAssets;
 
-        (valid, state.vpiUsdc) = CfdMath.tryCalculateVPI(
-            inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.poolDepthUsdc, inputs.riskParams.vpiFactor
+        (valid, state.vpiAssets) = CfdMath.tryCalculateVPI(
+            inputs.preSkewAssets, inputs.postSkewAssets, inputs.poolDepthAssets, inputs.riskParams.vpiFactor
         );
         if (!valid) {
             return (false, state, 0);
         }
-        state.notionalUsdc = addedEntryCostUsdcAtoms;
-        state.executionFeeUsdc = (state.notionalUsdc * inputs.executionFeeBps) / 10_000;
-        state.tradeCostUsdc = state.vpiUsdc + int256(state.executionFeeUsdc);
-        state.maintenanceMarginUsdc = ((newLots * inputs.price) * inputs.riskParams.maintMarginBps) / 10_000;
-        state.initialMarginRequirementUsdc = ((newLots * inputs.price) * inputs.riskParams.initMarginBps) / 10_000;
-        if (state.initialMarginRequirementUsdc < inputs.riskParams.minBountyUsdc) {
-            state.initialMarginRequirementUsdc = inputs.riskParams.minBountyUsdc;
+        state.notionalAssets = addedEntryCostAssetAtoms;
+        state.executionFeeAssets = (state.notionalAssets * inputs.executionFeeBps) / 10_000;
+        state.tradeCostAssets = state.vpiAssets + int256(state.executionFeeAssets);
+        state.maintenanceMarginAssets = ((newLots * inputs.price) * inputs.riskParams.maintMarginBps) / 10_000;
+        state.initialMarginRequirementAssets = ((newLots * inputs.price) * inputs.riskParams.initMarginBps) / 10_000;
+        if (state.initialMarginRequirementAssets < inputs.riskParams.minBountyAssets) {
+            state.initialMarginRequirementAssets = inputs.riskParams.minBountyAssets;
         }
-        uint256 resultingNotionalUsdc = newLots * inputs.price;
-        if (inputs.riskParams.bountyBps != 0 && resultingNotionalUsdc > type(uint256).max / inputs.riskParams.bountyBps)
-        {
+        uint256 resultingNotionalAssets = newLots * inputs.price;
+        if (
+            inputs.riskParams.bountyBps != 0
+                && resultingNotionalAssets > type(uint256).max / inputs.riskParams.bountyBps
+        ) {
             return (false, state, 0);
         }
-        rawLiquidationRequirementUsdc = (resultingNotionalUsdc * inputs.riskParams.bountyBps) / 10_000;
-        state.liquidationReserveTargetUsdc = rawLiquidationRequirementUsdc;
-        if (state.liquidationReserveTargetUsdc < inputs.riskParams.minBountyUsdc) {
-            state.liquidationReserveTargetUsdc = inputs.riskParams.minBountyUsdc;
+        rawLiquidationRequirementAssets = (resultingNotionalAssets * inputs.riskParams.bountyBps) / 10_000;
+        state.liquidationReserveTargetAssets = rawLiquidationRequirementAssets;
+        if (state.liquidationReserveTargetAssets < inputs.riskParams.minBountyAssets) {
+            state.liquidationReserveTargetAssets = inputs.riskParams.minBountyAssets;
         }
-        return (true, state, rawLiquidationRequirementUsdc);
+        return (true, state, rawLiquidationRequirementAssets);
     }
 
 }

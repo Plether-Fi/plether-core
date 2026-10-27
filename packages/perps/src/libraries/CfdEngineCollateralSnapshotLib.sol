@@ -17,27 +17,28 @@ library CfdEngineCollateralSnapshotLib {
         bool closeCommit
     ) internal view {
         IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(account);
-        snapshot.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: buckets.settlementBalanceUsdc,
-            totalLockedMarginUsdc: buckets.totalLockedUsdc,
-            activePositionMarginUsdc: buckets.pnlPledgeUsdc,
-            otherLockedMarginUsdc: buckets.liquidationReserveUsdc + buckets.orderMarginUsdc + buckets.actionReserveUsdc,
-            freeSettlementUsdc: buckets.freeSettlementUsdc
+        snapshot.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: buckets.settlementBalanceAssets,
+            totalLockedMarginAssets: buckets.totalLockedAssets,
+            activePositionMarginAssets: buckets.pnlPledgeAssets,
+            otherLockedMarginAssets: buckets.liquidationReserveAssets + buckets.orderMarginAssets
+                + buckets.actionReserveAssets,
+            freeSettlementAssets: buckets.freeSettlementAssets
         });
         snapshot.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: buckets.pnlPledgeUsdc,
-            committedOrderMarginUsdc: buckets.orderMarginUsdc,
-            reservedSettlementUsdc: buckets.actionReserveUsdc,
-            totalLockedMarginUsdc: buckets.totalLockedUsdc
+            positionMarginAssets: buckets.pnlPledgeAssets,
+            committedOrderMarginAssets: buckets.orderMarginAssets,
+            reservedSettlementAssets: buckets.actionReserveAssets,
+            totalLockedMarginAssets: buckets.totalLockedAssets
         });
-        snapshot.liquidationReserveUsdc = buckets.liquidationReserveUsdc;
-        snapshot.actionReserveUsdc = buckets.actionReserveUsdc;
+        snapshot.liquidationReserveAssets = buckets.liquidationReserveAssets;
+        snapshot.actionReserveAssets = buckets.actionReserveAssets;
         if (!closeCommit) {
-            snapshot.vpiRebateReserveUsdc = buckets.vpiRebateReserveUsdc;
-            snapshot.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
+            snapshot.vpiRebateReserveAssets = buckets.vpiRebateReserveAssets;
+            snapshot.protectedExecutionBountyAssets = clearinghouse.totalBountyReservationsAssets(account);
         }
         // Clearinghouse pledge remains authoritative even when the Engine position tuple is stale.
-        snapshot.position.margin = buckets.pnlPledgeUsdc;
+        snapshot.position.margin = buckets.pnlPledgeAssets;
     }
 
 }

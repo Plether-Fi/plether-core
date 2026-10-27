@@ -14,7 +14,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 ///      `IPerpsTraderActions`, `IPerpsTraderViews`, `IPerpsLPActions`, `IPerpsLPViews`,
 ///      `IPerpsKeeper`, `IProtocolViews`, and `IMarginAccount`.
 ///      Live protocol contracts should prefer smaller role-specific interfaces like `ICfdEngineCore`.
-///      Unless stated otherwise, USDC amounts use 6 decimals, prices use 8 decimals, position sizes use 18 decimals,
+///      Unless stated otherwise, settlement token amounts use 6 decimals, prices use 8 decimals, position sizes use 18 decimals,
 ///      basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 interface ICfdEngine is ICfdEngineTypes {
 
@@ -44,8 +44,8 @@ interface ICfdEngine is ICfdEngineTypes {
         returns (address treasury, uint256 activationTime, uint256 lockedUntil);
 
     /// @notice Settlement token used for fees, margin, and payouts
-    /// @return USDC-compatible settlement token
-    function USDC() external view returns (IERC20);
+    /// @return settlementToken-compatible settlement token
+    function settlementToken() external view returns (IERC20);
 
     /// @notice Last mark price observed by the engine (8 decimals)
     /// @return Cached engine mark price, or zero before the first mark
@@ -57,12 +57,12 @@ interface ICfdEngine is ICfdEngineTypes {
     ///      execution delegates the planned clearinghouse, HousePool, aggregate-side, and position mutations.
     /// @param order Queued order being executed by the router
     /// @param currentOraclePrice Execution oracle price (8 decimals), clamped to CAP_PRICE
-    /// @param poolDepthUsdc HousePool depth used for planning and solvency checks
+    /// @param poolDepthAssets HousePool depth used for planning and solvency checks
     /// @param publishTime Router-validated execution publish time; the Engine caches the execution price only when strictly newer
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
-        uint256 poolDepthUsdc,
+        uint256 poolDepthAssets,
         uint64 publishTime
     ) external;
 
@@ -80,10 +80,10 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @dev Callable only by the router. Reclassifies clearinghouse balances without moving ERC20 tokens; zero is a
     ///      no-op.
     /// @param sourceAccount Account whose reserved settlement bounty is forfeited
-    /// @param amountUsdc Reserved USDC amount to transfer into the protocol treasury account
+    /// @param amountAssets Reserved settlement token amount to transfer into the protocol treasury account
     function absorbReservedExecutionBounty(
         address sourceAccount,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external;
 
     /// @notice Credits a reserved execution bounty into the beneficiary's clearinghouse account.
@@ -91,34 +91,34 @@ interface ICfdEngine is ICfdEngineTypes {
     ///      position, retaining arrears. The incoming bounty remains untouched until a later checkpoint. A strictly newer mark is capped and cached; zero is a no-op.
     /// @param sourceAccount Account whose reserved settlement bounty funds the credit
     /// @param beneficiary Account receiving the clearinghouse settlement credit
-    /// @param amountUsdc Reserved USDC amount to reclassify
+    /// @param amountAssets Reserved settlement token amount to reclassify
     /// @param price Router-validated mark price used to checkpoint beneficiary carry when needed (8 decimals)
     /// @param publishTime Oracle publish timestamp associated with `price`
     function creditBounty(
         address sourceAccount,
         address beneficiary,
-        uint256 amountUsdc,
+        uint256 amountAssets,
         uint256 price,
         uint64 publishTime
     ) external;
 
-    /// @notice Liquidates an undercollateralized position and returns the keeper's charge allocation in USDC.
+    /// @notice Liquidates an undercollateralized position and returns the keeper's charge allocation in settlement token.
     /// @dev Callable only by the configured router. Deletes the full position, settles typed collateral and any surplus,
     ///      exposes price loss above the exact collectible cap only as a diagnostic write-off, credits keeper and
     ///      protocol allocations internally, and can latch degraded mode after a physical post-operation shortfall.
     /// @param account          Account holding the position to liquidate
     /// @param currentOraclePrice Mark price from the oracle (8 decimals)
-    /// @param poolDepthUsdc     HousePool effective total assets used for planning and settlement checks (6 decimals)
+    /// @param poolDepthAssets     HousePool effective total assets used for planning and settlement checks (6 decimals)
     /// @param publishTime        Oracle publish timestamp
     /// @param keeper             Keeper credited with any liquidation bounty
-    /// @return keeperBountyUsdc  Bounty paid to the liquidation keeper (6 decimals)
+    /// @return keeperBountyAssets  Bounty paid to the liquidation keeper (6 decimals)
     function liquidatePosition(
         address account,
         uint256 currentOraclePrice,
-        uint256 poolDepthUsdc,
+        uint256 poolDepthAssets,
         uint64 publishTime,
         address keeper
-    ) external returns (uint256 keeperBountyUsdc);
+    ) external returns (uint256 keeperBountyAssets);
 
     /// @notice Realizes accrued carry against the current reachable collateral before a user-level
     ///         settlement balance mutation changes the carry basis.
@@ -147,17 +147,17 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @dev Implemented by the diagnostic engine lens, not by the canonical stateful `CfdEngine` deployment.
     /// @param account Account whose position would be tested
     /// @param oraclePrice Oracle price used for the simulation, clamped to `CAP_PRICE` (8 decimals)
-    /// @param poolDepthUsdc Hypothetical HousePool depth in USDC
+    /// @param poolDepthAssets Hypothetical HousePool depth in settlement token
     /// @return preview Liquidation economics and projected post-operation solvency
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) external view returns (LiquidationPreview memory preview);
 
     /// @notice Trader claim balance still owed to beneficiaries.
-    /// @return Aggregate senior HousePool payout liability in USDC
-    function totalTraderClaimBalanceUsdc() external view returns (uint256);
+    /// @return Aggregate senior HousePool payout liability in settlement token
+    function totalTraderClaimBalanceAssets() external view returns (uint256);
 
     /// @notice Returns one authenticated exact terminal price-PnL snapshot for canonical LP accounting.
     /// @dev Reverts while multi-contract accounting is transient or when the Engine-bound terminal book/mark fails
@@ -203,10 +203,10 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @return size Position size (18 decimals)
     /// @return margin Current active position margin (6 decimals)
     /// @return entryPrice Average entry price (8 decimals)
-    /// @return maxProfitUsdc Position maximum profit envelope (6 decimals)
+    /// @return maxProfitAssets Position maximum profit envelope (6 decimals)
     /// @return side Position side
     /// @return lastUpdateTime Last position mutation timestamp
-    /// @return vpiAccrued Lifetime signed VPI in USDC; positive is charged and negative is rebated
+    /// @return vpiAccrued Lifetime signed VPI in settlement token; positive is charged and negative is rebated
     function positions(
         address account
     )
@@ -216,7 +216,7 @@ interface ICfdEngine is ICfdEngineTypes {
             uint256 size,
             uint256 margin,
             uint256 entryPrice,
-            uint256 maxProfitUsdc,
+            uint256 maxProfitAssets,
             CfdTypes.Side side,
             uint64 lastUpdateTime,
             int256 vpiAccrued
@@ -224,18 +224,18 @@ interface ICfdEngine is ICfdEngineTypes {
 
     /// @notice Returns the exact remaining entry basis used by lot-based PnL settlement.
     /// @dev The average entry price in `positions` is display-only and may omit division dust.
-    function positionEntryCostUsdcAtoms(
+    function positionEntryCostAssetAtoms(
         address account
     ) external view returns (uint256);
 
     /// @notice Returns the indexed carry basis for a position.
     /// @param account Account to inspect
-    /// @return borrowBaseUsdc Position LP borrow base used for carry utilization, in USDC
+    /// @return borrowBaseAssets Position LP borrow base used for carry utilization, in settlement token
     /// @return lastCarryIndex Side carry index last stored on the position, scaled by 1e18
     /// @return lastCarryTimestamp Unix timestamp through which position carry was last checkpointed
     function positionCarryState(
         address account
-    ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
+    ) external view returns (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
 
     /// @notice True when a close or liquidation has latched degraded mode after revealing adjusted insolvency.
     /// @return Whether risk-increasing actions are disabled by the insolvency latch

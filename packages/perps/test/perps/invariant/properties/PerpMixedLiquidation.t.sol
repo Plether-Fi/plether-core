@@ -36,7 +36,7 @@ contract PerpMixedLiquidationTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
         handler = new PerpMixedAccountingHandler(
-            usdc,
+            settlementToken,
             baseMockPyth,
             engine,
             clearinghouse,
@@ -261,7 +261,7 @@ contract PerpMixedLiquidationTest is BasePerpTest {
             assertEq(router.pendingOrderCounts(handler.actorAt(side)), 0);
             assertEq(router.pendingOrderCounts(handler.actorAt(1 - side)), 1);
             assertEq(handler.expectedTreasury(), treasuryBefore + ownBounties);
-            assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), treasuryBefore + ownBounties);
+            assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), treasuryBefore + ownBounties);
             for (uint256 j; j < ownIds.length; ++j) {
                 _assertLiquidatedQueuedOrder(ownIds[j], side);
             }
@@ -295,7 +295,7 @@ contract PerpMixedLiquidationTest is BasePerpTest {
                 router.lifecycleBook().terminalOutcome(id),
                 clearinghouse.getOrderReservation(id),
                 clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id),
-                clearinghouse.balanceUsdc(handler.actorAt(order.actorIndex))
+                clearinghouse.balanceAssets(handler.actorAt(order.actorIndex))
             )
         );
     }
@@ -320,11 +320,11 @@ contract PerpMixedLiquidationTest is BasePerpTest {
         assertEq(outcome.receiptHash, queued.receiptHash, "permanent receipt matches the authenticated liquidation log");
         assertEq(router.lifecycleBook().pendingIntent(id).account, address(0));
         IMarginClearinghouse.OrderReservation memory margin = clearinghouse.getOrderReservation(id);
-        assertEq(margin.remainingAmountUsdc, 0);
+        assertEq(margin.remainingAmountAssets, 0);
         assertEq(uint8(margin.status), uint8(PendingOrderReferenceLedger.MarginStatus.Released));
         IMarginClearinghouse.BountyReservation memory bounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
-        assertEq(bounty.amountUsdc, 0);
+        assertEq(bounty.amountAssets, 0);
         assertEq(uint8(bounty.state), uint8(IMarginClearinghouse.BountyReservationState.Settled));
     }
 
@@ -339,7 +339,7 @@ contract PerpMixedLiquidationTest is BasePerpTest {
             assertEq(trader.claim, 0, "old claim has been paid into live pledge");
             assertGt(trader.margin, 1500e6);
             assertGt(account.arrears, 0, "claim credit does not immediately recollect its new backing");
-            assertEq(engine.unsettledCarryUsdc(handler.actorAt(side)), account.arrears);
+            assertEq(engine.unsettledCarryAssets(handler.actorAt(side)), account.arrears);
             assertGt(
                 trader.margin - account.arrears,
                 side == 0 ? 120_000_002 : 80_000_002,
@@ -402,7 +402,7 @@ contract PerpMixedLiquidationTest is BasePerpTest {
             assertGt(second.remainingClaim, firstClaim + 1500e6, "second public close creates another old claim");
             assertGt(handler.carry().accountState(handler.actorAt(side)).totalWithheld, firstWithheld);
             assertEq(handler.traderState(side).lots, 0);
-            assertEq(engine.unsettledCarryUsdc(handler.actorAt(side)), 0);
+            assertEq(engine.unsettledCarryAssets(handler.actorAt(side)), 0);
             assertEq(handler.liquidationCarryWaived(), 0);
             _withdrawTerminalCash(side);
             _assertCarryConservation();
@@ -415,21 +415,25 @@ contract PerpMixedLiquidationTest is BasePerpTest {
         LiquidationReferenceMath.Values memory v = _runTerminal(0, 2);
         assertGt(v.remainingClaim, 1500e6);
         _assertGetterFaultDetected(
-            address(engine), abi.encodeCall(engine.traderClaimBalanceUsdc, (handler.actorAt(0))), v.remainingClaim + 1
+            address(engine), abi.encodeCall(engine.traderClaimBalanceAssets, (handler.actorAt(0))), v.remainingClaim + 1
         );
     }
 
     function test_ModelRejectsOneAtomOfCarryRestoredAfterTerminalLiquidation() public {
         _runTerminal(1, 0);
         assertEq(handler.carry().accountState(handler.actorAt(1)).arrears, 0);
-        _assertGetterFaultDetected(address(engine), abi.encodeCall(engine.unsettledCarryUsdc, (handler.actorAt(1))), 1);
+        _assertGetterFaultDetected(
+            address(engine), abi.encodeCall(engine.unsettledCarryAssets, (handler.actorAt(1))), 1
+        );
     }
 
     function test_ModelRejectsOneAtomAddedToRetainedTraderCash() public {
         LiquidationReferenceMath.Values memory v = _runTerminal(1, 2);
         assertGt(v.retainedCash, 0);
         _assertGetterFaultDetected(
-            address(clearinghouse), abi.encodeCall(clearinghouse.balanceUsdc, (handler.actorAt(1))), v.retainedCash + 1
+            address(clearinghouse),
+            abi.encodeCall(clearinghouse.balanceAssets, (handler.actorAt(1))),
+            v.retainedCash + 1
         );
     }
 
@@ -438,7 +442,7 @@ contract PerpMixedLiquidationTest is BasePerpTest {
         assertGt(v.keeper, 0);
         _assertGetterFaultDetected(
             address(clearinghouse),
-            abi.encodeCall(clearinghouse.balanceUsdc, (handler.KEEPER())),
+            abi.encodeCall(clearinghouse.balanceAssets, (handler.KEEPER())),
             handler.expectedKeeper() + 1
         );
     }
@@ -474,7 +478,7 @@ contract PerpMixedLiquidationTest is BasePerpTest {
         assertFalse(account.active);
         assertEq(account.totalWithheld, v.carryWithheld);
         assertEq(account.totalWaived, v.carryWaived);
-        assertEq(engine.unsettledCarryUsdc(handler.actorAt(actor)), 0);
+        assertEq(engine.unsettledCarryAssets(handler.actorAt(actor)), 0);
         assertEq(v.charge, v.keeper + v.lpFee);
         assertEq(v.fresh, v.immediate + v.deferred);
         _assertCarryConservation();

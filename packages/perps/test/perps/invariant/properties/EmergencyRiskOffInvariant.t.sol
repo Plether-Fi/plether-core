@@ -29,8 +29,8 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
         uint256 pendingDepositAssets;
         uint256 claimableDepositAssets;
         uint256 vaultSupply;
-        uint256 poolUsdc;
-        uint256 vaultUsdc;
+        uint256 poolAssets;
+        uint256 vaultAssets;
     }
 
     address internal constant ALICE = address(0xA11CE);
@@ -95,14 +95,15 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
         uint64[] memory orderIds = _commitOpens(ALICE, orderCount);
 
         IOrderRouterAccounting.AccountReservationView memory reservationsBefore = router.getAccountReservations(ALICE);
-        IMarginClearinghouse.AccountUsdcBuckets memory traderBucketsBefore = clearinghouse.getAccountUsdcBuckets(ALICE);
-        uint256 executorSettlementBefore = clearinghouse.balanceUsdc(EXECUTOR);
-        uint256 executorWalletBefore = usdc.balanceOf(EXECUTOR);
-        uint256 traderWalletBefore = usdc.balanceOf(ALICE);
+        IMarginClearinghouse.AccountAssetBuckets memory traderBucketsBefore =
+            clearinghouse.getAccountAssetBuckets(ALICE);
+        uint256 executorSettlementBefore = clearinghouse.balanceAssets(EXECUTOR);
+        uint256 executorWalletBefore = settlementToken.balanceOf(EXECUTOR);
+        uint256 traderWalletBefore = settlementToken.balanceOf(ALICE);
 
         assertEq(reservationsBefore.pendingOrderCount, orderCount);
-        assertGt(reservationsBefore.committedMarginUsdc, 0);
-        assertGt(reservationsBefore.executionBountyUsdc, 0);
+        assertGt(reservationsBefore.committedMarginAssets, 0);
+        assertGt(reservationsBefore.executionBountyAssets, 0);
 
         uint64 cutoff = _triggerRiskOff();
         assertEq(cutoff, orderIds[orderCount - 1]);
@@ -118,7 +119,7 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
                 uint256(IMarginClearinghouse.ReservationStatus.Released),
                 "risk-off must release every remaining committed-margin reservation"
             );
-            assertEq(reservation.remainingAmountUsdc, 0);
+            assertEq(reservation.remainingAmountAssets, 0);
             assertEq(
                 uint256(_orderRecord(orderIds[i]).status),
                 uint256(IOrderRouterAccounting.OrderStatus.Failed),
@@ -127,25 +128,27 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
         }
 
         IOrderRouterAccounting.AccountReservationView memory reservationsAfter = router.getAccountReservations(ALICE);
-        IMarginClearinghouse.AccountUsdcBuckets memory traderBucketsAfter = clearinghouse.getAccountUsdcBuckets(ALICE);
+        IMarginClearinghouse.AccountAssetBuckets memory traderBucketsAfter = clearinghouse.getAccountAssetBuckets(ALICE);
 
         assertEq(reservationsAfter.pendingOrderCount, 0);
-        assertEq(reservationsAfter.committedMarginUsdc, 0);
-        assertEq(reservationsAfter.executionBountyUsdc, 0);
+        assertEq(reservationsAfter.committedMarginAssets, 0);
+        assertEq(reservationsAfter.executionBountyAssets, 0);
         assertEq(router.nextExecuteId(), 0, "random non-head cleanup must leave the global FIFO structurally empty");
         assertEq(
-            traderBucketsAfter.freeSettlementUsdc - traderBucketsBefore.freeSettlementUsdc,
-            reservationsBefore.committedMarginUsdc + reservationsBefore.executionBountyUsdc,
+            traderBucketsAfter.freeSettlementAssets - traderBucketsBefore.freeSettlementAssets,
+            reservationsBefore.committedMarginAssets + reservationsBefore.executionBountyAssets,
             "all margin and bounty classifications must return to trader free settlement"
         );
         assertEq(
-            traderBucketsAfter.settlementBalanceUsdc,
-            traderBucketsBefore.settlementBalanceUsdc,
+            traderBucketsAfter.settlementBalanceAssets,
+            traderBucketsBefore.settlementBalanceAssets,
             "risk-off refunds must not mint, burn, or transfer gross settlement"
         );
-        assertEq(clearinghouse.balanceUsdc(EXECUTOR), executorSettlementBefore, "cleanup caller must receive no credit");
-        assertEq(usdc.balanceOf(EXECUTOR), executorWalletBefore, "cleanup caller must receive no tokens");
-        assertEq(usdc.balanceOf(ALICE), traderWalletBefore, "refund must remain internal settlement");
+        assertEq(
+            clearinghouse.balanceAssets(EXECUTOR), executorSettlementBefore, "cleanup caller must receive no credit"
+        );
+        assertEq(settlementToken.balanceOf(EXECUTOR), executorWalletBefore, "cleanup caller must receive no tokens");
+        assertEq(settlementToken.balanceOf(ALICE), traderWalletBefore, "refund must remain internal settlement");
     }
 
     /// @notice An old open remains non-executable after recovery, while a higher post-cutoff id executes normally.
@@ -165,13 +168,13 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
         uint64 newOrderId = _commitOpen(ALICE, side, newSize, _marginForSize(newSize));
         assertGt(newOrderId, routerAdmin.riskOffOrderCutoff());
 
-        uint256 executorBeforeOldCleanup = clearinghouse.balanceUsdc(EXECUTOR);
+        uint256 executorBeforeOldCleanup = clearinghouse.balanceAssets(EXECUTOR);
         vm.prank(EXECUTOR);
         router.executeOrder(oldOrderId, new bytes[](0));
 
         (uint256 sizeAfterOld,,,,,,) = engine.positions(ALICE);
         assertEq(sizeAfterOld, 0, "historically invalidated open must not reach the Engine after unpause");
-        assertEq(clearinghouse.balanceUsdc(EXECUTOR), executorBeforeOldCleanup, "old bounty must return to trader");
+        assertEq(clearinghouse.balanceAssets(EXECUTOR), executorBeforeOldCleanup, "old bounty must return to trader");
         assertEq(uint256(_orderRecord(oldOrderId).status), uint256(IOrderRouterAccounting.OrderStatus.Failed));
 
         bytes[] memory newOrderUpdate = _mockPythUpdateData();
@@ -200,7 +203,7 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
         uint256 closeBounty = _executionBountyReserve(closeOrderId);
 
         assertEq(_triggerRiskOff(), closeOrderId);
-        uint256 executorBefore = clearinghouse.balanceUsdc(EXECUTOR);
+        uint256 executorBefore = clearinghouse.balanceAssets(EXECUTOR);
         bytes[] memory closeUpdate = _mockPythUpdateData();
         vm.prank(EXECUTOR);
         router.executeOrder(closeOrderId, closeUpdate);
@@ -212,7 +215,7 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
         );
         assertEq(uint256(_orderRecord(closeOrderId).status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
         assertEq(
-            clearinghouse.balanceUsdc(EXECUTOR) - executorBefore,
+            clearinghouse.balanceAssets(EXECUTOR) - executorBefore,
             closeBounty,
             "executor may receive the close bounty but never the invalidated-open bounty"
         );
@@ -250,9 +253,9 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
         uint256 assets = bound(uint256(assetsSeed), 1e6, 50_000e6);
         uint256 attempts = bound(uint256(attemptsSeed), 1, 8);
 
-        usdc.mint(ALICE, assets);
+        settlementToken.mint(ALICE, assets);
         vm.startPrank(ALICE);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         uint256 requestId = juniorVault.requestDeposit(assets, ALICE, ALICE);
         vm.stopPrank();
         vm.warp(pool.lpEpochStart(requestId));
@@ -360,8 +363,8 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
         snapshot.pendingDepositAssets = juniorVault.pendingDepositRequest(requestId, ALICE);
         snapshot.claimableDepositAssets = juniorVault.claimableDepositRequest(requestId, ALICE);
         snapshot.vaultSupply = juniorVault.totalSupply();
-        snapshot.poolUsdc = usdc.balanceOf(address(pool));
-        snapshot.vaultUsdc = usdc.balanceOf(address(juniorVault));
+        snapshot.poolAssets = settlementToken.balanceOf(address(pool));
+        snapshot.vaultAssets = settlementToken.balanceOf(address(juniorVault));
     }
 
     function _assertHeldEpochSnapshot(
@@ -391,8 +394,10 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
             "claimable deposit changed while held"
         );
         assertEq(juniorVault.totalSupply(), expected.vaultSupply, "vault supply changed while held");
-        assertEq(usdc.balanceOf(address(pool)), expected.poolUsdc, "pool custody changed while held");
-        assertEq(usdc.balanceOf(address(juniorVault)), expected.vaultUsdc, "vault custody changed while held");
+        assertEq(settlementToken.balanceOf(address(pool)), expected.poolAssets, "pool custody changed while held");
+        assertEq(
+            settlementToken.balanceOf(address(juniorVault)), expected.vaultAssets, "vault custody changed while held"
+        );
     }
 
     function _shuffle(

@@ -20,7 +20,7 @@ contract AccountPriceCollateralFeesTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -53,7 +53,7 @@ contract AccountPriceCollateralFeesTest is BasePerpTest {
             equityAfter, equityBefore, "User-funded close-order bounties should not reduce LP distributable equity"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             80e6,
             "Open and close execution fees should both accrue as protocol revenue"
         );
@@ -81,7 +81,7 @@ contract LiquidationBountyForfeitureTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
 
         uint256 forfeitedBounty = _executionBountyReserve(1);
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(196_000_000));
@@ -92,7 +92,7 @@ contract LiquidationBountyForfeitureTest is BasePerpTest {
         router.executeLiquidation(account, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - feesBefore,
             forfeitedBounty,
             "Forfeited queued order bounties should accrue to protocol fees"
         );
@@ -127,7 +127,7 @@ contract MarginAndReservationAdmissionFeesTest is BasePerpTest {
             equityAfter - equityBefore, 1000, "LP equity delta should be limited to incidental one-second senior yield"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             80e6,
             "Open and close execution fees should both accrue as protocol revenue"
         );

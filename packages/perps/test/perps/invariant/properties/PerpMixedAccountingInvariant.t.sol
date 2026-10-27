@@ -31,7 +31,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
         handler = new MixedLpTestHarness(
-            usdc,
+            settlementToken,
             baseMockPyth,
             engine,
             clearinghouse,
@@ -303,7 +303,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
     function test_RegressionClaimBackedDustCloseRejectedBeforeCollection() public {
         handler.createDeferredClaimHistory();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.minOpenNotionalUsdc = 1000e6;
+        config.minOpenNotionalAssets = 1000e6;
         _setRouterConfig(config);
         handler.close(0, 1, false);
         assertEq(handler.rejectedSmallOrders(), 1);
@@ -338,7 +338,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
     }
 
     function test_MixedOracleRejectsUnrecordedPoolCash() public {
-        usdc.mint(address(pool), 1);
+        settlementToken.mint(address(pool), 1);
         vm.expectRevert();
         handler.assertModel();
     }
@@ -346,7 +346,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
     function test_MixedOracleRejectsCrossAccountCredit() public {
         vm.mockCall(
             address(clearinghouse),
-            abi.encodeCall(clearinghouse.balanceUsdc, (handler.actorAt(0))),
+            abi.encodeCall(clearinghouse.balanceAssets, (handler.actorAt(0))),
             abi.encode(handler.traderState(0).cash + 1)
         );
         vm.expectRevert();

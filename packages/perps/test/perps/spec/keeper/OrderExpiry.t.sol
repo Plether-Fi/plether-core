@@ -27,7 +27,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -46,7 +46,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         _warpForward(48 hours + 1);
         routerAdmin.finalizeRouterConfig();
         assertEq(router.openOrderExecutionBountyBps(), 1);
-        assertEq(router.maxOpenOrderExecutionBountyUsdc(), 200_000);
+        assertEq(router.maxOpenOrderExecutionBountyAssets(), 200_000);
     }
 
     function test_TargetedExpiryPrunesFiveEarlierOrdersAndPaysEveryBounty() public {
@@ -137,8 +137,8 @@ contract StaleOrderExpiryTest is BasePerpTest {
         _fundTrader(spammer, 10_000e6);
         vm.prank(spammer);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
-        uint256 cashBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 poolBefore = usdc.balanceOf(address(pool));
+        uint256 cashBefore = settlementToken.balanceOf(address(clearinghouse));
+        uint256 poolBefore = settlementToken.balanceOf(address(pool));
         uint256 treasuryBefore = _settlementBalance(engine.protocolTreasury());
         vm.warp(block.timestamp + 301);
         vm.roll(block.number + 1);
@@ -147,8 +147,10 @@ contract StaleOrderExpiryTest is BasePerpTest {
         assertEq(_settlementBalance(spammer), 10_000e6 - 200_000, "only the stored bounty leaves trader settlement");
         assertEq(_settlementBalance(localKeeper), 200_000, "full stored bounty credits the clearer");
         assertEq(_settlementBalance(engine.protocolTreasury()), treasuryBefore, "expiry does not pay the treasury");
-        assertEq(usdc.balanceOf(address(clearinghouse)), cashBefore, "expiry transfers internal ownership only");
-        assertEq(usdc.balanceOf(address(pool)), poolBefore, "expiry does not route cash to the pool");
+        assertEq(
+            settlementToken.balanceOf(address(clearinghouse)), cashBefore, "expiry transfers internal ownership only"
+        );
+        assertEq(settlementToken.balanceOf(address(pool)), poolBefore, "expiry does not route cash to the pool");
         _assertExpiredReceipt(1, spammer, localKeeper);
         _assertNoPendingReservations(spammer);
         _assertExpiryReplayRejected(1, localKeeper, false);
@@ -169,10 +171,10 @@ contract StaleOrderExpiryTest is BasePerpTest {
         }
         vm.prank(alice);
         uint64 target = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
-        uint256 cashBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 poolBefore = usdc.balanceOf(address(pool));
+        uint256 cashBefore = settlementToken.balanceOf(address(clearinghouse));
+        uint256 poolBefore = settlementToken.balanceOf(address(pool));
         uint256 treasuryBefore = _settlementBalance(engine.protocolTreasury());
-        assertEq(router.getAccountReservations(spammer).committedMarginUsdc, uint256(earlierCount) * 1000e6);
+        assertEq(router.getAccountReservations(spammer).committedMarginAssets, uint256(earlierCount) * 1000e6);
         vm.warp(block.timestamp + 301);
         vm.roll(block.number + 1);
         vm.prank(localKeeper);
@@ -186,8 +188,12 @@ contract StaleOrderExpiryTest is BasePerpTest {
         assertEq(_settlementBalance(alice), 50_000e6 - 200_000);
         assertEq(_settlementBalance(localKeeper), uint256(earlierCount + 1) * 200_000, "one credit per expired order");
         assertEq(_settlementBalance(engine.protocolTreasury()), treasuryBefore, "no expiry bounty accrues to protocol");
-        assertEq(usdc.balanceOf(address(clearinghouse)), cashBefore, "clearinghouse cash remains physically backed");
-        assertEq(usdc.balanceOf(address(pool)), poolBefore, "unexecuted positions cannot route pool cash");
+        assertEq(
+            settlementToken.balanceOf(address(clearinghouse)),
+            cashBefore,
+            "clearinghouse cash remains physically backed"
+        );
+        assertEq(settlementToken.balanceOf(address(pool)), poolBefore, "unexecuted positions cannot route pool cash");
         for (uint64 id = 1; id <= target; ++id) {
             _assertExpiredReceipt(id, id == target ? alice : spammer, localKeeper);
         }
@@ -213,10 +219,10 @@ contract StaleOrderExpiryTest is BasePerpTest {
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
         assertEq(outcome.executor, localKeeper);
         assertEq(outcome.bountyRecipient, localKeeper);
-        assertEq(outcome.bountyUsdc, 200_000, "configured one-bps bounty is capped at 0.2 USDC");
+        assertEq(outcome.bountyAssets, 200_000, "configured one-bps bounty is capped at 0.2 settlementToken");
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(id);
-        assertEq(pending.committedMarginUsdc, 0);
-        assertEq(pending.executionBountyUsdc, 0);
+        assertEq(pending.committedMarginAssets, 0);
+        assertEq(pending.executionBountyAssets, 0);
         assertEq(router.lifecycleBook().pendingIntent(id).account, address(0));
     }
 
@@ -224,8 +230,8 @@ contract StaleOrderExpiryTest is BasePerpTest {
         address account
     ) internal view {
         IOrderRouterAccounting.AccountReservationView memory reserves = router.getAccountReservations(account);
-        assertEq(reserves.committedMarginUsdc, 0);
-        assertEq(reserves.executionBountyUsdc, 0);
+        assertEq(reserves.committedMarginAssets, 0);
+        assertEq(reserves.executionBountyAssets, 0);
         assertEq(reserves.pendingOrderCount, 0);
         assertEq(router.accountHeadOrderId(account), 0);
     }

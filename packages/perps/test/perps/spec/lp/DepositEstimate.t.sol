@@ -33,15 +33,15 @@ contract DepositEstimateTest is HousePoolAsyncTestBase {
         _refreshMarkForAsyncSettlement();
 
         // Model a pool loss without consuming the pending deposit's separate vault escrow.
-        uint256 poolAssetsBefore = usdc.balanceOf(address(pool));
-        usdc.burn(address(pool), poolAssetsBefore);
+        uint256 poolAssetsBefore = settlementToken.balanceOf(address(pool));
+        settlementToken.burn(address(pool), poolAssetsBefore);
         assertGt(isSenior ? pool.seniorPrincipal() : pool.juniorPrincipal(), 0, "stored principal is still stale");
         assertGt(vault.totalSupply(), 0);
         assertEq(vault.totalAssets(), 0);
         assertEq(vault.estimateDepositShares(assets), 0, "projected wipe must suppress the estimate before reconcile");
 
         PerpsViewTypes.LpRequestStateView memory state = publicLens.getLpRequestState(isSenior, requestId, ALICE);
-        assertEq(state.pendingDepositAssets, assets, "the pending USDC must remain visible");
+        assertEq(state.pendingDepositAssets, assets, "the pending settlementToken must remain visible");
         assertEq(state.pendingDepositSharesEstimate, 0);
         assertEq(state.claimableDepositAssets, 0);
         assertEq(state.claimableDepositShares, 0);
@@ -56,12 +56,12 @@ contract DepositEstimateTest is HousePoolAsyncTestBase {
 
         vm.prank(ALICE);
         assertEq(vault.cancelPendingDeposit(requestId, ALICE, ALICE), assets);
-        assertEq(usdc.balanceOf(ALICE), assets, "terminal wipe must retain the full cancellation refund");
+        assertEq(settlementToken.balanceOf(ALICE), assets, "terminal wipe must retain the full cancellation refund");
         assertEq(vault.pendingDepositRequest(requestId, ALICE), 0);
         assertEq(vault.pendingDepositEscrowAssets(), 0);
 
         // Restoring real backing must reopen indicative pricing for the surviving shares.
-        usdc.mint(address(pool), poolAssetsBefore);
+        settlementToken.mint(address(pool), poolAssetsBefore);
         vm.prank(address(vault));
         pool.reconcile();
         assertGt(vault.estimateDepositShares(assets), 0);

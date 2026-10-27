@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "orderInterfaceVersion": 3,
   "network": {
     "name": "arbitrum-sepolia",
@@ -18,7 +18,11 @@
     "pyth": "0x0B73614636C855Bf23F342F307FB981A3e47f42B"
   },
   "contracts": {
-    "mockUsdc": { "address": null, "runtimeCodeHash": null },
+    "settlementToken": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:MockUSDG",
+      "address": null,
+      "runtimeCodeHash": null
+    },
     "marginClearinghouse": { "address": null, "runtimeCodeHash": null },
     "cfdEngine": { "address": null, "runtimeCodeHash": null },
     "terminalNavBookV2": { "address": null, "runtimeCodeHash": null },
@@ -60,16 +64,30 @@
     "settlementMonitorLensSidecar": { "address": null, "runtimeCodeHash": null },
     "emergencyPauseCoordinator": { "address": null, "runtimeCodeHash": null }
   },
+  "settlementToken": {
+    "name": "Mock USDG",
+    "symbol": "USDG",
+    "decimals": 6,
+    "isMock": true,
+    "supportsReceiveWithAuthorization": false,
+    "supportsBridgeFunding": false
+  },
+  "rewards": {
+    "status": "not_applicable",
+    "holdingContracts": ["marginClearinghouse", "housePool"],
+    "payoutAddress": null,
+    "payoutController": null
+  },
   "economics": {
     "vpiFactorWad": "10000000000000000",
     "maxSkewRatioWad": "400000000000000000",
     "maintenanceMarginBps": 10,
     "initialMarginBps": 20,
     "liquidationChargeBps": 10,
-    "minimumLiquidationChargeUsdc": "1000000",
+    "minimumLiquidationChargeAssets": "1000000",
     "keeperShareBps": 5000,
     "protocolShareBps": 0,
-    "minimumKeeperPayoutUsdc": "500000",
+    "minimumKeeperPayoutAssets": "500000",
     "fadMarginBps": 300,
     "baseCarryBps": 500,
     "executionFeeBps": 4,
@@ -77,14 +95,14 @@
     "frozenCloseSpreadBps": 50,
     "basketMaxConfidenceRatioBps": 10,
     "adverseConfidenceMultiplierBps": 2500,
-    "minimumOpenNotionalUsdc": "1000000000",
+    "minimumOpenNotionalAssets": "1000000000",
     "maxPendingOrders": 5,
-    "closeOrderExecutionBountyUsdc": "0",
-    "positionProtectionTriggerBountyUsdc": "200000",
-    "maxSeniorExposureUsdc": "40000000000000",
+    "closeOrderExecutionBountyAssets": "0",
+    "positionProtectionTriggerBountyAssets": "200000",
+    "maxSeniorExposureAssets": "40000000000000",
     "maxSeniorShareBps": 8000,
-    "seniorSeedUsdc": "1000000",
-    "juniorSeedUsdc": "1000000",
+    "seniorSeedAssets": "1000000",
+    "juniorSeedAssets": "1000000",
     "seniorSeedReceiver": null,
     "juniorSeedReceiver": null,
     "juniorMaintenanceFeeAprBps": 100,

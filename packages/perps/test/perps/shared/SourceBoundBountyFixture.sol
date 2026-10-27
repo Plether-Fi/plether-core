@@ -44,14 +44,14 @@ abstract contract SourceBoundBountyFixture is BasePerpTest {
             executionWindowSeconds: 60,
             allowedExecutionModes: 7,
             expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
-            maxExecutionBountyUsdc: type(uint256).max,
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max,
+            maxExecutionBountyAssets: type(uint256).max,
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max,
             maxPostPositionSize: type(uint256).max,
-            minPostSettlementBalanceUsdc: 0,
-            minPostPositionEquityUsdc: 0,
+            minPostSettlementBalanceAssets: 0,
+            minPostPositionEquityAssets: 0,
             maxPostLeverageBps: type(uint32).max
         });
     }
@@ -131,14 +131,14 @@ abstract contract SourceBoundBountyFixture is BasePerpTest {
         _fundTrader(BOUNTY_TRADER, 1000e6);
         uint64 opening = _bountyCommit(BOUNTY_TRADER, side, false, BOUNTY_SIZE, 250e6);
         _bountyExecute(opening, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
-        uint256 free = clearinghouse.getFreeBuyingPowerUsdc(BOUNTY_TRADER);
+        uint256 free = clearinghouse.getFreeBuyingPowerAssets(BOUNTY_TRADER);
         vm.prank(BOUNTY_TRADER);
         clearinghouse.withdraw(BOUNTY_TRADER, free);
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(BOUNTY_TRADER), 0);
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(BOUNTY_TRADER), 0);
         (uint256 size,,,,,,) = engine.positions(BOUNTY_TRADER);
         assertEq(size, BOUNTY_SIZE);
         assertEq(engine.positionEpoch(BOUNTY_TRADER), 1);
-        pledge = clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER);
+        pledge = clearinghouse.pnlPledgeAssets(BOUNTY_TRADER);
     }
 
     function _bountyReservation(
@@ -151,7 +151,7 @@ abstract contract SourceBoundBountyFixture is BasePerpTest {
         uint64 id
     ) internal view {
         IMarginClearinghouse.BountyReservation memory reservation = _bountyReservation(id);
-        assertEq(reservation.amountUsdc, 0, "terminal bounty custody attribution cleared");
+        assertEq(reservation.amountAssets, 0, "terminal bounty custody attribution cleared");
         assertEq(uint8(reservation.state), uint8(IMarginClearinghouse.BountyReservationState.Settled));
         (IOrderRouterAccounting.PendingOrderView memory order, uint64 next) = router.getPendingOrderView(id);
         assertEq(order.sizeDelta, 0, "terminal queue record removed");
@@ -174,9 +174,9 @@ abstract contract SourceBoundBountyFixture is BasePerpTest {
         (IOrderRouterAccounting.PendingOrderView memory pending, uint64 next) = router.getPendingOrderView(id);
         bytes32 custody = keccak256(
             abi.encode(
-                clearinghouse.balanceUsdc(BOUNTY_TRADER),
-                clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER),
-                clearinghouse.actionReserveUsdc(BOUNTY_TRADER),
+                clearinghouse.balanceAssets(BOUNTY_TRADER),
+                clearinghouse.pnlPledgeAssets(BOUNTY_TRADER),
+                clearinghouse.actionReserveAssets(BOUNTY_TRADER),
                 _bountyReservation(id),
                 engine.positionEpoch(BOUNTY_TRADER)
             )

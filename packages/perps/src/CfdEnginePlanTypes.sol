@@ -12,7 +12,7 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 /// @title CfdEnginePlanTypes
 /// @notice Snapshot and delta structs for the plan→apply architecture.
 /// @dev Plan functions are pure over a `RawSnapshot` and return typed deltas. Apply functions consume deltas to
-///      perform state mutations and external calls. Unless stated otherwise, USDC amounts use 6 decimals, prices use
+///      perform state mutations and external calls. Unless stated otherwise, settlement token amounts use 6 decimals, prices use
 ///      8 decimals, position sizes and open interest use 18 decimals, basis-point values use a 10,000 denominator,
 ///      and timestamps are Unix seconds.
 library CfdEnginePlanTypes {
@@ -20,12 +20,12 @@ library CfdEnginePlanTypes {
     /// @notice Carry and custody effects computed when a close is committed.
     /// @dev Close commitments have no bounty; open-order commitments can fund one from free settlement.
     struct CloseCommitment {
-        uint256 carryCollectedUsdc;
-        uint256 carryOutstandingUsdc;
-        uint256 bountyFromFreeUsdc;
-        uint256 settlementBeforeUsdc;
-        uint256 settlementAfterUsdc;
-        uint256 freeSettlementAfterUsdc;
+        uint256 carryCollectedAssets;
+        uint256 carryOutstandingAssets;
+        uint256 bountyFromFreeAssets;
+        uint256 settlementBeforeAssets;
+        uint256 settlementAfterAssets;
+        uint256 freeSettlementAfterAssets;
     }
 
     /// @notice Failure-lifecycle classification used by router open-order policy.
@@ -55,18 +55,18 @@ library CfdEnginePlanTypes {
     // ──────────────────────────────────────────────
 
     /// @notice Aggregate planning state for one position side.
-    /// @param maxProfitUsdc Maximum-profit liability envelope for the side.
+    /// @param maxProfitAssets Maximum-profit liability envelope for the side.
     /// @param openInterest Aggregate synthetic-token size, with 18 decimals.
     /// @param entryNotional Aggregate exact entry cost scaled by `1e20`, with 26-decimal precision.
     /// @param totalMargin Aggregate canonical position margin for the side.
-    /// @param borrowBaseUsdc Aggregate LP-backed amount on which side carry accrues.
+    /// @param borrowBaseAssets Aggregate LP-backed amount on which side carry accrues.
     /// @param carryIndex Current cumulative carry index, scaled by 1e18.
     struct SideSnapshot {
-        uint256 maxProfitUsdc;
+        uint256 maxProfitAssets;
         uint256 openInterest;
         uint256 entryNotional;
         uint256 totalMargin;
-        uint256 borrowBaseUsdc;
+        uint256 borrowBaseAssets;
         uint256 carryIndex;
     }
 
@@ -74,29 +74,29 @@ library CfdEnginePlanTypes {
     /// @dev Some context fields are retained for plan/apply parity even when the current planner does not read them.
     ///      Callers must construct a mutually consistent snapshot; the planner does not authenticate or reload it.
     /// @param position Account's current canonical position.
-    /// @param positionEntryCostUsdcAtoms Exact remaining position entry basis, in 6-decimal USDC atoms.
+    /// @param positionEntryCostAssetAtoms Exact remaining position entry basis, in 6-decimal settlement token atoms.
     /// @param account Clearinghouse account whose collateral and claims are represented.
     /// @param currentTimestamp Snapshot timestamp in Unix seconds; used by commitment-carry projection.
     /// @param lastMarkPrice Latest stored mark price; close-commitment planning checks availability and uses it for
     ///        partial-close health. Open, close-execution, and liquidation plans do not read it.
     /// @param lastMarkTime Latest stored mark publish time; close-commitment planning checks that it is nonzero.
     ///        Open, close-execution, and liquidation plans do not read it.
-    /// @param positionBorrowBaseUsdc Position carry borrow base.
+    /// @param positionBorrowBaseAssets Position carry borrow base.
     /// @param positionLastCarryIndex Side carry index last checkpointed for the position, scaled by 1e18.
     /// @param longSide Aggregate LONG-side state.
     /// @param shortSide Aggregate SHORT-side state.
-    /// @param poolAssetsUsdc Gross physical assets used for planning; VPI and skew subtract aggregate trader claims.
-    /// @param poolCashUsdc Physical-asset basis for open solvency and cash available for payouts and fee top-ups.
-    /// @param poolAdditionalReservedUsdc Pending claimant inflows and unassigned assets protected from fee top-ups.
+    /// @param poolAssets Gross physical assets used for planning; VPI and skew subtract aggregate trader claims.
+    /// @param poolCashAssets Physical-asset basis for open solvency and cash available for payouts and fee top-ups.
+    /// @param poolAdditionalReservedAssets Pending claimant inflows and unassigned assets protected from fee top-ups.
     /// @param poolQueuesTradingRevenue Whether new revenue joins the pending claimant reserve until reconciliation.
     /// @param accountBuckets Aggregate clearinghouse custody buckets for `account`.
     /// @param lockedBuckets Typed clearinghouse margin buckets for `account`.
-    /// @param liquidationReserveUsdc Dedicated backing for the configured liquidation charge.
-    /// @param actionReserveUsdc Aggregate action reserve, including VPI backing and protected execution bounties.
-    /// @param vpiRebateReserveUsdc Dedicated backing for negative lifetime VPI, included in `actionReserveUsdc`.
-    /// @param protectedExecutionBountyUsdc Execution-bounty reservations excluded from action-charge collection.
-    /// @param unsettledCarryUsdc Carry already checkpointed but not yet collected for `account`.
-    /// @param totalTraderClaimBalanceUsdc Aggregate outstanding trader-claim liability.
+    /// @param liquidationReserveAssets Dedicated backing for the configured liquidation charge.
+    /// @param actionReserveAssets Aggregate action reserve, including VPI backing and protected execution bounties.
+    /// @param vpiRebateReserveAssets Dedicated backing for negative lifetime VPI, included in `actionReserveAssets`.
+    /// @param protectedExecutionBountyAssets Execution-bounty reservations excluded from action-charge collection.
+    /// @param unsettledCarryAssets Carry already checkpointed but not yet collected for `account`.
+    /// @param totalTraderClaimBalanceAssets Aggregate outstanding trader-claim liability.
     /// @param traderClaimBalanceForAccount Outstanding trader claim owned by `account`.
     /// @param degradedMode Whether the engine was already in degraded mode.
     /// @param capPrice Maximum execution and risk price, with 8 decimals.
@@ -108,32 +108,32 @@ library CfdEnginePlanTypes {
     /// @param settlementBufferBps Protected headroom required per unit of maximum directional liability, in basis points.
     struct RawSnapshot {
         CfdTypes.Position position;
-        uint256 positionEntryCostUsdcAtoms;
+        uint256 positionEntryCostAssetAtoms;
         address account;
 
         uint256 currentTimestamp;
         uint256 lastMarkPrice;
         uint64 lastMarkTime;
-        uint256 positionBorrowBaseUsdc;
+        uint256 positionBorrowBaseAssets;
         uint256 positionLastCarryIndex;
 
         SideSnapshot longSide;
         SideSnapshot shortSide;
 
-        uint256 poolAssetsUsdc;
-        uint256 poolCashUsdc;
-        uint256 poolAdditionalReservedUsdc;
+        uint256 poolAssets;
+        uint256 poolCashAssets;
+        uint256 poolAdditionalReservedAssets;
         bool poolQueuesTradingRevenue;
 
-        IMarginClearinghouse.AccountUsdcBuckets accountBuckets;
+        IMarginClearinghouse.AccountAssetBuckets accountBuckets;
         IMarginClearinghouse.LockedMarginBuckets lockedBuckets;
-        uint256 liquidationReserveUsdc;
-        uint256 actionReserveUsdc;
-        uint256 vpiRebateReserveUsdc;
-        uint256 protectedExecutionBountyUsdc;
+        uint256 liquidationReserveAssets;
+        uint256 actionReserveAssets;
+        uint256 vpiRebateReserveAssets;
+        uint256 protectedExecutionBountyAssets;
 
-        uint256 unsettledCarryUsdc;
-        uint256 totalTraderClaimBalanceUsdc;
+        uint256 unsettledCarryAssets;
+        uint256 totalTraderClaimBalanceAssets;
         uint256 traderClaimBalanceForAccount;
         bool degradedMode;
 
@@ -147,13 +147,13 @@ library CfdEnginePlanTypes {
     }
 
     /// @notice Projected protocol solvency state after a close or liquidation.
-    /// @param effectiveAssetsAfterUsdc Physical assets after planned cash flow, net of trader claims.
-    /// @param maxLiabilityAfterUsdc Maximum remaining side-liability envelope.
+    /// @param effectiveAssetsAfterAssets Physical assets after planned cash flow, net of trader claims.
+    /// @param maxLiabilityAfterAssets Maximum remaining side-liability envelope.
     /// @param triggersDegradedMode Whether this operation newly crosses into degraded mode.
     /// @param postOpDegradedMode Whether projected effective assets are below projected maximum liability.
     struct SolvencyPreview {
-        uint256 effectiveAssetsAfterUsdc;
-        uint256 maxLiabilityAfterUsdc;
+        uint256 effectiveAssetsAfterAssets;
+        uint256 maxLiabilityAfterAssets;
         bool triggersDegradedMode;
         bool postOpDegradedMode;
     }
@@ -198,22 +198,22 @@ library CfdEnginePlanTypes {
     /// @param posSide Side of the resulting position.
     /// @param newPosSize Resulting position size, with 18 decimals.
     /// @param newPosEntryPrice Display-only average entry price from exact resulting entry cost per lot, rounded down.
-    /// @param newPosEntryCostUsdcAtoms Exact resulting position entry basis, in 6-decimal USDC atoms.
-    /// @param posVpiAccruedDelta Signed 6-decimal USDC VPI added to accrual; positive is a charge, negative a rebate.
-    /// @param posMaxProfitIncrease Increase in the position maximum-profit envelope, in 6-decimal USDC.
-    /// @param positionMarginAfterOpen Resulting clearinghouse position-margin bucket in 6-decimal USDC.
+    /// @param newPosEntryCostAssetAtoms Exact resulting position entry basis, in 6-decimal settlement token atoms.
+    /// @param posVpiAccruedDelta Signed 6-decimal settlement token VPI added to accrual; positive is a charge, negative a rebate.
+    /// @param posMaxProfitIncrease Increase in the position maximum-profit envelope, in 6-decimal settlement token.
+    /// @param positionMarginAfterOpen Resulting clearinghouse position-margin bucket in 6-decimal settlement token.
     /// @param sideOiIncrease Increase in aggregate side open interest, with 18 decimals.
     /// @param sideEntryNotionalDelta Signed change in exact side entry cost scaled by `1e20`, with 26-decimal precision.
-    /// @param requiredEffectiveAssetsAfterUsdc Minimum post-settlement effective assets required by protected admission.
-    /// @param sideMaxProfitIncrease Increase in the aggregate side maximum-profit envelope, in 6-decimal USDC.
-    /// @param tradeCostUsdc Signed VPI plus execution fee; positive debits the account and negative rebates it.
-    /// @param marginDeltaUsdc Order margin supplied for the open/increase.
+    /// @param requiredEffectiveAssetsAfterAssets Minimum post-settlement effective assets required by protected admission.
+    /// @param sideMaxProfitIncrease Increase in the aggregate side maximum-profit envelope, in 6-decimal settlement token.
+    /// @param tradeCostAssets Signed VPI plus execution fee; positive debits the account and negative rebates it.
+    /// @param marginDeltaAssets Order margin supplied for the open/increase.
     /// @param netMarginChange Exact signed change in PnL pledge after action cost and VPI/liquidation-reserve carve-outs.
-    /// @param poolRebatePayoutUsdc Pool-funded cash needed when `tradeCostUsdc` is negative.
-    /// @param executionFeeUsdc Execution fee included in `tradeCostUsdc`.
-    /// @param pendingCarryUsdc Total checkpointed and indexed carry to realize before opening.
-    /// @param sideTotalMarginBefore Aggregate selected-side margin after carry and before the open, in 6-decimal USDC.
-    /// @param sideTotalMarginAfterOpen Projected aggregate selected-side margin, in 6-decimal USDC.
+    /// @param poolRebatePayoutAssets Pool-funded cash needed when `tradeCostAssets` is negative.
+    /// @param executionFeeAssets Execution fee included in `tradeCostAssets`.
+    /// @param pendingCarryAssets Total checkpointed and indexed carry to realize before opening.
+    /// @param sideTotalMarginBefore Aggregate selected-side margin after carry and before the open, in 6-decimal settlement token.
+    /// @param sideTotalMarginAfterOpen Projected aggregate selected-side margin, in 6-decimal settlement token.
     /// @param account Account copied from the order and mutated during settlement.
     /// @param sizeDelta Order size increase, with 18 decimals.
     /// @param price Execution price capped at `RawSnapshot.capPrice`, with 8 decimals.
@@ -226,29 +226,29 @@ library CfdEnginePlanTypes {
         CfdTypes.Side posSide;
         uint256 newPosSize;
         uint256 newPosEntryPrice;
-        uint256 newPosEntryCostUsdcAtoms;
+        uint256 newPosEntryCostAssetAtoms;
         int256 posVpiAccruedDelta;
         uint256 posMaxProfitIncrease;
         uint256 positionMarginAfterOpen;
-        uint256 liquidationReserveBeforeUsdc;
-        uint256 liquidationReserveAfterUsdc;
+        uint256 liquidationReserveBeforeAssets;
+        uint256 liquidationReserveAfterAssets;
 
         uint256 sideOiIncrease;
         int256 sideEntryNotionalDelta;
-        uint256 requiredEffectiveAssetsAfterUsdc;
+        uint256 requiredEffectiveAssetsAfterAssets;
         uint256 sideMaxProfitIncrease;
 
-        int256 tradeCostUsdc;
-        uint256 marginDeltaUsdc;
+        int256 tradeCostAssets;
+        uint256 marginDeltaAssets;
         int256 netMarginChange;
-        uint256 poolRebatePayoutUsdc;
+        uint256 poolRebatePayoutAssets;
 
-        uint256 executionFeeUsdc;
-        uint256 pendingCarryUsdc;
+        uint256 executionFeeAssets;
+        uint256 pendingCarryAssets;
 
-        uint256 vpiRebateReserveBeforeUsdc;
-        uint256 vpiRebateReserveAfterUsdc;
-        uint256 vpiRebateReserveFromPledgeUsdc;
+        uint256 vpiRebateReserveBeforeAssets;
+        uint256 vpiRebateReserveAfterAssets;
+        uint256 vpiRebateReserveFromPledgeAssets;
 
         uint256 sideTotalMarginBefore;
         uint256 sideTotalMarginAfterOpen;
@@ -298,37 +298,37 @@ library CfdEnginePlanTypes {
     /// @param closeState Detailed PnL, VPI, fee, spread, released-margin, and remaining-position calculation.
     /// @param postLongOi Projected LONG open interest, with 18 decimals.
     /// @param postShortOi Projected SHORT open interest, with 18 decimals.
-    /// @param posMarginAfter Canonical position margin remaining after the close, in 6-decimal USDC.
+    /// @param posMarginAfter Canonical position margin remaining after the close, in 6-decimal settlement token.
     /// @param posSizeDelta Position size removed, with 18 decimals.
-    /// @param posMaxProfitReduction Reduction in the position maximum-profit envelope, in 6-decimal USDC.
-    /// @param posVpiAccruedReduction Signed proportional lifetime VPI removed, in 6-decimal USDC.
+    /// @param posMaxProfitReduction Reduction in the position maximum-profit envelope, in 6-decimal settlement token.
+    /// @param posVpiAccruedReduction Signed proportional lifetime VPI removed, in 6-decimal settlement token.
     /// @param deletePosition Whether settlement removes the entire position.
     /// @param side Side of the position being reduced.
     /// @param sideOiDecrease Reduction in aggregate side open interest, with 18 decimals.
     /// @param sideEntryNotionalReduction Exact entry basis removed from the side, scaled by `1e20` to 26 decimals.
-    /// @param sideMaxProfitReduction Reduction in aggregate side maximum-profit envelope, in 6-decimal USDC.
-    /// @param unlockMarginUsdc Unconsumed close-allocated pledge released while preserving the remaining terminal cap.
+    /// @param sideMaxProfitReduction Reduction in aggregate side maximum-profit envelope, in 6-decimal settlement token.
+    /// @param unlockMarginAssets Unconsumed close-allocated pledge released while preserving the remaining terminal cap.
     /// @param settlementType Coarse payout-first classification after price and action settlement planning.
-    /// @param lossUsdc Raw realized price loss before same-account claim and PnL-pledge collection.
-    /// @param freshTraderPayoutUsdc Net price payout plus the actually payable action rebate.
+    /// @param lossAssets Raw realized price loss before same-account claim and PnL-pledge collection.
+    /// @param freshTraderPayoutAssets Net price payout plus the actually payable action rebate.
     /// @param freshPayoutIsImmediate Whether no price claim is created; also true for a valid zero-payout close.
     /// @param freshPayoutCreatesClaim Whether the net price payout creates a trader claim; action rebates never do.
-    /// @param existingTraderClaimConsumedUsdc Same-account claim consumed first toward raw realized price loss.
-    /// @param existingTraderClaimRemainingUsdc Account claim remaining after price-loss netting, before any new price claim.
-    /// @param executionFeeUsdc Assessed execution fee capped by eligible withheld price gain and collected action cash.
-    /// @param protocolFeeTopUpUsdc Additional unreserved pool cash planned for the protocol treasury fee credit.
-    /// @param pendingCarryUsdc Total checkpointed and indexed carry before margin-first collection and action settlement.
-    /// @param totalMarginBefore Aggregate selected-side position margin after projected carry collection, in 6-decimal USDC.
-    /// @param totalMarginAfterClose Projected aggregate selected-side margin after the close, in 6-decimal USDC.
+    /// @param existingTraderClaimConsumedAssets Same-account claim consumed first toward raw realized price loss.
+    /// @param existingTraderClaimRemainingAssets Account claim remaining after price-loss netting, before any new price claim.
+    /// @param executionFeeAssets Assessed execution fee capped by eligible withheld price gain and collected action cash.
+    /// @param protocolFeeTopUpAssets Additional unreserved pool cash planned for the protocol treasury fee credit.
+    /// @param pendingCarryAssets Total checkpointed and indexed carry before margin-first collection and action settlement.
+    /// @param totalMarginBefore Aggregate selected-side position margin after projected carry collection, in 6-decimal settlement token.
+    /// @param totalMarginAfterClose Projected aggregate selected-side margin after the close, in 6-decimal settlement token.
     /// @param solvency Projected post-close solvency and degraded-mode flags.
     /// @param account Account copied from the order and mutated during settlement.
     /// @param sizeDelta Requested size reduction, with 18 decimals.
     /// @param price Execution price capped at `RawSnapshot.capPrice`, with 8 decimals.
-    /// @param realizedPnlUsdc Signed realized price PnL before VPI, fee, spread, and carry.
+    /// @param realizedPnlAssets Signed realized price PnL before VPI, fee, spread, and carry.
     struct CloseDelta {
-        uint256 safeMarginReleaseUsdc;
-        uint256 actionChargeFromReleasedMarginUsdc;
-        uint256 netReleasedMarginUsdc;
+        uint256 safeMarginReleaseAssets;
+        uint256 actionChargeFromReleasedMarginAssets;
+        uint256 netReleasedMarginAssets;
         bool valid;
         CloseRevertCode revertCode;
 
@@ -339,8 +339,8 @@ library CfdEnginePlanTypes {
         uint256 posMarginAfter;
         uint256 posSizeDelta;
         uint256 posEntryPriceAfter;
-        uint256 posEntryCostAfterUsdcAtoms;
-        uint256 liquidationReserveReleaseUsdc;
+        uint256 posEntryCostAfterAssetAtoms;
+        uint256 liquidationReserveReleaseAssets;
         uint256 posMaxProfitReduction;
         int256 posVpiAccruedReduction;
         bool deletePosition;
@@ -350,45 +350,45 @@ library CfdEnginePlanTypes {
         uint256 sideEntryNotionalReduction;
         uint256 sideMaxProfitReduction;
 
-        uint256 unlockMarginUsdc;
+        uint256 unlockMarginAssets;
 
         SettlementType settlementType;
-        uint256 lossUsdc;
+        uint256 lossAssets;
 
-        uint256 priceGainUsdc;
-        uint256 priceLossUsdc;
-        uint256 pricePnlClaimConsumedUsdc;
-        uint256 pricePnlPledgeConsumedUsdc;
-        uint256 priceLossWrittenOffUsdc;
+        uint256 priceGainAssets;
+        uint256 priceLossAssets;
+        uint256 pricePnlClaimConsumedAssets;
+        uint256 pricePnlPledgeConsumedAssets;
+        uint256 priceLossWrittenOffAssets;
 
-        uint256 actionChargeAssessedUsdc;
-        uint256 actionChargeWithheldUsdc;
-        uint256 actionChargeToCollectUsdc;
-        uint256 actionReserveConsumedUsdc;
-        uint256 actionCommittedMarginConsumedUsdc;
-        uint256 actionChargeCollectedUsdc;
-        uint256 actionChargeWaivedUsdc;
-        uint256 actionProtocolFeeCreditedUsdc;
-        uint256 vpiRebateReserveBeforeUsdc;
-        uint256 vpiRebateReserveAfterUsdc;
-        uint256 vpiRebateReserveConsumedUsdc;
-        uint256 actionRebateUsdc;
-        uint256 pricePayoutUsdc;
+        uint256 actionChargeAssessedAssets;
+        uint256 actionChargeWithheldAssets;
+        uint256 actionChargeToCollectAssets;
+        uint256 actionReserveConsumedAssets;
+        uint256 actionCommittedMarginConsumedAssets;
+        uint256 actionChargeCollectedAssets;
+        uint256 actionChargeWaivedAssets;
+        uint256 actionProtocolFeeCreditedAssets;
+        uint256 vpiRebateReserveBeforeAssets;
+        uint256 vpiRebateReserveAfterAssets;
+        uint256 vpiRebateReserveConsumedAssets;
+        uint256 actionRebateAssets;
+        uint256 pricePayoutAssets;
         bool pricePayoutIsImmediate;
         bool pricePayoutCreatesClaim;
-        uint256 actionRebatePaidUsdc;
-        uint256 actionRebateWaivedUsdc;
+        uint256 actionRebatePaidAssets;
+        uint256 actionRebateWaivedAssets;
 
-        uint256 freshTraderPayoutUsdc;
+        uint256 freshTraderPayoutAssets;
         bool freshPayoutIsImmediate;
         bool freshPayoutCreatesClaim;
-        uint256 existingTraderClaimConsumedUsdc;
-        uint256 existingTraderClaimRemainingUsdc;
-        uint256 executionFeeUsdc;
-        uint256 protocolFeeTopUpUsdc;
-        uint256 pendingCarryUsdc;
+        uint256 existingTraderClaimConsumedAssets;
+        uint256 existingTraderClaimRemainingAssets;
+        uint256 executionFeeAssets;
+        uint256 protocolFeeTopUpAssets;
+        uint256 pendingCarryAssets;
         /// @notice Carry collected from margin and free settlement before the remaining action settlement.
-        uint256 realizedCarryUsdc;
+        uint256 realizedCarryAssets;
 
         uint256 totalMarginBefore;
         uint256 totalMarginAfterClose;
@@ -398,7 +398,7 @@ library CfdEnginePlanTypes {
         address account;
         uint256 sizeDelta;
         uint256 price;
-        int256 realizedPnlUsdc;
+        int256 realizedPnlAssets;
     }
 
     // ──────────────────────────────────────────────
@@ -413,29 +413,29 @@ library CfdEnginePlanTypes {
     /// @param liquidationState Liquidation equity and total-charge split calculation.
     /// @param side Side of the position being liquidated.
     /// @param posSize Full position size removed, with 18 decimals.
-    /// @param posMargin Canonical position margin after projected carry collection, in 6-decimal USDC.
-    /// @param posMaxProfit Position maximum-profit envelope removed from aggregate liability, in 6-decimal USDC.
+    /// @param posMargin Canonical position margin after projected carry collection, in 6-decimal settlement token.
+    /// @param posMaxProfit Position maximum-profit envelope removed from aggregate liability, in 6-decimal settlement token.
     /// @param posEntryPrice Position entry price, with 8 decimals.
     /// @param sideOiDecrease Reduction in aggregate side open interest, with 18 decimals.
-    /// @param sideMaxProfitDecrease Reduction in aggregate side maximum-profit envelope, in 6-decimal USDC.
+    /// @param sideMaxProfitDecrease Reduction in aggregate side maximum-profit envelope, in 6-decimal settlement token.
     /// @param sideEntryNotionalReduction Exact entry basis removed from the side, scaled by `1e20` to 26 decimals.
-    /// @param liquidationChargeUsdc Total configured liquidation charge collected from the account.
-    /// @param keeperBountyUsdc Configured keeper share credited through clearinghouse settlement.
-    /// @param protocolLiquidationFeeUsdc Configured protocol share credited to the treasury clearinghouse account.
-    /// @param lpLiquidationFeeUsdc Remaining LP share transferred to the HousePool.
-    /// @param liquidationReachableCollateralUsdc Diagnostic post-carry PnL pledge plus same-account claim and VPI reserve;
+    /// @param liquidationChargeAssets Total configured liquidation charge collected from the account.
+    /// @param keeperBountyAssets Configured keeper share credited through clearinghouse settlement.
+    /// @param protocolLiquidationFeeAssets Configured protocol share credited to the treasury clearinghouse account.
+    /// @param lpLiquidationFeeAssets Remaining LP share transferred to the HousePool.
+    /// @param liquidationReachableCollateralAssets Diagnostic post-carry PnL pledge plus same-account claim and VPI reserve;
     ///        the separate liquidation reserve caps the keeper/protocol/LP charge.
-    /// @param residualUsdc Diagnostic price equity less the liquidation charge; does not determine isolated cash routing.
+    /// @param residualAssets Diagnostic price equity less the liquidation charge; does not determine isolated cash routing.
     /// @param residualPlan Full PnL-pledge unlock used by isolated liquidation settlement.
-    /// @param settlementSeizedUsdc Price-loss pledge plus the LP liquidation fee; excludes separately collected action cash.
-    /// @param settlementRetainedUsdc Projected settlement balance after all debits and any immediate price payout.
-    ///        Already includes freshTraderPayoutUsdc when freshPayoutIsImmediate; never add that payout a second time.
-    /// @param freshTraderPayoutUsdc New price gain after action-charge withholding, payable in full or recorded as a claim.
+    /// @param settlementSeizedAssets Price-loss pledge plus the LP liquidation fee; excludes separately collected action cash.
+    /// @param settlementRetainedAssets Projected settlement balance after all debits and any immediate price payout.
+    ///        Already includes freshTraderPayoutAssets when freshPayoutIsImmediate; never add that payout a second time.
+    /// @param freshTraderPayoutAssets New price gain after action-charge withholding, payable in full or recorded as a claim.
     /// @param freshPayoutIsImmediate Whether current unreserved pool cash can service the fresh payout.
     /// @param freshPayoutCreatesClaim Whether the fresh payout is expected to remain a trader-claim liability.
-    /// @param existingTraderClaimConsumedUsdc Existing claim value netted once against exact liquidation price loss.
-    /// @param existingTraderClaimRemainingUsdc Account claim balance remaining after planned netting.
-    /// @param pendingCarryUsdc Total checkpointed and indexed carry; only carry not directly realized enters the action path.
+    /// @param existingTraderClaimConsumedAssets Existing claim value netted once against exact liquidation price loss.
+    /// @param existingTraderClaimRemainingAssets Account claim balance remaining after planned netting.
+    /// @param pendingCarryAssets Total checkpointed and indexed carry; only carry not directly realized enters the action path.
     /// @param solvency Projected post-liquidation solvency and degraded-mode flags.
     /// @param account Account copied from the snapshot and liquidated during settlement.
     /// @param price Liquidation price capped at `RawSnapshot.capPrice`, with 8 decimals.
@@ -450,49 +450,49 @@ library CfdEnginePlanTypes {
         uint256 posMargin;
         uint256 posMaxProfit;
         uint256 posEntryPrice;
-        uint256 posEntryCostUsdcAtoms;
+        uint256 posEntryCostAssetAtoms;
 
         uint256 sideOiDecrease;
         uint256 sideMaxProfitDecrease;
         uint256 sideEntryNotionalReduction;
 
-        uint256 liquidationChargeUsdc;
-        uint256 keeperBountyUsdc;
-        uint256 protocolLiquidationFeeUsdc;
-        uint256 lpLiquidationFeeUsdc;
-        uint256 liquidationReachableCollateralUsdc;
+        uint256 liquidationChargeAssets;
+        uint256 keeperBountyAssets;
+        uint256 protocolLiquidationFeeAssets;
+        uint256 lpLiquidationFeeAssets;
+        uint256 liquidationReachableCollateralAssets;
 
-        uint256 priceGainUsdc;
-        uint256 priceLossUsdc;
-        uint256 pricePnlClaimConsumedUsdc;
-        uint256 pricePnlPledgeConsumedUsdc;
-        uint256 priceLossWrittenOffUsdc;
+        uint256 priceGainAssets;
+        uint256 priceLossAssets;
+        uint256 pricePnlClaimConsumedAssets;
+        uint256 pricePnlPledgeConsumedAssets;
+        uint256 priceLossWrittenOffAssets;
 
-        uint256 actionChargeAssessedUsdc;
-        uint256 actionChargeWithheldUsdc;
-        uint256 actionChargeToCollectUsdc;
-        uint256 actionReserveConsumedUsdc;
-        uint256 actionCommittedMarginConsumedUsdc;
-        uint256 actionChargeCollectedUsdc;
-        uint256 actionChargeWaivedUsdc;
-        uint256 vpiRebateReserveBeforeUsdc;
-        uint256 vpiRebateReserveAfterUsdc;
-        uint256 vpiRebateReserveConsumedUsdc;
+        uint256 actionChargeAssessedAssets;
+        uint256 actionChargeWithheldAssets;
+        uint256 actionChargeToCollectAssets;
+        uint256 actionReserveConsumedAssets;
+        uint256 actionCommittedMarginConsumedAssets;
+        uint256 actionChargeCollectedAssets;
+        uint256 actionChargeWaivedAssets;
+        uint256 vpiRebateReserveBeforeAssets;
+        uint256 vpiRebateReserveAfterAssets;
+        uint256 vpiRebateReserveConsumedAssets;
 
-        int256 residualUsdc;
+        int256 residualAssets;
         MarginClearinghouseAccountingLib.LiquidationResidualPlan residualPlan;
 
-        uint256 settlementSeizedUsdc;
-        uint256 settlementRetainedUsdc;
-        uint256 freshTraderPayoutUsdc;
+        uint256 settlementSeizedAssets;
+        uint256 settlementRetainedAssets;
+        uint256 freshTraderPayoutAssets;
         bool freshPayoutIsImmediate;
         bool freshPayoutCreatesClaim;
-        uint256 existingTraderClaimConsumedUsdc;
-        uint256 existingTraderClaimRemainingUsdc;
+        uint256 existingTraderClaimConsumedAssets;
+        uint256 existingTraderClaimRemainingAssets;
 
-        uint256 pendingCarryUsdc;
+        uint256 pendingCarryAssets;
         /// @notice Carry collected from margin and free settlement before the remaining action settlement.
-        uint256 realizedCarryUsdc;
+        uint256 realizedCarryAssets;
 
         SolvencyPreview solvency;
 

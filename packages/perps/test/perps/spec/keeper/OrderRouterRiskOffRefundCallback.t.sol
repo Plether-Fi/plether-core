@@ -186,7 +186,7 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
             uint256(OrderV3Types.TerminalReason.RiskOff),
             "post-refund cutoff must select risk-off before liquidation forfeiture"
         );
-        assertGt(outcome.bountyUsdc, 0, "setup must exercise a nonzero execution bounty");
+        assertGt(outcome.bountyAssets, 0, "setup must exercise a nonzero execution bounty");
         assertEq(
             uint256(outcome.bountyDisposition),
             uint256(OrderV3Types.BountyDisposition.RefundedToAccount),

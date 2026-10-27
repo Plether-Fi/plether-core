@@ -16,7 +16,7 @@ contract HousePoolLiquidationAccountingTest is HousePoolTestBase {
                 initMarginBps: ((100) * 15) / 10,
                 fadMarginBps: 300,
                 baseCarryBps: 500,
-                minBountyUsdc: 5 * 1e6,
+                minBountyAssets: 5 * 1e6,
                 bountyBps: 10,
                 keeperShareBps: 5000,
                 protocolShareBps: 0
@@ -43,7 +43,7 @@ contract HousePoolLiquidationAccountingTest is HousePoolTestBase {
         assertEq(sizeAfter, 0, "liquidation clears the position size");
         assertEq(marginAfter, 0, "liquidation clears the position pledge");
         assertEq(maxProfitAfter, 0, "liquidation releases the position's maximum-profit liability");
-        assertEq(clearinghouse.getLockedMarginBuckets(carolAccount).positionMarginUsdc, 0);
+        assertEq(clearinghouse.getLockedMarginBuckets(carolAccount).positionMarginAssets, 0);
         assertEq(_sideOpenInterest(CfdTypes.Side.LONG), 0);
         assertEq(_sideMaxProfit(CfdTypes.Side.LONG), 0);
         assertEq(_terminalLpPriceDelta(), 0, "no terminal price exposure remains after the only position closes");

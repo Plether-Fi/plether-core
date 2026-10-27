@@ -248,14 +248,14 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
                 executionWindowSeconds: window,
                 allowedExecutionModes: 7,
                 expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
-                maxExecutionBountyUsdc: type(uint256).max,
-                maxExecutionNotionalUsdc: type(uint256).max,
-                maxGrossAccountDebitUsdc: type(uint256).max,
-                maxActionChargeUsdc: type(uint256).max,
-                maxExplicitFeesUsdc: type(uint256).max,
+                maxExecutionBountyAssets: type(uint256).max,
+                maxExecutionNotionalAssets: type(uint256).max,
+                maxGrossAccountDebitAssets: type(uint256).max,
+                maxActionChargeAssets: type(uint256).max,
+                maxExplicitFeesAssets: type(uint256).max,
                 maxPostPositionSize: type(uint256).max,
-                minPostSettlementBalanceUsdc: 0,
-                minPostPositionEquityUsdc: 0,
+                minPostSettlementBalanceAssets: 0,
+                minPostPositionEquityAssets: 0,
                 maxPostLeverageBps: type(uint32).max
             })
         });

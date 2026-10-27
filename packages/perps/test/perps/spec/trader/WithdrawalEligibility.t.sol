@@ -28,16 +28,16 @@ contract OpenPositionWithdrawalTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0);
 
-        uint256 balance = clearinghouse.balanceUsdc(aliceAccount);
-        uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);
+        uint256 balance = clearinghouse.balanceAssets(aliceAccount);
+        uint256 locked = clearinghouse.lockedMarginAssets(aliceAccount);
         uint256 freeBalance = balance - locked;
         assertGt(freeBalance, 90_000 * 1e6, "Fixture must retain substantial free settlement");
 
         // The healthy position allows a $1 withdrawal from Alice's free settlement.
-        uint256 aliceBalanceBefore = usdc.balanceOf(alice);
+        uint256 aliceBalanceBefore = settlementToken.balanceOf(alice);
         vm.prank(alice);
         clearinghouse.withdraw(aliceAccount, 1e6);
-        assertEq(usdc.balanceOf(alice), aliceBalanceBefore + 1e6, "should withdraw $1 of free equity");
+        assertEq(settlementToken.balanceOf(alice), aliceBalanceBefore + 1e6, "should withdraw $1 of free equity");
     }
 
 }
@@ -56,7 +56,7 @@ contract CarryAndMarginCheckpointWithdrawTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -96,7 +96,7 @@ contract UnderwaterWithdrawalGuardTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -119,8 +119,8 @@ contract UnderwaterWithdrawalGuardTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(underwaterPrice, uint64(vm.getBlockTimestamp()));
 
-        uint256 chBalance = clearinghouse.balanceUsdc(aliceAccount);
-        uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);
+        uint256 chBalance = clearinghouse.balanceAssets(aliceAccount);
+        uint256 locked = clearinghouse.lockedMarginAssets(aliceAccount);
         uint256 withdrawable = chBalance - locked;
 
         // Attempting to withdraw all locally free settlement must fail the Engine health guard.

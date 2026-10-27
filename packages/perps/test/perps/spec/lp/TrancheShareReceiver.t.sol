@@ -98,7 +98,7 @@ contract TrancheShareReceiverTest is HousePoolAsyncTestBase {
         assertEq(juniorVault.balanceOf(address(juniorVault)), 0);
     }
 
-    function test_FundedUsdcClaimCanStillUseAnotherReceiver() public {
+    function test_FundedAssetsClaimCanStillUseAnotherReceiver() public {
         (, uint256 shares) = _depositAsync(juniorVault, ALICE, 100e6);
         _finishAsyncCooldown(juniorVault, ALICE);
         uint256 requestId = _requestAsyncRedeem(juniorVault, ALICE, shares);
@@ -108,7 +108,7 @@ contract TrancheShareReceiverTest is HousePoolAsyncTestBase {
         assertGt(assets, 0);
         vm.prank(ALICE);
         assertEq(juniorVault.claimRedeem(requestId, fundedShares, RECEIVER, ALICE), assets);
-        assertEq(usdc.balanceOf(RECEIVER), assets);
+        assertEq(settlementToken.balanceOf(RECEIVER), assets);
         assertEq(juniorVault.balanceOf(RECEIVER), 0);
         assertEq(juniorVault.lastDepositTime(RECEIVER), 0);
     }

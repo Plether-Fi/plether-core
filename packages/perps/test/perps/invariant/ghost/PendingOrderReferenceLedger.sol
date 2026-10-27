@@ -32,7 +32,7 @@ contract PendingOrderReferenceLedger {
         uint64 deadline;
         uint256 bountyFree;
         uint256 bountyPledge;
-        uint256 bountyUsdc;
+        uint256 bountyAssets;
         uint256 remainingBounty;
         uint256 sourceGeneration;
         uint256 originalMargin;
@@ -109,8 +109,8 @@ contract PendingOrderReferenceLedger {
         pending.deadline = uint64(timestamp + request.bounds.executionWindowSeconds);
         pending.bountyFree = bountyFree;
         pending.bountyPledge = bountyPledge;
-        pending.bountyUsdc = bountyFree + bountyPledge;
-        pending.remainingBounty = pending.bountyUsdc;
+        pending.bountyAssets = bountyFree + bountyPledge;
+        pending.remainingBounty = pending.bountyAssets;
         pending.sourceGeneration = bountyPledge == 0 ? 0 : generation;
         pending.originalMargin = request.isClose ? 0 : request.marginDelta;
         pending.remainingMargin = pending.originalMargin;

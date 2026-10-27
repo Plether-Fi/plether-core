@@ -21,7 +21,7 @@ contract LiquidityDepthRoundTripTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -44,13 +44,13 @@ contract LiquidityDepthRoundTripTest is BasePerpTest {
 
         _fundTrader(alice, 50_000e6);
         address aliceAccount = alice;
-        uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 aliceBalBefore = clearinghouse.balanceAssets(aliceAccount);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
         router.executeOrder(2, _mockPythUpdateData(1e8));
 
-        usdc.mint(address(pool), 9_000_000e6);
+        settlementToken.mint(address(pool), 9_000_000e6);
         pool.accountExcess();
 
         vm.prank(alice);
@@ -58,7 +58,7 @@ contract LiquidityDepthRoundTripTest is BasePerpTest {
         bytes[] memory closePrice = _mockPythUpdateData(1e8);
         router.executeOrder(3, closePrice);
 
-        uint256 aliceBalAfter = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 aliceBalAfter = clearinghouse.balanceAssets(aliceAccount);
 
         assertLe(aliceBalAfter, aliceBalBefore, "Depth manipulation round-trip must not produce positive PnL");
     }
@@ -75,7 +75,7 @@ contract MarketMakerVpiRoundTripTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -104,7 +104,7 @@ contract MarketMakerVpiRoundTripTest is BasePerpTest {
 
         _close(mmAccount, CfdTypes.Side.LONG, 500_000 * 1e18, 1e8);
 
-        uint256 mmAfter = clearinghouse.balanceUsdc(mmAccount);
+        uint256 mmAfter = clearinghouse.balanceAssets(mmAccount);
         uint256 depositAmount = 500_000 * 1e6;
         uint256 execFeesRoundTrip = ((500_000 * 1e6 * 4) / 10_000) * 2;
 

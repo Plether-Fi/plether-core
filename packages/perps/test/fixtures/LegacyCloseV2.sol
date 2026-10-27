@@ -110,3 +110,32 @@ interface ILegacyClosePolicy {
     ) external view returns (LegacyCloseTypes.ExecutionAssessment memory);
 
 }
+
+// Pinned v1.2.3 getter selectors and returned tuple labels. These interfaces are
+// only for archived deployed-bytecode tests; the current protocol exposes no aliases.
+interface ILegacyCloseClearinghouse {
+
+    struct AccountUsdcBuckets {
+        uint256 settlementBalanceUsdc;
+        uint256 totalLockedMarginUsdc;
+        uint256 activePositionMarginUsdc;
+        uint256 otherLockedMarginUsdc;
+        uint256 freeSettlementUsdc;
+    }
+
+    function balanceUsdc(
+        address account
+    ) external view returns (uint256);
+    function getAccountUsdcBuckets(
+        address account
+    ) external view returns (AccountUsdcBuckets memory);
+
+}
+
+interface ILegacyCloseEngine {
+
+    function positionEntryCostUsdcAtoms(
+        address account
+    ) external view returns (uint256);
+
+}

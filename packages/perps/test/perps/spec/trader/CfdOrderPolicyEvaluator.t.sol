@@ -52,32 +52,32 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         snap.account = ACCOUNT;
         snap.capPrice = 2e8;
         snap.executionFeeBps = 4;
-        snap.poolAssetsUsdc = 1_000_000_000e6;
-        snap.poolCashUsdc = snap.poolAssetsUsdc;
+        snap.poolAssets = 1_000_000_000e6;
+        snap.poolCashAssets = snap.poolAssets;
         snap.position.size = size;
         snap.position.margin = 10_000e6;
         snap.position.entryPrice = entry;
         snap.position.side = CfdTypes.Side.SHORT;
-        snap.position.maxProfitUsdc = size / 1e20 * (snap.capPrice - entry);
-        snap.positionEntryCostUsdcAtoms = size / 1e20 * entry;
+        snap.position.maxProfitAssets = size / 1e20 * (snap.capPrice - entry);
+        snap.positionEntryCostAssetAtoms = size / 1e20 * entry;
         snap.shortSide.openInterest = size;
-        snap.shortSide.maxProfitUsdc = snap.position.maxProfitUsdc;
+        snap.shortSide.maxProfitAssets = snap.position.maxProfitAssets;
         snap.shortSide.totalMargin = snap.position.margin;
-        snap.shortSide.entryNotional = snap.positionEntryCostUsdcAtoms * 1e12;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 10_000e6 + bounty,
-            activePositionMarginUsdc: 10_000e6,
-            totalLockedMarginUsdc: 10_000e6,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: bounty
+        snap.shortSide.entryNotional = snap.positionEntryCostAssetAtoms * 1e12;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: 10_000e6 + bounty,
+            activePositionMarginAssets: 10_000e6,
+            totalLockedMarginAssets: 10_000e6,
+            otherLockedMarginAssets: 0,
+            freeSettlementAssets: bounty
         });
-        snap.lockedBuckets.positionMarginUsdc = 10_000e6;
-        snap.lockedBuckets.totalLockedMarginUsdc = 10_000e6;
+        snap.lockedBuckets.positionMarginAssets = 10_000e6;
+        snap.lockedBuckets.totalLockedMarginAssets = 10_000e6;
         CfdTypes.Order memory order = CfdTypes.Order(ACCOUNT, size, 0, price, 0, 0, 0, CfdTypes.Side.SHORT, true);
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, price);
         assertTrue(delta.valid);
-        assertEq(delta.pricePnlPledgeConsumedUsdc, 10_000e6);
-        assertEq(delta.actionChargeCollectedUsdc, bounty);
+        assertEq(delta.pricePnlPledgeConsumedAssets, 10_000e6);
+        assertEq(delta.actionChargeCollectedAssets, bounty);
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking.selector, 0, bounty
@@ -86,25 +86,25 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         evaluator.evaluateClose(snap, delta, _permissiveBounds(), bounty);
 
         // Same custody and position, complete classification equivalent to locking and recording the bounty.
-        snap.accountBuckets.freeSettlementUsdc = 0;
-        snap.accountBuckets.otherLockedMarginUsdc = bounty;
-        snap.accountBuckets.totalLockedMarginUsdc += bounty;
-        snap.lockedBuckets.totalLockedMarginUsdc += bounty;
-        snap.lockedBuckets.reservedSettlementUsdc = bounty;
-        snap.actionReserveUsdc = bounty;
-        snap.protectedExecutionBountyUsdc = bounty;
+        snap.accountBuckets.freeSettlementAssets = 0;
+        snap.accountBuckets.otherLockedMarginAssets = bounty;
+        snap.accountBuckets.totalLockedMarginAssets += bounty;
+        snap.lockedBuckets.totalLockedMarginAssets += bounty;
+        snap.lockedBuckets.reservedSettlementAssets = bounty;
+        snap.actionReserveAssets = bounty;
+        snap.protectedExecutionBountyAssets = bounty;
         delta = planner.planClose(snap, order, price);
         assertTrue(delta.valid);
-        assertEq(delta.actionChargeCollectedUsdc, 0);
+        assertEq(delta.actionChargeCollectedAssets, 0);
         OrderV3Types.ExecutionAssessment memory assessment =
             evaluator.evaluateClose(snap, delta, _permissiveBounds(), bounty);
-        assertEq(assessment.postSettlementBalanceUsdc, 0);
+        assertEq(assessment.postSettlementBalanceAssets, 0);
     }
 
     function test_OpenBountyUnderfundingHasTypedInvariantError() public {
         CfdEnginePlanTypes.RawSnapshot memory snap = _baseOpenSnapshot();
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
-        snap.accountBuckets.settlementBalanceUsdc = 2e6;
+        snap.accountBuckets.settlementBalanceAssets = 2e6;
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking.selector, 0, BOUNTY
@@ -119,18 +119,18 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.CloseDelta memory delta;
         delta.valid = true;
         delta.deletePosition = true;
-        snap.accountBuckets.settlementBalanceUsdc = BOUNTY - 1;
+        snap.accountBuckets.settlementBalanceAssets = BOUNTY - 1;
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking.selector, BOUNTY - 1, BOUNTY
             )
         );
         harness.evaluateSelfClose(snap, delta, _permissiveBounds(), BOUNTY);
-        snap.accountBuckets.settlementBalanceUsdc = BOUNTY;
+        snap.accountBuckets.settlementBalanceAssets = BOUNTY;
         OrderV3Types.ExecutionAssessment memory assessment =
             harness.evaluateSelfClose(snap, delta, _permissiveBounds(), BOUNTY);
-        assertEq(assessment.postSettlementBalanceUsdc, BOUNTY);
-        assertEq(assessment.grossAccountDebitUsdc, BOUNTY);
+        assertEq(assessment.postSettlementBalanceAssets, BOUNTY);
+        assertEq(assessment.grossAccountDebitAssets, BOUNTY);
     }
 
     function test_AssessOrderUsesReleasedMarginButKeepsBountyProtectedAndHandlesSelfExecution() public {
@@ -153,15 +153,15 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         OrderV3Types.ExecutionAssessment memory selfExecution =
             evaluator.assessOrder(ENGINE, order, ACCOUNT, PRICE, 2_000_000e6, bounds, BOUNTY);
 
-        assertEq(externalExecution.executionNotionalUsdc, 100_000e6);
-        assertEq(externalExecution.grossAccountDebitUsdc, 40e6 + BOUNTY);
-        assertEq(externalExecution.actionChargeAssessedUsdc, 40e6);
-        assertEq(externalExecution.actionChargeCollectedUsdc, 40e6);
-        assertEq(externalExecution.explicitFeesUsdc, 40e6);
-        assertEq(externalExecution.preSettlementBalanceUsdc, 20_000e6);
-        assertEq(externalExecution.postSettlementBalanceUsdc, 20_000e6 - 40e6 - BOUNTY);
-        assertEq(selfExecution.grossAccountDebitUsdc, externalExecution.grossAccountDebitUsdc);
-        assertEq(selfExecution.postSettlementBalanceUsdc, externalExecution.postSettlementBalanceUsdc + BOUNTY);
+        assertEq(externalExecution.executionNotionalAssets, 100_000e6);
+        assertEq(externalExecution.grossAccountDebitAssets, 40e6 + BOUNTY);
+        assertEq(externalExecution.actionChargeAssessedAssets, 40e6);
+        assertEq(externalExecution.actionChargeCollectedAssets, 40e6);
+        assertEq(externalExecution.explicitFeesAssets, 40e6);
+        assertEq(externalExecution.preSettlementBalanceAssets, 20_000e6);
+        assertEq(externalExecution.postSettlementBalanceAssets, 20_000e6 - 40e6 - BOUNTY);
+        assertEq(selfExecution.grossAccountDebitAssets, externalExecution.grossAccountDebitAssets);
+        assertEq(selfExecution.postSettlementBalanceAssets, externalExecution.postSettlementBalanceAssets + BOUNTY);
     }
 
     function test_OpenAssessmentNormalizesEconomicsAndInclusiveBoundsPass() public view {
@@ -169,36 +169,36 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
 
-        bounds.maxExecutionBountyUsdc = BOUNTY;
-        bounds.maxExecutionNotionalUsdc = 100e6;
-        bounds.maxGrossAccountDebitUsdc = 2_250_000;
-        bounds.maxActionChargeUsdc = 2e6;
-        bounds.maxExplicitFeesUsdc = 500_000;
+        bounds.maxExecutionBountyAssets = BOUNTY;
+        bounds.maxExecutionNotionalAssets = 100e6;
+        bounds.maxGrossAccountDebitAssets = 2_250_000;
+        bounds.maxActionChargeAssets = 2e6;
+        bounds.maxExplicitFeesAssets = 500_000;
         bounds.maxPostPositionSize = CfdTypes.SIZE_QUANTUM;
-        bounds.minPostSettlementBalanceUsdc = 497_750_000;
-        bounds.minPostPositionEquityUsdc = 203e6;
+        bounds.minPostSettlementBalanceAssets = 497_750_000;
+        bounds.minPostPositionEquityAssets = 203e6;
         bounds.maxPostLeverageBps = 4927;
 
         OrderV3Types.ExecutionAssessment memory assessment = evaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
 
         assertEq(uint8(assessment.mode), uint8(OrderV3Types.ExecutionMode.Live));
-        assertEq(assessment.executionNotionalUsdc, 100e6);
-        assertEq(assessment.grossAccountDebitUsdc, 2_250_000);
-        assertEq(assessment.actionChargeAssessedUsdc, 2e6);
-        assertEq(assessment.actionChargeCollectedUsdc, 2e6);
-        assertEq(assessment.explicitFeesUsdc, 500_000);
-        assertEq(assessment.preSettlementBalanceUsdc, 500e6);
-        assertEq(assessment.postSettlementBalanceUsdc, 497_750_000);
-        assertEq(assessment.realizedPnlUsdc, 0);
-        assertEq(assessment.vpiUsdc, 1_500_000);
-        assertEq(assessment.carryUsdc, 0);
-        assertEq(assessment.executionFeeUsdc, 500_000);
-        assertEq(assessment.frozenSpreadUsdc, 0);
-        assertEq(assessment.preTraderClaimUsdc, 3e6);
-        assertEq(assessment.postTraderClaimUsdc, 3e6);
+        assertEq(assessment.executionNotionalAssets, 100e6);
+        assertEq(assessment.grossAccountDebitAssets, 2_250_000);
+        assertEq(assessment.actionChargeAssessedAssets, 2e6);
+        assertEq(assessment.actionChargeCollectedAssets, 2e6);
+        assertEq(assessment.explicitFeesAssets, 500_000);
+        assertEq(assessment.preSettlementBalanceAssets, 500e6);
+        assertEq(assessment.postSettlementBalanceAssets, 497_750_000);
+        assertEq(assessment.realizedPnlAssets, 0);
+        assertEq(assessment.vpiAssets, 1_500_000);
+        assertEq(assessment.carryAssets, 0);
+        assertEq(assessment.executionFeeAssets, 500_000);
+        assertEq(assessment.frozenSpreadAssets, 0);
+        assertEq(assessment.preTraderClaimAssets, 3e6);
+        assertEq(assessment.postTraderClaimAssets, 3e6);
         assertEq(assessment.postPositionSize, CfdTypes.SIZE_QUANTUM);
-        assertEq(assessment.postPositionMarginUsdc, 200e6);
-        assertEq(assessment.postPositionEquityUsdc, 203e6);
+        assertEq(assessment.postPositionMarginAssets, 200e6);
+        assertEq(assessment.postPositionEquityAssets, 203e6);
         assertEq(assessment.postLeverageBps, 4927);
     }
 
@@ -207,35 +207,35 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.CloseDelta memory delta = _baseCloseDelta();
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 4;
-        bounds.maxExecutionBountyUsdc = 1e6;
-        bounds.maxExecutionNotionalUsdc = 120e6;
-        bounds.maxGrossAccountDebitUsdc = 27e6;
-        bounds.maxActionChargeUsdc = 6e6;
-        bounds.maxExplicitFeesUsdc = 3e6;
+        bounds.maxExecutionBountyAssets = 1e6;
+        bounds.maxExecutionNotionalAssets = 120e6;
+        bounds.maxGrossAccountDebitAssets = 27e6;
+        bounds.maxActionChargeAssets = 6e6;
+        bounds.maxExplicitFeesAssets = 3e6;
         bounds.maxPostPositionSize = CfdTypes.SIZE_QUANTUM;
-        bounds.minPostSettlementBalanceUsdc = 478e6;
-        bounds.minPostPositionEquityUsdc = 85e6;
+        bounds.minPostSettlementBalanceAssets = 478e6;
+        bounds.minPostPositionEquityAssets = 85e6;
         bounds.maxPostLeverageBps = 14_118;
 
         OrderV3Types.ExecutionAssessment memory assessment = evaluator.evaluateClose(snapshot, delta, bounds, 1e6);
 
         assertEq(uint8(assessment.mode), uint8(OrderV3Types.ExecutionMode.Frozen));
-        assertEq(assessment.executionNotionalUsdc, 120e6);
-        assertEq(assessment.grossAccountDebitUsdc, 27e6);
-        assertEq(assessment.actionChargeAssessedUsdc, 6e6);
-        assertEq(assessment.actionChargeCollectedUsdc, 6e6);
-        assertEq(assessment.explicitFeesUsdc, 3e6);
-        assertEq(assessment.postSettlementBalanceUsdc, 478e6);
-        assertEq(assessment.realizedPnlUsdc, -20e6);
-        assertEq(assessment.vpiUsdc, 2e6);
-        assertEq(assessment.carryUsdc, 1e6);
-        assertEq(assessment.executionFeeUsdc, 2e6);
-        assertEq(assessment.frozenSpreadUsdc, 1e6);
-        assertEq(assessment.preTraderClaimUsdc, 10e6);
-        assertEq(assessment.postTraderClaimUsdc, 5e6);
+        assertEq(assessment.executionNotionalAssets, 120e6);
+        assertEq(assessment.grossAccountDebitAssets, 27e6);
+        assertEq(assessment.actionChargeAssessedAssets, 6e6);
+        assertEq(assessment.actionChargeCollectedAssets, 6e6);
+        assertEq(assessment.explicitFeesAssets, 3e6);
+        assertEq(assessment.postSettlementBalanceAssets, 478e6);
+        assertEq(assessment.realizedPnlAssets, -20e6);
+        assertEq(assessment.vpiAssets, 2e6);
+        assertEq(assessment.carryAssets, 1e6);
+        assertEq(assessment.executionFeeAssets, 2e6);
+        assertEq(assessment.frozenSpreadAssets, 1e6);
+        assertEq(assessment.preTraderClaimAssets, 10e6);
+        assertEq(assessment.postTraderClaimAssets, 5e6);
         assertEq(assessment.postPositionSize, CfdTypes.SIZE_QUANTUM);
-        assertEq(assessment.postPositionMarginUsdc, 100e6);
-        assertEq(assessment.postPositionEquityUsdc, 85e6);
+        assertEq(assessment.postPositionMarginAssets, 100e6);
+        assertEq(assessment.postPositionEquityAssets, 85e6);
         assertEq(assessment.postLeverageBps, 14_118);
     }
 
@@ -247,10 +247,10 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         OrderV3Types.ExecutionAssessment memory assessment =
             evaluator.evaluateClose(snapshot, delta, _permissiveBounds(), 1e6);
 
-        assertEq(assessment.preSettlementBalanceUsdc, 500e6);
-        assertEq(assessment.postSettlementBalanceUsdc, 519e6);
-        assertEq(assessment.preTraderClaimUsdc, 10e6);
-        assertEq(assessment.postTraderClaimUsdc, 10e6);
+        assertEq(assessment.preSettlementBalanceAssets, 500e6);
+        assertEq(assessment.postSettlementBalanceAssets, 519e6);
+        assertEq(assessment.preTraderClaimAssets, 10e6);
+        assertEq(assessment.postTraderClaimAssets, 10e6);
     }
 
     function test_CloseDeferredGainCreatesClaimOnTopOfExistingClaim() public view {
@@ -258,27 +258,27 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.CloseDelta memory delta = _fullCloseGainDelta(snapshot);
         delta.pricePayoutCreatesClaim = true;
         // The planner's legacy diagnostic can remain zero on gain paths; assessment derives claim state canonically.
-        delta.existingTraderClaimRemainingUsdc = 0;
+        delta.existingTraderClaimRemainingAssets = 0;
 
         OrderV3Types.ExecutionAssessment memory assessment =
             evaluator.evaluateClose(snapshot, delta, _permissiveBounds(), 1e6);
 
-        assertEq(assessment.preSettlementBalanceUsdc, 500e6);
-        assertEq(assessment.postSettlementBalanceUsdc, 499e6);
-        assertEq(assessment.preTraderClaimUsdc, 10e6);
-        assertEq(assessment.postTraderClaimUsdc, 30e6);
+        assertEq(assessment.preSettlementBalanceAssets, 500e6);
+        assertEq(assessment.postSettlementBalanceAssets, 499e6);
+        assertEq(assessment.preTraderClaimAssets, 10e6);
+        assertEq(assessment.postTraderClaimAssets, 30e6);
     }
 
     function test_NegativeVpiCannotHideExplicitOpenFee() public {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
-        delta.tradeCostUsdc = -10e6;
+        delta.tradeCostAssets = -10e6;
         delta.posVpiAccruedDelta = -19e6;
-        delta.pendingCarryUsdc = 3e6;
-        delta.executionFeeUsdc = 9e6;
+        delta.pendingCarryAssets = 3e6;
+        delta.executionFeeAssets = 9e6;
 
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
-        bounds.maxExplicitFeesUsdc = 9e6 - 1;
+        bounds.maxExplicitFeesAssets = 9e6 - 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -297,11 +297,11 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.deletePosition = true;
         delta.sizeDelta = snapshot.position.size;
         delta.closeState.remainingSize = 0;
-        delta.actionChargeCollectedUsdc = 0;
+        delta.actionChargeCollectedAssets = 0;
 
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 4;
-        bounds.maxExplicitFeesUsdc = 3e6 - 1;
+        bounds.maxExplicitFeesAssets = 3e6 - 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -319,7 +319,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.CloseDelta memory delta = _baseCloseDelta();
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 4;
-        bounds.maxGrossAccountDebitUsdc = 27e6 - 1;
+        bounds.maxGrossAccountDebitAssets = 27e6 - 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -336,9 +336,9 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
-        bounds.maxExecutionBountyUsdc = 0;
-        bounds.maxExecutionNotionalUsdc = 0;
-        bounds.maxGrossAccountDebitUsdc = 0;
+        bounds.maxExecutionBountyAssets = 0;
+        bounds.maxExecutionNotionalAssets = 0;
+        bounds.maxGrossAccountDebitAssets = 0;
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -355,7 +355,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
-        bounds.minPostSettlementBalanceUsdc = 497_750_001;
+        bounds.minPostSettlementBalanceAssets = 497_750_001;
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -372,7 +372,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
-        bounds.minPostPositionEquityUsdc = 203e6 + 1;
+        bounds.minPostPositionEquityAssets = 203e6 + 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -415,7 +415,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.positionMarginAfterOpen = 0;
 
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
-        bounds.minPostPositionEquityUsdc = 0;
+        bounds.minPostPositionEquityAssets = 0;
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -435,10 +435,10 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.positionMarginAfterOpen = 0;
         delta.posSide = CfdTypes.Side.SHORT;
         delta.newPosEntryPrice = 2 * PRICE;
-        delta.newPosEntryCostUsdcAtoms = 2 * PRICE;
+        delta.newPosEntryCostAssetAtoms = 2 * PRICE;
 
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
-        bounds.minPostPositionEquityUsdc = 0;
+        bounds.minPostPositionEquityAssets = 0;
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -454,16 +454,16 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function test_FreshOpenDoesNotReportOrDebitUnappliedStaleCarry() public view {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
-        delta.pendingCarryUsdc = 99e6;
+        delta.pendingCarryAssets = 99e6;
 
         OrderV3Types.ExecutionAssessment memory assessment =
             evaluator.evaluateOpen(snapshot, delta, _permissiveBounds(), BOUNTY);
 
-        assertEq(assessment.carryUsdc, 0);
-        assertEq(assessment.actionChargeAssessedUsdc, 2e6);
-        assertEq(assessment.actionChargeCollectedUsdc, 2e6);
-        assertEq(assessment.grossAccountDebitUsdc, 2e6 + BOUNTY);
-        assertEq(assessment.postSettlementBalanceUsdc, 500e6 - 2e6 - BOUNTY);
+        assertEq(assessment.carryAssets, 0);
+        assertEq(assessment.actionChargeAssessedAssets, 2e6);
+        assertEq(assessment.actionChargeCollectedAssets, 2e6);
+        assertEq(assessment.grossAccountDebitAssets, 2e6 + BOUNTY);
+        assertEq(assessment.postSettlementBalanceAssets, 500e6 - 2e6 - BOUNTY);
     }
 
     function test_IncreaseReportsCarryActuallyRealizedBeforeOpenCost() public view {
@@ -471,20 +471,20 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         snapshot.position.size = CfdTypes.SIZE_QUANTUM;
         snapshot.position.entryPrice = PRICE;
         snapshot.position.side = CfdTypes.Side.SHORT;
-        snapshot.positionEntryCostUsdcAtoms = PRICE;
+        snapshot.positionEntryCostAssetAtoms = PRICE;
 
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         delta.newPosSize = 2 * CfdTypes.SIZE_QUANTUM;
-        delta.newPosEntryCostUsdcAtoms = 2 * PRICE;
+        delta.newPosEntryCostAssetAtoms = 2 * PRICE;
 
         OrderV3Types.ExecutionAssessment memory assessment =
             evaluator.evaluateOpen(snapshot, delta, _permissiveBounds(), BOUNTY);
 
-        assertEq(assessment.carryUsdc, 1e6);
-        assertEq(assessment.actionChargeAssessedUsdc, 3e6);
-        assertEq(assessment.actionChargeCollectedUsdc, 3e6);
-        assertEq(assessment.grossAccountDebitUsdc, 3e6 + BOUNTY);
-        assertEq(assessment.postSettlementBalanceUsdc, 500e6 - 3e6 - BOUNTY);
+        assertEq(assessment.carryAssets, 1e6);
+        assertEq(assessment.actionChargeAssessedAssets, 3e6);
+        assertEq(assessment.actionChargeCollectedAssets, 3e6);
+        assertEq(assessment.grossAccountDebitAssets, 3e6 + BOUNTY);
+        assertEq(assessment.postSettlementBalanceAssets, 500e6 - 3e6 - BOUNTY);
     }
 
     function test_FullCloseSkipsPositionEquityAndLeverageFloors() public view {
@@ -495,17 +495,17 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.closeState.remainingSize = 0;
         delta.posMarginAfter = 0;
         delta.posEntryPriceAfter = 0;
-        delta.posEntryCostAfterUsdcAtoms = 0;
+        delta.posEntryCostAfterAssetAtoms = 0;
 
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 4;
         bounds.maxPostPositionSize = 0;
-        bounds.minPostPositionEquityUsdc = type(uint256).max;
+        bounds.minPostPositionEquityAssets = type(uint256).max;
         bounds.maxPostLeverageBps = 0;
 
         OrderV3Types.ExecutionAssessment memory assessment = evaluator.evaluateClose(snapshot, delta, bounds, 1e6);
         assertEq(assessment.postPositionSize, 0);
-        assertEq(assessment.postPositionEquityUsdc, 0);
+        assertEq(assessment.postPositionEquityAssets, 0);
         assertEq(assessment.postLeverageBps, 0);
     }
 
@@ -571,23 +571,23 @@ contract CfdOrderPolicyEvaluatorTest is Test {
 
     function _baseOpenSnapshot() private pure returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
         snapshot.account = address(0xA11CE);
-        snapshot.accountBuckets.settlementBalanceUsdc = 500e6;
+        snapshot.accountBuckets.settlementBalanceAssets = 500e6;
         snapshot.traderClaimBalanceForAccount = 3e6;
         snapshot.capPrice = 2e8;
     }
 
     function _baseOpenDelta() private pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         delta.valid = true;
-        delta.openState.notionalUsdc = 100e6;
+        delta.openState.notionalAssets = 100e6;
         delta.posSide = CfdTypes.Side.SHORT;
         delta.newPosSize = CfdTypes.SIZE_QUANTUM;
         delta.newPosEntryPrice = PRICE;
-        delta.newPosEntryCostUsdcAtoms = PRICE;
+        delta.newPosEntryCostAssetAtoms = PRICE;
         delta.posVpiAccruedDelta = 1_500_000;
         delta.positionMarginAfterOpen = 200e6;
-        delta.tradeCostUsdc = 2e6;
-        delta.executionFeeUsdc = 500_000;
-        delta.pendingCarryUsdc = 1e6;
+        delta.tradeCostAssets = 2e6;
+        delta.executionFeeAssets = 500_000;
+        delta.pendingCarryAssets = 1e6;
         delta.sizeDelta = CfdTypes.SIZE_QUANTUM;
         delta.price = PRICE;
     }
@@ -598,8 +598,8 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         snapshot.position.margin = 300e6;
         snapshot.position.entryPrice = PRICE;
         snapshot.position.side = CfdTypes.Side.LONG;
-        snapshot.positionEntryCostUsdcAtoms = 2 * PRICE;
-        snapshot.accountBuckets.settlementBalanceUsdc = 500e6;
+        snapshot.positionEntryCostAssetAtoms = 2 * PRICE;
+        snapshot.accountBuckets.settlementBalanceAssets = 500e6;
         snapshot.traderClaimBalanceForAccount = 10e6;
         snapshot.capPrice = 2e8;
         snapshot.oracleFrozen = true;
@@ -608,21 +608,21 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function _baseCloseDelta() private pure returns (CfdEnginePlanTypes.CloseDelta memory delta) {
         delta.valid = true;
         delta.closeState.remainingSize = CfdTypes.SIZE_QUANTUM;
-        delta.closeState.vpiDeltaUsdc = 2e6;
-        delta.closeState.executionFeeUsdc = 2e6;
-        delta.closeState.frozenSpreadUsdc = 1e6;
+        delta.closeState.vpiDeltaAssets = 2e6;
+        delta.closeState.executionFeeAssets = 2e6;
+        delta.closeState.frozenSpreadAssets = 1e6;
         delta.posMarginAfter = 100e6;
         delta.posEntryPriceAfter = PRICE;
-        delta.posEntryCostAfterUsdcAtoms = PRICE;
-        delta.pricePnlClaimConsumedUsdc = 5e6;
-        delta.pricePnlPledgeConsumedUsdc = 15e6;
-        delta.actionChargeAssessedUsdc = 6e6;
-        delta.actionChargeCollectedUsdc = 6e6;
-        delta.existingTraderClaimRemainingUsdc = 5e6;
-        delta.pendingCarryUsdc = 1e6;
+        delta.posEntryCostAfterAssetAtoms = PRICE;
+        delta.pricePnlClaimConsumedAssets = 5e6;
+        delta.pricePnlPledgeConsumedAssets = 15e6;
+        delta.actionChargeAssessedAssets = 6e6;
+        delta.actionChargeCollectedAssets = 6e6;
+        delta.existingTraderClaimRemainingAssets = 5e6;
+        delta.pendingCarryAssets = 1e6;
         delta.sizeDelta = CfdTypes.SIZE_QUANTUM;
         delta.price = 120_000_000;
-        delta.realizedPnlUsdc = -20e6;
+        delta.realizedPnlAssets = -20e6;
     }
 
     function _fullCloseGainDelta(
@@ -632,17 +632,17 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.deletePosition = true;
         delta.sizeDelta = snapshot.position.size;
         delta.price = 120_000_000;
-        delta.realizedPnlUsdc = 20e6;
-        delta.pricePayoutUsdc = 20e6;
+        delta.realizedPnlAssets = 20e6;
+        delta.pricePayoutAssets = 20e6;
     }
 
     function _permissiveBounds() private pure returns (OrderV3Types.ExecutionBounds memory bounds) {
         bounds.allowedExecutionModes = 7;
-        bounds.maxExecutionBountyUsdc = type(uint256).max;
-        bounds.maxExecutionNotionalUsdc = type(uint256).max;
-        bounds.maxGrossAccountDebitUsdc = type(uint256).max;
-        bounds.maxActionChargeUsdc = type(uint256).max;
-        bounds.maxExplicitFeesUsdc = type(uint256).max;
+        bounds.maxExecutionBountyAssets = type(uint256).max;
+        bounds.maxExecutionNotionalAssets = type(uint256).max;
+        bounds.maxGrossAccountDebitAssets = type(uint256).max;
+        bounds.maxActionChargeAssets = type(uint256).max;
+        bounds.maxExplicitFeesAssets = type(uint256).max;
         bounds.maxPostPositionSize = type(uint256).max;
         bounds.maxPostLeverageBps = type(uint32).max;
     }
@@ -657,7 +657,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
             abi.encodeWithSignature("positions(address)", ACCOUNT),
             abi.encode(uint256(0), uint256(0), uint256(0), uint256(0), CfdTypes.Side.LONG, uint64(0), int256(0))
         );
-        vm.mockCall(ENGINE, abi.encodeWithSignature("positionEntryCostUsdcAtoms(address)", ACCOUNT), abi.encode(0));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("positionEntryCostAssetAtoms(address)", ACCOUNT), abi.encode(0));
         vm.mockCall(
             ENGINE,
             abi.encodeWithSignature("positionCarryState(address)", ACCOUNT),
@@ -673,7 +673,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
                 abi.encodeWithSignature("sides(uint256)", side),
                 abi.encode(uint256(0), uint256(0), uint256(0), uint256(0))
             );
-            vm.mockCall(ENGINE, abi.encodeWithSignature("sideBorrowBaseUsdc(uint256)", side), abi.encode(0));
+            vm.mockCall(ENGINE, abi.encodeWithSignature("sideBorrowBaseAssets(uint256)", side), abi.encode(0));
             vm.mockCall(ENGINE, abi.encodeWithSignature("sideCarryIndex(uint256)", side), abi.encode(0));
             vm.mockCall(
                 ENGINE,
@@ -684,36 +684,38 @@ contract CfdOrderPolicyEvaluatorTest is Test {
 
         vm.mockCall(POOL, abi.encodeWithSignature("totalAssets()"), abi.encode(2_000_000e6));
         // Funded LP principals with no pending or unassigned reserves in this bounty-accounting scenario.
-        vm.mockCall(POOL, abi.encodeWithSignature("pendingRecapitalizationUsdc()"), abi.encode(0));
-        vm.mockCall(POOL, abi.encodeWithSignature("pendingTradingRevenueUsdc()"), abi.encode(0));
+        vm.mockCall(POOL, abi.encodeWithSignature("pendingRecapitalizationAssets()"), abi.encode(0));
+        vm.mockCall(POOL, abi.encodeWithSignature("pendingTradingRevenueAssets()"), abi.encode(0));
         vm.mockCall(POOL, abi.encodeWithSignature("unassignedAssets()"), abi.encode(0));
         vm.mockCall(POOL, abi.encodeWithSignature("seniorPrincipal()"), abi.encode(1_000_000e6));
         vm.mockCall(POOL, abi.encodeWithSignature("juniorPrincipal()"), abi.encode(1_000_000e6));
 
         IMarginClearinghouse.PnlIsolationBuckets memory buckets = IMarginClearinghouse.PnlIsolationBuckets({
-            settlementBalanceUsdc: 20_000e6,
-            pnlPledgeUsdc: 0,
-            liquidationReserveUsdc: 0,
-            orderMarginUsdc: 0,
-            actionReserveUsdc: BOUNTY,
-            vpiRebateReserveUsdc: 0,
-            totalLockedUsdc: BOUNTY,
-            freeSettlementUsdc: 20_000e6 - BOUNTY
+            settlementBalanceAssets: 20_000e6,
+            pnlPledgeAssets: 0,
+            liquidationReserveAssets: 0,
+            orderMarginAssets: 0,
+            actionReserveAssets: BOUNTY,
+            vpiRebateReserveAssets: 0,
+            totalLockedAssets: BOUNTY,
+            freeSettlementAssets: 20_000e6 - BOUNTY
         });
         vm.mockCall(
             CLEARINGHOUSE, abi.encodeWithSignature("getPnlIsolationBuckets(address)", ACCOUNT), abi.encode(buckets)
         );
 
         vm.mockCall(
-            CLEARINGHOUSE, abi.encodeWithSignature("totalBountyReservationsUsdc(address)", ACCOUNT), abi.encode(BOUNTY)
+            CLEARINGHOUSE,
+            abi.encodeWithSignature("totalBountyReservationsAssets(address)", ACCOUNT),
+            abi.encode(BOUNTY)
         );
         vm.mockCallRevert(
             ROUTER, abi.encodeWithSignature("getAccountReservations(address)", ACCOUNT), "not an accounting authority"
         );
 
-        vm.mockCall(ENGINE, abi.encodeWithSignature("unsettledCarryUsdc(address)", ACCOUNT), abi.encode(0));
-        vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceUsdc()"), abi.encode(0));
-        vm.mockCall(ENGINE, abi.encodeWithSignature("traderClaimBalanceUsdc(address)", ACCOUNT), abi.encode(0));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("unsettledCarryAssets(address)", ACCOUNT), abi.encode(0));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceAssets()"), abi.encode(0));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("traderClaimBalanceAssets(address)", ACCOUNT), abi.encode(0));
         vm.mockCall(ENGINE, abi.encodeWithSignature("degradedMode()"), abi.encode(false));
         vm.mockCall(ENGINE, abi.encodeWithSignature("CAP_PRICE()"), abi.encode(2e8));
         vm.mockCall(ENGINE, abi.encodeWithSignature("executionFeeBps()"), abi.encode(4));
@@ -731,7 +733,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
             initMarginBps: 150,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0

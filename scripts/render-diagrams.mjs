@@ -239,7 +239,7 @@ const trancheWaterfall = `graph TD
     D -->|distributable < claimedEquity| L1[1 · Junior Absorbs First Loss]
     L1 -->|Junior wiped| L2[2 · Senior Absorbs Last Loss]
 
-    T -.- TD>distributable = USDC balance − pending fees − unrealized trader gains]
+    T -.- TD>distributable = asset balance − pending fees − unrealized trader gains]
     R3 -.- RD>Senior protected: principal and yield paid before junior sees revenue]
     L2 -.- LD>Junior subordinated: fully wiped before senior takes any impairment]
 
@@ -308,11 +308,11 @@ const perpsLpWithdrawalAvailability = `graph TD
     G2 -->|Yes| G3{Fresh mark required and available?}
     G3 -->|No| B3([Blocked: stale mark])
     G3 -->|Yes| SNAP[Build withdrawal snapshot]
-    SNAP --> RES[Reserved USDC]
+    SNAP --> RES[Reserved assets]
     RES --> RES2[max directional liability + trader claims + supplemental reserve]
     RES2 -.- RESN>excludes carry and VPI reserves plus protocol fees]
-    RES2 --> FREE[Free USDC]
-    FREE --> FREE2[net physical assets minus reserved USDC]
+    RES2 --> FREE[Free assets]
+    FREE --> FREE2[net physical assets minus reserved assets]
     FREE2 --> CAP[Cap by tranche priority]
     CAP --> CAP2[senior first, junior subordinated]
     CAP2 --> OUT([Withdrawable Amount])

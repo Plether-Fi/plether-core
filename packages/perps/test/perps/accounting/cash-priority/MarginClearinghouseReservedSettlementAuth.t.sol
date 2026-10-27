@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract ReservedSettlementAuthEngineMock {
@@ -54,21 +54,21 @@ contract MarginClearinghouseReservedSettlementAuthTest is Test {
     address internal constant SETTLEMENT_SIDECAR = address(0x51DECA2);
     address internal constant STRANGER = address(0xBAD);
 
-    MockUSDC internal usdc;
+    MockSettlementToken internal settlementToken;
     MarginClearinghouse internal clearinghouse;
     ReservedSettlementAuthEngineMock internal engine;
     ReservedSettlementAuthRouterMock internal orderRouter;
 
     function setUp() public {
-        usdc = new MockUSDC();
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        settlementToken = new MockSettlementToken();
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         orderRouter = new ReservedSettlementAuthRouterMock(POSITION_PROTECTION_BOOK);
         engine = new ReservedSettlementAuthEngineMock(address(orderRouter), SETTLEMENT_SIDECAR);
         clearinghouse.setEngine(address(engine));
 
-        usdc.mint(ACCOUNT, 1000e6);
+        settlementToken.mint(ACCOUNT, 1000e6);
         vm.startPrank(ACCOUNT);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(ACCOUNT, 1000e6);
         vm.stopPrank();
     }
@@ -81,8 +81,8 @@ contract MarginClearinghouseReservedSettlementAuthTest is Test {
         clearinghouse.unlockReservedSettlement(ACCOUNT, 200e6);
 
         IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(ACCOUNT);
-        assertEq(buckets.reservedSettlementUsdc, 0, "router should unlock the exact reserved amount");
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(ACCOUNT), 1000e6, "unlocked settlement should become free");
+        assertEq(buckets.reservedSettlementAssets, 0, "router should unlock the exact reserved amount");
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(ACCOUNT), 1000e6, "unlocked settlement should become free");
         assertEq(engine.carryCheckpointCalls(), checkpointsBefore + 1, "unlock should checkpoint carry exactly once");
         assertEq(engine.lastCarryAccount(), ACCOUNT, "unlock should checkpoint the affected account");
     }
@@ -91,7 +91,7 @@ contract MarginClearinghouseReservedSettlementAuthTest is Test {
         vm.prank(POSITION_PROTECTION_BOOK);
         clearinghouse.lockReservedSettlement(ACCOUNT, 200e6);
         assertEq(
-            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementAssets,
             200e6,
             "immutable Book should lock reserved settlement"
         );
@@ -99,7 +99,7 @@ contract MarginClearinghouseReservedSettlementAuthTest is Test {
         vm.prank(POSITION_PROTECTION_BOOK);
         clearinghouse.unlockReservedSettlement(ACCOUNT, 200e6);
         assertEq(
-            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementAssets,
             0,
             "immutable Book should unlock its exact reservation"
         );
@@ -111,7 +111,7 @@ contract MarginClearinghouseReservedSettlementAuthTest is Test {
         clearinghouse.lockReservedSettlement(ACCOUNT, 200e6);
 
         assertEq(
-            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementAssets,
             0,
             "sidecar must not gain new lock authority"
         );
@@ -126,7 +126,7 @@ contract MarginClearinghouseReservedSettlementAuthTest is Test {
         clearinghouse.unlockReservedSettlement(ACCOUNT, 200e6);
 
         assertEq(
-            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementAssets,
             0,
             "engine and sidecar should retain unlock authority"
         );
@@ -140,7 +140,7 @@ contract MarginClearinghouseReservedSettlementAuthTest is Test {
         clearinghouse.unlockReservedSettlement(ACCOUNT, 200e6);
 
         assertEq(
-            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementAssets,
             200e6,
             "unauthorized unlock must preserve reservation"
         );
@@ -154,17 +154,17 @@ contract MarginClearinghouseReservedSettlementAuthTest is Test {
         clearinghouse.unlockReservedSettlement(ACCOUNT, 201e6);
 
         assertEq(
-            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementAssets,
             200e6,
             "failed exact unlock must roll back"
         );
     }
 
     function _lockFromRouter(
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
         vm.prank(address(orderRouter));
-        clearinghouse.lockReservedSettlement(ACCOUNT, amountUsdc);
+        clearinghouse.lockReservedSettlement(ACCOUNT, amountAssets);
     }
 
 }

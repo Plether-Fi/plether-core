@@ -56,9 +56,9 @@ contract PerpsPublicLensDepositCooldownTest is BasePerpTest {
 
     function test_GetLpDepositCooldownState_TracksActivationAndEligibility() public {
         uint256 assets = 25_000e6;
-        usdc.mint(DEPOSITOR, assets);
+        settlementToken.mint(DEPOSITOR, assets);
         vm.startPrank(DEPOSITOR);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         uint256 requestId = juniorVault.requestDeposit(assets, DEPOSITOR, DEPOSITOR);
         vm.stopPrank();
 

@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {RecordedOrderReceipts} from "../../../utils/RecordedOrderReceipts.sol";
 import {PerpAccountingHandler} from "../handlers/PerpAccountingHandler.sol";
 import {CfdEngineHarness} from "../mocks/CfdEngineHarness.sol";
@@ -23,20 +24,19 @@ import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
 
     struct ResidualPriceRisk {
         uint256 size;
-        uint256 entryCostUsdc;
-        uint256 notionalUsdc;
-        int256 pnlUsdc;
-        int256 equityUsdc;
-        uint256 requiredUsdc;
+        uint256 entryCostAssets;
+        uint256 notionalAssets;
+        int256 pnlAssets;
+        int256 equityAssets;
+        uint256 requiredAssets;
     }
 
-    MockUSDC internal usdc;
+    MockSettlementToken internal settlementToken;
     CfdEngineHarness internal harness;
     CfdEngine internal engine;
     CfdEngineLens internal engineLens;
@@ -50,10 +50,10 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
     uint256 internal constant CAP_PRICE = 2e8;
 
     function setUp() public {
-        usdc = new MockUSDC();
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        settlementToken = new MockSettlementToken();
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
 
-        harness = new CfdEngineHarness(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 50);
+        harness = new CfdEngineHarness(address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), 50);
         engine = harness;
         engine.setDependencies(
             address(new CfdEnginePlanner()),
@@ -63,7 +63,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(CAP_PRICE))));
         engineLens = new CfdEngineLens(address(engine));
 
-        housePool = new MockInvariantHousePool(address(usdc), address(engine));
+        housePool = new MockInvariantHousePool(address(settlementToken), address(engine));
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
         mockPyth.setPrice(bytes32(uint256(1)), int64(100_000_000), int32(-8), uint64(SETUP_TIMESTAMP));
@@ -104,7 +104,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         updateData[0] = hex"00";
         router.updateMarkPrice(updateData);
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
+        handler = new PerpAccountingHandler(settlementToken, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 50_000e6);
 
         bytes4[] memory selectors = new bytes4[](9);
@@ -143,7 +143,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         handler.drainHousePool(99_733_018);
         handler.executeNextOrderBatch(1);
         assertEq(uint8(router.lifecycleBook().lifecycleStatus(2)), uint8(OrderV3Types.LifecycleStatus.Executed));
-        assertEq(engine.traderClaimBalanceUsdc(account), 12_097_368_296);
+        assertEq(engine.traderClaimBalanceAssets(account), 12_097_368_296);
         handler.fundHousePool(221_020_557_746);
         handler.commitOpenOrder(1, 0, 79, 11e6, 100_007_201);
         handler.executeNextOrderBatch(1);
@@ -151,7 +151,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         (uint256 size, uint256 pledge,,,,,) = engine.positions(account);
         assertEq(size, 7900e18);
         assertEq(pledge, 729_262);
-        assertEq(clearinghouse.liquidationReserveUsdc(account), 7_110_511);
+        assertEq(clearinghouse.liquidationReserveAssets(account), 7_110_511);
         ICfdEngineTypes.ClosePreview memory oneLot =
             engineLens.previewClose(account, CfdTypes.SIZE_QUANTUM, 100_007_201);
         assertTrue(oneLot.valid);
@@ -175,14 +175,14 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         assertTrue(preview.valid, "Claim-backed residual must be executable");
         assertLt(preview.remainingMargin, 1e6);
         ResidualPriceRisk memory expected = _independentResidualPriceRisk(
-            account, closeSize, preview.remainingMargin, preview.traderClaimBalanceUsdc, price
+            account, closeSize, preview.remainingMargin, preview.traderClaimBalanceAssets, price
         );
         assertLe(
-            int256(preview.remainingMargin) + expected.pnlUsdc,
-            int256(expected.requiredUsdc),
+            int256(preview.remainingMargin) + expected.pnlAssets,
+            int256(expected.requiredAssets),
             "Pledge and PnL alone do not satisfy this fixture's residual requirement"
         );
-        assertGt(expected.equityUsdc, int256(expected.requiredUsdc), "Same-account claims provide required backing");
+        assertGt(expected.equityAssets, int256(expected.requiredAssets), "Same-account claims provide required backing");
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = abi.encode(price);
         _startRecordingLogs();
@@ -193,15 +193,15 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         (uint256 remainingSize, uint256 remainingPledge,,,,,) = engine.positions(account);
         assertEq(remainingSize, expected.size);
         assertEq(remainingPledge, preview.remainingMargin);
-        assertEq(engine.traderClaimBalanceUsdc(account), preview.traderClaimBalanceUsdc);
-        assertEq(engine.positionEntryCostUsdcAtoms(account), expected.entryCostUsdc);
-        assertEq(clearinghouse.liquidationReserveUsdc(account), expected.notionalUsdc * 9 / 10_000);
+        assertEq(engine.traderClaimBalanceAssets(account), preview.traderClaimBalanceAssets);
+        assertEq(engine.positionEntryCostAssetAtoms(account), expected.entryCostAssets);
+        assertEq(clearinghouse.liquidationReserveAssets(account), expected.notionalAssets * 9 / 10_000);
         _assertAllInvariants();
     }
 
     function _assertInvariant_ValidPartialClosePreservesExactResidualHealth() internal view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyAssets,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -209,7 +209,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
             if (size < 2 * CfdTypes.SIZE_QUANTUM) {
                 continue;
             }
-            uint256[3] memory fractions = _closeFractions(size, margin, minBountyUsdc);
+            uint256[3] memory fractions = _closeFractions(size, margin, minBountyAssets);
             for (uint256 f = 0; f < 3; f++) {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
@@ -233,46 +233,46 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
             return;
         }
         ResidualPriceRisk memory risk = _independentResidualPriceRisk(
-            account, closeSize, preview.remainingMargin, preview.traderClaimBalanceUsdc, oraclePrice
+            account, closeSize, preview.remainingMargin, preview.traderClaimBalanceAssets, oraclePrice
         );
         assertEq(preview.remainingSize, risk.size, "Partial preview must retain the unclosed whole lots");
         assertGt(
-            risk.equityUsdc,
-            int256(risk.requiredUsdc),
+            risk.equityAssets,
+            int256(risk.requiredAssets),
             "Residual pledge plus same-account claims and exact price PnL must exceed required margin"
         );
     }
 
     /// @dev Independent integer specification: preserve basis dust, cap the mark, and floor the active requirement.
     ///      Pledge is already after carry/action settlement. Dedicated liquidation/VPI reserves and free cash do not
-    ///      increase price-risk equity, and minBountyUsdc is not a minimum pledge requirement.
+    ///      increase price-risk equity, and minBountyAssets is not a minimum pledge requirement.
     function _independentResidualPriceRisk(
         address account,
         uint256 closeSize,
-        uint256 remainingPledgeUsdc,
-        uint256 remainingClaimsUsdc,
+        uint256 remainingPledgeAssets,
+        uint256 remainingClaimsAssets,
         uint256 oraclePrice
     ) internal view returns (ResidualPriceRisk memory risk) {
         (uint256 oldSize,,,, CfdTypes.Side side,,) = engine.positions(account);
-        uint256 oldEntryCost = engine.positionEntryCostUsdcAtoms(account);
+        uint256 oldEntryCost = engine.positionEntryCostAssetAtoms(account);
         uint256 oldLots = oldSize / CfdTypes.SIZE_QUANTUM;
         uint256 closedLots = closeSize / CfdTypes.SIZE_QUANTUM;
         risk.size = oldSize - closeSize;
-        risk.entryCostUsdc = oldEntryCost - oldEntryCost * closedLots / oldLots;
+        risk.entryCostAssets = oldEntryCost - oldEntryCost * closedLots / oldLots;
         uint256 cappedPrice = oraclePrice > CAP_PRICE ? CAP_PRICE : oraclePrice;
-        risk.notionalUsdc = (oldLots - closedLots) * cappedPrice;
-        risk.pnlUsdc = side == CfdTypes.Side.LONG
-            ? int256(risk.entryCostUsdc) - int256(risk.notionalUsdc)
-            : int256(risk.notionalUsdc) - int256(risk.entryCostUsdc);
-        risk.equityUsdc = int256(remainingPledgeUsdc) + int256(remainingClaimsUsdc) + risk.pnlUsdc;
+        risk.notionalAssets = (oldLots - closedLots) * cappedPrice;
+        risk.pnlAssets = side == CfdTypes.Side.LONG
+            ? int256(risk.entryCostAssets) - int256(risk.notionalAssets)
+            : int256(risk.notionalAssets) - int256(risk.entryCostAssets);
+        risk.equityAssets = int256(remainingPledgeAssets) + int256(remainingClaimsAssets) + risk.pnlAssets;
         (,, uint256 maintenanceBps,, uint256 fadBps,,,,,) = engine.riskParams();
-        risk.requiredUsdc = risk.notionalUsdc * (engine.isFadWindow() ? fadBps : maintenanceBps) / 10_000;
+        risk.requiredAssets = risk.notionalAssets * (engine.isFadWindow() ? fadBps : maintenanceBps) / 10_000;
     }
 
     function _assertInvariant_PreviewClose_EqualsSimulateCloseAtCanonicalDepth() internal view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 canonicalDepth = housePool.totalAssets();
-        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyAssets,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -290,7 +290,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
                 continue;
             }
 
-            uint256[3] memory fractions = _closeFractions(size, margin, minBountyUsdc);
+            uint256[3] memory fractions = _closeFractions(size, margin, minBountyAssets);
             for (uint256 f = 0; f < 3; f++) {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
@@ -306,7 +306,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
 
     function _assertInvariant_SampledPartialClosePreviewsDoNotRevert() internal view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyAssets,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -315,7 +315,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
                 continue;
             }
 
-            uint256[3] memory fractions = _closeFractions(size, margin, minBountyUsdc);
+            uint256[3] memory fractions = _closeFractions(size, margin, minBountyAssets);
             for (uint256 f = 0; f < 3; f++) {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
@@ -327,7 +327,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
 
     function _assertInvariant_PartialCloseInvalidOnlyForFundingOrHealth() internal view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyAssets,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -341,7 +341,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
                 continue;
             }
 
-            uint256[3] memory fractions = _closeFractions(size, margin, minBountyUsdc);
+            uint256[3] memory fractions = _closeFractions(size, margin, minBountyAssets);
             for (uint256 f = 0; f < 3; f++) {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
@@ -364,7 +364,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
 
     function _assertInvariant_ImmediateOrTraderClaimSplitMatchesFreshPayout() internal view {
         uint256 oraclePrice = _previewOraclePrice();
-        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyAssets,,,) = engine.riskParams();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -379,7 +379,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
                 continue;
             }
 
-            uint256[3] memory fractions = _closeFractions(size, margin, minBountyUsdc);
+            uint256[3] memory fractions = _closeFractions(size, margin, minBountyAssets);
             for (uint256 f = 0; f < 3; f++) {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
@@ -401,28 +401,28 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         }
 
         assertGe(
-            preview.traderClaimBalanceUsdc,
-            preview.existingTraderClaimRemainingUsdc,
+            preview.traderClaimBalanceAssets,
+            preview.existingTraderClaimRemainingAssets,
             "Resulting trader claim must include the unconsumed existing claim"
         );
-        uint256 freshTraderClaimUsdc = preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc;
-        assertEq(preview.deferredPayoutUsdc, freshTraderClaimUsdc, "Deferred payout must exclude old claims");
+        uint256 freshTraderClaimAssets = preview.traderClaimBalanceAssets - preview.existingTraderClaimRemainingAssets;
+        assertEq(preview.deferredPayoutAssets, freshTraderClaimAssets, "Deferred payout must exclude old claims");
         assertEq(
-            preview.immediatePayoutUsdc,
-            preview.payoutToPnlPledgeUsdc + preview.payoutToFreeSettlementUsdc,
+            preview.immediatePayoutAssets,
+            preview.payoutToPnlPledgeAssets + preview.payoutToFreeSettlementAssets,
             "Paid cash must be partitioned by destination"
         );
         if (preview.remainingSize == 0) {
-            assertEq(preview.payoutToPnlPledgeUsdc, 0, "Full close cannot pledge fresh payout");
+            assertEq(preview.payoutToPnlPledgeAssets, 0, "Full close cannot pledge fresh payout");
         }
         assertEq(
-            preview.immediatePayoutUsdc + freshTraderClaimUsdc,
-            preview.freshTraderPayoutUsdc,
+            preview.immediatePayoutAssets + freshTraderClaimAssets,
+            preview.freshTraderPayoutAssets,
             "Fresh payout must settle immediately or become a new trader claim"
         );
-        if (preview.freshTraderPayoutUsdc > 0) {
+        if (preview.freshTraderPayoutAssets > 0) {
             assertTrue(
-                (preview.immediatePayoutUsdc > 0) != (freshTraderClaimUsdc > 0),
+                (preview.immediatePayoutAssets > 0) != (freshTraderClaimAssets > 0),
                 "Fresh payout settlement modes must be mutually exclusive"
             );
         }
@@ -436,48 +436,54 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         assertEq(uint8(actual.invalidReason), uint8(expected.invalidReason), "Close invalid reason should match");
         assertEq(actual.executionPrice, expected.executionPrice, "Close execution price should match");
         assertEq(actual.sizeDelta, expected.sizeDelta, "Close size delta should match");
-        assertEq(actual.realizedPnlUsdc, expected.realizedPnlUsdc, "Close realized pnl should match");
-        assertEq(actual.vpiDeltaUsdc, expected.vpiDeltaUsdc, "Close VPI delta should match");
-        assertEq(actual.vpiUsdc, expected.vpiUsdc, "Close VPI should match");
-        assertEq(actual.executionFeeUsdc, expected.executionFeeUsdc, "Close execution fee should match");
-        assertEq(actual.frozenSpreadUsdc, expected.frozenSpreadUsdc, "Close assessed frozen spread should match");
-        assertEq(actual.frozenSpreadPaidUsdc, expected.frozenSpreadPaidUsdc, "Close paid frozen spread should match");
+        assertEq(actual.realizedPnlAssets, expected.realizedPnlAssets, "Close realized pnl should match");
+        assertEq(actual.vpiDeltaAssets, expected.vpiDeltaAssets, "Close VPI delta should match");
+        assertEq(actual.vpiAssets, expected.vpiAssets, "Close VPI should match");
+        assertEq(actual.executionFeeAssets, expected.executionFeeAssets, "Close execution fee should match");
+        assertEq(actual.frozenSpreadAssets, expected.frozenSpreadAssets, "Close assessed frozen spread should match");
         assertEq(
-            actual.frozenSpreadWaivedUsdc, expected.frozenSpreadWaivedUsdc, "Close waived frozen spread should match"
+            actual.frozenSpreadPaidAssets, expected.frozenSpreadPaidAssets, "Close paid frozen spread should match"
         );
-        assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Close fresh payout should match");
         assertEq(
-            actual.existingTraderClaimConsumedUsdc,
-            expected.existingTraderClaimConsumedUsdc,
+            actual.frozenSpreadWaivedAssets,
+            expected.frozenSpreadWaivedAssets,
+            "Close waived frozen spread should match"
+        );
+        assertEq(actual.freshTraderPayoutAssets, expected.freshTraderPayoutAssets, "Close fresh payout should match");
+        assertEq(
+            actual.existingTraderClaimConsumedAssets,
+            expected.existingTraderClaimConsumedAssets,
             "Close trader claim consumption should match"
         );
         assertEq(
-            actual.existingTraderClaimRemainingUsdc,
-            expected.existingTraderClaimRemainingUsdc,
+            actual.existingTraderClaimRemainingAssets,
+            expected.existingTraderClaimRemainingAssets,
             "Close trader claim remainder should match"
         );
-        assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
-        assertEq(actual.payoutToPnlPledgeUsdc, expected.payoutToPnlPledgeUsdc, "Close pledged payout should match");
+        assertEq(actual.immediatePayoutAssets, expected.immediatePayoutAssets, "Close immediate payout should match");
+        assertEq(actual.payoutToPnlPledgeAssets, expected.payoutToPnlPledgeAssets, "Close pledged payout should match");
         assertEq(
-            actual.payoutToFreeSettlementUsdc, expected.payoutToFreeSettlementUsdc, "Close free payout should match"
+            actual.payoutToFreeSettlementAssets, expected.payoutToFreeSettlementAssets, "Close free payout should match"
         );
-        assertEq(actual.deferredPayoutUsdc, expected.deferredPayoutUsdc, "Close deferred payout should match");
-        assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Close trader claim should match");
-        assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
+        assertEq(actual.deferredPayoutAssets, expected.deferredPayoutAssets, "Close deferred payout should match");
+        assertEq(actual.traderClaimBalanceAssets, expected.traderClaimBalanceAssets, "Close trader claim should match");
+        assertEq(actual.seizedCollateralAssets, expected.seizedCollateralAssets, "Close seized collateral should match");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");
         assertEq(actual.remainingMargin, expected.remainingMargin, "Close remaining margin should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Close degraded trigger should match");
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Close post-op degraded mode should match");
         assertEq(
-            actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Close effective assets should match"
+            actual.effectiveAssetsAfterAssets,
+            expected.effectiveAssetsAfterAssets,
+            "Close effective assets should match"
         );
-        assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Close max liability should match");
+        assertEq(actual.maxLiabilityAfterAssets, expected.maxLiabilityAfterAssets, "Close max liability should match");
     }
 
     function _closeFractions(
         uint256 size,
         uint256 margin,
-        uint256 minBountyUsdc
+        uint256 minBountyAssets
     ) internal pure returns (uint256[3] memory fractions) {
         uint256 sizeLots = size / CfdTypes.SIZE_QUANTUM;
         if (sizeLots < 2) {
@@ -487,8 +493,8 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         fractions[0] = CfdTypes.SIZE_QUANTUM;
         fractions[1] = (sizeLots / 2) * CfdTypes.SIZE_QUANTUM;
         // The nominal bounty scale is only a sampling landmark; health does not impose this amount as a pledge floor.
-        if (margin > minBountyUsdc) {
-            uint256 marginDerivedLots = sizeLots * (margin - minBountyUsdc) / margin;
+        if (margin > minBountyAssets) {
+            uint256 marginDerivedLots = sizeLots * (margin - minBountyAssets) / margin;
             fractions[2] = marginDerivedLots * CfdTypes.SIZE_QUANTUM;
             if (fractions[2] == 0) {
                 fractions[2] = CfdTypes.SIZE_QUANTUM;
@@ -509,7 +515,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 9,
             keeperShareBps: 5000,
             protocolShareBps: 0

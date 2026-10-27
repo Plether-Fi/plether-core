@@ -28,24 +28,24 @@ contract MarginFirstCarryAllocationTest is Test {
         uint256 free,
         uint256 unpaid
     ) private pure {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(210e6, 100e6, 10e6, 20e6, 30e6);
+        IMarginClearinghouse.AccountAssetBuckets memory buckets =
+            MarginClearinghouseAccountingLib.buildIsolatedAccountAssetBuckets(210e6, 100e6, 10e6, 20e6, 30e6);
         bytes32 beforeHash = keccak256(abi.encode(buckets));
         (
             MarginClearinghouseAccountingLib.SettlementConsumption memory c,
-            IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets
+            IMarginClearinghouse.AccountAssetBuckets memory afterBuckets
         ) = MarginClearinghouseAccountingLib.projectCarryLoss(buckets, due);
-        assertEq(c.activeMarginConsumedUsdc, margin);
-        assertEq(c.freeSettlementConsumedUsdc, free);
-        assertEq(c.uncoveredUsdc, unpaid);
-        assertEq(c.otherLockedMarginConsumedUsdc, 0);
-        assertEq(afterBuckets.settlementBalanceUsdc, 210e6 - margin - free);
-        assertEq(afterBuckets.activePositionMarginUsdc, 100e6 - margin);
-        assertEq(afterBuckets.totalLockedMarginUsdc, 160e6 - margin);
-        assertEq(afterBuckets.otherLockedMarginUsdc, 60e6);
-        assertEq(afterBuckets.freeSettlementUsdc, 50e6 - free);
+        assertEq(c.activeMarginConsumedAssets, margin);
+        assertEq(c.freeSettlementConsumedAssets, free);
+        assertEq(c.uncoveredAssets, unpaid);
+        assertEq(c.otherLockedMarginConsumedAssets, 0);
+        assertEq(afterBuckets.settlementBalanceAssets, 210e6 - margin - free);
+        assertEq(afterBuckets.activePositionMarginAssets, 100e6 - margin);
+        assertEq(afterBuckets.totalLockedMarginAssets, 160e6 - margin);
+        assertEq(afterBuckets.otherLockedMarginAssets, 60e6);
+        assertEq(afterBuckets.freeSettlementAssets, 50e6 - free);
         assertEq(keccak256(abi.encode(buckets)), beforeHash, "projection must retain raw custody");
-        afterBuckets.activePositionMarginUsdc = 1;
+        afterBuckets.activePositionMarginAssets = 1;
         assertEq(
             keccak256(abi.encode(buckets)), beforeHash, "returned buckets must not alias input, even for zero carry"
         );
@@ -57,33 +57,34 @@ contract MarginFirstCarryAllocationTest is Test {
         uint96 reserve,
         uint96 due
     ) public pure {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(
+        IMarginClearinghouse.AccountAssetBuckets memory buckets =
+            MarginClearinghouseAccountingLib.buildIsolatedAccountAssetBuckets(
                 uint256(margin) + free + uint256(reserve) * 3, margin, reserve, reserve, reserve
             );
         bytes32 beforeHash = keccak256(abi.encode(buckets));
         (
             MarginClearinghouseAccountingLib.SettlementConsumption memory c,
-            IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets
+            IMarginClearinghouse.AccountAssetBuckets memory afterBuckets
         ) = MarginClearinghouseAccountingLib.projectCarryLoss(buckets, due);
-        assertEq(c.totalConsumedUsdc + c.uncoveredUsdc, due);
-        assertEq(c.totalConsumedUsdc, c.activeMarginConsumedUsdc + c.freeSettlementConsumedUsdc);
-        assertLe(c.activeMarginConsumedUsdc, margin);
-        assertLe(c.freeSettlementConsumedUsdc, free);
-        assertEq(c.otherLockedMarginConsumedUsdc, 0);
-        if (c.freeSettlementConsumedUsdc > 0) {
-            assertEq(c.activeMarginConsumedUsdc, margin);
+        assertEq(c.totalConsumedAssets + c.uncoveredAssets, due);
+        assertEq(c.totalConsumedAssets, c.activeMarginConsumedAssets + c.freeSettlementConsumedAssets);
+        assertLe(c.activeMarginConsumedAssets, margin);
+        assertLe(c.freeSettlementConsumedAssets, free);
+        assertEq(c.otherLockedMarginConsumedAssets, 0);
+        if (c.freeSettlementConsumedAssets > 0) {
+            assertEq(c.activeMarginConsumedAssets, margin);
         }
-        if (c.uncoveredUsdc > 0) {
-            assertEq(c.totalConsumedUsdc, uint256(margin) + free);
+        if (c.uncoveredAssets > 0) {
+            assertEq(c.totalConsumedAssets, uint256(margin) + free);
         }
-        assertEq(afterBuckets.settlementBalanceUsdc + c.totalConsumedUsdc, buckets.settlementBalanceUsdc);
-        assertEq(afterBuckets.activePositionMarginUsdc + c.activeMarginConsumedUsdc, margin);
-        assertEq(afterBuckets.freeSettlementUsdc + c.freeSettlementConsumedUsdc, free);
-        assertEq(afterBuckets.otherLockedMarginUsdc, uint256(reserve) * 3);
-        assertEq(afterBuckets.totalLockedMarginUsdc, afterBuckets.activePositionMarginUsdc + uint256(reserve) * 3);
+        assertEq(afterBuckets.settlementBalanceAssets + c.totalConsumedAssets, buckets.settlementBalanceAssets);
+        assertEq(afterBuckets.activePositionMarginAssets + c.activeMarginConsumedAssets, margin);
+        assertEq(afterBuckets.freeSettlementAssets + c.freeSettlementConsumedAssets, free);
+        assertEq(afterBuckets.otherLockedMarginAssets, uint256(reserve) * 3);
+        assertEq(afterBuckets.totalLockedMarginAssets, afterBuckets.activePositionMarginAssets + uint256(reserve) * 3);
         assertEq(
-            afterBuckets.settlementBalanceUsdc, afterBuckets.totalLockedMarginUsdc + afterBuckets.freeSettlementUsdc
+            afterBuckets.settlementBalanceAssets,
+            afterBuckets.totalLockedMarginAssets + afterBuckets.freeSettlementAssets
         );
         assertEq(keccak256(abi.encode(buckets)), beforeHash);
     }
@@ -103,7 +104,7 @@ contract MarginFirstCarryTest is BasePerpTest {
     function _margin(
         address account
     ) private view returns (uint256) {
-        return clearinghouse.pnlPledgeUsdc(account);
+        return clearinghouse.pnlPledgeAssets(account);
     }
 
     function _checkpoint(
@@ -128,9 +129,9 @@ contract MarginFirstCarryTest is BasePerpTest {
         _fundTrader(TRADER, openingBudget + 400_000);
         _open(TRADER, CfdTypes.Side.LONG, size, openingBudget, 1e8);
         assertEq(_margin(TRADER), 90_417_680_000);
-        assertEq(_freeSettlementUsdc(TRADER), 400_000);
+        assertEq(_freeSettlementAssets(TRADER), 400_000);
         vm.warp(block.timestamp + 1 days);
-        uint256 carry = _expectedIndexedCarryUsdc(TRADER);
+        uint256 carry = _expectedIndexedCarryAssets(TRADER);
         assertGe(carry, 3_965_425);
         uint256 beforeMargin = _margin(TRADER);
         uint256 beforePool = pool.totalAssets();
@@ -138,10 +139,10 @@ contract MarginFirstCarryTest is BasePerpTest {
         vm.prank(TRADER);
         router.commitOrder(CfdTypes.Side.LONG, size, 0, 0, true);
         assertEq(_margin(TRADER), beforeMargin - carry);
-        assertEq(_freeSettlementUsdc(TRADER), 400_000);
-        assertEq(clearinghouse.actionReserveUsdc(TRADER), 0);
+        assertEq(_freeSettlementAssets(TRADER), 400_000);
+        assertEq(clearinghouse.actionReserveAssets(TRADER), 0);
         assertEq(pool.totalAssets(), beforePool + carry);
-        assertEq(engine.unsettledCarryUsdc(TRADER), 0);
+        assertEq(engine.unsettledCarryAssets(TRADER), 0);
         assertEq(router.pendingOrderCounts(TRADER), 1);
         assertEq(terminalNavBook.bookState().bookVersion, version + 1, "nested carry syncs only once");
         _authenticate(TRADER);
@@ -152,18 +153,18 @@ contract MarginFirstCarryTest is BasePerpTest {
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
         vm.warp(block.timestamp + 200_000 days);
         uint256 beforeMargin = _margin(TRADER);
-        uint256 beforeBalance = clearinghouse.balanceUsdc(TRADER);
+        uint256 beforeBalance = clearinghouse.balanceAssets(TRADER);
         uint256 beforePool = pool.totalAssets();
         bytes32 beforeHash = terminalNavBook.curveHashOf(TRADER);
         bytes32 beforeBook = keccak256(abi.encode(terminalNavBook.bookState()));
-        uint256 accrued = _expectedIndexedCarryUsdc(TRADER);
+        uint256 accrued = _expectedIndexedCarryAssets(TRADER);
         assertGt(accrued, beforeMargin + 100_000);
         vm.prank(TRADER);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
         assertEq(_margin(TRADER), 0);
-        assertEq(clearinghouse.balanceUsdc(TRADER), beforeBalance - beforeMargin - 100_000);
+        assertEq(clearinghouse.balanceAssets(TRADER), beforeBalance - beforeMargin - 100_000);
         assertEq(pool.totalAssets(), beforePool + beforeMargin + 100_000);
-        assertEq(engine.unsettledCarryUsdc(TRADER), accrued - beforeMargin - 100_000);
+        assertEq(engine.unsettledCarryAssets(TRADER), accrued - beforeMargin - 100_000);
         assertNotEq(terminalNavBook.curveHashOf(TRADER), beforeHash);
         assertNotEq(keccak256(abi.encode(terminalNavBook.bookState())), beforeBook);
         _authenticate(TRADER);
@@ -173,10 +174,10 @@ contract MarginFirstCarryTest is BasePerpTest {
         _fundTrader(TRADER, 3000e6);
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 3000e6, 1e8);
         vm.warp(block.timestamp + 500 * 365 days);
-        uint256 unpaid = _expectedIndexedCarryUsdc(TRADER) - _margin(TRADER);
+        uint256 unpaid = _expectedIndexedCarryAssets(TRADER) - _margin(TRADER);
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18);
-        assertEq(engine.unsettledCarryUsdc(TRADER), unpaid, "full-close commitment retains unpaid carry");
+        assertEq(engine.unsettledCarryAssets(TRADER), unpaid, "full-close commitment retains unpaid carry");
         assertEq(_margin(TRADER), 0);
         _authenticate(TRADER);
     }
@@ -221,7 +222,7 @@ contract MarginFirstCarryTest is BasePerpTest {
         assertTrue(engineLens.previewLiquidation(TRADER, 1e8).liquidatable);
         _checkpoint(TRADER);
         assertEq(_margin(TRADER), 0);
-        assertEq(engine.unsettledCarryUsdc(TRADER), 0, "free cash covers remaining carry");
+        assertEq(engine.unsettledCarryAssets(TRADER), 0, "free cash covers remaining carry");
         assertTrue(
             engineAccountLens.getAccountLedgerSnapshot(TRADER).liquidatable, "free cash does not replenish pledge"
         );
@@ -232,17 +233,17 @@ contract MarginFirstCarryTest is BasePerpTest {
         _fundTrader(TRADER, 20_000e6);
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
         vm.warp(block.timestamp + 30 days);
-        uint256 carry = _expectedIndexedCarryUsdc(TRADER);
+        uint256 carry = _expectedIndexedCarryAssets(TRADER);
         uint256 beforeMargin = _margin(TRADER);
         ICfdEngineTypes.OpenPreview memory preview =
             engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
         assertTrue(preview.valid);
         _open(TRADER, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
         assertEq(_margin(TRADER), beforeMargin - carry + 986e6);
-        assertEq(_margin(TRADER), preview.postMarginUsdc);
+        assertEq(_margin(TRADER), preview.postMarginAssets);
         (,,, uint256 sideMargin) = engine.sides(0);
         assertEq(sideMargin, _margin(TRADER));
-        assertEq(engine.sideBorrowBaseUsdc(0), _positionBorrowBaseUsdc(TRADER));
+        assertEq(engine.sideBorrowBaseAssets(0), _positionBorrowBaseAssets(TRADER));
         _authenticate(TRADER);
     }
 
@@ -262,11 +263,11 @@ contract MarginFirstCarryTest is BasePerpTest {
         vm.warp(block.timestamp + 1 days);
         vm.prank(TRADER);
         router.commitOrder(CfdTypes.Side.LONG, isPartial ? 50_000e18 : 100_000e18, 0, 0, true);
-        uint256 balanceAfterCommit = clearinghouse.balanceUsdc(TRADER);
+        uint256 balanceAfterCommit = clearinghouse.balanceAssets(TRADER);
         uint256 marginAfterCommit = _margin(TRADER);
         vm.warp(block.timestamp + 10);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
-        uint256 carry = _expectedIndexedCarryUsdc(TRADER);
+        uint256 carry = _expectedIndexedCarryAssets(TRADER);
         uint256 size = isPartial ? 50_000e18 : 100_000e18;
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(TRADER, size, 1e8);
         assertTrue(preview.valid);
@@ -281,24 +282,24 @@ contract MarginFirstCarryTest is BasePerpTest {
             }
         }
         assertEq(uint8(receipt.status), uint8(OrderV3Types.LifecycleStatus.Executed));
-        assertEq(receipt.economics.carryUsdc, int256(carry + receipt.commitment.carryCollectedUsdc));
+        assertEq(receipt.economics.carryAssets, int256(carry + receipt.commitment.carryCollectedAssets));
         assertEq(
-            receipt.economics.actionChargeCollectedUsdc,
-            receipt.commitment.carryCollectedUsdc + carry + (isPartial ? 20e6 : 40e6)
+            receipt.economics.actionChargeCollectedAssets,
+            receipt.commitment.carryCollectedAssets + carry + (isPartial ? 20e6 : 40e6)
         );
         assertEq(
-            receipt.economics.grossAccountDebitUsdc,
-            receipt.commitment.carryCollectedUsdc + carry + (isPartial ? 20e6 : 40e6)
+            receipt.economics.grossAccountDebitAssets,
+            receipt.commitment.carryCollectedAssets + carry + (isPartial ? 20e6 : 40e6)
         );
-        assertEq(receipt.economics.preSettlementBalanceUsdc, balanceAfterCommit);
-        assertEq(receipt.economics.postSettlementBalanceUsdc, clearinghouse.balanceUsdc(TRADER));
+        assertEq(receipt.economics.preSettlementBalanceAssets, balanceAfterCommit);
+        assertEq(receipt.economics.postSettlementBalanceAssets, clearinghouse.balanceAssets(TRADER));
         assertEq(realized, carry);
         assertEq(free, 0);
         assertEq(margin, carry);
-        assertEq(clearinghouse.balanceUsdc(TRADER), balanceAfterCommit - carry - (isPartial ? 20e6 : 40e6));
+        assertEq(clearinghouse.balanceAssets(TRADER), balanceAfterCommit - carry - (isPartial ? 20e6 : 40e6));
         assertEq(_margin(TRADER), preview.remainingMargin);
         assertEq(_margin(TRADER), isPartial ? (marginAfterCommit - carry) - (marginAfterCommit - carry) / 2 : 0);
-        assertEq(engine.unsettledCarryUsdc(TRADER), 0);
+        assertEq(engine.unsettledCarryAssets(TRADER), 0);
         _authenticate(TRADER);
     }
 
@@ -308,8 +309,8 @@ contract MarginFirstCarryTest is BasePerpTest {
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 3000e6, 1e8);
         _open(KEEPER, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
         vm.warp(block.timestamp + 1 days);
-        uint256 traderCarry = _expectedIndexedCarryUsdc(TRADER);
-        uint256 keeperCarry = _expectedIndexedCarryUsdc(KEEPER);
+        uint256 traderCarry = _expectedIndexedCarryAssets(TRADER);
+        uint256 keeperCarry = _expectedIndexedCarryAssets(KEEPER);
         uint256 keeperMargin = _margin(KEEPER);
         uint256 traderMargin = _margin(TRADER);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(TRADER, 1.1e8);
@@ -330,7 +331,7 @@ contract MarginFirstCarryTest is BasePerpTest {
         assertEq(_margin(TRADER), 0);
         assertEq(_margin(KEEPER), keeperMargin - keeperCarry);
         assertLt(traderCarry, traderMargin);
-        assertEq(engine.unsettledCarryUsdc(TRADER), 0);
+        assertEq(engine.unsettledCarryAssets(TRADER), 0);
         _authenticate(TRADER);
         _authenticate(KEEPER);
     }
@@ -340,21 +341,21 @@ contract MarginFirstCarryTest is BasePerpTest {
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
         vm.warp(block.timestamp + 1 days);
         uint256 marginBefore = _margin(TRADER);
-        uint256 balanceBefore = clearinghouse.balanceUsdc(TRADER);
+        uint256 balanceBefore = clearinghouse.balanceAssets(TRADER);
         uint256 poolBefore = pool.totalAssets();
         bytes32 bookBefore = keccak256(abi.encode(terminalNavBook.bookState()));
         CarryNavProbeToken failing = new CarryNavProbeToken(address(engine), true);
-        vm.etch(address(usdc), address(failing).code);
+        vm.etch(address(settlementToken), address(failing).code);
         vm.expectRevert(bytes("downstream revert"));
         _checkpoint(TRADER);
         assertEq(_margin(TRADER), marginBefore);
-        assertEq(clearinghouse.balanceUsdc(TRADER), balanceBefore);
+        assertEq(clearinghouse.balanceAssets(TRADER), balanceBefore);
         assertEq(pool.totalAssets(), poolBefore);
         assertEq(keccak256(abi.encode(terminalNavBook.bookState())), bookBefore);
         CarryNavProbeToken probe = new CarryNavProbeToken(address(engine), false);
-        vm.etch(address(usdc), address(probe).code);
+        vm.etch(address(settlementToken), address(probe).code);
         _checkpoint(TRADER);
-        assertEq(CarryNavProbeToken(address(usdc)).blockedReads(), 1);
+        assertEq(CarryNavProbeToken(address(settlementToken)).blockedReads(), 1);
         _authenticate(TRADER);
     }
 
@@ -365,12 +366,12 @@ contract MarginFirstCarryTest is BasePerpTest {
         uint256 depth = pool.totalAssets();
         vm.prank(address(engine));
         CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(TRADER, depth);
-        uint256 directCarry = snap.position.margin + snap.accountBuckets.freeSettlementUsdc;
-        snap.unsettledCarryUsdc = directCarry + 123e6;
+        uint256 directCarry = snap.position.margin + snap.accountBuckets.freeSettlementAssets;
+        snap.unsettledCarryAssets = directCarry + 123e6;
         snap.executionFeeBps = 0;
         snap.oracleFrozen = false;
         snap.traderClaimBalanceForAccount = 987e6;
-        snap.totalTraderClaimBalanceUsdc = 987e6;
+        snap.totalTraderClaimBalanceAssets = 987e6;
         CfdTypes.Order memory order;
         order.account = TRADER;
         order.isClose = true;
@@ -380,33 +381,33 @@ contract MarginFirstCarryTest is BasePerpTest {
             uint256 price = 1e8 - i * 100_000;
             CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snap, order, price);
             assertTrue(delta.valid);
-            assertEq(delta.realizedCarryUsdc, directCarry);
-            assertEq(delta.actionChargeAssessedUsdc, 123e6);
+            assertEq(delta.realizedCarryAssets, directCarry);
+            assertEq(delta.actionChargeAssessedAssets, 123e6);
             assertEq(
-                delta.pendingCarryUsdc,
-                delta.realizedCarryUsdc + delta.actionChargeWithheldUsdc + delta.actionChargeCollectedUsdc
-                    + delta.actionChargeWaivedUsdc
+                delta.pendingCarryAssets,
+                delta.realizedCarryAssets + delta.actionChargeWithheldAssets + delta.actionChargeCollectedAssets
+                    + delta.actionChargeWaivedAssets
             );
-            assertEq(delta.pricePnlClaimConsumedUsdc, 0);
-            assertEq(delta.existingTraderClaimRemainingUsdc, 987e6);
+            assertEq(delta.pricePnlClaimConsumedAssets, 0);
+            assertEq(delta.existingTraderClaimRemainingAssets, 987e6);
             uint256 afterWithholding = i == 0 ? 123e6 : i == 1 ? 23e6 : 0;
             uint256 fromReleasedReserve =
-                afterWithholding < snap.liquidationReserveUsdc ? afterWithholding : snap.liquidationReserveUsdc;
-            assertEq(delta.actionChargeCollectedUsdc, fromReleasedReserve);
-            assertEq(delta.actionChargeWaivedUsdc, afterWithholding - fromReleasedReserve);
+                afterWithholding < snap.liquidationReserveAssets ? afterWithholding : snap.liquidationReserveAssets;
+            assertEq(delta.actionChargeCollectedAssets, fromReleasedReserve);
+            assertEq(delta.actionChargeWaivedAssets, afterWithholding - fromReleasedReserve);
         }
         // Liquidation retains its separate charge allocation and cannot release its bounty reserve to pay carry.
         CfdEnginePlanTypes.LiquidationDelta memory liquidation = engine.planner().planLiquidation(snap, 1e8);
         assertTrue(liquidation.liquidatable);
         assertEq(
-            liquidation.pendingCarryUsdc,
-            liquidation.realizedCarryUsdc + liquidation.actionChargeWithheldUsdc + liquidation.actionChargeCollectedUsdc
-                + liquidation.actionChargeWaivedUsdc
+            liquidation.pendingCarryAssets,
+            liquidation.realizedCarryAssets + liquidation.actionChargeWithheldAssets
+                + liquidation.actionChargeCollectedAssets + liquidation.actionChargeWaivedAssets
         );
-        assertEq(liquidation.realizedCarryUsdc, directCarry);
-        assertEq(liquidation.pricePnlClaimConsumedUsdc, 0);
-        assertEq(liquidation.actionChargeWaivedUsdc, 123e6);
-        assertEq(liquidation.liquidationChargeUsdc, snap.liquidationReserveUsdc);
+        assertEq(liquidation.realizedCarryAssets, directCarry);
+        assertEq(liquidation.pricePnlClaimConsumedAssets, 0);
+        assertEq(liquidation.actionChargeWaivedAssets, 123e6);
+        assertEq(liquidation.liquidationChargeAssets, snap.liquidationReserveAssets);
     }
 
     function testFuzz_CheckpointInterleavingsConserveCarry(
@@ -418,17 +419,17 @@ contract MarginFirstCarryTest is BasePerpTest {
             // Start some sequences with real arrears carried forward from an earlier exhausted checkpoint.
             vm.warp(block.timestamp + 125 * 365 days);
             _checkpoint(TRADER);
-            assertGt(engine.unsettledCarryUsdc(TRADER), 0);
+            assertGt(engine.unsettledCarryAssets(TRADER), 0);
         }
         uint256 assessed;
         uint256 marginCollected;
         uint256 freeCollected;
-        uint256 startingArrears = engine.unsettledCarryUsdc(TRADER);
+        uint256 startingArrears = engine.unsettledCarryAssets(TRADER);
         for (uint256 i; i < 8; ++i) {
             seed = uint256(keccak256(abi.encode(seed, i)));
             vm.warp(block.timestamp + (seed % (80 * 365 days)));
             // This helper reports only new indexed accrual, excluding carried-forward arrears.
-            assessed += _expectedIndexedCarryUsdc(TRADER);
+            assessed += _expectedIndexedCarryAssets(TRADER);
             vm.recordLogs();
             if (seed & 2 != 0) {
                 // Deposits checkpoint the old basis and can collect arrears from newly available free settlement.
@@ -442,7 +443,7 @@ contract MarginFirstCarryTest is BasePerpTest {
             (, uint256 free, uint256 margin) = _carryCollected(TRADER);
             marginCollected += margin;
             freeCollected += free;
-            assertEq(startingArrears + assessed, marginCollected + freeCollected + engine.unsettledCarryUsdc(TRADER));
+            assertEq(startingArrears + assessed, marginCollected + freeCollected + engine.unsettledCarryAssets(TRADER));
             _authenticate(TRADER);
         }
     }

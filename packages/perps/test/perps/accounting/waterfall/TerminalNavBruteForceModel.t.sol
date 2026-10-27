@@ -36,10 +36,10 @@ contract TerminalNavBruteForceModelTest is Test {
 
         assertEq(TerminalNavBruteForceModel.aggregateDeltaAt(states, 200, CAP_PRICE), -80);
 
-        states[0].collectibleCapUsdcAtoms = 100;
-        states[0].effectiveCapUsdcAtoms = 100;
-        states[1].collectibleCapUsdcAtoms = 10;
-        states[1].effectiveCapUsdcAtoms = 10;
+        states[0].collectibleCapAssetAtoms = 100;
+        states[0].effectiveCapAssetAtoms = 100;
+        states[1].collectibleCapAssetAtoms = 10;
+        states[1].effectiveCapAssetAtoms = 10;
         assertEq(TerminalNavBruteForceModel.aggregateDeltaAt(states, 200, CAP_PRICE), 10);
     }
 
@@ -68,16 +68,16 @@ contract TerminalNavBruteForceModelTest is Test {
     function _state(
         CfdTypes.Side side,
         uint256 lots,
-        uint256 entryCostUsdcAtoms,
-        uint256 collectibleCapUsdcAtoms
+        uint256 entryCostAssetAtoms,
+        uint256 collectibleCapAssetAtoms
     ) private pure returns (TerminalNavBruteForceModel.AccountState memory state) {
         state.active = true;
         state.side = side;
         state.lots = lots;
         state.size = lots * CfdTypes.SIZE_QUANTUM;
-        state.entryCostUsdcAtoms = entryCostUsdcAtoms;
-        state.collectibleCapUsdcAtoms = collectibleCapUsdcAtoms;
-        state.effectiveCapUsdcAtoms = collectibleCapUsdcAtoms;
+        state.entryCostAssetAtoms = entryCostAssetAtoms;
+        state.collectibleCapAssetAtoms = collectibleCapAssetAtoms;
+        state.effectiveCapAssetAtoms = collectibleCapAssetAtoms;
     }
 
 }

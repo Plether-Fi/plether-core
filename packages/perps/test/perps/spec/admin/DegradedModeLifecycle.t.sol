@@ -22,7 +22,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -62,7 +62,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         });
 
         uint256 depthBefore = pool.totalAssets();
-        uint256 balanceBefore = clearinghouse.balanceUsdc(newTraderAccount);
+        uint256 balanceBefore = clearinghouse.balanceAssets(newTraderAccount);
         (uint256 sizeBefore, uint256 marginBefore,,,,,) = engine.positions(newTraderAccount);
         assertEq(sizeBefore, 0, "the rejected order must attempt a new position");
         vm.expectRevert(
@@ -79,7 +79,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(newTraderAccount);
         assertEq(sizeAfter, sizeBefore, "degraded admission must preserve the position size");
         assertEq(marginAfter, marginBefore, "degraded admission must preserve the position margin");
-        assertEq(clearinghouse.balanceUsdc(newTraderAccount), balanceBefore);
+        assertEq(clearinghouse.balanceAssets(newTraderAccount), balanceBefore);
         assertEq(pool.totalAssets(), depthBefore);
     }
 
@@ -89,7 +89,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__StillInsolvent.selector);
         engine.clearDegradedMode();
 
-        usdc.mint(address(pool), 500_000e6);
+        settlementToken.mint(address(pool), 500_000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             500_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -127,7 +127,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         _enterDegradedMode();
         assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
 
-        uint256 lockedBefore = clearinghouse.lockedMarginUsdc(account);
+        uint256 lockedBefore = clearinghouse.lockedMarginAssets(account);
         (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
@@ -136,7 +136,7 @@ contract DegradedModeLifecycleTest is BasePerpTest {
         (, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(marginAfter, marginBefore + 1000e6, "Add margin should still increase position margin");
         assertEq(
-            clearinghouse.lockedMarginUsdc(account),
+            clearinghouse.lockedMarginAssets(account),
             lockedBefore + 1000e6,
             "Add margin should remain usable during degraded mode"
         );

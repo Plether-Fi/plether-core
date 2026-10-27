@@ -25,7 +25,7 @@ indefinite, oracle-settled directional exposure to a normalized six-currency
 basket whose mark is constrained to the interval \([0,C]\). The bounded price
 domain makes every position's price-PnL finite and permits a constant-time,
 common-mark liability envelope computed from two side aggregates. Plether
-combines that envelope with a USDC balance sheet that distinguishes physical
+combines that envelope with a USDG balance sheet that distinguishes physical
 cash from mathematical claims, a senior/junior LP capital stack, delayed
 historical-oracle execution, utilization-priced LP capital, and fail-soft
 terminal settlement. LP entry and exit use one exact signed mark-to-close
@@ -105,7 +105,7 @@ The answer developed here has five parts:
    deficit.
 
 Plether is therefore not best understood as a conventional matched order-book
-future. It is a pooled, oracle-settled perpetual CFD with USDC cross-margin
+future. It is a pooled, oracle-settled perpetual CFD with USDG cross-margin
 custody, explicit position-margin buckets, and a tranched external capital
 provider. Long means long Plether's dollar index and gains as the raw FX-basket
 mark falls; Short means short the dollar index and gains as that mark rises.
@@ -250,7 +250,7 @@ comparison, independent of account count.
 
 The implementation fixes position size to whole 100-token lots. With an
 eight-decimal price, one lot times one price is already an exact six-decimal
-USDC atom quantity. For each account the Engine therefore stores the lot count
+USDG atom quantity. For each account the Engine therefore stores the lot count
 and exact entry cost
 
 \[
@@ -302,20 +302,20 @@ VPI reserve, and all-in settlement equation must not be conflated.
 The central accounting discipline is to avoid using one quantity called
 "equity" for every decision. A protocol can be solvent for current risk
 admission while having no safely withdrawable LP cash. A trader can own a valid
-claim without the corresponding USDC being immediately available. A losing
+claim without the corresponding USDG being immediately available. A losing
 trader can owe value that has not entered HousePool custody.
 
 ### 3.1 Asset and obligation categories
 
 | Quantity | Meaning | Canonical location |
 | --- | --- | --- |
-| Raw assets | Literal USDC token balance at HousePool | USDC `balanceOf(HousePool)` |
-| Accounted assets | USDC admitted into protocol economics | HousePool accounting ledger |
+| Raw assets | Literal USDG token balance at HousePool | USDG `balanceOf(HousePool)` |
+| Accounted assets | USDG admitted into protocol economics | HousePool accounting ledger |
 | Physical assets \(A\) | Conservative backing `min(raw, accounted)` | `HousePool.totalAssets()` |
 | Economic pool depth \(D\) | Physical assets net of existing trader claims, floored at zero | Carry, VPI, and skew-limit calculations |
 | Excess assets | Unsolicited raw surplus not yet assigned | `raw - accounted`, floored at zero |
 | Free trader settlement | Unlocked account cash, subject to withdrawal and health checks | MarginClearinghouse account |
-| Position margin / PnL pledge | Trader cash pledged to the live position's price losses; `pnlPledgeUsdc` is this same bucket | Clearinghouse position bucket plus Engine accounting |
+| Position margin / PnL pledge | Trader cash pledged to the live position's price losses; `pnlPledgeAssets` is this same bucket | Clearinghouse position bucket plus Engine accounting |
 | Order reservation | Margin committed to one queued order | Clearinghouse reservation keyed by order ID |
 | Action reserve | Cash for action charges, including separately protected VPI and bounty amounts | Clearinghouse action-reserve bucket |
 | Liquidation reserve | Cash dedicated to the liquidation charge | Clearinghouse liquidation-reserve bucket |
@@ -355,7 +355,7 @@ them into one number.
 | Accounting view | Question | Primary construction |
 | --- | --- | --- |
 | Risk admission | May the protocol accept more price risk? | Post-operation physical assets net of trader claims versus \(L_{\max}\) plus its settlement buffer |
-| LP withdrawal | How much physical USDC may leave now? | Physical assets less endpoint liability, trader claims, and the same settlement buffer plus explicit pool reserves |
+| LP withdrawal | How much physical USDG may leave now? | Physical assets less endpoint liability, trader claims, and the same settlement buffer plus explicit pool reserves |
 | Tranche reconciliation and share pricing | What marked ownership backs tranche shares? | Physical assets less claims plus the exact signed account-capped terminal price delta |
 | Terminal reachability | What trader-owned value can this close or liquidation actually consume? | Explicit clearinghouse buckets and permitted terminal reservation paths |
 
@@ -373,7 +373,7 @@ Let:
 - \(L_{\max}^+\) be the projected common-mark endpoint envelope;
 - \(\beta_{\mathrm{buf}}\) be the settlement-buffer rate in basis points; and
 - \(B_{\mathrm{settle}}^+\) be the projected settlement buffer, rounded up in
-  six-decimal USDC atoms.
+  six-decimal USDG atoms.
 
 The engine's effective assets are
 
@@ -487,11 +487,11 @@ LPs while retaining the endpoint envelope of Section 3.4 for physical redemption
 funding.
 
 For account \(i\), let \(\ell_i\) be its number of 100-token lots, \(E_i\) its
-exact entry cost in USDC atoms, and \(k_i\) its effective collectible cap: the
+exact entry cost in USDG atoms, and \(k_i\) its effective collectible cap: the
 smaller of its dedicated PnL pledge plus nettable same-account claim, and its
 maximum possible price loss inside \([0,C]\). In this subsection, \(p\) and
 \(C\) denote the encoded eight-decimal price integers, so \(\ell_i p\) is
-in six-decimal USDC atoms. With the protocol's LONG side
+in six-decimal USDG atoms. With the protocol's LONG side
 profiting as the oracle price falls and SHORT profiting as it rises, the LP-side
 terminal price delta is
 
@@ -551,7 +551,7 @@ equity.
 
 ### 3.6 Conservation is category-specific
 
-Let \(H\) be physical USDC in HousePool and \(Q\) physical USDC in the
+Let \(H\) be physical USDG in HousePool and \(Q\) physical USDG in the
 MarginClearinghouse across trader, treasury, and keeper ownership buckets. For
 one internal settlement transition with no deposit, withdrawal, unsolicited
 transfer, stablecoin rebase, or token failure:
@@ -564,12 +564,12 @@ That token identity is necessary but incomplete. A settlement can replace a
 cash payout with a non-cash trader claim, consume an existing claim against a
 price loss, write off price loss that was never recognized beyond the account's
 collectible cap, or waive an uncollectible terminal action charge. Those items
-change entitlement or telemetry without minting physical USDC.
+change entitlement or telemetry without minting physical USDG.
 
 ### Proposition 4 - Transition-level conservation of value categories
 
 Assume the planner and apply path use the same settlement amounts and the
-underlying USDC transfers conserve tokens. For every successful close or
+underlying USDG transfers conserve tokens. For every successful close or
 liquidation:
 
 1. every physical debit has one physical credit across HousePool,
@@ -663,7 +663,7 @@ A $50 million reconciliation loss produces:
 If $25 million of revenue later becomes distributable, the first $10 million
 restores senior to its high-water mark and the remaining $15 million establishes
 junior principal. The resulting state is \(S=60\), \(J=15\), \(H=60\), all in
-millions of USDC.
+millions of USDG.
 
 ### 4.3 Synchronized LP epochs are an accounting and liquidity control
 
@@ -758,7 +758,7 @@ views expose nonbinding current quotes.
 
 ### 4.5 Recapitalization and ownership routing
 
-"More USDC in the pool" is not one accounting event. Plether distinguishes:
+"More USDG in the pool" is not one accounting event. Plether distinguishes:
 
 - **Claimant recapitalization with cash arrived:** new cash intended to restore
   the LP waterfall;
@@ -791,7 +791,7 @@ share dilution. Share conversions include accrued, unminted fee shares; actual
 minting occurs at specified supply mutations or configuration finalization.
 The fee uses completed Unix hours, is capped at a 1,000-basis-point nominal APR,
 and has a 48-hour configuration delay. Each checkpoint charges at most 8,760
-hours and forgives older time. It transfers no USDC and changes neither tranche
+hours and forgives older time. It transfers no USDG and changes neither tranche
 principal nor the Senior high-water mark. The current Arbitrum Sepolia
 deployment script initializes a zero-basis-point rate with the protocol treasury
 as the snapshotted recipient; a positive rate requires the governance delay.
@@ -824,7 +824,7 @@ D=\max(A-K,0).
 
 Open-position endpoint liabilities and the settlement buffer are not deducted
 again from \(D\); they constrain risk admission and LP withdrawals separately.
-Physical assets \(A\) still report the gross conservative USDC balance.
+Physical assets \(A\) still report the gross conservative USDG balance.
 
 At fixed pool depth \(D\), Plether assigns absolute skew \(S\) the potential
 
@@ -960,7 +960,7 @@ sources are exhausted independently blocks withdrawal and makes the account
 liquidatable. Same-account claims cannot fund carry. Before a mutation changes
 the borrow basis or rate denominator, elapsed carry is checkpointed, collected
 cash is recorded as LP revenue, and the remaining amount is retained in the
-account-specific `unsettledCarryUsdc` bucket. Only that unpaid remainder enters
+account-specific `unsettledCarryAssets` bucket. Only that unpaid remainder enters
 a later terminal action-charge calculation.
 
 Carry ownership is determined at collection. Indexed pending carry and retained
@@ -1008,7 +1008,7 @@ and FIFO does not by itself prove fairness [21-22].
 
 ### 6.1 Order lifecycle
 
-1. The trader deposits USDC into MarginClearinghouse.
+1. The trader deposits USDG into MarginClearinghouse.
 2. The trader constructs one typed request with an account-scoped nonzero
    `clientOrderId`, side, size, margin, nonzero price limit, close/open intent,
    submission deadline, execution-window duration, permitted execution modes,
@@ -1686,7 +1686,7 @@ profitability, safe leverage, or an optimal cap.
 | Dimension | Matched CLOB perpetual | vAMM perpetual | Unbounded oracle pool | Plether bounded oracle pool |
 | --- | --- | --- | --- | --- |
 | Execution price | Order matching | Endogenous curve | External oracle plus impact rules | Historical external basket plus VPI/confidence policy |
-| Counterparty | Matched traders/clearing system | Virtual inventory plus collateral vault | LP pool | Tranched USDC HousePool |
+| Counterparty | Matched traders/clearing system | Virtual inventory plus collateral vault | LP pool | Tranched USDG HousePool |
 | Price domain | Generally unbounded | Generally unbounded | Generally unbounded | Contractually capped \([0,C]\) |
 | Recurring payment | Long-short funding | Funding and/or curve economics | Funding/borrow fees | LP-capital carry; both sides can pay |
 | Concentration price | Book spread/depth | Curve slippage | OI impact/funding | Quadratic VPI plus hard skew limit |
@@ -1727,10 +1727,10 @@ The strongest paper claims require:
 - all executed marks are correctly authenticated, normalized, and capped;
 - every live entry price lies in \([0,C]\);
 - side aggregates remain equal to the underlying live-position state;
-- HousePool `totalAssets()` correctly reflects conservative physical USDC;
+- HousePool `totalAssets()` correctly reflects conservative physical USDG;
 - clearinghouse buckets preserve ownership and reachability semantics;
 - privileged contracts and one-time dependency wiring are correct;
-- USDC maintains the settlement value assumed by the model, remains
+- USDG maintains the settlement value assumed by the model, remains
   transferable with standard ERC-20 behavior, and is not made unavailable by
   issuer blacklisting or an issuer-controlled upgrade;
 - keepers can submit eligible orders and liquidations within policy windows; and
@@ -1768,7 +1768,7 @@ Plether mitigates but does not eliminate these risks through:
   that every profitable close pays immediately.
 - **Lot lattice:** exact entry-cost and terminal-book arithmetic relies on every
   open, increase, and close being a whole 100-token lot; changing the price
-  decimals or quantum invalidates the USDC-atom identity and requires a new
+  decimals or quantum invalidates the USDG-atom identity and requires a new
   deployment.
 - **Cap selection:** a tighter cap lowers some liabilities but changes the
   economic instrument and may not reduce the dominant side.
@@ -1805,7 +1805,7 @@ Plether mitigates but does not eliminate these risks through:
   plus a post-forced-close reconciliation, forced final closes, and zero
   VPI/confidence/frozen adjustments are research controls, not a production
   backtest.
-- **Stablecoin risk:** accounting in USDC units does not guarantee one-dollar
+- **Stablecoin risk:** accounting in USDG units does not guarantee one-dollar
   economic value, unrestricted transferability, standard token behavior, or
   freedom from issuer blacklisting and issuer upgrades.
 
@@ -1911,7 +1911,7 @@ when normal settlement assumptions fail.
 | \(B_{\mathrm{settle}}\) | Liability-scaled settlement headroom, atom-ceiled from \(L_{\max}\) |
 | \(C\) | Immutable protocol price cap |
 | \(D\) | Economic pool depth \(\max(A-K,0)\), used by carry, VPI, and the skew limit |
-| \(E_i\) | Exact entry cost of account \(i\), in USDC atoms |
+| \(E_i\) | Exact entry cost of account \(i\), in USDG atoms |
 | \(e_i\) | Position entry price |
 | \(G(p)\) | Gross positive price PnL at common mark \(p\) |
 | \(H\) | Senior high-water mark |

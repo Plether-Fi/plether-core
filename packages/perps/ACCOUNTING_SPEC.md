@@ -23,7 +23,7 @@ pricing, however, deliberately share one exact terminal-NAV view.
 
 The key rules are:
 
-1. Physical USDC and mathematical claims are different objects.
+1. Physical USDG and mathematical claims are different objects.
 2. Marked LP equity includes only the portion of an unrealized trader loss collectible from that account's dedicated
    PnL pledge or nettable same-account trader claim. It is not spendable
    withdrawal cash before collection.
@@ -40,7 +40,7 @@ The key rules are:
 
 ## Canonical Quantities
 
-All monetary quantities are in 6-decimal USDC unless stated otherwise: `1e6` units equals 1 USDC. Prices use 8
+All monetary quantities are in 6-decimal USDG unless stated otherwise: `1e6` units equals 1 USDG. Prices use 8
 decimals, position sizes use 18 decimals, and rates in basis points use a denominator of 10,000.
 
 | Term | Meaning |
@@ -59,13 +59,13 @@ they are the reverse of being long or short the displayed basket mark. See [READ
 
 Use these terms consistently:
 
-- `rawAssets`: literal USDC token balance held by `HousePool`
-- `accountedAssets`: canonical protocol-owned USDC recognized by pool accounting
+- `rawAssets`: literal USDG token balance held by `HousePool`
+- `accountedAssets`: canonical protocol-owned USDG recognized by pool accounting
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: conservative economic pool backing
-- `economicDepth = max(physicalAssets - totalTraderClaimBalanceUsdc, 0)`: depth for carry utilization, skew capacity,
+- `economicDepth = max(physicalAssets - totalTraderClaimBalanceAssets, 0)`: depth for carry utilization, skew capacity,
   and VPI. Do not also subtract open-position liabilities, the settlement buffer, or LP principal.
-- `protocolTreasuryBalance = clearinghouse.balanceUsdc(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
+- `protocolTreasuryBalance = clearinghouse.balanceAssets(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
 - `netPhysicalAssets = physicalAssets`: the retained snapshot field reports canonical pool backing. Treasury
   settlement is held in the clearinghouse, outside pool custody, so subtracting it here would understate backing.
   A pool-funded treasury payment already reduces `rawAssets` and `accountedAssets` when it leaves the pool.
@@ -85,7 +85,7 @@ Operational rules:
 - `longMaxProfit`: sum of live LONG entry costs, the maximum payout at basket price zero
 - `shortMaxProfit`: sum of `lots * CAP_PRICE - entryCost` for live SHORT positions, the maximum payout at the cap
 - `maxLiability = max(longMaxProfit, shortMaxProfit)`
-- `priceLossWrittenOffUsdc`: diagnostic trader price loss above the account's collectible cap; it is not a liability
+- `priceLossWrittenOffAssets`: diagnostic trader price loss above the account's collectible cap; it is not a liability
   or receivable. Unpaid price payouts become trader claims; negative aggregate terminal equity is reported
   separately as `terminalDeficit`.
 
@@ -102,7 +102,7 @@ B = ceil(L * settlementBufferBps / 10_000)
 ```
 
 `settlementBufferBps` defaults to `25` bps and governance may set it anywhere from `0` through `1,000` bps,
-inclusive. The ceiling is applied in 6-decimal USDC atoms, so nonzero `L` and a nonzero rate produce at least one
+inclusive. The ceiling is applied in 6-decimal USDG atoms, so nonzero `L` and a nonzero rate produce at least one
 atom of buffer.
 
 `B` is protected settlement headroom. It does not represent an additional trader claim or maximum payout, does not
@@ -118,8 +118,8 @@ SIZE_QUANTUM = 1e20
 lots = size / SIZE_QUANTUM
 ```
 
-At an 8-decimal price, `lots * price` is already denominated in 6-decimal USDC atoms. The Engine stores
-`entryCostUsdcAtoms` exactly rather than reconstructing it from the display-only average `entryPrice`. On an increase,
+At an 8-decimal price, `lots * price` is already denominated in 6-decimal USDG atoms. The Engine stores
+`entryCostAssetAtoms` exactly rather than reconstructing it from the display-only average `entryPrice`. On an increase,
 the added basis is `addedLots * executionPrice`. On a partial close:
 
 ```text
@@ -130,7 +130,7 @@ remainingEntryCost = oldEntryCost - closedEntryCost
 This assigns every entry-cost atom exactly once and preserves all basis dust for the residual position.
 
 For one account at mark `p`, let `entryCost` be exact entry cost and let
-`K = pnlPledgeUsdc + sameAccountTraderClaimUsdc`. Its LP-side terminal price delta is:
+`K = pnlPledgeAssets + sameAccountTraderClaimAssets`. Its LP-side terminal price delta is:
 
 ```text
 LONG: min(lots * p - entryCost, K)
@@ -149,11 +149,11 @@ the book's monotonic version makes the captured snapshot auditable.
 
 ### Frozen-close spread terms
 
-- `frozenSpreadUsdc`: fixed spread assessed on the reduced position notional for a voluntary close/reduce while `oracleFrozen`
-- `frozenSpreadPaidUsdc`: assessed spread actually retained or collected as LP trading revenue
-- `frozenSpreadWaivedUsdc`: uncollectible assessed spread waived to let a terminal full close complete
+- `frozenSpreadAssets`: fixed spread assessed on the reduced position notional for a voluntary close/reduce while `oracleFrozen`
+- `frozenSpreadPaidAssets`: assessed spread actually retained or collected as LP trading revenue
+- `frozenSpreadWaivedAssets`: uncollectible assessed spread waived to let a terminal full close complete
 
-For a valid close plan, `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`. All three values are zero for live and FAD-only closes. Liquidations never assess this spread.
+For a valid close plan, `frozenSpreadAssets == frozenSpreadPaidAssets + frozenSpreadWaivedAssets`. All three values are zero for live and FAD-only closes. Liquidations never assess this spread.
 
 ### Symmetric exact marked NAV
 
@@ -162,8 +162,8 @@ redemptions, before allocating pending claimant inflows and excluding ownerless 
 
 ```text
 signedTerminalEquity = physicalAssets
-                     - totalTraderClaimBalanceUsdc
-                     + terminalLpPriceDeltaUsdc
+                     - totalTraderClaimBalanceAssets
+                     + terminalLpPriceDeltaAssets
 
 distributable = max(signedTerminalEquity, 0)
 terminalDeficit = max(-signedTerminalEquity, 0)
@@ -173,17 +173,17 @@ This is symmetric: an entrant receives the same discount for inherited marked li
 and receives credit only for collectible marked receivables. It does not make those receivables cash. Redemption
 funding still uses the stricter physical withdrawal reserve described below.
 
-For example, suppose the pool holds 1,000 USDC, owes 100 USDC of trader claims, has maximum open-position liability
-of 600 USDC, and has a collectible terminal price delta of +80 USDC. At a 25-bps buffer rate:
+For example, suppose the pool holds 1,000 USDG, owes 100 USDG of trader claims, has maximum open-position liability
+of 600 USDG, and has a collectible terminal price delta of +80 USDG. At a 25-bps buffer rate:
 
 | Question | Calculation | Result |
 | --- | --- | --- |
-| Raw solvency | `1,000 - 100 >= 600` | Solvent, with 300 USDC of raw headroom. |
+| Raw solvency | `1,000 - 100 >= 600` | Solvent, with 300 USDG of raw headroom. |
 | Buffered admission | `900 >= 600 + 1.50` | The current state meets the buffer; a new trade must also pass on its post-trade state. |
-| Terminal equity | `1,000 - 100 + 80` | 980 USDC before ownership routing. |
-| Base LP funding capacity | `1,000 - 100 - 600 - 1.50` | 298.50 USDC before pending-claimant, unassigned-asset, and tranche limits. |
+| Terminal equity | `1,000 - 100 + 80` | 980 USDG before ownership routing. |
+| Base LP funding capacity | `1,000 - 100 - 600 - 1.50` | 298.50 USDG before pending-claimant, unassigned-asset, and tranche limits. |
 
-The marked 80-USDC receivable raises NAV but cannot fund a redemption until collected.
+The marked 80-USDG receivable raises NAV but cannot fund a redemption until collected.
 
 ### LP request admission, maturity, and oracle boundaries
 
@@ -259,12 +259,12 @@ Notes:
 This view determines how much cash the next synchronized settlement may commit to matured LP redemptions:
 
 ```text
-baseWithdrawalReservedUsdc = C + L + B
-freeUsdc = max(P - withdrawalReservedUsdc, 0)
+baseWithdrawalReservedAssets = C + L + B
+freeAssets = max(P - withdrawalReservedAssets, 0)
 ```
 
 HousePool adds pending claimant assets and `unassignedAssets` to the base reserve before calculating free cash.
-The Engine supplies `B` as `supplementalReservedUsdc`.
+The Engine supplies `B` as `supplementalReservedAssets`.
 
 Rule:
 
@@ -287,7 +287,7 @@ Notes:
 This view determines tranche equity for share pricing and revenue distribution:
 
 - start from the same physical assets, trader-claim liabilities, claimant buckets, recapitalizations, and revenue state,
-- apply the exact signed `terminalLpPriceDeltaUsdc` once,
+- apply the exact signed `terminalLpPriceDeltaAssets` once,
 - route the resulting distributable equity through the same Senior/Junior waterfall for both redemption and deposit
   pricing,
 - ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, Junior requests
@@ -358,7 +358,7 @@ checkpoint the applicable old rate before changing the basis. Revenue with no el
 
 ### 3.1 Junior maintenance-fee supply
 
-The Junior vault may dilute its outstanding shares to pay a maintenance fee. It never transfers USDC or changes
+The Junior vault may dilute its outstanding shares to pay a maintenance fee. It never transfers USDG or changes
 `juniorPrincipal`, Senior principal or high-water mark, withdrawal reserves, claimant buckets, or the allocation of
 assets between tranches. The Junior constructor accepts the initial rate and recipient; Senior requires both to be
 zero. When the Junior rate is zero, pending fee shares are zero and effective supply equals raw ERC-20 `totalSupply()`.
@@ -413,10 +413,10 @@ Let:
 - `S` be projected senior principal after the conservative reconcile used by senior admission,
 - `H` be the projected senior high-water mark,
 - `J` be projected junior principal,
-- `R` be gross USDC reserved by all unfinalized senior deposit requests,
+- `R` be gross USDG reserved by all unfinalized senior deposit requests,
 - `X = max(S, H)` be active protected senior exposure,
 - `Y = X + R` be counted senior admission exposure,
-- `A = maxSeniorExposureUsdc`, and
+- `A = maxSeniorExposureAssets`, and
 - `Q = maxSeniorShareBps`, where finalized governance requires `A` to be finite and `Q < 10_000`.
 
 New senior exposure is admissible only while both conditions hold after the action:
@@ -460,7 +460,7 @@ This view determines what backs one account's exact price-risk health and which 
 obligation:
 
 - generic account views distinguish free settlement, PnL pledge, liquidation reserve, order margin, and action reserve,
-- exact price-risk health uses post-carry `pnlPledgeUsdc + traderClaimBalanceUsdc`, including for open/increase, trader-withdraw,
+- exact price-risk health uses post-carry `pnlPledgeAssets + traderClaimBalanceAssets`, including for open/increase, trader-withdraw,
   close, and liquidation checks; the claim is nettable exactly once against that same account's price loss,
 - the separately funded VPI reserve backs only that account's typed VPI obligation: excess reserve never increases
   price-risk equity or the terminal price-PnL cap, while backing below `max(-vpiAccrued, 0)` blocks withdrawal and
@@ -479,7 +479,7 @@ obligation:
 match. Both the beneficiary and amount must be nonzero. On success:
 
 ```text
-clearinghouse USDC custody += amount
+clearinghouse USDG custody += amount
 settlementBalances[account] += amount
 all position, order, liquidation, action, and VPI reserve buckets are unchanged
 ```
@@ -507,19 +507,19 @@ Snapshot structs are boundary objects between engine accounting and downstream c
 Purpose:
 
 - canonical accounting payload for LP redemption funding and tranche reconciliation. Live LP kernels consume
-  `physicalAssetsUsdc` plus explicit reserve fields; `netPhysicalAssetsUsdc` is exposed for protocol and read-layer
+  `physicalAssets` plus explicit reserve fields; `netPhysicalAssets` is exposed for protocol and read-layer
   parity with the same canonical pool backing. Treasury clearinghouse balances are outside this custody boundary.
 
 Key fields:
 
-- `physicalAssetsUsdc`
-- `netPhysicalAssetsUsdc`
-- `maxLiabilityUsdc`
-- `supplementalReservedUsdc`: the current settlement-buffer target
-  `ceil(maxLiabilityUsdc * settlementBufferBps / 10_000)` for LP-withdrawal accounting
-- `terminalLpPriceDeltaUsdc`: exact signed collectible price-PnL adjustment used by both entry and exit pricing
+- `physicalAssets`
+- `netPhysicalAssets`
+- `maxLiabilityAssets`
+- `supplementalReservedAssets`: the current settlement-buffer target
+  `ceil(maxLiabilityAssets * settlementBufferBps / 10_000)` for LP-withdrawal accounting
+- `terminalLpPriceDeltaAssets`: exact signed collectible price-PnL adjustment used by both entry and exit pricing
 - `terminalNavBookVersion`: monotonic version captured with the exact delta
-- `traderClaimBalanceUsdc`
+- `traderClaimBalanceAssets`
 - `hasOpenPositions`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
@@ -574,7 +574,7 @@ Accounting rules:
   exactly the resulting net assets,
 - `withdraw` and `redeem` only release already-funded escrow and do not reprice or reassess a fee,
 - the fee does not become protocol revenue,
-- the fee does not increase `protocolTreasuryBalanceUsdc`,
+- the fee does not increase `protocolTreasuryBalanceAssets`,
 - the fee remains inside the same tranche and therefore benefits incumbent LPs of that tranche only.
 
 Senior withdrawal protection follows the actual net principal debit: for pre-withdrawal principal `P`, high-water
@@ -611,9 +611,9 @@ Purpose:
 
 Required fields:
 
-- `effectiveAssetsAfterUsdc`
-- `maxLiabilityAfterUsdc`
-- `postOpDegradedMode`: whether projected `effectiveAssetsAfterUsdc < maxLiabilityAfterUsdc`
+- `effectiveAssetsAfterAssets`
+- `maxLiabilityAfterAssets`
+- `postOpDegradedMode`: whether projected `effectiveAssetsAfterAssets < maxLiabilityAfterAssets`
 - `triggersDegradedMode`: that insolvency condition is true and the latch was not already set
 
 `postOpDegradedMode` reports projected raw insolvency, not the future value of the sticky on-chain latch. A healthy
@@ -636,8 +636,8 @@ Keep these categories separate:
 - `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the pool and only needing ownership routing
 - `accountExcess()`: owner-governed admission of unsolicited raw pool cash into canonical assets
 
-Governance funds recapitalization through `CfdEngine.recapitalizePool(amountUsdc)`. The engine owner approves
-the engine for USDC; the call checkpoints carry at the old depth, transfers from the owner's wallet directly to
+Governance funds recapitalization through `CfdEngine.recapitalizePool(amountAssets)`. The engine owner approves
+the engine for USDG; the call checkpoints carry at the old depth, transfers from the owner's wallet directly to
 the pool, and verifies exact receipt before recording `Recapitalization` with `CashArrived`. Transfer and recording
 are atomic. Normal reconciliation allocates the queued amount to senior restoration or unassigned assets;
 the funding call mints no LP shares and does not automatically clear degraded mode.
@@ -674,11 +674,11 @@ The protocol uses LP-capital carry instead of a side-to-side rate mechanism.
 
 Definitions:
 
-- `borrowBaseUsdc = max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)`
-- `sideBorrowBaseUsdc`: sum of open-position borrow bases for one side
-- `sideUtilizationBps = min(floor(sideBorrowBaseUsdc * 10_000 / economicDepth), 10_000)`; a positive base at zero depth uses 10,000 bps
-- `pendingCarryUsdc = unsettledCarryUsdc + floor(borrowBaseUsdc * (currentSideCarryIndex - positionLastCarryIndex) / 1e18)`
-- `unsettledCarryUsdc[account]`: carry that has been checkpointed at a basis change but not yet physically collected
+- `borrowBaseAssets = max(positionMaxProfitAssets - activePositionMarginAssets, 0)`
+- `sideBorrowBaseAssets`: sum of open-position borrow bases for one side
+- `sideUtilizationBps = min(floor(sideBorrowBaseAssets * 10_000 / economicDepth), 10_000)`; a positive base at zero depth uses 10,000 bps
+- `pendingCarryAssets = unsettledCarryAssets + floor(borrowBaseAssets * (currentSideCarryIndex - positionLastCarryIndex) / 1e18)`
+- `unsettledCarryAssets[account]`: carry that has been checkpointed at a basis change but not yet physically collected
 
 For elapsed seconds `dt` at fixed borrow base and economic depth, the side index increases by:
 
@@ -703,7 +703,7 @@ Rules:
   retaining any unpaid remainder. Then the full credit is applied: paid claims become pledge for live positions,
   bounties become free settlement. No second collection pass or waiver occurs; a later checkpoint can collect that
   credit even at the same timestamp, without reassessing elapsed carry,
-- stored `unsettledCarryUsdc` may therefore coexist with new backing immediately after a credit. Health checks project
+- stored `unsettledCarryAssets` may therefore coexist with new backing immediately after a credit. Health checks project
   collection from current buckets; stored arrears alone do not prove carry delinquency,
 - claim service still requires pool cash to cover all outstanding trader claims after carry collection. Collected carry
   may enable that payout; insufficient cash or any later failure reverts the entire collection and credit,
@@ -728,7 +728,7 @@ Rules:
 `CarryRealized` reports collection and retained arrears whenever nonzero carry is due, including zero collection when
 no backing remains.
 
-LP ownership follows collection time. Indexed pending carry and retained `unsettledCarryUsdc` are trader debt, not
+LP ownership follows collection time. Indexed pending carry and retained `unsettledCarryAssets` are trader debt, not
 LP NAV receivables. Cash collection becomes pool revenue and the existing tranche waterfall prices it at the next
 reconcile. Shares activated before collection participate even while held in deposit-claim escrow; shares burned to
 fund a redemption stop participating, and the resulting fixed cash claim does not earn later carry. Carry collected
@@ -740,7 +740,7 @@ The same rule applies when retained arrears are later paid. This is a collection
 that timing cannot transfer part of old carry revenue to a new LP.
 
 Collected cash is not always an equal increase in LP NAV. For a solvent pool at a fixed mark and with no other flows,
-the change in aggregate tranche NAV is `collectedCarryUsdc + changeInTerminalLpPriceDeltaUsdc`. Collecting from pledged
+the change in aggregate tranche NAV is `collectedCarryAssets + changeInTerminalLpPriceDeltaAssets`. Collecting from pledged
 margin reduces the account's collectible price-loss cap. If that cap binds both before and after collection, the decrease in
 the marked price-loss receivable offsets the carry cash. Reconcile must neither add uncollected carry nor count the
 same pledge once as a price-loss receivable and again as collected revenue.
@@ -764,12 +764,12 @@ The protocol supports fail-soft terminal settlement.
 
 ### Trader claim balance
 
-- profitable closes and some liquidation residuals may create `traderClaimBalanceUsdc[account]`,
+- profitable closes and some liquidation residuals may create `traderClaimBalanceAssets[account]`,
 - only the beneficiary account itself may call `settleTraderClaim(account)` (`msg.sender == account`; an AA account's
   owner must execute through that account),
 - settlement is all-or-nothing for the account claim once aggregate trader claim liabilities are fully cash-covered,
 - settlement is credited into `MarginClearinghouse`,
-- if the beneficiary still has a live position, paid claim value is credited directly to `pnlPledgeUsdc` and the
+- if the beneficiary still has a live position, paid claim value is credited directly to `pnlPledgeAssets` and the
   account's terminal curve is resynchronized; it must not become withdrawable free settlement while its value was
   already included in the marked collectible cap.
 
@@ -786,17 +786,17 @@ Rules:
 Reservations identify settlement cash that cannot be withdrawn or reused for another obligation. The clearinghouse
 splits it into:
 
-- `pnlPledgeUsdc`: live-position custody immediately reachable by marked price losses,
-- `liquidationReserveUsdc`: keeper/protocol liquidation-charge backing, isolated from price PnL,
-- `orderMarginUsdc`: committed open/increase margin,
-- `actionReserveUsdc`: opening execution bounties and other action charges, including the dedicated negative
+- `pnlPledgeAssets`: live-position custody immediately reachable by marked price losses,
+- `liquidationReserveAssets`: keeper/protocol liquidation-charge backing, isolated from price PnL,
+- `orderMarginAssets`: committed open/increase margin,
+- `actionReserveAssets`: opening execution bounties and other action charges, including the dedicated negative
   lifetime-VPI reserve and dormant position-protection trigger rewards. Close execution bounties are zero.
 
 For a live position, the gross VPI reserve target is:
 
 ```text
-vpiRebateReserveUsdc = max(-vpiAccrued, 0)
-actionReserveUsdc >= protectedExecutionBountyUsdc + vpiRebateReserveUsdc
+vpiRebateReserveAssets = max(-vpiAccrued, 0)
+actionReserveAssets >= protectedExecutionBountyAssets + vpiRebateReserveAssets
 ```
 
 The second relation is a protected floor: generic action-charge collection may consume only action reserve above it.
@@ -806,7 +806,7 @@ pledge, otherwise planning fails before exposure grows.
 After an open/increase, the target liquidation reserve is:
 
 ```text
-max(minBountyUsdc, floor(resultingNotionalUsdc * bountyBps / 10_000))
+max(minBountyAssets, floor(resultingNotionalAssets * bountyBps / 10_000))
 ```
 
 Approved position collateral beyond that target is PnL pledge. A reduction recomputes the target and releases excess
@@ -845,7 +845,7 @@ queue-synchronization step. The Router separately enforces `maxPendingOrders` (d
 
 ### Bounty records and protected backing
 
-A bounty record is keyed by `(BountyKind, id)` and contains `account`, `amountUsdc`, `freeFundedUsdc`, and `state`.
+A bounty record is keyed by `(BountyKind, id)` and contains `account`, `amountAssets`, `freeFundedAssets`, and `state`.
 Numeric ids may overlap across the two independent namespaces:
 
 | Namespace | Authorized record owner | Monetary backing |
@@ -853,17 +853,17 @@ Numeric ids may overlap across the two independent namespaces:
 | `Order` | Router | Opening/increase execution reward from free settlement; every close attempt records zero. |
 | `ProtectionTrigger` | Router's immutable protection book | One trigger reward from free settlement; it is paid once or refunded/forfeited before payment. |
 
-`totalBountyReservationsUsdc(account)` is the sum of outstanding protected bounty amounts in both namespaces. Creation
+`totalBountyReservationsAssets(account)` is the sum of outstanding protected bounty amounts in both namespaces. Creation
 increases it; taking or successfully recovering a record decreases it. Quarantine preserves the amount in the aggregate.
 A new record requires an unused nonzero id and enough already-locked action reserve to cover the new amount, existing
 bounties, and the dedicated VPI reserve. A zero close still needs an explicit `Active` record and valid backing for the
-account's other obligations. The planner snapshot field `protectedExecutionBountyUsdc` reads this same aggregate,
+account's other obligations. The planner snapshot field `protectedExecutionBountyAssets` reads this same aggregate,
 including unpaid protection-trigger rewards.
 
 The exact floor enforced locally by the clearinghouse is:
 
 ```text
-protectedActionReserveUsdc = vpiRebateReserveUsdc + totalBountyReservationsUsdc(account)
+protectedActionReserveAssets = vpiRebateReserveAssets + totalBountyReservationsAssets(account)
 ```
 
 Generic action charges cannot consume this protected amount. No Router queue scan or external accounting callback
@@ -872,7 +872,7 @@ counts and the clearinghouse's committed-margin summary.
 
 ### Reservation recovery and atomicity
 
-Recording a reservation classifies custody; it does not create or transfer USDC. `recordBountyReservation` classifies
+Recording a reservation classifies custody; it does not create or transfer USDG. `recordBountyReservation` classifies
 value already locked by the authorized funding path, or records an active zero close. `takeBountyReservation` settles
 the classification while the underlying action reserve remains locked. The authorized caller then completes the payout,
 refund, or forfeiture in the same transaction. Later failure rolls back the record, lifecycle state, and funds together.
@@ -886,7 +886,7 @@ Reservation mismatch before expiry is retryable. Strictly after the execution de
 exact Book-backed opening funding before any internal refund, without a new carry checkpoint. Missing, already-settled,
 or foreign-account records authorize no refund. Identifiable records with inconsistent funding, aggregate backing, or
 custody become `Quarantined`; their value stays locked and remains included in the protected aggregate. A discrepancy
-never authorizes an administrator to guess or rewrite ownership. `BountyRecovery` reports the recoverable `freeUsdc`
+never authorizes an administrator to guess or rewrite ownership. `BountyRecovery` reports the recoverable `freeAssets`
 and a `discrepancy` classification; a zero close still requires its complete authenticated identity.
 
 ### Reading and checking reservations
@@ -899,7 +899,7 @@ Use these views for their distinct purposes:
 | `getAccountReservationSummary(account)` | Active committed-margin total and active reservation count. |
 | `getMarginReservationIds(account)` | Active monetary-reservation FIFO; not the execution queue. |
 | `getBountyReservation(kind, id)` | Canonical bounty owner, amount, funding classification, and state. |
-| `totalBountyReservationsUsdc(account)` | Protected outstanding bounty amount, including quarantined backing. |
+| `totalBountyReservationsAssets(account)` | Protected outstanding bounty amount, including quarantined backing. |
 | `OrderRouter.getAccountReservations(account)` | Router pending count plus canonical committed-margin and bounty totals. |
 | `OrderLifecycleBook` / `PositionProtectionBook` | Order outcome and protection lifecycle, respectively. |
 
@@ -916,7 +916,7 @@ in the separate accounting suites, rather than implied by this conservation test
 
 ### Funded settlement minimum for a pending flat open
 
-A positive `minPostSettlementBalanceUsdc` is supported only for a flat account's first pending open. The canonical
+A positive `minPostSettlementBalanceAssets` is supported only for a flat account's first pending open. The canonical
 pending intent is the sole floor ledger; no account-level floor storage is added. After commitment and reservations,
 settlement custody `S`, minimum `M` and maximum gross debit `G` must satisfy `S >= M && S - M >= G`. Every owner
 withdrawal applies the same predicate after its provisional debit, in addition to ordinary reservation checks. The
@@ -932,7 +932,7 @@ does not freeze market-dependent financial bounds.
 
 ### Close-order bounty policy
 
-Ordinary and protection close attempts have zero execution bounty, so commitment requires no USDC top-up for a close
+Ordinary and protection close attempts have zero execution bounty, so commitment requires no USDG top-up for a close
 keeper reward. Native transaction gas and oracle-update fees are separate. Opening/increase bounties, protection
 trigger rewards, and liquidation rewards remain paid incentives. A zero reward does not make trading charges zero
 or guarantee that every partial reduction passes its health and financial limits.
@@ -1015,7 +1015,7 @@ A full close removes the entire position, so it has no residual-position health/
 partial-close minimum-notional floor. A partial close must leave a healthy residual position and meet the applicable
 size and leverage bounds. "Full" is evaluated against the position at each check: queued admission and live execution
 can differ if an earlier order fails. Both paths still require lot-aligned size, matching direction, admissible oracle
-data, and valid timing, mode, and financial bounds. A positive `minPostSettlementBalanceUsdc` is not supported for a
+data, and valid timing, mode, and financial bounds. A positive `minPostSettlementBalanceAssets` is not supported for a
 fresh close.
 
 Every voluntary close uses the signed VPI curve and lifetime rebate clamp. During `oracleFrozen`, it also assesses
@@ -1073,12 +1073,12 @@ Required properties:
 
 The engine lens close preview separates fresh payout destinations:
 
-- `payoutToPnlPledgeUsdc`: cash price profit locked as collateral for a remaining position;
-- `payoutToFreeSettlementUsdc`: paid action rebates and full-close price profit credited without a position pledge;
-- `deferredPayoutUsdc`: new unpaid price profit recorded as a trader claim, excluding pre-existing claims.
+- `payoutToPnlPledgeAssets`: cash price profit locked as collateral for a remaining position;
+- `payoutToFreeSettlementAssets`: paid action rebates and full-close price profit credited without a position pledge;
+- `deferredPayoutAssets`: new unpaid price profit recorded as a trader claim, excluding pre-existing claims.
 
-`immediatePayoutUsdc` is the sum of the two cash destinations, not a withdrawable amount.
-The three destinations sum to `freshTraderPayoutUsdc`; existing claims remain separately reported.
+`immediatePayoutAssets` is the sum of the two cash destinations, not a withdrawable amount.
+The three destinations sum to `freshTraderPayoutAssets`; existing claims remain separately reported.
 Released pre-existing collateral is outside these fresh payout fields. Even a free-settlement credit is not a
 withdrawal-capacity quote: account reservations, carry, and Engine withdrawal guards still apply. See
 [CLOSE_PREVIEW.md](CLOSE_PREVIEW.md) for field interpretation and integration examples.
@@ -1104,7 +1104,7 @@ health, and solvency. [Order timing](CANONICAL_ENTRYPOINTS.md#order-timing) desc
 ### Treasury fee withdrawals
 
 - protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,
-- `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
+- `MarginClearinghouse.balanceAssets(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
 - rotating the treasury changes the recipient of future fees; existing balances stay with the previous account and remain withdrawable by it,
 - an optional treasury commitment activates immediately and blocks both immediate treasury setters until its expiry; it does not restrict withdrawals or move balances,
 - during an active lock, the owner can propose, replace, or cancel a pending successor without changing the current expiry; at that expiry the latest pending address becomes effective automatically, with no confirmation or keeper transaction,
@@ -1126,10 +1126,10 @@ inside the clearinghouse; they are not wallet transfers. `previewLiquidation` an
 Engine-level diagnostics that omit this Router cleanup. All use caller-supplied prices and do not validate oracle
 policy or predict intervening transactions or other accounts in a batch.
 
-In the liquidation preview, `settlementRetainedUsdc` is the projected settlement balance after all liquidation
-debits and any immediate price payout. `immediatePayoutUsdc` is already included in that total and must not be
-added again. `traderClaimBalanceUsdc` reports outstanding claims separately; deferred payouts are not cash in
-`settlementRetainedUsdc`. For example, $100 left after debits plus a $30 immediate payout gives retained
+In the liquidation preview, `settlementRetainedAssets` is the projected settlement balance after all liquidation
+debits and any immediate price payout. `immediatePayoutAssets` is already included in that total and must not be
+added again. `traderClaimBalanceAssets` reports outstanding claims separately; deferred payouts are not cash in
+`settlementRetainedAssets`. For example, $100 left after debits plus a $30 immediate payout gives retained
 settlement of $130, not $160. If that $30 is deferred instead, retained settlement stays $100 and the claim
 balance increases by $30. Retained settlement is an account-balance projection, not a withdrawal-capacity quote.
 
@@ -1155,7 +1155,7 @@ that classification; unrelated errors do not become healthy outcomes. Other acco
 
 Liquidation-charge rule:
 
-- assess the configured `bountyBps` rate and `minBountyUsdc` floor as one total charge,
+- assess the configured `bountyBps` rate and `minBountyAssets` floor as one total charge,
 - cap the total charge by physically reachable liquidation collateral,
 - require `keeperShareBps + protocolShareBps <= 10_000`,
 - set `keeperAllocation = floor(totalCharge * keeperShareBps / 10_000)` and credit it to the keeper,
