@@ -114,8 +114,9 @@ The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked up
 ### Protocol treasury commitment
 
 `CfdEngine.setProtocolTreasury(address,uint256)` activates a nonzero treasury immediately and locks it for a
-caller-selected positive duration in seconds. The constructor's initial treasury is unlocked. Both immediate treasury
-setters, including the legacy one-argument setter and same-address calls, reject updates while
+caller-selected duration from 1 second to 90 days (7,776,000 seconds), inclusive. The constructor's initial treasury is
+unlocked. Both immediate treasury setters, including the legacy one-argument setter and same-address calls, reject
+updates while
 `block.timestamp < protocolTreasuryLockedUntil()`. The current lock's expiry cannot be cancelled, shortened,
 extended, or bypassed by ownership transfer. The legacy setter starts no new lock.
 
@@ -127,9 +128,10 @@ current treasury remains. A matured proposal cannot be cancelled or replaced ret
 preserves the schedule; renouncing ownership does not prevent activation.
 
 The proposal's duration determines the successor's lock from the scheduled activation timestamp, even if the next
-interaction occurs much later. Zero duration is allowed for a proposal and leaves its successor unlocked. The
-effective treasury stays selected after its own lock expires. `pendingProtocolTreasury()` returns the address,
-activation time, and successor lock expiry only while the proposal is pending, then returns zeros.
+interaction occurs much later. A proposal accepts durations from zero to 90 days, inclusive; zero leaves its successor
+unlocked. The 90-day cap applies to each individual lock, not the total time from proposal submission until the
+successor's lock expires. The effective treasury stays selected after its own lock expires. `pendingProtocolTreasury()`
+returns the address, activation time, and successor lock expiry only while the proposal is pending, then returns zeros.
 `protocolTreasury()` and `protocolTreasuryLockedUntil()` resolve the effective values by timestamp; the latter
 retains the latest effective expiry after it passes.
 
@@ -138,10 +140,11 @@ Before an immediate update or a new proposal, an activated successor is copied i
 record is cleared. Reads still resolve activation by timestamp before that storage normalization occurs. This keeps
 mutations on the current record without introducing an activation transaction or changing either lock deadline.
 
-There is no mandatory minimum tenure, emergency override, or duration cap. An incorrect active address or
-excessively long active lock cannot be corrected before expiry. Zero duration is rejected by the immediate locking
-setter, and timestamp overflow reverts atomically. The commitment affects future protocol credits only. Existing
-balances remain with their original clearinghouse accounts, and normal withdrawal rules continue to apply to both
+There is no mandatory minimum positive tenure or emergency override. An incorrect active address or lock duration
+cannot be corrected before expiry. The immediate locking setter and proposal method reject durations above 90 days;
+zero duration is also rejected by the immediate locking setter. Timestamp overflow reverts atomically. The commitment
+affects future protocol credits only. Existing balances remain with their original clearinghouse accounts, and normal
+withdrawal rules continue to apply to both
 old and current treasuries. It does not constrain the treasury wallet's own spending or the separately governed
 junior-vault maintenance-fee recipient. `ProtocolTreasuryLocked(treasury, lockedUntil)` records an immediate
 commitment; `ProtocolTreasuryProposed(treasury, activationTime, lockedUntil)` records the pending schedule and

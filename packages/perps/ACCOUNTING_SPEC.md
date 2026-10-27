@@ -1112,6 +1112,7 @@ not hold balances or change the accounting rules.
 - `MarginClearinghouse.balanceAssets(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
 - rotating the treasury changes the recipient of future fees; existing balances stay with the previous account and remain withdrawable by it,
 - an optional treasury commitment activates immediately and blocks both immediate treasury setters until its expiry; it does not restrict withdrawals or move balances,
+- immediate commitments accept durations from 1 second to 90 days (7,776,000 seconds), inclusive; a pending successor accepts zero to 90 days, with zero leaving it unlocked. This cap applies to each lock's duration, not the time from proposal submission until the successor's lock expires,
 - during an active lock, the owner can propose, replace, or cancel a pending successor without changing the current expiry; at that expiry the latest pending address becomes effective automatically, with no confirmation or keeper transaction,
 - all future protocol credits use the effective `CfdEngine.protocolTreasury()` at the credit timestamp; the pending successor's optional lock starts at its scheduled activation time, even if the next interaction occurs later,
 - only cash-collected execution or liquidation fees and free-cash-funded top-ups become treasury margin,

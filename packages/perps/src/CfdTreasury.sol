@@ -9,6 +9,8 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 /// @notice Owner-controlled treasury locks and automatic successor scheduling, stored in the inheriting engine.
 abstract contract CfdTreasury is ICfdEngineTypes, Ownable2Step {
 
+    uint256 internal constant MAX_TREASURY_LOCK_DURATION = 90 days;
+
     struct TreasuryConfig {
         address account;
         uint256 lockedUntil;
@@ -64,7 +66,7 @@ abstract contract CfdTreasury is ICfdEngineTypes, Ownable2Step {
     /// @notice Queues or replaces the treasury that automatically takes effect when the current lock expires.
     /// @dev Owner-only; requires an active lock. Replacement leaves the current lock's expiry unchanged.
     /// @param treasury Nonzero clearinghouse account for future fees after activation.
-    /// @param nextLockDuration Seconds to lock the successor from the scheduled activation time; zero leaves it unlocked.
+    /// @param nextLockDuration Seconds to lock the successor from activation, at most 90 days; zero leaves it unlocked.
     function proposeProtocolTreasury(
         address treasury,
         uint256 nextLockDuration
@@ -76,6 +78,9 @@ abstract contract CfdTreasury is ICfdEngineTypes, Ownable2Step {
         }
         if (treasury == address(0)) {
             revert CfdEngine__ZeroAddress();
+        }
+        if (nextLockDuration > MAX_TREASURY_LOCK_DURATION) {
+            revert CfdEngine__InvalidTreasuryLockDuration();
         }
         uint256 lockedUntil = activationTime + nextLockDuration;
         _pendingTreasury.account = treasury;
@@ -127,12 +132,12 @@ abstract contract CfdTreasury is ICfdEngineTypes, Ownable2Step {
     ///      through ownership transfer. Existing balances and withdrawals are unaffected. Expiry allows updates
     ///      at block.timestamp >= protocolTreasuryLockedUntil(). A queued successor activates at expiry.
     /// @param treasury Nonzero clearinghouse account that will receive future protocol fee credits.
-    /// @param lockDuration Positive lock duration in seconds. Timestamp overflow reverts atomically.
+    /// @param lockDuration Positive lock duration in seconds, at most 90 days. Timestamp overflow reverts atomically.
     function setProtocolTreasury(
         address treasury,
         uint256 lockDuration
     ) external onlyOwner {
-        if (lockDuration == 0) {
+        if (lockDuration == 0 || lockDuration > MAX_TREASURY_LOCK_DURATION) {
             revert CfdEngine__InvalidTreasuryLockDuration();
         }
         _setProtocolTreasury(treasury);

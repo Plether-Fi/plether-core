@@ -67,7 +67,7 @@ interface ICfdEngineTypes {
     error CfdEngine__ZeroAddress();
     /// @notice Immediate treasury updates are blocked until this Unix timestamp, including same-address updates.
     error CfdEngine__TreasuryLocked(uint256 lockedUntil);
-    /// @notice The locking treasury setter requires a positive duration in seconds.
+    /// @notice Treasury locks cannot exceed 90 days; the immediate locking setter also rejects zero duration.
     error CfdEngine__InvalidTreasuryLockDuration();
     /// @notice A successor can only be scheduled while the current treasury is locked.
     error CfdEngine__TreasuryNotLocked();

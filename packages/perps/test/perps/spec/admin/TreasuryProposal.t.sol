@@ -19,12 +19,21 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         vm.warp(expiry - 30 days);
 
         vm.expectEmit(true, false, false, true, address(engine));
-        emit CfdTreasury.ProtocolTreasuryProposed(TREASURY_B, expiry, expiry + 60 days);
-        engine.proposeProtocolTreasury(TREASURY_B, 60 days);
+        emit CfdTreasury.ProtocolTreasuryProposed(TREASURY_B, expiry, expiry + 90 days);
+        engine.proposeProtocolTreasury(TREASURY_B, 90 days);
 
         assertEq(engine.protocolTreasury(), TREASURY_A);
         assertEq(engine.protocolTreasuryLockedUntil(), expiry);
-        _assertPending(TREASURY_B, expiry, expiry + 60 days);
+        _assertPending(TREASURY_B, expiry, expiry + 90 days);
+        vm.warp(expiry);
+        assertEq(engine.protocolTreasury(), TREASURY_B);
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry + 90 days, "Maximum lock starts at activation");
+        vm.warp(expiry + 90 days - 1);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TreasuryLocked.selector, expiry + 90 days));
+        engine.setProtocolTreasury(TREASURY_C);
+        vm.warp(expiry + 90 days);
+        engine.setProtocolTreasury(TREASURY_C);
+        assertEq(engine.protocolTreasury(), TREASURY_C);
     }
 
     function test_TreasuryProposal_ReplacementDoesNotRestartCountdown() public {
@@ -192,6 +201,8 @@ contract TreasuryProposalTest is CfdEngineTestBase {
     function test_TreasuryProposal_RequiresAnActiveLock() public {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__TreasuryNotLocked.selector);
         engine.proposeProtocolTreasury(TREASURY_B, 30 days);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__TreasuryNotLocked.selector);
+        engine.proposeProtocolTreasury(TREASURY_B, 90 days + 1);
 
         uint256 expiry = _lockTreasury();
         vm.warp(expiry);
@@ -219,16 +230,38 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         uint256 expiry = _lockTreasury();
         engine.proposeProtocolTreasury(TREASURY_B, 30 days);
 
+        vm.recordLogs();
         vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAddress.selector);
         engine.proposeProtocolTreasury(address(0), 7 days);
-        vm.expectRevert(abi.encodeWithSignature("Panic(uint256)", 0x11));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAddress.selector);
+        engine.proposeProtocolTreasury(address(0), 90 days + 1);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
+        engine.proposeProtocolTreasury(TREASURY_C, 90 days + 1);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
         engine.proposeProtocolTreasury(TREASURY_C, type(uint256).max);
 
         assertEq(engine.protocolTreasury(), TREASURY_A);
         assertEq(engine.protocolTreasuryLockedUntil(), expiry);
         _assertPending(TREASURY_B, expiry, expiry + 30 days);
+        assertEq(vm.getRecordedLogs().length, 0, "Rejected replacements must not emit treasury events");
         vm.warp(expiry);
         assertEq(engine.protocolTreasury(), TREASURY_B);
+    }
+
+    function testFuzz_TreasuryProposal_RejectsDurationOverNinetyDays(
+        uint256 durationSeed
+    ) public {
+        uint256 duration = bound(durationSeed, 90 days + 1, type(uint256).max);
+        uint256 expiry = _lockTreasury();
+        vm.recordLogs();
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
+        engine.proposeProtocolTreasury(TREASURY_B, duration);
+
+        assertEq(engine.protocolTreasury(), TREASURY_A);
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry);
+        _assertPending(address(0), 0, 0);
+        assertEq(vm.getRecordedLogs().length, 0);
     }
 
     function test_TreasuryProposal_InvalidNextProposalCannotUndoAutomaticActivation() public {
@@ -236,7 +269,7 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         engine.proposeProtocolTreasury(TREASURY_B, 30 days);
         vm.warp(expiry);
 
-        vm.expectRevert(abi.encodeWithSignature("Panic(uint256)", 0x11));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
         engine.proposeProtocolTreasury(TREASURY_C, type(uint256).max);
 
         assertEq(engine.protocolTreasury(), TREASURY_B);
@@ -388,33 +421,34 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         uint256 replacementTimeSeed,
         uint32 nextDuration
     ) public {
-        uint256 duration = bound(uint256(durationSeed), 1, 3650 days);
+        uint256 duration = bound(uint256(durationSeed), 1, 90 days);
+        uint256 nextLockDuration = bound(uint256(nextDuration), 0, 90 days);
         vm.warp(uint256(start));
         engine.setProtocolTreasury(TREASURY_A, duration);
         uint256 expiry = uint256(start) + duration;
         engine.proposeProtocolTreasury(TREASURY_B, 1 days);
         vm.warp(uint256(start) + bound(replacementTimeSeed, 0, duration - 1));
-        engine.proposeProtocolTreasury(TREASURY_C, uint256(nextDuration));
+        engine.proposeProtocolTreasury(TREASURY_C, nextLockDuration);
 
         assertEq(engine.protocolTreasury(), TREASURY_A);
         assertEq(engine.protocolTreasuryLockedUntil(), expiry);
-        _assertPending(TREASURY_C, expiry, expiry + uint256(nextDuration));
+        _assertPending(TREASURY_C, expiry, expiry + nextLockDuration);
         vm.warp(expiry - 1);
         assertEq(engine.protocolTreasury(), TREASURY_A);
         vm.warp(expiry);
         assertEq(engine.protocolTreasury(), TREASURY_C);
-        assertEq(engine.protocolTreasuryLockedUntil(), expiry + uint256(nextDuration));
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry + nextLockDuration);
         _assertPending(address(0), 0, 0);
-        vm.warp(expiry + uint256(nextDuration) + 1);
+        vm.warp(expiry + nextLockDuration + 1);
         assertEq(engine.protocolTreasury(), TREASURY_C);
-        assertEq(engine.protocolTreasuryLockedUntil(), expiry + uint256(nextDuration));
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry + nextLockDuration);
     }
 
     function testFuzz_TreasuryProposal_CancellationCannotChangeCurrentLock(
         uint32 durationSeed,
         uint256 cancellationTimeSeed
     ) public {
-        uint256 duration = bound(uint256(durationSeed), 1, 3650 days);
+        uint256 duration = bound(uint256(durationSeed), 1, 90 days);
         uint256 start = block.timestamp;
         engine.setProtocolTreasury(TREASURY_A, duration);
         uint256 expiry = start + duration;

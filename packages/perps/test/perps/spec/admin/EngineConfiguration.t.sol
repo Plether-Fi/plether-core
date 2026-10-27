@@ -51,7 +51,7 @@ contract EngineConfigurationTest is CfdEngineTestBase {
         engine.setProtocolTreasury(treasury);
         vm.expectRevert(reason);
         engine.setProtocolTreasury(treasury, 1);
-        vm.expectRevert(reason);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
         engine.setProtocolTreasury(treasury, 365 days);
         assertEq(engine.protocolTreasury(), treasury);
         assertEq(engine.protocolTreasuryLockedUntil(), expiry);
@@ -129,17 +129,39 @@ contract EngineConfigurationTest is CfdEngineTestBase {
 
     function test_TreasuryLock_InvalidInputsLeaveStateUnchanged() public {
         address treasury = engine.protocolTreasury();
+        vm.recordLogs();
         vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAddress.selector);
         engine.setProtocolTreasury(address(0), 90 days);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAddress.selector);
         engine.setProtocolTreasury(address(0));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
         engine.setProtocolTreasury(address(0xFEE90), 0);
-        vm.warp(1);
-        vm.expectRevert(abi.encodeWithSignature("Panic(uint256)", 0x11));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
+        engine.setProtocolTreasury(address(0xFEE90), 90 days + 1);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
         engine.setProtocolTreasury(address(0xFEE90), type(uint256).max);
         assertEq(engine.protocolTreasury(), treasury);
         assertEq(engine.protocolTreasuryLockedUntil(), 0);
+        assertEq(vm.getRecordedLogs().length, 0, "Rejected durations must not emit treasury events");
+    }
+
+    function testFuzz_TreasuryLock_RejectsDurationOverNinetyDays(
+        uint256 durationSeed
+    ) public {
+        uint256 duration = bound(durationSeed, 90 days + 1, type(uint256).max);
+        address treasury = engine.protocolTreasury();
+        vm.recordLogs();
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
+        engine.setProtocolTreasury(address(0xFEE90), duration);
+
+        assertEq(engine.protocolTreasury(), treasury);
+        assertEq(engine.protocolTreasuryLockedUntil(), 0);
+        (address pending, uint256 activationTime, uint256 lockedUntil) = engine.pendingProtocolTreasury();
+        assertEq(pending, address(0));
+        assertEq(activationTime, 0);
+        assertEq(lockedUntil, 0);
+        assertEq(vm.getRecordedLogs().length, 0);
     }
 
     function testFuzz_TreasuryLock_RejectsChangesThroughoutDuration(
@@ -147,7 +169,7 @@ contract EngineConfigurationTest is CfdEngineTestBase {
         uint64 durationSeed,
         uint256 elapsedSeed
     ) public {
-        uint256 duration = bound(uint256(durationSeed), 1, type(uint64).max);
+        uint256 duration = bound(uint256(durationSeed), 1, 90 days);
         vm.warp(uint256(start));
         engine.setProtocolTreasury(address(0xFEE90), duration);
         uint256 expiry = uint256(start) + duration;

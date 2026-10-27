@@ -89,7 +89,8 @@ planner and settlement sidecar; it has no separate owner, configuration step, or
 
 ## Protocol treasury lock and scheduling
 
-The engine owner can activate a treasury immediately and lock its address for a chosen positive duration in seconds:
+The engine owner can activate a treasury immediately and lock its address for a chosen duration from 1 second to
+90 days (7,776,000 seconds), inclusive:
 
 ```solidity
 engine.setProtocolTreasury(treasury, 90 days);
@@ -107,9 +108,10 @@ engine.cancelProtocolTreasuryProposal(); // Keeps the current treasury and its o
 
 At the original expiry, the latest pending treasury automatically becomes the recipient of future protocol fees.
 No confirmation or keeper transaction is required. Replacement and cancellation never reset the countdown. A
-proposal's duration sets the successor's lock, starting at that scheduled activation time; zero leaves the successor
-unlocked. If there is no pending proposal, the current treasury stays in place at expiry. Proposals require an active
-lock, and an already active successor cannot be cancelled.
+proposal's duration sets the successor's lock, starting at that scheduled activation time; it can range from zero to
+90 days, inclusive, with zero leaving the successor unlocked. The cap applies to each lock's duration, not the total
+time from proposing a successor until its lock expires. If there is no pending proposal, the current treasury stays
+in place at expiry. Proposals require an active lock, and an already active successor cannot be cancelled.
 
 `protocolTreasury()` and `protocolTreasuryLockedUntil()` resolve the effective address and lock from the timestamp,
 even without a transaction at expiry. `pendingProtocolTreasury()` returns `(treasury, activationTime, lockedUntil)`

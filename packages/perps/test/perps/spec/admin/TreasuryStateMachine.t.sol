@@ -31,6 +31,7 @@ contract TreasuryStateMachineTest is Test {
     function testFuzz_TreasuryStateMachine_MatchesLegacyAcrossOperationSequences(
         bytes32 seed
     ) public {
+        // Compare the shared duration domain; rejection above the new 90-day cap is tested against the specification.
         // Begin with a cancellable schedule so every sequence exercises an actual pending record.
         _callBoth(address(this), abi.encodeWithSignature("setProtocolTreasury(address,uint256)", TREASURY_A, 90 days));
         _callBoth(address(this), abi.encodeCall(treasury.proposeProtocolTreasury, (TREASURY_B, 30 days)));
@@ -85,7 +86,6 @@ contract TreasuryStateMachineTest is Test {
             _callBoth(address(this), abi.encodeCall(treasury.cancelProtocolTreasuryProposal, ()));
         assertFalse(success);
         assertEq(result, abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__NoTreasuryProposal.selector));
-        _callBoth(address(this), abi.encodeCall(treasury.proposeProtocolTreasury, (TREASURY_C, type(uint256).max)));
         _callBoth(address(this), abi.encodeCall(treasury.proposeProtocolTreasury, (address(0), 0)));
         _callBoth(address(this), abi.encodeWithSignature("setProtocolTreasury(address,uint256)", address(0), 0));
         _callBoth(address(this), abi.encodeWithSignature("setProtocolTreasury(address)", address(0)));
@@ -94,12 +94,27 @@ contract TreasuryStateMachineTest is Test {
         _callBoth(address(this), abi.encodeCall(treasury.proposeProtocolTreasury, (TREASURY_C, 0)));
         vm.warp(treasury.protocolTreasuryLockedUntil());
         _callBoth(address(this), abi.encodeWithSignature("setProtocolTreasury(address)", address(0)));
-        _callBoth(
-            address(this),
-            abi.encodeWithSignature("setProtocolTreasury(address,uint256)", TREASURY_A, type(uint256).max)
-        );
+        _callBoth(address(this), abi.encodeWithSignature("setProtocolTreasury(address,uint256)", TREASURY_A, 0));
         assertEq(treasury.protocolTreasury(), TREASURY_C);
         _callBoth(address(this), abi.encodeWithSignature("setProtocolTreasury(address)", TREASURY_A));
+    }
+
+    function test_TreasuryStateMachine_BoundedDurationsStillCheckTimestampOverflow() public {
+        vm.warp(type(uint256).max - 2 days);
+        _callBoth(address(this), abi.encodeWithSignature("setProtocolTreasury(address,uint256)", TREASURY_A, 1 days));
+        (bool success, bytes memory result) =
+            _callBoth(address(this), abi.encodeCall(treasury.proposeProtocolTreasury, (TREASURY_B, 2 days)));
+        assertFalse(success);
+        assertEq(result, abi.encodeWithSignature("Panic(uint256)", 0x11));
+        _callBoth(address(this), abi.encodeCall(treasury.proposeProtocolTreasury, (TREASURY_B, 1 days)));
+
+        vm.warp(type(uint256).max);
+        (success, result) =
+            _callBoth(address(this), abi.encodeWithSignature("setProtocolTreasury(address,uint256)", TREASURY_C, 1));
+        assertFalse(success);
+        assertEq(result, abi.encodeWithSignature("Panic(uint256)", 0x11));
+        assertEq(treasury.protocolTreasury(), TREASURY_B);
+        assertEq(treasury.protocolTreasuryLockedUntil(), type(uint256).max);
     }
 
     function test_TreasuryStateMachine_OwnershipAndRenunciationKeepScheduledActivation() public {
@@ -207,9 +222,9 @@ contract TreasuryStateMachineTest is Test {
             return 30 days;
         }
         if (choice == 4) {
-            return type(uint256).max;
+            return 90 days;
         }
-        return 1 + entropy % 365 days;
+        return 1 + entropy % 90 days;
     }
 
     function _advanceTime(
