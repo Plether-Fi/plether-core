@@ -99,7 +99,8 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
     }
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
-    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_529;
+    // Measured after the token-neutral API rename (solc 0.8.35, via-IR, optimizer runs 200).
+    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_571;
     uint256 internal constant REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT = 1200;
     uint256 internal constant CFD_ENGINE_RUNTIME_BASELINE = 24_439;
 
