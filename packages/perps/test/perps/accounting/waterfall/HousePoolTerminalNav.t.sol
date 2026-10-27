@@ -21,7 +21,7 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -35,7 +35,7 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
     function _mintAndAccountPoolExcess(
         uint256 amount
     ) internal {
-        usdc.mint(address(pool), amount);
+        settlementToken.mint(address(pool), amount);
         pool.accountExcess();
     }
 
@@ -196,7 +196,7 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(saturdayFrozen - 3 hours));
 
-        uint256 bobUsdcBefore = usdc.balanceOf(bob);
+        uint256 bobAssetsBefore = settlementToken.balanceOf(bob);
         uint256 requestShares = juniorVault.estimateWithdrawShares(1e6);
         uint256 requestId = _requestAsyncRedeem(juniorVault, bob, requestShares);
         _settleAsyncRequest(requestId, false);
@@ -204,7 +204,9 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
 
         assertEq(fundedShares, requestShares, "the frozen-window request should be fully funded");
         assertGt(assetsPaid, 0, "the frozen-window exit should pay assets after the configured fee");
-        assertEq(usdc.balanceOf(bob), bobUsdcBefore + assetsPaid, "oracleFrozen alone should not block LP exits");
+        assertEq(
+            settlementToken.balanceOf(bob), bobAssetsBefore + assetsPaid, "oracleFrozen alone should not block LP exits"
+        );
     }
 
     function test_MaxWithdraw_RemainsExecutableWithPendingCarryAccrual() public {
@@ -230,13 +232,13 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
         uint256 requestId = _requestAsyncRedeem(juniorVault, bob, juniorVault.maxRequestRedeem(bob));
         _settleAsyncRequest(requestId, false);
         uint256 quotedAssets = juniorVault.maxWithdraw(bob);
-        uint256 bobBalanceBefore = usdc.balanceOf(bob);
+        uint256 bobBalanceBefore = settlementToken.balanceOf(bob);
 
         vm.prank(bob);
         juniorVault.withdraw(quotedAssets, bob, bob);
 
         assertEq(
-            usdc.balanceOf(bob),
+            settlementToken.balanceOf(bob),
             bobBalanceBefore + quotedAssets,
             "maxWithdraw quote should remain executable after sync"
         );
@@ -265,7 +267,7 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
         uint256 requestId = _requestAsyncRedeem(juniorVault, bob, juniorVault.maxRequestRedeem(bob));
         _settleAsyncRequest(requestId, false);
         uint256 quotedShares = juniorVault.maxRedeem(bob);
-        uint256 bobBalanceBefore = usdc.balanceOf(bob);
+        uint256 bobBalanceBefore = settlementToken.balanceOf(bob);
         uint256 quotedAssets = juniorVault.maxWithdraw(bob);
 
         vm.prank(bob);
@@ -273,7 +275,7 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
 
         assertEq(redeemedAssets, quotedAssets, "maxRedeem should pay the settled claimable asset amount");
         assertEq(
-            usdc.balanceOf(bob),
+            settlementToken.balanceOf(bob),
             bobBalanceBefore + redeemedAssets,
             "maxRedeem quote should remain executable after sync"
         );
@@ -316,9 +318,9 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 poolBalance = usdc.balanceOf(address(pool));
+        uint256 poolBalance = settlementToken.balanceOf(address(pool));
         uint256 totalClaimed = pool.seniorPrincipal() + pool.juniorPrincipal();
-        uint256 pendingFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 pendingFees = clearinghouse.balanceAssets(engine.protocolTreasury());
 
         assertGe(totalClaimed + pendingFees, poolBalance, "All pool cash must be accounted for with zero open interest");
     }
@@ -341,11 +343,11 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
 
         uint256 accountedAssetsBeforeClose = pool.accountedAssets();
         _close(carol, CfdTypes.Side.LONG, 100_000e18, 1e8);
-        uint256 realizedCarryUsdc = pool.accountedAssets() - accountedAssetsBeforeClose;
+        uint256 realizedCarryAssets = pool.accountedAssets() - accountedAssetsBeforeClose;
 
         ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
-        assertEq(terminalSnapshot.terminalLpPriceDeltaUsdc, 0, "remaining position has no terminal price PnL");
-        assertGt(realizedCarryUsdc, 0, "close should separately realize elapsed carry into the pool");
+        assertEq(terminalSnapshot.terminalLpPriceDeltaAssets, 0, "remaining position has no terminal price PnL");
+        assertGt(realizedCarryAssets, 0, "close should separately realize elapsed carry into the pool");
 
         uint256 seniorBefore = pool.seniorPrincipal();
         uint256 juniorBefore = pool.juniorPrincipal();
@@ -354,16 +356,16 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
         uint256 seniorAfter = pool.seniorPrincipal();
         uint256 juniorAfter = pool.juniorPrincipal();
 
-        uint256 fundedSeniorCouponUsdc = seniorAfter - seniorBefore;
-        uint256 juniorCarryRevenueUsdc = juniorAfter - juniorBefore;
+        uint256 fundedSeniorCouponAssets = seniorAfter - seniorBefore;
+        uint256 juniorCarryRevenueAssets = juniorAfter - juniorBefore;
         assertEq(
-            fundedSeniorCouponUsdc + juniorCarryRevenueUsdc,
-            realizedCarryUsdc,
+            fundedSeniorCouponAssets + juniorCarryRevenueAssets,
+            realizedCarryAssets,
             "realized carry must account for the full claimant increase"
         );
         assertEq(
             juniorAfter,
-            juniorBefore + realizedCarryUsdc - fundedSeniorCouponUsdc,
+            juniorBefore + realizedCarryAssets - fundedSeniorCouponAssets,
             "legacy spread state must not add junior value beyond realized carry after senior coupon"
         );
     }
@@ -377,17 +379,19 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
         _open(alice, CfdTypes.Side.LONG, 250_000e18, 25_000e6, 1e8);
         _open(carol, CfdTypes.Side.LONG, 250_100e18, 25_000e6, 1e8);
 
-        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 fees = clearinghouse.balanceAssets(engine.protocolTreasury());
         assertGt(fees, 0, "Fees should have accumulated");
 
         uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.LONG);
         assertEq(maxLiability, 500_100e6, "Both positions should be open");
 
         address feeRecipient = engine.protocolTreasury();
-        uint256 recipientBalanceBefore = usdc.balanceOf(feeRecipient);
+        uint256 recipientBalanceBefore = settlementToken.balanceOf(feeRecipient);
         _withdrawProtocolTreasury(fees);
 
-        assertEq(usdc.balanceOf(feeRecipient) - recipientBalanceBefore, fees, "Fee recipient should receive fees");
+        assertEq(
+            settlementToken.balanceOf(feeRecipient) - recipientBalanceBefore, fees, "Fee recipient should receive fees"
+        );
     }
 
     // senior HWM preserved for restoration after wipeout
@@ -424,7 +428,7 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
         assertGt(pool.seniorHighWaterMark(), seniorAfterLoss, "Senior below HWM");
         assertGt(seniorAfterLoss, 0, "Senior not fully wiped");
 
-        usdc.mint(address(pool), 100_000e6);
+        settlementToken.mint(address(pool), 100_000e6);
         pool.accountExcess();
 
         vm.prank(address(juniorVault));
@@ -466,9 +470,9 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
         assertGt(pool.seniorHighWaterMark() - pool.seniorPrincipal(), 0, "Senior deficit exists");
 
         address dave = address(0x444);
-        usdc.mint(dave, 10_000_000e6);
+        settlementToken.mint(dave, 10_000_000e6);
         vm.startPrank(dave);
-        usdc.approve(address(seniorVault), 10_000_000e6);
+        settlementToken.approve(address(seniorVault), 10_000_000e6);
         assertEq(seniorVault.maxRequestDeposit(dave), 0, "request capacity should be zero while impaired");
         vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
         seniorVault.requestDeposit(10_000_000e6, dave, dave);

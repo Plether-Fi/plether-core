@@ -57,11 +57,18 @@ abstract contract OrderLiquidationHandler is OrderValidation {
         if (refundedOrders != 0 && !engineLens.isLiquidatableAt(account, executionPrice, housePoolDepth)) {
             return type(uint256).max;
         }
-        (uint64[] memory orderIds, uint256[] memory orderBountiesUsdc) =
+        (uint64[] memory orderIds, uint256[] memory orderBountiesAssets) =
             _forfeitReservedOrderBountiesOnLiquidation(account);
         outcome = engine.liquidatePosition(account, executionPrice, housePoolDepth, publishTime, keeper);
         _clearLiquidatedAccountOrders(
-            account, orderIds, orderBountiesUsdc, executionPrice, neutralMarkPrice, housePoolDepth, publishTime, keeper
+            account,
+            orderIds,
+            orderBountiesAssets,
+            executionPrice,
+            neutralMarkPrice,
+            housePoolDepth,
+            publishTime,
+            keeper
         );
     }
 
@@ -93,10 +100,10 @@ abstract contract OrderLiquidationHandler is OrderValidation {
     function _clearLiquidatedAccountOrders(
         address account,
         uint64[] memory orderIds,
-        uint256[] memory orderBountiesUsdc,
+        uint256[] memory orderBountiesAssets,
         uint256 executionPrice,
         uint256 neutralMarkPrice,
-        uint256 housePoolDepthUsdc,
+        uint256 housePoolDepthAssets,
         uint64 publishTime,
         address keeper
     ) internal {
@@ -123,20 +130,20 @@ abstract contract OrderLiquidationHandler is OrderValidation {
             receiptInput.priceSource = OrderV3Types.PriceSource.Liquidation;
             receiptInput.executionPrice = executionPrice;
             receiptInput.neutralMarkPrice = neutralMarkPrice;
-            receiptInput.poolDepthUsdc = housePoolDepthUsdc;
+            receiptInput.poolDepthAssets = housePoolDepthAssets;
             receiptInput.oraclePublishTime = publishTime;
             receiptInput.priceReachedEngine = false;
-            _setLiquidationBountyReceipt(receiptInput, orderBountiesUsdc[i]);
+            _setLiquidationBountyReceipt(receiptInput, orderBountiesAssets[i]);
             _recordSettledTerminalReceipt(receiptInput);
         }
     }
 
     function _setLiquidationBountyReceipt(
         IOrderRouterExecutionHost.SettledTerminalInput memory receiptInput,
-        uint256 bountyUsdc
+        uint256 bountyAssets
     ) private view {
-        receiptInput.bountyUsdc = bountyUsdc;
-        if (bountyUsdc != 0) {
+        receiptInput.bountyAssets = bountyAssets;
+        if (bountyAssets != 0) {
             receiptInput.bountyRecipient = engine.protocolTreasury();
             receiptInput.bountyDisposition = OrderV3Types.BountyDisposition.Forfeited;
         }

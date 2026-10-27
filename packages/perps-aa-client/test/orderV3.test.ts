@@ -7,9 +7,9 @@ const request: OrderRequestV3 = {
   clientOrderId: hash, side: 0, sizeDelta: 10_000n * 10n ** 18n, marginDelta: 0n,
   targetPrice: 100_000_000n, isClose: true,
   bounds: { submitBy: 1_900_000_000n, executionWindowSeconds: 60, allowedExecutionModes: 7, expectedConfigHash: hash,
-    maxExecutionBountyUsdc: 200_000n, maxExecutionNotionalUsdc: 10_000_000_000n,
-    maxGrossAccountDebitUsdc: 1_000_000n, maxActionChargeUsdc: 500_000n, maxExplicitFeesUsdc: 400_000n,
-    maxPostPositionSize: 0n, minPostSettlementBalanceUsdc: 0n, minPostPositionEquityUsdc: 0n,
+    maxExecutionBountyAssets: 200_000n, maxExecutionNotionalAssets: 10_000_000_000n,
+    maxGrossAccountDebitAssets: 1_000_000n, maxActionChargeAssets: 500_000n, maxExplicitFeesAssets: 400_000n,
+    maxPostPositionSize: 0n, minPostSettlementBalanceAssets: 0n, minPostPositionEquityAssets: 0n,
     maxPostLeverageBps: 100_000 },
 };
 describe("new-stack close calls", () => {
@@ -30,13 +30,13 @@ describe("new-stack close calls", () => {
     expect(call.value).toBe(0n);
     expect(decodeFunctionData({ abi: orderRouterV3Abi, data: call.data })).toEqual({ functionName: "expireOrder", args: [7n] });
   });
-  it.each([1n, maxUint256])("rejects a close with settlement floor %s without changing the request", minPostSettlementBalanceUsdc => {
-    const input = { ...request, bounds: { ...request.bounds, minPostSettlementBalanceUsdc } };
+  it.each([1n, maxUint256])("rejects a close with settlement floor %s without changing the request", minPostSettlementBalanceAssets => {
+    const input = { ...request, bounds: { ...request.bounds, minPostSettlementBalanceAssets } };
     expect(() => buildCloseOrderV3(router, input)).toThrow("flat opening order");
-    expect(input.bounds.minPostSettlementBalanceUsdc).toBe(minPostSettlementBalanceUsdc);
+    expect(input.bounds.minPostSettlementBalanceAssets).toBe(minPostSettlementBalanceAssets);
   });
   it("preserves an unlimited gross debit ceiling for a close without a settlement floor", () => {
-    const input = { ...request, bounds: { ...request.bounds, maxGrossAccountDebitUsdc: maxUint256 } };
+    const input = { ...request, bounds: { ...request.bounds, maxGrossAccountDebitAssets: maxUint256 } };
     const call = buildCloseOrderV3(router, input);
     expect(decodeFunctionData({ abi: orderRouterV3Abi, data: call.data }).args).toEqual([input]);
   });

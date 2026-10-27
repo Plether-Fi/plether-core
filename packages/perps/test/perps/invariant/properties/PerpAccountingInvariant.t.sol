@@ -25,8 +25,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     struct TerminalBookTotals {
         uint256 activeCurveCount;
         uint256 totalLots;
-        uint256 totalEntryCostUsdcAtoms;
-        uint256 totalEffectiveCapUsdcAtoms;
+        uint256 totalEntryCostAssetAtoms;
+        uint256 totalEffectiveCapAssetAtoms;
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
@@ -37,7 +37,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 9,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -47,7 +47,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
+        handler = new PerpAccountingHandler(settlementToken, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
 
         bytes4[] memory selectors = new bytes4[](6);
@@ -140,15 +140,15 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         // Opening spends the entire $5,000 commitment (fee, pledge and liquidation reserve),
         // plus the capped $0.20 execution bounty. The loss exhausts the pledge but cannot take free cash.
         uint256 residual = 44_999_800_000;
-        assertEq(clearinghouse.balanceUsdc(actor), residual, "independent first-generation residual");
+        assertEq(clearinghouse.balanceAssets(actor), residual, "independent first-generation residual");
         _assertAllInvariants();
 
         vm.prank(actor);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
         clearinghouse.withdraw(actor, residual + 1);
         handler.withdrawCollateral(0, residual);
-        assertEq(clearinghouse.balanceUsdc(actor), 0);
-        assertEq(usdc.balanceOf(actor), residual, "requested residual belongs to the liquidated trader");
+        assertEq(clearinghouse.balanceAssets(actor), 0);
+        assertEq(settlementToken.balanceOf(actor), residual, "requested residual belongs to the liquidated trader");
         vm.prank(actor);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
         clearinghouse.withdraw(actor, 1);
@@ -171,11 +171,15 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         assertEq(router.pendingOrderCounts(actor), 0);
         assertEq(_remainingCommittedMargin(pendingOrderId), 0);
         assertEq(
-            clearinghouse.balanceUsdc(actor),
+            clearinghouse.balanceAssets(actor),
             44_999_600_000,
             "second generation also forfeits its pending order's capped $0.20 bounty"
         );
-        assertEq(usdc.balanceOf(actor), residual, "reopening and liquidation cannot seize prior wallet entitlement");
+        assertEq(
+            settlementToken.balanceOf(actor),
+            residual,
+            "reopening and liquidation cannot seize prior wallet entitlement"
+        );
         _assertAllInvariants();
     }
 
@@ -186,7 +190,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         _openReusableActor();
         handler.liquidate(0, 1.69e8);
         assertEq(handler.ghostSuccessfulLiquidations(), 1);
-        assertEq(clearinghouse.balanceUsdc(actor), 0, "fully spent funding leaves no recoverable entitlement");
+        assertEq(clearinghouse.balanceAssets(actor), 0, "fully spent funding leaves no recoverable entitlement");
         vm.prank(actor);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
         clearinghouse.withdraw(actor, 1);
@@ -199,7 +203,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         address actor = handler.actorAt(0);
         handler.withdrawCollateral(0, 100e6);
         _assertAllInvariants();
-        usdc.mint(actor, 1);
+        settlementToken.mint(actor, 1);
         vm.expectRevert();
         this.invariant_OrderReservationsQueuesAndTerminalStateReconcile();
     }
@@ -208,7 +212,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         address actor = handler.actorAt(0);
         handler.withdrawCollateral(0, 100e6);
         _assertAllInvariants();
-        usdc.mint(actor, 100e6);
+        settlementToken.mint(actor, 100e6);
         vm.expectRevert();
         this.invariant_OrderReservationsQueuesAndTerminalStateReconcile();
     }
@@ -221,17 +225,17 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         handler.createTraderClaim(0);
         // 10,000 tokens gain $0.50 each; the close withholds $2 (4 bps of $5,000 notional).
         uint256 claim = 4998e6;
-        assertEq(engine.traderClaimBalanceUsdc(actor), claim, "independent new deferred claim");
+        assertEq(engine.traderClaimBalanceAssets(actor), claim, "independent new deferred claim");
         handler.fundHousePool(claim + 1000e6);
         handler.settleTraderClaim(0);
-        assertEq(engine.traderClaimBalanceUsdc(actor), 0);
-        assertEq(usdc.balanceOf(actor), 0, "claim settlement credits custody rather than the wallet");
+        assertEq(engine.traderClaimBalanceAssets(actor), 0);
+        assertEq(settlementToken.balanceOf(actor), 0, "claim settlement credits custody rather than the wallet");
         handler.restoreSolvencyAndClearDegradedMode();
         // $44,999.80 residual - $4 open fee - two $0.20 bounties + $4,998 net claim.
         uint256 settlement = 49_993_600_000;
-        assertEq(clearinghouse.balanceUsdc(actor), settlement, "independent profit and claim entitlement");
+        assertEq(clearinghouse.balanceAssets(actor), settlement, "independent profit and claim entitlement");
         handler.withdrawCollateral(0, settlement);
-        assertEq(usdc.balanceOf(actor), settlement);
+        assertEq(settlementToken.balanceOf(actor), settlement);
         assertEq(handler.ghost().accountGeneration(actor), 1);
         _assertAllInvariants();
     }
@@ -241,8 +245,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         _openReusableActor();
         handler.liquidate(0, 1.69e8);
         handler.createTraderClaim(0);
-        assertEq(engine.traderClaimBalanceUsdc(actor), 4998e6);
-        assertEq(clearinghouse.balanceUsdc(actor), 44_995_600_000);
+        assertEq(engine.traderClaimBalanceAssets(actor), 4998e6);
+        assertEq(clearinghouse.balanceAssets(actor), 44_995_600_000);
         // Replenish the mock pool without settling this account's outstanding claim.
         handler.restoreSolvencyAndClearDegradedMode();
         handler.setPoolAssets(1_000_000_000e6);
@@ -255,13 +259,13 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         // is $1,142 < $1,242 maintenance. The liquidation charge is capped at the $108 reserve.
         handler.liquidate(0, 1.242e8);
         assertEq(handler.ghostSuccessfulLiquidations(), 2);
-        assertEq(engine.traderClaimBalanceUsdc(actor), 798e6, "claim remainder survives liquidation");
-        assertEq(clearinghouse.balanceUsdc(actor), 44_839_400_000, "free cash plus surviving pledge entitlement");
+        assertEq(engine.traderClaimBalanceAssets(actor), 798e6, "claim remainder survives liquidation");
+        assertEq(clearinghouse.balanceAssets(actor), 44_839_400_000, "free cash plus surviving pledge entitlement");
         handler.settleTraderClaim(0);
-        assertEq(engine.traderClaimBalanceUsdc(actor), 0);
-        assertEq(clearinghouse.balanceUsdc(actor), 45_637_400_000);
+        assertEq(engine.traderClaimBalanceAssets(actor), 0);
+        assertEq(clearinghouse.balanceAssets(actor), 45_637_400_000);
         handler.withdrawCollateral(0, 45_637_400_000);
-        assertEq(usdc.balanceOf(actor), 45_637_400_000);
+        assertEq(settlementToken.balanceOf(actor), 45_637_400_000);
         vm.prank(actor);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
         clearinghouse.withdraw(actor, 1);
@@ -274,7 +278,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         this.checkFirstGenerationResidual();
         vm.mockCall(
             address(clearinghouse),
-            abi.encodeCall(clearinghouse.balanceUsdc, (handler.actorAt(0))),
+            abi.encodeCall(clearinghouse.balanceAssets, (handler.actorAt(0))),
             abi.encode(uint256(44_999_800_001))
         );
         vm.expectRevert();
@@ -284,7 +288,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
     function checkFirstGenerationResidual() external view {
         assertEq(
-            clearinghouse.balanceUsdc(handler.actorAt(0)),
+            clearinghouse.balanceAssets(handler.actorAt(0)),
             44_999_800_000,
             "input-derived residual must not accept an inflated production balance"
         );
@@ -303,7 +307,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         _assertAllInvariants();
 
         IMarginClearinghouse.OrderReservation memory stale = clearinghouse.getOrderReservation(oldReservationId);
-        stale.remainingAmountUsdc = 1;
+        stale.remainingAmountAssets = 1;
         vm.mockCall(
             address(clearinghouse),
             abi.encodeCall(clearinghouse.getOrderReservation, (oldReservationId)),
@@ -324,7 +328,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     }
 
     function _assertInvariant_ClearinghouseReservationsMatchLiveExecutionBounties() internal view {
-        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody execution bounty reserves");
+        assertEq(settlementToken.balanceOf(address(router)), 0, "Router must not custody execution bounty reserves");
         assertEq(
             _sumReservedSettlementBuckets(),
             _sumPendingExecutionBounties(),
@@ -346,8 +350,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             if (size == 0) {
                 assertEq(curveHash, bytes32(0), "Absent Engine position must not have a curve hash");
                 assertEq(curve.lots, 0, "Absent Engine position must not have curve lots");
-                assertEq(curve.entryCostUsdcAtoms, 0, "Absent Engine position must not have curve basis");
-                assertEq(curve.effectiveCapUsdcAtoms, 0, "Absent Engine position must not have a curve cap");
+                assertEq(curve.entryCostAssetAtoms, 0, "Absent Engine position must not have curve basis");
+                assertEq(curve.effectiveCapAssetAtoms, 0, "Absent Engine position must not have a curve cap");
                 assertEq(
                     uint256(curve.side),
                     uint256(CfdTypes.Side.LONG),
@@ -363,33 +367,33 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             );
             assertEq(size % CfdTypes.SIZE_QUANTUM, 0, "Live Engine position must contain exact terminal lots");
             uint256 expectedLots = size / CfdTypes.SIZE_QUANTUM;
-            uint256 expectedEntryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
-            uint256 maximumCollectibleUsdcAtoms = side == CfdTypes.Side.LONG
-                ? expectedLots * uint256(book.CAP_PRICE()) - expectedEntryCostUsdcAtoms
-                : expectedEntryCostUsdcAtoms;
-            uint256 candidateCapUsdcAtoms =
-                clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
-            uint256 expectedEffectiveCapUsdcAtoms = candidateCapUsdcAtoms < maximumCollectibleUsdcAtoms
-                ? candidateCapUsdcAtoms
-                : maximumCollectibleUsdcAtoms;
+            uint256 expectedEntryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
+            uint256 maximumCollectibleAssetAtoms = side == CfdTypes.Side.LONG
+                ? expectedLots * uint256(book.CAP_PRICE()) - expectedEntryCostAssetAtoms
+                : expectedEntryCostAssetAtoms;
+            uint256 candidateCapAssetAtoms =
+                clearinghouse.pnlPledgeAssets(account) + engine.traderClaimBalanceAssets(account);
+            uint256 expectedEffectiveCapAssetAtoms = candidateCapAssetAtoms < maximumCollectibleAssetAtoms
+                ? candidateCapAssetAtoms
+                : maximumCollectibleAssetAtoms;
 
             assertEq(curve.lots, expectedLots, "Curve lots must match canonical Engine size");
             assertEq(
-                curve.entryCostUsdcAtoms,
-                expectedEntryCostUsdcAtoms,
+                curve.entryCostAssetAtoms,
+                expectedEntryCostAssetAtoms,
                 "Curve basis must match canonical Engine entry cost"
             );
             assertEq(
-                curve.effectiveCapUsdcAtoms,
-                expectedEffectiveCapUsdcAtoms,
+                curve.effectiveCapAssetAtoms,
+                expectedEffectiveCapAssetAtoms,
                 "Curve cap must match clipped same-account claims and pledge"
             );
             assertEq(uint256(curve.side), uint256(side), "Curve side must match canonical Engine side");
 
             totals.activeCurveCount++;
             totals.totalLots += curve.lots;
-            totals.totalEntryCostUsdcAtoms += curve.entryCostUsdcAtoms;
-            totals.totalEffectiveCapUsdcAtoms += curve.effectiveCapUsdcAtoms;
+            totals.totalEntryCostAssetAtoms += curve.entryCostAssetAtoms;
+            totals.totalEffectiveCapAssetAtoms += curve.effectiveCapAssetAtoms;
         }
 
         ITerminalNavBookV2.BookState memory state = book.bookState();
@@ -397,13 +401,13 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         assertEq(state.activeCurveCount, totals.activeCurveCount, "Book active curve count must match actor records");
         assertEq(state.totalLots, totals.totalLots, "Book total lots must match actor records");
         assertEq(
-            state.totalEntryCostUsdcAtoms,
-            totals.totalEntryCostUsdcAtoms,
+            state.totalEntryCostAssetAtoms,
+            totals.totalEntryCostAssetAtoms,
             "Book total entry cost must match actor records"
         );
         assertEq(
-            state.totalEffectiveCapUsdcAtoms,
-            totals.totalEffectiveCapUsdcAtoms,
+            state.totalEffectiveCapAssetAtoms,
+            totals.totalEffectiveCapAssetAtoms,
             "Book total effective cap must match actor records"
         );
     }
@@ -422,7 +426,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         for (uint256 i; i < handler.actorCount(); ++i) {
             address actor = handler.actorAt(i);
             assertEq(
-                usdc.balanceOf(actor),
+                settlementToken.balanceOf(actor),
                 handler.ghost().expectedWalletFromSubmittedFlows(actor),
                 "Wallet credits must equal submitted withdrawal flows"
             );
@@ -434,7 +438,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             uint256 ghostCommittedMargin = handler.committedMarginSnapshot(account);
-            uint256 liveCommittedMargin = router.getAccountReservations(account).committedMarginUsdc;
+            uint256 liveCommittedMargin = router.getAccountReservations(account).committedMarginAssets;
             uint256 reservationCommittedMargin = handler.accountActiveReservationCommittedMargin(account);
 
             assertEq(ghostCommittedMargin, liveCommittedMargin, "Ghost committed margin must match account reservation");
@@ -462,7 +466,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             uint256 pendingCloseSize;
             uint256 pendingBounties;
             for (uint256 j = 0; j < pending.length; j++) {
-                pendingBounties += pending[j].executionBountyUsdc;
+                pendingBounties += pending[j].executionBountyAssets;
                 if (pending[j].isClose) {
                     pendingCloseSize += pending[j].sizeDelta;
                 }
@@ -472,12 +476,12 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 pending.length, reservation.pendingOrderCount, "Pending order count must match account reservation"
             );
             assertEq(
-                clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc,
-                reservation.committedMarginUsdc,
+                clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginAssets,
+                reservation.committedMarginAssets,
                 "Committed margin summary must match account reservation"
             );
             assertEq(
-                reservation.executionBountyUsdc,
+                reservation.executionBountyAssets,
                 pendingBounties + router.positionProtectionBook().unpaidBounties(account),
                 "Canonical bounty total must equal the sum of order and protection records"
             );
@@ -543,7 +547,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             );
             assertEq(
                 handler.accountReservationRemainingSum(account),
-                router.getAccountReservations(account).committedMarginUsdc,
+                router.getAccountReservations(account).committedMarginAssets,
                 "Account reservation committed margin must derive from the same clearinghouse reservation source"
             );
         }
@@ -657,13 +661,13 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             IMarginClearinghouse.LockedMarginBuckets memory buckets = clearinghouse.getLockedMarginBuckets(account);
 
             assertEq(
-                snapshot.committedMarginUsdc,
-                summary.activeCommittedOrderMarginUsdc,
+                snapshot.committedMarginAssets,
+                summary.activeCommittedOrderMarginAssets,
                 "Account ledger snapshot committed margin must match reservation summary"
             );
             assertEq(
-                snapshot.committedMarginUsdc,
-                buckets.committedOrderMarginUsdc,
+                snapshot.committedMarginAssets,
+                buckets.committedOrderMarginAssets,
                 "Account ledger snapshot committed margin must match typed committed bucket"
             );
         }
@@ -761,16 +765,16 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             if (record.core.account == address(0) || record.core.sizeDelta == 0) {
                 continue;
             }
-            totalBounties += record.executionBountyUsdc;
+            totalBounties += record.executionBountyAssets;
         }
     }
 
     function _sumReservedSettlementBuckets() internal view returns (uint256 totalReservedSettlement) {
         totalReservedSettlement += clearinghouse.getLockedMarginBuckets(_account(address(handler)))
-        .reservedSettlementUsdc;
+        .reservedSettlementAssets;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             totalReservedSettlement += clearinghouse.getLockedMarginBuckets(_account(handler.actorAt(i)))
-            .reservedSettlementUsdc;
+            .reservedSettlementAssets;
         }
     }
 
@@ -785,8 +789,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 book.CAP_PRICE(),
                 account,
                 curve.lots,
-                curve.entryCostUsdcAtoms,
-                curve.effectiveCapUsdcAtoms,
+                curve.entryCostAssetAtoms,
+                curve.effectiveCapAssetAtoms,
                 curve.side
             )
         );

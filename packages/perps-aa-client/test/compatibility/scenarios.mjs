@@ -4,7 +4,7 @@ import { getUserOperationHash } from 'viem/account-abstraction'
 
 export const account = '0x2222222222222222222222222222222222222222'
 const owner = '0x1111111111111111111111111111111111111111'
-const usdc = '0x3333333333333333333333333333333333333333'
+const settlementToken = '0x3333333333333333333333333333333333333333'
 const clearinghouse = '0x4444444444444444444444444444444444444444'
 const orderRouter = '0x5555555555555555555555555555555555555555'
 const cfdEngine = '0x6666666666666666666666666666666666666666'
@@ -32,18 +32,18 @@ export function response(signatureByte = '99') {
 }
 
 export function actions(client) {
-  const closeLimits = { maxExecutionNotionalUsdc: 21000000n, maxGrossAccountDebitUsdc: 3000000n,
-    maxActionChargeUsdc: 200000n, maxExplicitFeesUsdc: 300000n }
+  const closeLimits = { maxExecutionNotionalAssets: 21000000n, maxGrossAccountDebitAssets: 3000000n,
+    maxActionChargeAssets: 200000n, maxExplicitFeesAssets: 300000n }
   const params = { takeProfitTriggerPrice: 70000000n, stopLossTriggerPrice: 90000000n, closeLimits }
   return [
-    client.buildAuthorizedDepositAction({ account, usdc, clearinghouse,
+    client.buildAuthorizedDepositAction({ account, settlementToken, clearinghouse,
       authorization: { from: owner, to: account, value: 25000000n, validAfter: 10n, validBefore: 1000n, nonce: word('ab') },
       authorizationSignature: `0x${'11'.repeat(32)}${'22'.repeat(32)}1b` }),
-    client.buildSmartAccountBalanceDepositAction({ account, usdc, clearinghouse, amount: 12000000n }),
+    client.buildSmartAccountBalanceDepositAction({ account, settlementToken, clearinghouse, amount: 12000000n }),
     client.buildPlaceOrderAction({ account, orderRouter, side: 'BEAR', sizeDelta: 10n ** 18n, marginDelta: 2000000n, targetPrice: 123456789n, isClose: false }),
     client.buildAddMarginAction({ account, cfdEngine, amount: 7000000n }),
     client.buildWithdrawAction({ account, clearinghouse, amount: 9000000n }),
-    client.buildWithdrawToOwnerAction({ account, owner, usdc, clearinghouse, amount: 12345678n }),
+    client.buildWithdrawToOwnerAction({ account, owner, settlementToken, clearinghouse, amount: 12345678n }),
     client.buildSettleTraderClaimAction({ account, cfdEngine }),
     client.buildCreateProtectionAction({ account, book, params }),
     client.buildReplaceProtectionAction({ account, book, params, protectionId: 42n }),
@@ -51,17 +51,17 @@ export function actions(client) {
     client.buildProtectedOpenAction({ account, book, params, request: {
       clientOrderId: word('ab'), side: 1, sizeDelta: 10n ** 18n, marginDelta: 2000000n, targetPrice: 80000000n, isClose: false,
       bounds: { submitBy: 1900000000n, executionWindowSeconds: 60, allowedExecutionModes: 1, expectedConfigHash: word('cd'),
-        maxExecutionBountyUsdc: 100000n, maxExecutionNotionalUsdc: 21000000n,
-        maxGrossAccountDebitUsdc: 3000000n, maxActionChargeUsdc: 200000n, maxExplicitFeesUsdc: 300000n,
-        maxPostPositionSize: 2n * 10n ** 18n, minPostSettlementBalanceUsdc: 400000n,
-        minPostPositionEquityUsdc: 500000n, maxPostLeverageBps: 100000 },
+        maxExecutionBountyAssets: 100000n, maxExecutionNotionalAssets: 21000000n,
+        maxGrossAccountDebitAssets: 3000000n, maxActionChargeAssets: 200000n, maxExplicitFeesAssets: 300000n,
+        maxPostPositionSize: 2n * 10n ** 18n, minPostSettlementBalanceAssets: 400000n,
+        minPostPositionEquityAssets: 500000n, maxPostLeverageBps: 100000 },
     } }),
     client.buildAmendLatchedProtectionCloseLimitsAction({ account, book, protectionId: 42n, closeLimits }),
     client.buildCancelProtectionAndCloseAction({ account, book, protectionId: 42n, request: {
       clientOrderId: word('ef'), side: 1, sizeDelta: 200n * 10n ** 18n, marginDelta: 0n, targetPrice: 80000000n, isClose: true,
       bounds: { submitBy: 1900000000n, executionWindowSeconds: 60, allowedExecutionModes: 7, expectedConfigHash: word('cd'),
-        maxExecutionBountyUsdc: 0n, ...closeLimits, maxPostPositionSize: 0n, minPostSettlementBalanceUsdc: 0n,
-        minPostPositionEquityUsdc: 500000n, maxPostLeverageBps: 100000 },
+        maxExecutionBountyAssets: 0n, ...closeLimits, maxPostPositionSize: 0n, minPostSettlementBalanceAssets: 0n,
+        minPostPositionEquityAssets: 500000n, maxPostLeverageBps: 100000 },
     } }),
   ]
 }
@@ -103,23 +103,25 @@ export function captureCompatibility(client) {
 
 export async function assertCompatibility(client, fixture, currentSchema) {
   const current = captureCompatibility(client)
-  assert.equal(currentSchema.schema, 'current-v5', 'Wrong current schema golden')
+  assert.equal(currentSchema.schema, 'current-assets-v5', 'Wrong current schema golden')
   assert.equal(fixture.protectionAbiHash, currentSchema.historicalProtectionAbiHash,
     'Immutable historical protection ABI baseline changed')
   assert.equal(fixture.actions.length, 11, 'Immutable historical action baseline changed')
   // The immutable 0.2 baseline guards unaffected action calldata and hashes.
-  // MED-9/MED-30 protection actions and the V5 receipt/view are reviewed current-schema changes.
-  const expectedExports = fixture.exports.filter(name => name !== 'hashOrderReceiptV4')
+  // v0.4.0 renames token/asset fields and retires the archived ABI runtime export.
+  // Tuple values, action calldata and native sponsorship hashes remain unchanged.
+  const expectedExports = fixture.exports.filter(name => !['hashOrderReceiptV4', 'orderLifecycleV4Abi'].includes(name))
     .concat('hashOrderReceiptV5', 'buildAmendLatchedProtectionCloseLimitsAction', 'buildCancelProtectionAndCloseAction').sort()
-  assert.deepEqual(current.exports, expectedExports, 'Only the reviewed current-receipt and protection exports may change')
+  assert.deepEqual(current.exports, expectedExports, 'Only the reviewed current-receipt, protection and archived ABI export changes are allowed')
   assert.deepEqual(current.envelope, fixture.envelope, 'Native sponsorship envelope changed')
   assert.deepEqual(current.actions.slice(0, 7), fixture.actions.slice(0, 7),
     'Retained non-protection action calldata or sponsorship hashes changed')
   assert.deepEqual(current.actions.slice(7), currentSchema.protectionActions,
     'Current protection action calldata or sponsorship hashes changed')
+  assert.equal(/usdc/i.test(JSON.stringify(client.positionProtectionBookAbi)), false, 'Current protection ABI retains a retired token identifier')
   assert.equal(current.protectionAbiHash, currentSchema.protectionAbiHash, 'Current protection ABI changed')
-  const closeLimitNames = ['maxExecutionNotionalUsdc', 'maxGrossAccountDebitUsdc',
-    'maxActionChargeUsdc', 'maxExplicitFeesUsdc']
+  const closeLimitNames = ['maxExecutionNotionalAssets', 'maxGrossAccountDebitAssets',
+    'maxActionChargeAssets', 'maxExplicitFeesAssets']
   const requireCloseLimitsTuple = tuple => {
     assert.equal(tuple?.type, 'tuple', 'Close limits must be one tuple')
     assert.deepEqual(tuple.components.map(({ name, type }) => [name, type]),
@@ -152,16 +154,15 @@ export async function assertCompatibility(client, fixture, currentSchema) {
     orderLifecycleV5Abi: client.orderLifecycleV5Abi,
     orderRouterV3Abi: client.orderRouterV3Abi,
   })) {
+    assert.equal(/usdc/i.test(JSON.stringify(abi)), false, `${name} retains a retired token identifier`)
     assert.equal(keccak256(new TextEncoder().encode(JSON.stringify(abi))), currentSchema.abiHashes[name],
       `${name} differs from the reviewed V5 schema`)
   }
-  assert.equal(keccak256(new TextEncoder().encode(JSON.stringify(client.orderLifecycleV4Abi))),
-    currentSchema.historicalOrderLifecycleV4AbiHash, 'Archived V4 Book ABI changed')
   const preview = client.closePreviewV3Abi.find(item => item.type === 'function' && item.name === 'previewClose')
   assert(preview, 'Current close preview is missing')
   assert.equal(preview.inputs.some(item => item.name === 'publishTime'), false,
     'Current close preview retains an unused publish-time argument')
-  assert.equal(preview.outputs[0].components.some(item => item.name === 'executionBountyUsdc'), false,
+  assert.equal(preview.outputs[0].components.some(item => item.name === 'executionBountyAssets'), false,
     'Current close preview must not expose a zero-only bounty output')
   assert.deepEqual(preview.outputs[0].components.at(-1),
     { name: 'replayOrderId', type: 'uint64', internalType: 'uint64' },
@@ -173,7 +174,7 @@ export async function assertCompatibility(client, fixture, currentSchema) {
   const protectionCreated = client.positionProtectionBookAbi.find(item => item.type === 'event' && item.name === 'PositionProtectionCreated')
   assert(protectionCreated, 'Current protection-created event is missing')
   assert.deepEqual(protectionCreated.inputs.map(item => item.name),
-    ['protectionId', 'account', 'parentOrderId', 'takeProfitTriggerPrice', 'stopLossTriggerPrice', 'triggerBountyUsdc'],
+    ['protectionId', 'account', 'parentOrderId', 'takeProfitTriggerPrice', 'stopLossTriggerPrice', 'triggerBountyAssets'],
     'Current protection-created event still includes the zero-only execution bounty')
   const protectionCreatedSignature = `${protectionCreated.name}(${protectionCreated.inputs.map(item => item.type).join(',')})`
   assert.equal(keccak256(new TextEncoder().encode(protectionCreatedSignature)),
@@ -186,7 +187,7 @@ export async function assertCompatibility(client, fixture, currentSchema) {
   assert(finalized, 'Current terminal event is missing')
   const receipt = finalized.inputs.find(item => item.name === 'receipt')
   assert(receipt, 'Current receipt is missing')
-  for (const retired of ['bountyFromPledgeUsdc', 'bountyRetainedUsdc', 'sourcePositionEpoch']) {
+  for (const retired of ['bountyFromPledgeAssets', 'bountyRetainedAssets', 'sourcePositionEpoch']) {
     assert.equal(JSON.stringify(receipt).includes(`"${retired}"`), false,
       `Current receipt retains retired field ${retired}`)
   }

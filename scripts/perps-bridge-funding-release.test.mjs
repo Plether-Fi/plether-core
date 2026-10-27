@@ -9,6 +9,11 @@ const hash = value => `0x${value.toString(16).padStart(64, '0')}`
 const word = value => hash(BigInt(value))
 const clone = value => structuredClone(value)
 
+test('binds token-neutral settlement getter calldata', () => {
+  assert.equal(selectors['settlementToken()'], '0x7b9e618d')
+  assert.equal(selectors['USDC()'], undefined)
+})
+
 function fixture() {
   const manifest = clone(template)
   const contracts = manifest.evidence.contracts
@@ -25,15 +30,15 @@ function fixture() {
       transactionTargets: [address(21)], approvalSpenders: [address(21)], swapExchanges: [address(22)], spokePools: [address(23)] }],
   })
   Object.assign(manifest.evidence, { sourceCommit: '1'.repeat(40),
-    depositFor: { transactionHash: hash(82), payer: address(83), beneficiary: address(84), amountUsdc: '1000000' } })
+    depositFor: { transactionHash: hash(82), payer: address(83), beneficiary: address(84), amountAssets: '1000000' } })
   const probe = manifest.evidence.depositFor
   const blocks = { '0x30': { number: '0x30', hash: hash(48) }, '0x40': { number: '0x40', hash: hash(64) } }
   const transactions = {
     [probe.transactionHash]: { hash: probe.transactionHash, to: manifest.clearinghouse, from: probe.payer,
-      input: `${selectors['depositFor(address,uint256)']}${word(probe.beneficiary).slice(2)}${word(probe.amountUsdc).slice(2)}`,
+      input: `${selectors['depositFor(address,uint256)']}${word(probe.beneficiary).slice(2)}${word(probe.amountAssets).slice(2)}`,
       value: '0x0', blockNumber: '0x30', blockHash: blocks['0x30'].hash },
   }
-  const event = (emitter, topic, first, second) => ({ address: emitter, topics: [topic, word(first), word(second)], data: word(probe.amountUsdc) })
+  const event = (emitter, topic, first, second) => ({ address: emitter, topics: [topic, word(first), word(second)], data: word(probe.amountAssets) })
   const receipts = {
     [probe.transactionHash]: { transactionHash: probe.transactionHash, contractAddress: null, status: '0x1',
       blockNumber: '0x30', blockHash: blocks['0x30'].hash, logs: [
@@ -87,7 +92,7 @@ test('runtime fields, schema, pins, and source allowlists fail closed', () => {
     m => { m.sources[0].spokePools.push(...m.sources[0].spokePools) },
     m => { m.sources.push(clone(m.sources[0])) }, m => { m.sources[0].chainId = m.destinationChainId },
     m => { m.evidence.depositFor.payer = m.evidence.depositFor.beneficiary },
-    m => { m.evidence.depositFor.amountUsdc = '0' }, m => { m.evidence.depositFor.amountUsdc = `${1n << 256n}` },
+    m => { m.evidence.depositFor.amountAssets = '0' }, m => { m.evidence.depositFor.amountAssets = `${1n << 256n}` },
   ]
   for (const change of changes) {
     const { manifest } = fixture()

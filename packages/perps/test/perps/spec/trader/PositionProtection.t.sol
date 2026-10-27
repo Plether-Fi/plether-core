@@ -29,19 +29,19 @@ contract PositionProtectionTest is BasePerpTest {
     using stdStorage for StdStorage;
 
     struct RiskBoundaryFixture {
-        uint256 requirementUsdc;
-        uint256 exactOpeningMarginDeltaUsdc;
-        uint256 plusOneOpeningMarginDeltaUsdc;
-        uint256 protectionBountiesUsdc;
+        uint256 requirementAssets;
+        uint256 exactOpeningMarginDeltaAssets;
+        uint256 plusOneOpeningMarginDeltaAssets;
+        uint256 protectionBountiesAssets;
     }
 
     struct RiskOffRefundFixture {
         uint256 freeBefore;
         uint256 settlementBefore;
         uint256 cleanerSettlementBefore;
-        uint256 parentMarginUsdc;
-        uint256 parentBountyUsdc;
-        uint256 protectionBountiesUsdc;
+        uint256 parentMarginAssets;
+        uint256 parentBountyAssets;
+        uint256 protectionBountiesAssets;
         uint64 parentOrderId;
         uint64 protectionId;
     }
@@ -61,7 +61,7 @@ contract PositionProtectionTest is BasePerpTest {
     uint256 internal constant MARK_PRICE = 1e8;
     uint256 internal constant POST_MARK_PRICE = MARK_PRICE + 2;
     uint256 internal constant POSITION_SIZE = 10_000e18;
-    uint256 internal constant POSITION_MARGIN_USDC = 2000e6;
+    uint256 internal constant POSITION_MARGIN_ASSETS = 2000e6;
     uint256 internal constant LONG_TAKE_PROFIT = 90_000_000;
     uint256 internal constant LONG_STOP_LOSS = 110_000_000;
     uint256 internal constant SHORT_TAKE_PROFIT = 110_000_000;
@@ -107,7 +107,7 @@ contract PositionProtectionTest is BasePerpTest {
             vm.prank(ALICE);
             vm.expectRevert(IOrderRouterErrors.OrderRouter__NoOpenPosition.selector);
             protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
-            assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "failed creation releases reserve");
+            assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "failed creation releases reserve");
         }
     }
 
@@ -123,9 +123,9 @@ contract PositionProtectionTest is BasePerpTest {
         CfdTypes.Side side
     ) internal {
         _refreshMark(95_000_000);
-        _open(ALICE, side, POSITION_SIZE, POSITION_MARGIN_USDC, 95_000_000);
+        _open(ALICE, side, POSITION_SIZE, POSITION_MARGIN_ASSETS, 95_000_000);
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
         (uint256 sizeBefore, uint256 marginBefore,,,,,) = engine.positions(ALICE);
         uint256 triggerPrice = side == CfdTypes.Side.LONG ? LONG_TAKE_PROFIT : SHORT_TAKE_PROFIT;
 
@@ -137,8 +137,8 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(protection.size, sizeBefore, "protects the entire existing position");
         assertEq(uint8(protection.side), uint8(side));
         assertEq(router.pendingOrderCounts(ALICE), 0, "arming creates no ordinary order");
-        assertEq(_freeSettlementUsdc(ALICE), freeBefore - _totalProtectionBountyUsdc(), "bounty remains funded");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, _totalProtectionBountyUsdc());
+        assertEq(_freeSettlementAssets(ALICE), freeBefore - _totalProtectionBountyAssets(), "bounty remains funded");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, _totalProtectionBountyAssets());
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(ALICE);
         assertEq(sizeAfter, sizeBefore, "arming does not expand exposure");
         assertEq(marginAfter, marginBefore, "arming preserves pledged margin");
@@ -151,9 +151,9 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_CreatePositionProtection_DegradedRetainsPauseFreshnessAndFrozenGuards() public {
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
         routerAdmin.pause();
         vm.prank(ALICE);
         vm.expectRevert(Pausable.EnforcedPause.selector);
@@ -170,22 +170,22 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ConditionalTriggerFrozen.selector);
         protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "rejections release temporary reserve");
-        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "rejections roll back carry and lock");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "rejections release temporary reserve");
+        assertEq(_freeSettlementAssets(ALICE), freeBefore, "rejections roll back carry and lock");
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0);
     }
 
     function test_AttachedOpen_DegradedStillRejectsNewExposure() public {
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
         _expectAttachedOpenCommitRevert(
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0),
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0),
             abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__DegradedMode.selector)
         );
     }
 
     function test_CreatePositionProtection_RejectsEmptyOrAboveCapThresholds() public {
         _startRecordingLogs();
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidProtectionPrices.selector);
@@ -197,7 +197,7 @@ contract PositionProtectionTest is BasePerpTest {
         protectionActions.createPositionProtection(_params(capPrice + 1, 0));
 
         assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc,
+            router.getAccountReservations(ALICE).executionBountyAssets,
             0,
             "invalid protection prices must roll back both bounty locks"
         );
@@ -205,7 +205,7 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_CreatePositionProtection_ValidatesLongGeometryAndArmsOffQueue() public {
         _startRecordingLogs();
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidProtectionPrices.selector);
@@ -215,7 +215,7 @@ contract PositionProtectionTest is BasePerpTest {
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
         protectionActions.createPositionProtection(_params(MARK_PRICE, 0));
 
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
         vm.prank(ALICE);
         uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
@@ -237,20 +237,20 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.pendingCloseSize(ALICE), 0, "armed protection must not reserve queued close size");
         assertEq(router.nextCommitId(), 1, "armed protection must not consume an order id");
         assertEq(
-            _freeSettlementUsdc(ALICE),
-            freeBefore - _totalProtectionBountyUsdc(),
+            _freeSettlementAssets(ALICE),
+            freeBefore - _totalProtectionBountyAssets(),
             "both protection bounties should be reserved"
         );
         assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc,
-            _totalProtectionBountyUsdc(),
+            router.getAccountReservations(ALICE).executionBountyAssets,
+            _totalProtectionBountyAssets(),
             "reservation view should include dormant protection bounties"
         );
     }
 
     function test_CreatePositionProtection_ValidatesShortGeometry() public {
         _startRecordingLogs();
-        _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidProtectionPrices.selector);
@@ -274,7 +274,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_CreatePositionProtection_RejectsThresholdCrossedByCurrentOracleButNotCachedMark() public {
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
         uint256 cachedMark = engine.lastMarkPrice();
         uint64 nextProtectionId = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
 
@@ -299,7 +299,7 @@ contract PositionProtectionTest is BasePerpTest {
             nextProtectionId,
             "crossed create must not consume an id"
         );
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "crossed create must release bounty");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "crossed create must release bounty");
 
         vm.warp(uint256(engine.lastMarkTime()) + 1);
         router.updateMarkPrice(_livePriceData(MARK_PRICE));
@@ -471,14 +471,14 @@ contract PositionProtectionTest is BasePerpTest {
         );
         assertEq(afterReverts.linkedOrderId, 0, "timing reverts must not create a close");
         assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc,
-            _totalProtectionBountyUsdc(),
+            router.getAccountReservations(ALICE).executionBountyAssets,
+            _totalProtectionBountyAssets(),
             "timing reverts must preserve both bounties"
         );
     }
 
     function test_TriggerPositionProtection_AcceptsNewOracleTickBehindArmingWallClock() public {
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
         uint64 observedPublishTime = engine.lastMarkTime();
         vm.warp(block.timestamp + 5);
 
@@ -594,7 +594,7 @@ contract PositionProtectionTest is BasePerpTest {
         uint256 l1Block = block.number;
 
         vm.prank(BOB);
-        uint64 orderId = router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        uint64 orderId = router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0, false);
         assertEq(_orderRecord(orderId).core.commitBlock, 30_000, "ordinary order must store the L2 block");
         uint64 committedAt = _orderRecord(orderId).core.commitTime;
 
@@ -617,7 +617,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_TriggerUsesArmedOracleTimeWhenSignedTickPredatesWallClockArm() public {
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
         uint64 armedOracleTime = engine.lastMarkTime();
         vm.warp(uint256(armedOracleTime) + 5);
         vm.prank(ALICE);
@@ -647,10 +647,10 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
         vm.prank(BOB);
-        router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0, false);
         assertEq(router.nextExecuteId(), 1, "foreign order should be queue head");
 
-        uint256 triggerKeeperBefore = clearinghouse.balanceUsdc(TRIGGER_KEEPER);
+        uint256 triggerKeeperBefore = clearinghouse.balanceAssets(TRIGGER_KEEPER);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         assertEq(linkedOrderId, 2, "triggered close should consume the next ordinary order id");
         assertEq(router.nextExecuteId(), 1, "triggered close must not jump the foreign head");
@@ -658,8 +658,8 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(_orderRecord(1).nextGlobalOrderId, linkedOrderId, "foreign head should link to close");
         assertEq(_orderRecord(linkedOrderId).prevGlobalOrderId, 1, "close should link back to foreign head");
         assertEq(
-            clearinghouse.balanceUsdc(TRIGGER_KEEPER) - triggerKeeperBefore,
-            router.positionProtectionTriggerBountyUsdc(),
+            clearinghouse.balanceAssets(TRIGGER_KEEPER) - triggerKeeperBefore,
+            router.positionProtectionTriggerBountyAssets(),
             "trigger keeper should be paid exactly once"
         );
 
@@ -676,7 +676,7 @@ contract PositionProtectionTest is BasePerpTest {
         assertTrue(closeOrder.isClose, "linked order should be reduce-only");
         assertEq(router.pendingCloseSize(ALICE), POSITION_SIZE, "linked close aggregate");
         assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc,
+            router.getAccountReservations(ALICE).executionBountyAssets,
             0,
             "trigger must transfer, not duplicate, the close bounty"
         );
@@ -690,7 +690,7 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(EXECUTION_KEEPER);
         router.executeOrder(1, bobExecutionData);
 
-        uint256 executionKeeperBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        uint256 executionKeeperBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
         bytes[] memory closeExecutionData = _mockPythUpdateData(LONG_TAKE_PROFIT);
         vm.prank(EXECUTION_KEEPER);
         router.executeOrder(linkedOrderId, closeExecutionData);
@@ -706,7 +706,7 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.pendingOrderCounts(ALICE), 0, "terminal close should leave no account order");
         assertEq(router.pendingCloseSize(ALICE), 0, "terminal close should clear pending size");
         assertEq(
-            clearinghouse.balanceUsdc(EXECUTION_KEEPER) - executionKeeperBefore,
+            clearinghouse.balanceAssets(EXECUTION_KEEPER) - executionKeeperBefore,
             0,
             "close executor should receive the remaining bounty once"
         );
@@ -718,15 +718,15 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
-        uint256 maxLiabilityUsdc = _maxLiability();
-        uint256 settlementBufferUsdc = _settlementBufferTargetUsdc(maxLiabilityUsdc);
-        _drainPoolTo(maxLiabilityUsdc);
+        uint256 maxLiabilityAssets = _maxLiability();
+        uint256 settlementBufferAssets = _settlementBufferTargetAssets(maxLiabilityAssets);
+        _drainPoolTo(maxLiabilityAssets);
 
-        assertEq(pool.totalAssets(), maxLiabilityUsdc, "setup should retain raw solvency equality");
-        assertGt(settlementBufferUsdc, 0, "live protection should require a nonzero settlement buffer");
+        assertEq(pool.totalAssets(), maxLiabilityAssets, "setup should retain raw solvency equality");
+        assertGt(settlementBufferAssets, 0, "live protection should require a nonzero settlement buffer");
         assertLt(
             pool.totalAssets(),
-            maxLiabilityUsdc + settlementBufferUsdc,
+            maxLiabilityAssets + settlementBufferAssets,
             "setup should leave the live position below the open-admission buffer target"
         );
 
@@ -756,16 +756,16 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
-        uint256 executionBountyUsdc = 0;
-        uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(ALICE);
-        uint256 cleanerBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        uint256 executionBountyAssets = 0;
+        uint256 actionReserveBefore = clearinghouse.actionReserveAssets(ALICE);
+        uint256 cleanerBalanceBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
 
         OrderV3Types.ExecutionResult memory result = _expireProtectionAttempt(linkedOrderId, EXECUTION_KEEPER);
 
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed), "expiry lifecycle status");
         assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Expired), "expiry reason");
         assertEq(
-            clearinghouse.balanceUsdc(EXECUTION_KEEPER),
+            clearinghouse.balanceAssets(EXECUTION_KEEPER),
             cleanerBalanceBefore,
             "zero-bounty protection attempt must not credit the cleaner"
         );
@@ -782,12 +782,12 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.pendingOrderCounts(ALICE), 0, "expired attempt should leave no live account order");
         assertEq(router.pendingCloseSize(ALICE), 0, "expired attempt should clear pending close size");
         assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc,
-            executionBountyUsdc,
+            router.getAccountReservations(ALICE).executionBountyAssets,
+            executionBountyAssets,
             "relatched protection must have no execution bounty reserve"
         );
         assertEq(
-            clearinghouse.actionReserveUsdc(ALICE),
+            clearinghouse.actionReserveAssets(ALICE),
             actionReserveBefore,
             "expiry should not change the underlying action reserve"
         );
@@ -800,7 +800,7 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(OrderV3Types.BountyDisposition.None),
             "receipt should authenticate zero-bounty expiry"
         );
-        assertEq(outcome.bountyUsdc, executionBountyUsdc, "receipt should preserve the bounty amount");
+        assertEq(outcome.bountyAssets, executionBountyAssets, "receipt should preserve the bounty amount");
         assertEq(outcome.bountyRecipient, address(0), "zero bounty has no recipient");
         assertFalse(router.lifecycleBook().isProtectionAttempt(linkedOrderId), "terminal receipt should clear marker");
     }
@@ -817,7 +817,7 @@ contract PositionProtectionTest is BasePerpTest {
         _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
 
         vm.prank(BOB);
-        uint64 foreignOrderId = router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        uint64 foreignOrderId = router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0, false);
         assertEq(router.nextExecuteId(), foreignOrderId, "foreign order should become the FIFO head");
 
         vm.deal(CAROL, 1);
@@ -864,7 +864,7 @@ contract PositionProtectionTest is BasePerpTest {
             "retry should install one live child"
         );
         assertEq(retried.linkedOrderId, retryOrderId, "retry should become the latest linked order");
-        assertEq(_orderRecord(retryOrderId).executionBountyUsdc, 0, "retry close remains zero bounty");
+        assertEq(_orderRecord(retryOrderId).executionBountyAssets, 0, "retry close remains zero bounty");
         assertEq(uint8(retried.triggeredLeg), uint8(triggered.triggeredLeg), "retry must preserve trigger leg");
         assertEq(retried.triggerMarkPrice, triggered.triggerMarkPrice, "retry must preserve trigger mark");
         assertEq(retried.triggerPublishTime, triggered.triggerPublishTime, "retry must preserve trigger publish time");
@@ -877,13 +877,13 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_ProtectionCloseLimits_PropagateToTriggeredCloseAndPermissionlessRetry() public {
         _startRecordingLogs();
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
         params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
-            maxExecutionNotionalUsdc: 12_345e6,
-            maxGrossAccountDebitUsdc: 9876e6,
-            maxActionChargeUsdc: 4321e6,
-            maxExplicitFeesUsdc: 1234e6
+            maxExecutionNotionalAssets: 12_345e6,
+            maxGrossAccountDebitAssets: 9876e6,
+            maxActionChargeAssets: 4321e6,
+            maxExplicitFeesAssets: 1234e6
         });
 
         vm.prank(ALICE);
@@ -902,18 +902,18 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_ProtectionCloseLimits_ExcessExecutionNotionalFailsWithoutSettlingPosition() public {
         _startRecordingLogs();
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
-        uint256 expectedNotionalUsdc = (POSITION_SIZE * LONG_TAKE_PROFIT) / 1e20;
-        params.closeLimits.maxExecutionNotionalUsdc = expectedNotionalUsdc - 1;
+        uint256 expectedNotionalAssets = (POSITION_SIZE * LONG_TAKE_PROFIT) / 1e20;
+        params.closeLimits.maxExecutionNotionalAssets = expectedNotionalAssets - 1;
 
         vm.prank(ALICE);
         uint64 protectionId = protectionActions.createPositionProtection(params);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         _assertPendingCloseLimits(linkedOrderId, params.closeLimits);
 
-        uint256 balanceBefore = clearinghouse.balanceUsdc(ALICE);
-        uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(ALICE);
+        uint256 balanceBefore = clearinghouse.balanceAssets(ALICE);
+        uint256 actionReserveBefore = clearinghouse.actionReserveAssets(ALICE);
         bytes[] memory executionData = _mockPythUpdateData(LONG_TAKE_PROFIT);
         vm.prank(EXECUTION_KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(linkedOrderId, executionData);
@@ -938,9 +938,9 @@ contract PositionProtectionTest is BasePerpTest {
         );
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
         assertEq(remainingSize, POSITION_SIZE, "rejected close must leave the position open");
-        assertEq(clearinghouse.balanceUsdc(ALICE), balanceBefore, "rejected close must not debit settlement");
+        assertEq(clearinghouse.balanceAssets(ALICE), balanceBefore, "rejected close must not debit settlement");
         assertEq(
-            clearinghouse.actionReserveUsdc(ALICE),
+            clearinghouse.actionReserveAssets(ALICE),
             actionReserveBefore,
             "rejected close must not consume action reserve"
         );
@@ -953,17 +953,17 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_ProtectionCloseLimits_OnlyOwnerCanAmendLatchedLimitsForNextRetry() public {
         _startRecordingLogs();
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
-        params.closeLimits.maxExecutionNotionalUsdc = 1e6;
+        params.closeLimits.maxExecutionNotionalAssets = 1e6;
 
         vm.prank(ALICE);
         uint64 protectionId = protectionActions.createPositionProtection(params);
         PositionProtectionTypes.CloseFinancialLimits memory amendedLimits = PositionProtectionTypes.CloseFinancialLimits({
-            maxExecutionNotionalUsdc: 25_000e6,
-            maxGrossAccountDebitUsdc: 25_000e6,
-            maxActionChargeUsdc: 25_000e6,
-            maxExplicitFeesUsdc: 25_000e6
+            maxExecutionNotionalAssets: 25_000e6,
+            maxGrossAccountDebitAssets: 25_000e6,
+            maxActionChargeAssets: 25_000e6,
+            maxExplicitFeesAssets: 25_000e6
         });
 
         vm.prank(ALICE);
@@ -1008,7 +1008,7 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 oldOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
-        uint256 executionBountyUsdc = 0;
+        uint256 executionBountyAssets = 0;
         _expireProtectionAttempt(oldOrderId, EXECUTION_KEEPER);
 
         vm.prank(CAROL);
@@ -1037,7 +1037,9 @@ contract PositionProtectionTest is BasePerpTest {
             router.lifecycleBook().isProtectionAttempt(retryOrderId), "replacement attempt marker must stay live"
         );
         assertEq(router.pendingOrderCounts(ALICE), 1, "obsolete callbacks must not unlink the replacement");
-        assertEq(_orderRecord(retryOrderId).executionBountyUsdc, executionBountyUsdc, "replacement stays zero bounty");
+        assertEq(
+            _orderRecord(retryOrderId).executionBountyAssets, executionBountyAssets, "replacement stays zero bounty"
+        );
     }
 
     function test_RetryPositionProtectionClose_OracleWindowStartsStrictlyAfterFreshCommit() public {
@@ -1146,8 +1148,8 @@ contract PositionProtectionTest is BasePerpTest {
             "price recovery must not rewrite the latched trigger"
         );
 
-        uint256 executionBountyUsdc = 0;
-        uint256 executorBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        uint256 executionBountyAssets = 0;
+        uint256 executorBalanceBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
         bytes[] memory executionData = _mockPythUpdateData(MARK_PRICE);
         vm.prank(EXECUTION_KEEPER);
         router.executeOrder(retryOrderId, executionData);
@@ -1162,18 +1164,18 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(executed.triggerMarkPrice, LONG_TAKE_PROFIT, "terminal protection keeps original trigger evidence");
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "successful retry should release trade lock");
         assertEq(
-            clearinghouse.balanceUsdc(EXECUTION_KEEPER) - executorBalanceBefore,
-            executionBountyUsdc,
+            clearinghouse.balanceAssets(EXECUTION_KEEPER) - executorBalanceBefore,
+            executionBountyAssets,
             "successful retry should pay the original bounty exactly once"
         );
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "success should clear bounty reserve");
-        assertEq(clearinghouse.actionReserveUsdc(ALICE), 0, "success should consume the action reserve");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "success should clear bounty reserve");
+        assertEq(clearinghouse.actionReserveAssets(ALICE), 0, "success should consume the action reserve");
         OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), retryOrderId);
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Executed), "successful retry receipt");
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None), "paid disposition");
         assertEq(outcome.bountyRecipient, address(0), "receipt bounty recipient");
-        assertEq(outcome.bountyUsdc, executionBountyUsdc, "receipt bounty amount");
+        assertEq(outcome.bountyAssets, executionBountyAssets, "receipt bounty amount");
         assertFalse(router.lifecycleBook().isProtectionAttempt(retryOrderId), "success should clear attempt marker");
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
         assertEq(remainingSize, 0, "successful retry should fully close the position");
@@ -1205,9 +1207,9 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 protectionId = _createSingleLegProtection(side, triggerPrice, 0);
         uint64 attemptId = _triggerAt(protectionId, triggerPrice);
         _damageProtectionAttemptReservation(attemptId, anomaly);
-        bytes32 bucketsBefore = keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ALICE)));
-        uint256 keeperBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
-        uint256 triggerKeeperBefore = clearinghouse.balanceUsdc(TRIGGER_KEEPER);
+        bytes32 bucketsBefore = keccak256(abi.encode(clearinghouse.getAccountAssetBuckets(ALICE)));
+        uint256 keeperBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
+        uint256 triggerKeeperBefore = clearinghouse.balanceAssets(TRIGGER_KEEPER);
         bytes32 limitsBefore = keccak256(abi.encode(protectionViews.closeFinancialLimits(protectionId)));
         vm.warp(uint256(router.lifecycleBook().orderTiming(attemptId).executionDeadline) + 1);
         vm.prank(EXECUTION_KEEPER);
@@ -1223,11 +1225,11 @@ contract PositionProtectionTest is BasePerpTest {
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), attemptId);
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.ExpiredReservationMismatch));
         assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
-        assertEq(outcome.bountyUsdc, 0, "recovery cannot fabricate a refund");
+        assertEq(outcome.bountyAssets, 0, "recovery cannot fabricate a refund");
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None));
-        assertEq(keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ALICE))), bucketsBefore);
-        assertEq(clearinghouse.balanceUsdc(EXECUTION_KEEPER), keeperBefore, "no cleaner payout");
-        assertEq(clearinghouse.balanceUsdc(TRIGGER_KEEPER), triggerKeeperBefore, "trigger paid only once");
+        assertEq(keccak256(abi.encode(clearinghouse.getAccountAssetBuckets(ALICE))), bucketsBefore);
+        assertEq(clearinghouse.balanceAssets(EXECUTION_KEEPER), keeperBefore, "no cleaner payout");
+        assertEq(clearinghouse.balanceAssets(TRIGGER_KEEPER), triggerKeeperBefore, "trigger paid only once");
         assertFalse(router.lifecycleBook().isProtectionAttempt(attemptId), "terminal lifecycle marker cleared");
         assertEq(router.pendingOrderCounts(ALICE), 0);
         assertEq(router.pendingCloseSize(ALICE), 0);
@@ -1271,7 +1273,7 @@ contract PositionProtectionTest is BasePerpTest {
             oldRecordHash,
             "retry does not rewrite disputed old record"
         );
-        assertEq(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, retryId).amountUsdc, 0);
+        assertEq(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, retryId).amountAssets, 0);
         vm.prank(address(router));
         protectionBook.afterOrderTerminal(attemptId, ALICE, IOrderRouterAccounting.OrderStatus.Failed);
         assertEq(
@@ -1303,7 +1305,7 @@ contract PositionProtectionTest is BasePerpTest {
         // Model an out-of-band size/side change through the trusted Engine test helper.
         _close(ALICE, CfdTypes.Side.LONG, change == 0 ? POSITION_SIZE / 2 : POSITION_SIZE, LONG_TAKE_PROFIT);
         if (change == 2) {
-            _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT);
+            _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_ASSETS, LONG_TAKE_PROFIT);
         }
         _damageProtectionAttemptReservation(attemptId, 0);
         vm.warp(uint256(router.lifecycleBook().orderTiming(attemptId).executionDeadline) + 1);
@@ -1363,7 +1365,7 @@ contract PositionProtectionTest is BasePerpTest {
                 _orderRecord(attemptId),
                 router.lifecycleBook().pendingIntent(attemptId),
                 clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, attemptId),
-                clearinghouse.getAccountUsdcBuckets(ALICE),
+                clearinghouse.getAccountAssetBuckets(ALICE),
                 router.pendingOrderCounts(ALICE),
                 router.pendingCloseSize(ALICE),
                 router.nextExecuteId(),
@@ -1419,7 +1421,7 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
-        uint256 executionBountyUsdc = 0;
+        uint256 executionBountyAssets = 0;
 
         CfdTypes.Order memory outOfBandPartialClose = CfdTypes.Order({
             account: ALICE,
@@ -1432,13 +1434,13 @@ contract PositionProtectionTest is BasePerpTest {
             side: CfdTypes.Side.LONG,
             isClose: true
         });
-        uint256 poolDepthUsdc = pool.totalAssets();
+        uint256 poolDepthAssets = pool.totalAssets();
         vm.prank(address(router));
-        engine.processOrderTyped(outOfBandPartialClose, MARK_PRICE, poolDepthUsdc, uint64(block.timestamp));
+        engine.processOrderTyped(outOfBandPartialClose, MARK_PRICE, poolDepthAssets, uint64(block.timestamp));
         (uint256 mismatchedSize,,,,,,) = engine.positions(ALICE);
         assertEq(mismatchedSize, POSITION_SIZE - 100e18, "fixture should change the protected position size");
 
-        uint256 cleanerBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        uint256 cleanerBalanceBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
         _expireProtectionAttempt(linkedOrderId, EXECUTION_KEEPER);
 
         PositionProtectionTypes.PositionProtectionView memory failed =
@@ -1450,19 +1452,19 @@ contract PositionProtectionTest is BasePerpTest {
         );
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "terminal mismatch should clear active id");
         assertEq(
-            clearinghouse.balanceUsdc(EXECUTION_KEEPER) - cleanerBalanceBefore,
-            executionBountyUsdc,
+            clearinghouse.balanceAssets(EXECUTION_KEEPER) - cleanerBalanceBefore,
+            executionBountyAssets,
             "mismatch cleaner should receive the child bounty exactly once"
         );
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "mismatch should clear reserve view");
-        assertEq(clearinghouse.actionReserveUsdc(ALICE), 0, "mismatch payout should consume the action reserve");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "mismatch should clear reserve view");
+        assertEq(clearinghouse.actionReserveAssets(ALICE), 0, "mismatch payout should consume the action reserve");
 
         OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Expired), "mismatch receipt reason");
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None), "paid receipt");
         assertEq(outcome.bountyRecipient, address(0), "cleaner receipt recipient");
-        assertEq(outcome.bountyUsdc, executionBountyUsdc, "cleaner receipt bounty");
+        assertEq(outcome.bountyAssets, executionBountyAssets, "cleaner receipt bounty");
         assertFalse(router.lifecycleBook().isProtectionAttempt(linkedOrderId), "mismatch should clear attempt marker");
     }
 
@@ -1471,35 +1473,37 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         _withdrawAllFreeSettlement(ALICE);
         uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
-        uint256 originalBountyUsdc = 0;
+        uint256 originalBountyAssets = 0;
         _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
 
-        uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(ALICE);
-        assertEq(actionReserveBefore, originalBountyUsdc, "expired close must retain no bounty reserve");
-        assertEq(_freeSettlementUsdc(ALICE), 0, "fixture should leave no fresh retry funding");
+        uint256 actionReserveBefore = clearinghouse.actionReserveAssets(ALICE);
+        assertEq(actionReserveBefore, originalBountyAssets, "expired close must retain no bounty reserve");
+        assertEq(_freeSettlementAssets(ALICE), 0, "fixture should leave no fresh retry funding");
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.positionProtectionTriggerBountyUsdc += 100_000;
+        config.positionProtectionTriggerBountyAssets += 100_000;
         _setRouterConfig(config);
 
         vm.prank(CAROL);
         uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
 
         assertEq(
-            _orderRecord(retryOrderId).executionBountyUsdc, originalBountyUsdc, "retry child must remain zero bounty"
+            _orderRecord(retryOrderId).executionBountyAssets,
+            originalBountyAssets,
+            "retry child must remain zero bounty"
         );
         assertEq(
-            router.lifecycleBook().pendingIntent(retryOrderId).executionBountyUsdc,
-            originalBountyUsdc,
+            router.lifecycleBook().pendingIntent(retryOrderId).executionBountyAssets,
+            originalBountyAssets,
             "lifecycle intent should authenticate zero bounty"
         );
         assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc,
-            originalBountyUsdc,
+            router.getAccountReservations(ALICE).executionBountyAssets,
+            originalBountyAssets,
             "trigger config change must not create an execution reserve"
         );
-        assertEq(clearinghouse.actionReserveUsdc(ALICE), actionReserveBefore, "retry should not alter reserve amount");
-        assertEq(_freeSettlementUsdc(ALICE), 0, "retry should not debit unavailable free settlement");
+        assertEq(clearinghouse.actionReserveAssets(ALICE), actionReserveBefore, "retry should not alter reserve amount");
+        assertEq(_freeSettlementAssets(ALICE), 0, "retry should not debit unavailable free settlement");
     }
 
     function test_Batch_ExpiredProtectionHeadRelatchesAndLaterOrderExecutes() public {
@@ -1510,7 +1514,7 @@ contract PositionProtectionTest is BasePerpTest {
 
         vm.warp(block.timestamp + 30);
         vm.prank(BOB);
-        uint64 bobOrderId = router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        uint64 bobOrderId = router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0, false);
         CfdTypes.Order memory bobOrder = _orderRecord(bobOrderId).core;
         assertEq(router.nextExecuteId(), linkedOrderId, "protection attempt should be the global head");
 
@@ -1555,12 +1559,12 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 attemptOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
-        uint256 executionBountyUsdc = 0;
-        uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
-        uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(ALICE);
+        uint256 executionBountyAssets = 0;
+        uint256 freeSettlementBefore = _freeSettlementAssets(ALICE);
+        uint256 actionReserveBefore = clearinghouse.actionReserveAssets(ALICE);
 
         for (uint256 i; i < 2; ++i) {
-            uint256 cleanerBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+            uint256 cleanerBalanceBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
             _expireProtectionAttempt(attemptOrderId, EXECUTION_KEEPER);
 
             PositionProtectionTypes.PositionProtectionView memory latched =
@@ -1571,19 +1575,19 @@ contract PositionProtectionTest is BasePerpTest {
                 "each expiry should return to the durable latch"
             );
             assertEq(
-                clearinghouse.balanceUsdc(EXECUTION_KEEPER),
+                clearinghouse.balanceAssets(EXECUTION_KEEPER),
                 cleanerBalanceBefore,
                 "expiry cleaner should remain unpaid on every cycle"
             );
-            assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "cycles must not change free settlement");
+            assertEq(_freeSettlementAssets(ALICE), freeSettlementBefore, "cycles must not change free settlement");
             assertEq(
-                clearinghouse.actionReserveUsdc(ALICE),
+                clearinghouse.actionReserveAssets(ALICE),
                 actionReserveBefore,
                 "cycles must not duplicate or consume reserved settlement"
             );
             assertEq(
-                router.getAccountReservations(ALICE).executionBountyUsdc,
-                executionBountyUsdc,
+                router.getAccountReservations(ALICE).executionBountyAssets,
+                executionBountyAssets,
                 "exactly one execution bounty should remain reserved"
             );
 
@@ -1592,8 +1596,8 @@ contract PositionProtectionTest is BasePerpTest {
             attemptOrderId = protectionActions.retryPositionProtectionClose(protectionId);
             assertGt(attemptOrderId, previousOrderId, "each attempt should receive a new id");
             assertEq(
-                _orderRecord(attemptOrderId).executionBountyUsdc,
-                executionBountyUsdc,
+                _orderRecord(attemptOrderId).executionBountyAssets,
+                executionBountyAssets,
                 "new child should own the same single bounty"
             );
             assertEq(
@@ -1629,8 +1633,8 @@ contract PositionProtectionTest is BasePerpTest {
             "retry should restore one live close attempt"
         );
 
-        uint256 executionBountyUsdc = 0;
-        uint256 executorBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        uint256 executionBountyAssets = 0;
+        uint256 executorBalanceBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
         baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(MARK_PRICE)), 0, int32(-8), uint64(block.timestamp));
         vm.prank(EXECUTION_KEEPER);
         router.executeOrder(retryOrderId, _priceData(MARK_PRICE));
@@ -1641,22 +1645,22 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None), "frozen payout");
         assertEq(outcome.bountyRecipient, address(0), "frozen executor should receive bounty");
         assertEq(
-            clearinghouse.balanceUsdc(EXECUTION_KEEPER) - executorBalanceBefore,
-            executionBountyUsdc,
+            clearinghouse.balanceAssets(EXECUTION_KEEPER) - executorBalanceBefore,
+            executionBountyAssets,
             "frozen retry should pay exactly once"
         );
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "frozen success clears reserve");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "frozen success clears reserve");
         assertFalse(router.lifecycleBook().isProtectionAttempt(retryOrderId), "frozen success clears marker");
     }
 
     function test_CancelPositionProtection_RefundsExactReserveAndClearsTradeLock() public {
         _startRecordingLogs();
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
 
         vm.prank(ALICE);
         uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
-        assertEq(_freeSettlementUsdc(ALICE), freeBefore - _totalProtectionBountyUsdc(), "reserve after create");
+        assertEq(_freeSettlementAssets(ALICE), freeBefore - _totalProtectionBountyAssets(), "reserve after create");
 
         vm.prank(ALICE);
         protectionActions.cancelPositionProtection(protectionId);
@@ -1668,10 +1672,10 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(PositionProtectionTypes.PositionProtectionStatus.Cancelled),
             "cancelled lifecycle"
         );
-        assertEq(cancelled.triggerBountyUsdc, 0, "cancel should clear trigger bounty ownership");
+        assertEq(cancelled.triggerBountyAssets, 0, "cancel should clear trigger bounty ownership");
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "cancel should clear active id");
-        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "cancel should refund exact reserve");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "reservation view after cancel");
+        assertEq(_freeSettlementAssets(ALICE), freeBefore, "cancel should refund exact reserve");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "reservation view after cancel");
     }
 
     function test_CancelAndCommitClose_LongLiveExecutes() public {
@@ -1707,24 +1711,24 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         vm.prank(BOB);
-        router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0, false);
         uint64 head = router.nextExecuteId();
         OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
         request.targetPrice = 105_000_000;
         request.bounds.allowedExecutionModes = 1;
         request.bounds.executionWindowSeconds = 37;
-        request.bounds.maxExecutionBountyUsdc = 0;
-        request.bounds.maxExecutionNotionalUsdc = 12_345e6;
-        request.bounds.maxGrossAccountDebitUsdc = 678e6;
-        request.bounds.maxActionChargeUsdc = 123e6;
-        request.bounds.maxExplicitFeesUsdc = 45e6;
+        request.bounds.maxExecutionBountyAssets = 0;
+        request.bounds.maxExecutionNotionalAssets = 12_345e6;
+        request.bounds.maxGrossAccountDebitAssets = 678e6;
+        request.bounds.maxActionChargeAssets = 123e6;
+        request.bounds.maxExplicitFeesAssets = 45e6;
         request.bounds.maxPostPositionSize = 0;
-        request.bounds.minPostPositionEquityUsdc = 19e6;
+        request.bounds.minPostPositionEquityAssets = 19e6;
         request.bounds.maxPostLeverageBps = 1;
         uint64 nextBefore = router.nextCommitId();
-        uint256 refund = protectionViews.getPositionProtection(protectionId).triggerBountyUsdc;
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
-        uint256 keeperBefore = clearinghouse.balanceUsdc(TRIGGER_KEEPER);
+        uint256 refund = protectionViews.getPositionProtection(protectionId).triggerBountyAssets;
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
+        uint256 keeperBefore = clearinghouse.balanceAssets(TRIGGER_KEEPER);
 
         vm.prank(ALICE);
         uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
@@ -1749,9 +1753,9 @@ contract PositionProtectionTest is BasePerpTest {
         assertFalse(router.lifecycleBook().isProtectionAttempt(orderId), "manual close has no trigger-attempt marker");
         assertEq(router.pendingOrderCounts(ALICE), 1, "exactly one close");
         assertEq(router.pendingCloseSize(ALICE), POSITION_SIZE, "full close reserved");
-        assertEq(_freeSettlementUsdc(ALICE), freeBefore + refund, "trigger reserve refunded");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "zero-bounty close");
-        assertEq(clearinghouse.balanceUsdc(TRIGGER_KEEPER), keeperBefore, "manual exit pays no trigger bounty");
+        assertEq(_freeSettlementAssets(ALICE), freeBefore + refund, "trigger reserve refunded");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "zero-bounty close");
+        assertEq(clearinghouse.balanceAssets(TRIGGER_KEEPER), keeperBefore, "manual exit pays no trigger bounty");
         _assertManualExitProtectionCancelled(protectionId);
 
         bytes[] memory updateData = _mockPythUpdateData(95_000_000);
@@ -1804,7 +1808,7 @@ contract PositionProtectionTest is BasePerpTest {
         _expectCancelAndCommitCloseRevert(
             protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PositionChanged.selector)
         );
-        _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
         _expectCancelAndCommitCloseRevert(
             protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PositionChanged.selector)
         );
@@ -1825,7 +1829,7 @@ contract PositionProtectionTest is BasePerpTest {
     function test_CancelAndCommitClose_RejectsPendingOpenTriggeredLatchedAndCancelled() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory openRequest =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         vm.prank(ALICE);
         (uint64 parentId, uint64 pendingId) =
             protectionActions.commitOpenOrderWithProtection(openRequest, _params(LONG_TAKE_PROFIT, 0));
@@ -1922,7 +1926,7 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_CancelAndCommitClose_HistoricalReplayAndConflictRollBackCancellation() public {
         _startRecordingLogs();
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
         OrderV3Types.OrderRequest memory historical = _manualCloseRequest(CfdTypes.Side.LONG);
         historical.targetPrice = 1;
         vm.prank(ALICE);
@@ -1942,7 +1946,7 @@ contract PositionProtectionTest is BasePerpTest {
             abi.encodeWithSelector(PositionProtectionBook.PositionProtectionBook__InvalidHostResponse.selector)
         );
         bytes32 originalHash = router.lifecycleBook().hashOrderRequest(ALICE, historical);
-        historical.bounds.maxExplicitFeesUsdc -= 1;
+        historical.bounds.maxExplicitFeesAssets -= 1;
         bytes32 conflictHash = router.lifecycleBook().hashOrderRequest(ALICE, historical);
         _expectCancelAndCommitCloseRevert(
             protectionId,
@@ -1965,10 +1969,10 @@ contract PositionProtectionTest is BasePerpTest {
     function test_CancelAndCommitClose_AccruedCarryCannotBypassGrossDebitBound() public {
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         vm.warp(block.timestamp + 1 hours);
-        uint256 carry = _expectedIndexedCarryUsdc(ALICE);
+        uint256 carry = _expectedIndexedCarryAssets(ALICE);
         assertGt(carry, 0, "fixture must accrue carry before cancellation");
         OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
-        request.bounds.maxGrossAccountDebitUsdc = 0;
+        request.bounds.maxGrossAccountDebitAssets = 0;
         _expectCancelAndCommitCloseRevert(
             protectionId,
             request,
@@ -1979,16 +1983,16 @@ contract PositionProtectionTest is BasePerpTest {
                 uint256(0)
             )
         );
-        assertEq(_expectedIndexedCarryUsdc(ALICE), carry, "rejected close must not checkpoint accrued carry");
+        assertEq(_expectedIndexedCarryAssets(ALICE), carry, "rejected close must not checkpoint accrued carry");
     }
 
     function test_CancelAndCommitClose_AccruedCarryCannotBypassActionChargeBound() public {
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         vm.warp(block.timestamp + 1 hours);
-        uint256 carry = _expectedIndexedCarryUsdc(ALICE);
+        uint256 carry = _expectedIndexedCarryAssets(ALICE);
         assertGt(carry, 0, "fixture must accrue carry before cancellation");
         OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
-        request.bounds.maxActionChargeUsdc = 0;
+        request.bounds.maxActionChargeAssets = 0;
         _expectCancelAndCommitCloseRevert(
             protectionId,
             request,
@@ -1999,29 +2003,29 @@ contract PositionProtectionTest is BasePerpTest {
                 uint256(0)
             )
         );
-        assertEq(_expectedIndexedCarryUsdc(ALICE), carry, "rejected close must not checkpoint accrued carry");
+        assertEq(_expectedIndexedCarryAssets(ALICE), carry, "rejected close must not checkpoint accrued carry");
     }
 
     function test_CancelAndCommitClose_ExactCarryBoundsRetainCommitmentAndTerminalReceipt() public {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         vm.warp(block.timestamp + 1 hours);
-        uint256 carry = _expectedIndexedCarryUsdc(ALICE);
-        uint256 settlementBefore = clearinghouse.balanceUsdc(ALICE);
+        uint256 carry = _expectedIndexedCarryAssets(ALICE);
+        uint256 settlementBefore = clearinghouse.balanceAssets(ALICE);
         assertGt(carry, 0, "fixture must accrue carry before cancellation");
         OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
-        request.bounds.maxGrossAccountDebitUsdc = carry;
-        request.bounds.maxActionChargeUsdc = carry;
+        request.bounds.maxGrossAccountDebitAssets = carry;
+        request.bounds.maxActionChargeAssets = carry;
         request.bounds.executionWindowSeconds = 1;
         vm.prank(ALICE);
         uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
         CfdEnginePlanTypes.CloseCommitment memory commitment = router.lifecycleBook().pendingIntent(orderId).commitment;
-        assertEq(commitment.carryCollectedUsdc, carry, "full cancellation-time carry included in bounded commitment");
-        assertEq(commitment.carryOutstandingUsdc, 0, "funded carry fully collected");
-        assertEq(commitment.settlementBeforeUsdc, settlementBefore, "commitment starts before carry debit");
-        assertEq(commitment.settlementAfterUsdc, settlementBefore - carry, "commitment records full carry debit");
-        assertEq(clearinghouse.balanceUsdc(ALICE), settlementBefore - carry, "carry debited once");
-        assertEq(_expectedIndexedCarryUsdc(ALICE), 0, "commitment checkpoints carry");
+        assertEq(commitment.carryCollectedAssets, carry, "full cancellation-time carry included in bounded commitment");
+        assertEq(commitment.carryOutstandingAssets, 0, "funded carry fully collected");
+        assertEq(commitment.settlementBeforeAssets, settlementBefore, "commitment starts before carry debit");
+        assertEq(commitment.settlementAfterAssets, settlementBefore - carry, "commitment records full carry debit");
+        assertEq(clearinghouse.balanceAssets(ALICE), settlementBefore - carry, "carry debited once");
+        assertEq(_expectedIndexedCarryAssets(ALICE), 0, "commitment checkpoints carry");
         _assertManualExitProtectionCancelled(protectionId);
 
         OrderV3Types.ExecutionResult memory result = _expireProtectionAttempt(orderId, EXECUTION_KEEPER);
@@ -2033,7 +2037,7 @@ contract PositionProtectionTest is BasePerpTest {
             keccak256(abi.encode(commitment)),
             "authenticated terminal receipt retains bounded carry effects"
         );
-        assertEq(clearinghouse.balanceUsdc(ALICE), settlementBefore - carry, "expiry does not charge carry again");
+        assertEq(clearinghouse.balanceAssets(ALICE), settlementBefore - carry, "expiry does not charge carry again");
         _assertManualExitProtectionCancelled(protectionId);
     }
 
@@ -2041,7 +2045,7 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
-        request.bounds.maxExecutionNotionalUsdc = 0;
+        request.bounds.maxExecutionNotionalAssets = 0;
         vm.prank(ALICE);
         uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
         bytes[] memory updateData = _mockPythUpdateData(95_000_000);
@@ -2101,7 +2105,7 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(size, POSITION_SIZE, "expiry preserves position");
     }
 
-    function test_PostLockRisk_RejectsInitialMarginEqualityAndAcceptsOneMicroUsdcAboveBoundary() public {
+    function test_PostLockRisk_RejectsInitialMarginEqualityAndAcceptsOneMicroAssetsAboveBoundary() public {
         _assertInitialMarginBoundary(false);
     }
 
@@ -2118,38 +2122,38 @@ contract PositionProtectionTest is BasePerpTest {
         _setRiskParams(riskParams);
         RiskBoundaryFixture memory fixture = _postMarkInitialMarginBoundaryFixture(riskParams);
 
-        _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
-        _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
-        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
-        _open(RISK_PLUS_ONE, CfdTypes.Side.LONG, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
+        _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaAssets + fixture.protectionBountiesAssets);
+        _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaAssets + fixture.protectionBountiesAssets);
+        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaAssets, MARK_PRICE);
+        _open(RISK_PLUS_ONE, CfdTypes.Side.LONG, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaAssets, MARK_PRICE);
         _refreshMark(POST_MARK_PRICE);
         assertEq(engine.lastMarkPrice(), POST_MARK_PRICE, "adverse basket mark installed");
 
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(degraded);
 
         assertEq(
-            clearinghouse.pnlPledgeUsdc(RISK_EXACT) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
+            clearinghouse.pnlPledgeAssets(RISK_EXACT) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
                 * (POST_MARK_PRICE - MARK_PRICE),
-            fixture.requirementUsdc,
+            fixture.requirementAssets,
             "exact marked equity boundary"
         );
         assertEq(
-            clearinghouse.pnlPledgeUsdc(RISK_PLUS_ONE) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
+            clearinghouse.pnlPledgeAssets(RISK_PLUS_ONE) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
                 * (POST_MARK_PRICE - MARK_PRICE),
-            fixture.requirementUsdc + 1,
+            fixture.requirementAssets + 1,
             "one-atom marked equity surplus"
         );
 
-        uint256 exactFreeBefore = _freeSettlementUsdc(RISK_EXACT);
+        uint256 exactFreeBefore = _freeSettlementAssets(RISK_EXACT);
         assertEq(
             exactFreeBefore,
-            fixture.protectionBountiesUsdc,
+            fixture.protectionBountiesAssets,
             "exact account should fund both bounties from free settlement"
         );
         vm.prank(RISK_EXACT);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
         protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
-        assertEq(_freeSettlementUsdc(RISK_EXACT), exactFreeBefore, "risk failure must roll back the bounty lock");
+        assertEq(_freeSettlementAssets(RISK_EXACT), exactFreeBefore, "risk failure must roll back the bounty lock");
         assertEq(protectionViews.activePositionProtectionId(RISK_EXACT), 0, "risk failure must not create protection");
 
         vm.prank(RISK_PLUS_ONE);
@@ -2157,7 +2161,7 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(
             uint8(protectionViews.getPositionProtection(protectionId).status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
-            "one micro-USDC above the inclusive initial-margin boundary should arm"
+            "one micro-settlementToken above the inclusive initial-margin boundary should arm"
         );
     }
 
@@ -2167,24 +2171,25 @@ contract PositionProtectionTest is BasePerpTest {
         riskParams.baseCarryBps = 0;
         _setRiskParams(riskParams);
         RiskBoundaryFixture memory fixture = _postMarkInitialMarginBoundaryFixture(riskParams);
-        uint256 surplusFreeSettlementUsdc = 5000e6;
+        uint256 surplusFreeSettlementAssets = 5000e6;
 
         _fundTrader(
-            RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc + surplusFreeSettlementUsdc
+            RISK_EXACT,
+            fixture.exactOpeningMarginDeltaAssets + fixture.protectionBountiesAssets + surplusFreeSettlementAssets
         );
-        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaAssets, MARK_PRICE);
         _refreshMark(POST_MARK_PRICE);
         assertEq(engine.lastMarkPrice(), POST_MARK_PRICE, "adverse basket mark installed");
 
         assertEq(
-            clearinghouse.pnlPledgeUsdc(RISK_EXACT) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
+            clearinghouse.pnlPledgeAssets(RISK_EXACT) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
                 * (POST_MARK_PRICE - MARK_PRICE),
-            fixture.requirementUsdc,
+            fixture.requirementAssets,
             "price equity at equality"
         );
         assertEq(
-            _freeSettlementUsdc(RISK_EXACT),
-            fixture.protectionBountiesUsdc + surplusFreeSettlementUsdc,
+            _freeSettlementAssets(RISK_EXACT),
+            fixture.protectionBountiesAssets + surplusFreeSettlementAssets,
             "fixture must have abundant generic free settlement"
         );
 
@@ -2193,8 +2198,8 @@ contract PositionProtectionTest is BasePerpTest {
         protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         assertEq(
-            _freeSettlementUsdc(RISK_EXACT),
-            fixture.protectionBountiesUsdc + surplusFreeSettlementUsdc,
+            _freeSettlementAssets(RISK_EXACT),
+            fixture.protectionBountiesAssets + surplusFreeSettlementAssets,
             "failed protection must roll back the temporary bounty lock"
         );
         assertEq(protectionViews.activePositionProtectionId(RISK_EXACT), 0, "free cash must not create price backing");
@@ -2207,14 +2212,14 @@ contract PositionProtectionTest is BasePerpTest {
         _setRiskParams(riskParams);
         RiskBoundaryFixture memory fixture = _postMarkInitialMarginBoundaryFixture(riskParams);
 
-        _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
-        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+        _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaAssets + fixture.protectionBountiesAssets);
+        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaAssets, MARK_PRICE);
         _refreshMark(POST_MARK_PRICE);
         assertEq(engine.lastMarkPrice(), POST_MARK_PRICE, "adverse basket mark installed");
         assertEq(
-            clearinghouse.pnlPledgeUsdc(RISK_EXACT) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
+            clearinghouse.pnlPledgeAssets(RISK_EXACT) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
                 * (POST_MARK_PRICE - MARK_PRICE),
-            fixture.requirementUsdc,
+            fixture.requirementAssets,
             "marked equity starts at equality"
         );
 
@@ -2226,7 +2231,7 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(RISK_EXACT);
         uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
-        assertEq(engine.traderClaimBalanceUsdc(RISK_EXACT), 1, "fixture must add one same-account claim atom");
+        assertEq(engine.traderClaimBalanceAssets(RISK_EXACT), 1, "fixture must add one same-account claim atom");
         assertEq(
             uint8(protectionViews.getPositionProtection(protectionId).status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
@@ -2242,7 +2247,7 @@ contract PositionProtectionTest is BasePerpTest {
 
         RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.fadMarginBps);
         assertGt(
-            fixture.requirementUsdc,
+            fixture.requirementAssets,
             ((POSITION_SIZE * MARK_PRICE) / 1e20) * riskParams.initMarginBps / 10_000,
             "fixture requires FAD to be stricter than initial"
         );
@@ -2252,32 +2257,34 @@ contract PositionProtectionTest is BasePerpTest {
         router.updateMarkPrice(_livePriceData(MARK_PRICE));
         assertFalse(engine.isFadWindow(), "positions should open immediately before the FAD boundary");
 
-        _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
-        _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
-        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
-        _open(RISK_PLUS_ONE, CfdTypes.Side.LONG, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
+        _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaAssets + fixture.protectionBountiesAssets);
+        _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaAssets + fixture.protectionBountiesAssets);
+        _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaAssets, MARK_PRICE);
+        _open(RISK_PLUS_ONE, CfdTypes.Side.LONG, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaAssets, MARK_PRICE);
 
-        assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "exact FAD pledge boundary");
-        assertEq(clearinghouse.pnlPledgeUsdc(RISK_PLUS_ONE), fixture.requirementUsdc + 1, "one-atom FAD pledge surplus");
+        assertEq(clearinghouse.pnlPledgeAssets(RISK_EXACT), fixture.requirementAssets, "exact FAD pledge boundary");
+        assertEq(
+            clearinghouse.pnlPledgeAssets(RISK_PLUS_ONE), fixture.requirementAssets + 1, "one-atom FAD pledge surplus"
+        );
 
         vm.warp(FRIDAY_FAD_START);
         _mockPythUpdateData(MARK_PRICE);
         router.updateMarkPrice(_livePriceData(MARK_PRICE));
         assertTrue(engine.isFadWindow(), "post-lock risk should use the stricter FAD requirement");
 
-        uint256 exactFreeBefore = _freeSettlementUsdc(RISK_EXACT);
-        assertGe(exactFreeBefore, fixture.protectionBountiesUsdc, "exact-boundary account can fund the bounty itself");
+        uint256 exactFreeBefore = _freeSettlementAssets(RISK_EXACT);
+        assertGe(exactFreeBefore, fixture.protectionBountiesAssets, "exact-boundary account can fund the bounty itself");
         vm.prank(RISK_EXACT);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
         protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
-        assertEq(_freeSettlementUsdc(RISK_EXACT), exactFreeBefore, "risk failure must roll back the bounty lock");
+        assertEq(_freeSettlementAssets(RISK_EXACT), exactFreeBefore, "risk failure must roll back the bounty lock");
 
         vm.prank(RISK_PLUS_ONE);
         uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
         assertEq(
             uint8(protectionViews.getPositionProtection(protectionId).status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
-            "one micro-USDC above the inclusive risk boundary should arm"
+            "one micro-settlementToken above the inclusive risk boundary should arm"
         );
     }
 
@@ -2295,37 +2302,39 @@ contract PositionProtectionTest is BasePerpTest {
         (,,,,,, int256 vpiAccrued) = engine.positions(BOB);
         assertLt(vpiAccrued, 0, "rebate-side fixture must have negative lifetime VPI");
 
-        uint256 reserveTargetUsdc = uint256(-(vpiAccrued + 1)) + 1;
-        assertEq(clearinghouse.vpiRebateReserveUsdc(BOB), reserveTargetUsdc, "reserve starts exactly funded");
+        uint256 reserveTargetAssets = uint256(-(vpiAccrued + 1)) + 1;
+        assertEq(clearinghouse.vpiRebateReserveAssets(BOB), reserveTargetAssets, "reserve starts exactly funded");
         vm.prank(address(engine));
         clearinghouse.releaseVpiRebateReserve(BOB, 1);
 
-        uint256 freeBefore = _freeSettlementUsdc(BOB);
+        uint256 freeBefore = _freeSettlementAssets(BOB);
         _refreshMark(MARK_PRICE);
         vm.prank(BOB);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
         protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         assertEq(
-            clearinghouse.vpiRebateReserveUsdc(BOB), reserveTargetUsdc - 1, "failed action must not repair VPI backing"
+            clearinghouse.vpiRebateReserveAssets(BOB),
+            reserveTargetAssets - 1,
+            "failed action must not repair VPI backing"
         );
-        assertEq(_freeSettlementUsdc(BOB), freeBefore, "failed action must roll back its bounty lock");
+        assertEq(_freeSettlementAssets(BOB), freeBefore, "failed action must roll back its bounty lock");
         assertEq(protectionViews.activePositionProtectionId(BOB), 0, "VPI delinquency must fail closed");
     }
 
     function test_PostLockRisk_RejectsCarryLeftUncoveredByLockCheckpoint() public {
         _startRecordingLogs();
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
         _withdrawAllFreeSettlement(ALICE);
 
-        stdstore.target(address(router)).sig("positionProtectionTriggerBountyUsdc()").checked_write(uint256(0));
+        stdstore.target(address(router)).sig("positionProtectionTriggerBountyAssets()").checked_write(uint256(0));
 
         // An exact number of weeks preserves the fixture's live oracle window.
         vm.warp(block.timestamp + 1001 * 365 days);
         _refreshMark(MARK_PRICE);
         assertGt(
-            _expectedIndexedCarryUsdc(ALICE),
-            clearinghouse.pnlPledgeUsdc(ALICE),
+            _expectedIndexedCarryAssets(ALICE),
+            clearinghouse.pnlPledgeAssets(ALICE),
             "fixture must exhaust both position margin and free settlement"
         );
 
@@ -2334,7 +2343,7 @@ contract PositionProtectionTest is BasePerpTest {
         protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         assertEq(
-            engine.unsettledCarryUsdc(ALICE),
+            engine.unsettledCarryAssets(ALICE),
             0,
             "risk failure must roll back the lock-time carry checkpoint with the rest of the action"
         );
@@ -2344,10 +2353,10 @@ contract PositionProtectionTest is BasePerpTest {
     function test_Pause_BlocksNewAndReplacementButAllowsCancelAndTrigger() public {
         _startRecordingLogs();
         uint64 cancelledProtectionId = _createProtectionFor(
-            ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, LONG_STOP_LOSS
+            ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, LONG_TAKE_PROFIT, LONG_STOP_LOSS
         );
         uint64 triggeredProtectionId =
-            _createProtectionFor(BOB, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, 0);
+            _createProtectionFor(BOB, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, LONG_TAKE_PROFIT, 0);
 
         routerAdmin.pause();
 
@@ -2356,7 +2365,7 @@ contract PositionProtectionTest is BasePerpTest {
         protectionActions.replacePositionProtection(cancelledProtectionId, _params(LONG_TAKE_PROFIT - 1, 0));
 
         OrderV3Types.OrderRequest memory pausedRequest =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         vm.prank(CAROL);
         vm.expectRevert(Pausable.EnforcedPause.selector);
         protectionActions.commitOpenOrderWithProtection(pausedRequest, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
@@ -2379,10 +2388,10 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(routerAdmin.activeConfigVersion(), 1, "fresh Router must use its constructor configuration");
         assertEq(routerAdmin.routerConfigActivationTime(), 0, "protection must not require an activation proposal");
         uint64 cancelledProtectionId = _createProtectionFor(
-            ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, LONG_STOP_LOSS
+            ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, LONG_TAKE_PROFIT, LONG_STOP_LOSS
         );
         uint64 triggeredProtectionId =
-            _createProtectionFor(BOB, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, 0);
+            _createProtectionFor(BOB, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, LONG_TAKE_PROFIT, 0);
 
         vm.prank(ALICE);
         protectionActions.replacePositionProtection(cancelledProtectionId, _params(LONG_TAKE_PROFIT - 1, 0));
@@ -2393,7 +2402,7 @@ contract PositionProtectionTest is BasePerpTest {
         );
 
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         vm.prank(CAROL);
         (, uint64 attachedProtectionId) =
             protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
@@ -2428,10 +2437,10 @@ contract PositionProtectionTest is BasePerpTest {
 
         PositionProtectionTypes.PositionProtectionParams memory replacementParams = _params(LONG_TAKE_PROFIT - 1, 0);
         replacementParams.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
-            maxExecutionNotionalUsdc: 11_111e6,
-            maxGrossAccountDebitUsdc: 8888e6,
-            maxActionChargeUsdc: 777e6,
-            maxExplicitFeesUsdc: 66e6
+            maxExecutionNotionalAssets: 11_111e6,
+            maxGrossAccountDebitAssets: 8888e6,
+            maxActionChargeAssets: 777e6,
+            maxExplicitFeesAssets: 66e6
         });
         vm.prank(ALICE);
         protectionActions.replacePositionProtection(protectionId, replacementParams);
@@ -2448,8 +2457,8 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(replaced.armedAt, block.timestamp, "replacement should restart time separation");
         assertEq(replaced.armedBlock, block.number, "replacement should restart block separation");
         assertEq(
-            replaced.triggerBountyUsdc,
-            _totalProtectionBountyUsdc(),
+            replaced.triggerBountyAssets,
+            _totalProtectionBountyAssets(),
             "replacement should retain the snapshotted reserve"
         );
     }
@@ -2458,7 +2467,7 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         PositionProtectionTypes.PositionProtectionView memory beforeReplacement =
             protectionViews.getPositionProtection(protectionId);
-        uint256 bountyBefore = router.getAccountReservations(ALICE).executionBountyUsdc;
+        uint256 bountyBefore = router.getAccountReservations(ALICE).executionBountyAssets;
 
         vm.warp(block.timestamp + 1);
         vm.prank(address(router));
@@ -2478,7 +2487,7 @@ contract PositionProtectionTest is BasePerpTest {
             protectionViews.getPositionProtection(protectionId);
         assertEq(afterRevert.takeProfitTriggerPrice, beforeReplacement.takeProfitTriggerPrice, "threshold unchanged");
         assertEq(afterRevert.armedAt, beforeReplacement.armedAt, "failed replacement must not rearm");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, bountyBefore, "bounty unchanged");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, bountyBefore, "bounty unchanged");
 
         vm.prank(ALICE);
         protectionActions.replacePositionProtection(protectionId, _params(93_000_000, 0));
@@ -2502,7 +2511,7 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         bytes[] memory calls = new bytes[](5);
         calls[0] = abi.encodeCall(IPositionProtectionActions.createPositionProtection, (params));
         calls[1] = abi.encodeCall(IPositionProtectionActions.replacePositionProtection, (uint64(1), params));
@@ -2646,7 +2655,7 @@ contract PositionProtectionTest is BasePerpTest {
         _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
         protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
@@ -2657,7 +2666,7 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
         _withdrawAllFreeSettlement(ALICE);
 
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         _liquidateProtectedPositionAsKeeper();
 
         PositionProtectionTypes.PositionProtectionView memory liquidated =
@@ -2667,12 +2676,12 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(PositionProtectionTypes.PositionProtectionStatus.Liquidated),
             "armed protection should terminalize as liquidated"
         );
-        assertEq(liquidated.triggerBountyUsdc, 0, "liquidation should consume the unpaid trigger bounty");
+        assertEq(liquidated.triggerBountyAssets, 0, "liquidation should consume the unpaid trigger bounty");
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "liquidation should clear active protection");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "no bounty reservation should remain");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "no bounty reservation should remain");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            _totalProtectionBountyUsdc(),
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
+            _totalProtectionBountyAssets(),
             "unpaid trigger bounty should be forfeited exactly once"
         );
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
@@ -2685,7 +2694,7 @@ contract PositionProtectionTest is BasePerpTest {
         _withdrawAllFreeSettlement(ALICE);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_STOP_LOSS);
 
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         _liquidateProtectedPositionAsKeeper();
 
         PositionProtectionTypes.PositionProtectionView memory liquidated =
@@ -2701,12 +2710,12 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(IOrderRouterAccounting.OrderStatus.Failed),
             "liquidation should terminally fail the queued linked close"
         );
-        assertEq(_orderRecord(linkedOrderId).executionBountyUsdc, 0, "linked order bounty should be consumed");
+        assertEq(_orderRecord(linkedOrderId).executionBountyAssets, 0, "linked order bounty should be consumed");
         assertEq(router.pendingOrderCounts(ALICE), 0, "liquidation should unlink the generated close");
         assertEq(router.pendingCloseSize(ALICE), 0, "liquidation should clear generated close size");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "no bounty reservation should remain");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "no bounty reservation should remain");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
             0,
             "only the unpaid linked-close bounty should be forfeited at liquidation"
         );
@@ -2731,7 +2740,7 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(latched.linkedOrderId, linkedOrderId, "latch retains the last attempt identity");
         assertEq(router.pendingOrderCounts(ALICE), 0, "latched protection should have no live child");
 
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         _liquidateProtectedPositionAsKeeper();
 
         PositionProtectionTypes.PositionProtectionView memory liquidated =
@@ -2742,9 +2751,9 @@ contract PositionProtectionTest is BasePerpTest {
             "liquidation should terminalize the latch"
         );
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "liquidation should clear the trade lock");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "no bounty reserve should remain");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "no bounty reserve should remain");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
             0,
             "latched zero-bounty close must not credit the treasury"
         );
@@ -2773,9 +2782,9 @@ contract PositionProtectionTest is BasePerpTest {
             retryOrderId,
             "retry should be the latest live linkage"
         );
-        assertEq(_orderRecord(retryOrderId).executionBountyUsdc, 0, "retry child must remain zero bounty");
+        assertEq(_orderRecord(retryOrderId).executionBountyAssets, 0, "retry child must remain zero bounty");
 
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         _liquidateProtectedPositionAsKeeper();
 
         PositionProtectionTypes.PositionProtectionView memory liquidated =
@@ -2788,12 +2797,12 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(liquidated.linkedOrderId, retryOrderId, "terminal history should retain the latest retry id");
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "liquidation should clear active linkage");
         assertEq(uint8(_orderRecord(retryOrderId).status), uint8(IOrderRouterAccounting.OrderStatus.Failed));
-        assertEq(_orderRecord(retryOrderId).executionBountyUsdc, 0, "latest child bounty should be consumed");
+        assertEq(_orderRecord(retryOrderId).executionBountyAssets, 0, "latest child bounty should be consumed");
         assertEq(router.pendingOrderCounts(ALICE), 0, "latest child should be removed from account queue");
         assertEq(router.pendingCloseSize(ALICE), 0, "latest child should be removed from close aggregate");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "all bounty reserve should clear");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "all bounty reserve should clear");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
             0,
             "liquidating a zero-bounty retry must not credit the treasury"
         );
@@ -2817,28 +2826,28 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_InheritsSettlementBufferAdmissionAtCommit() public {
         _startRecordingLogs();
         uint256 size = 100_000e18;
-        uint256 marginUsdc = 5000e6;
-        _open(BOB, CfdTypes.Side.SHORT, size, marginUsdc, MARK_PRICE);
+        uint256 marginAssets = 5000e6;
+        _open(BOB, CfdTypes.Side.SHORT, size, marginAssets, MARK_PRICE);
 
-        uint256 maxLiabilityUsdc = _maxLiability();
-        uint256 settlementBufferUsdc = _settlementBufferTargetUsdc(maxLiabilityUsdc);
-        uint256 underBufferedAssetsUsdc = maxLiabilityUsdc + settlementBufferUsdc - 1;
-        _drainPoolTo(underBufferedAssetsUsdc);
+        uint256 maxLiabilityAssets = _maxLiability();
+        uint256 settlementBufferAssets = _settlementBufferTargetAssets(maxLiabilityAssets);
+        uint256 underBufferedAssets = maxLiabilityAssets + settlementBufferAssets - 1;
+        _drainPoolTo(underBufferedAssets);
 
-        assertGe(pool.totalAssets(), maxLiabilityUsdc, "setup must remain raw solvent");
+        assertGe(pool.totalAssets(), maxLiabilityAssets, "setup must remain raw solvent");
         assertLt(
             pool.totalAssets(),
-            maxLiabilityUsdc + settlementBufferUsdc,
+            maxLiabilityAssets + settlementBufferAssets,
             "setup must miss only the settlement-buffer admission target"
         );
         assertEq(
-            engineLens.previewOpenRevertCode(ALICE, CfdTypes.Side.LONG, size, marginUsdc, MARK_PRICE),
+            engineLens.previewOpenRevertCode(ALICE, CfdTypes.Side.LONG, size, marginAssets, MARK_PRICE),
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
             "the attached parent must inherit the ordinary open buffer gate"
         );
 
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
-        OrderV3Types.OrderRequest memory request = _boundedOpenRequest(CfdTypes.Side.LONG, size, marginUsdc, 0);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
+        OrderV3Types.OrderRequest memory request = _boundedOpenRequest(CfdTypes.Side.LONG, size, marginAssets, 0);
         vm.prank(ALICE);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -2848,7 +2857,7 @@ contract PositionProtectionTest is BasePerpTest {
         );
         protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
-        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "commit rejection must roll back every tentative lock");
+        assertEq(_freeSettlementAssets(ALICE), freeBefore, "commit rejection must roll back every tentative lock");
         assertEq(
             PositionProtectionBook(address(protectionBook)).nextPositionProtectionId(),
             1,
@@ -2856,30 +2865,32 @@ contract PositionProtectionTest is BasePerpTest {
         );
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "commit rejection must not create a trade lock");
         assertEq(router.pendingOrderCounts(ALICE), 0, "commit rejection must not enqueue a parent order");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "commit rejection must reserve no bounty");
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyAssets, 0, "commit rejection must reserve no bounty"
+        );
     }
 
     function test_AttachedOpen_PostCommitBufferInvalidationRefundsAndUnlocksProtection() public {
         _startRecordingLogs();
         uint256 size = 100_000e18;
-        uint256 marginUsdc = 5000e6;
-        _open(BOB, CfdTypes.Side.SHORT, size, marginUsdc, MARK_PRICE);
+        uint256 marginAssets = 5000e6;
+        _open(BOB, CfdTypes.Side.SHORT, size, marginAssets, MARK_PRICE);
 
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
         vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            _boundedOpenRequest(CfdTypes.Side.LONG, size, marginUsdc, 0), _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
+            _boundedOpenRequest(CfdTypes.Side.LONG, size, marginAssets, 0), _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
         );
         vm.stopPrank();
-        uint256 parentBountyUsdc = _executionBountyReserve(parentOrderId);
+        uint256 parentBountyAssets = _executionBountyReserve(parentOrderId);
 
-        uint256 maxLiabilityUsdc = _maxLiability();
-        uint256 settlementBufferUsdc = _settlementBufferTargetUsdc(maxLiabilityUsdc);
-        _drainPoolTo(maxLiabilityUsdc + settlementBufferUsdc - 1);
-        assertGe(pool.totalAssets(), maxLiabilityUsdc, "post-commit drift must remain raw solvent");
+        uint256 maxLiabilityAssets = _maxLiability();
+        uint256 settlementBufferAssets = _settlementBufferTargetAssets(maxLiabilityAssets);
+        _drainPoolTo(maxLiabilityAssets + settlementBufferAssets - 1);
+        assertGe(pool.totalAssets(), maxLiabilityAssets, "post-commit drift must remain raw solvent");
         assertLt(
             pool.totalAssets(),
-            maxLiabilityUsdc + settlementBufferUsdc,
+            maxLiabilityAssets + settlementBufferAssets,
             "post-commit drift must leave the parent one atom below its buffer target"
         );
 
@@ -2887,7 +2898,7 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(address(router));
         clearinghouse.releaseOrderReservationForTerminalCleanup(parentOrderId);
         assertEq(
-            engineLens.previewOpenRevertCode(ALICE, CfdTypes.Side.LONG, size, marginUsdc, MARK_PRICE),
+            engineLens.previewOpenRevertCode(ALICE, CfdTypes.Side.LONG, size, marginAssets, MARK_PRICE),
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
             "execution-time revalidation must classify the headroom loss as solvency exceeded"
         );
@@ -2910,19 +2921,19 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(PositionProtectionTypes.PositionProtectionStatus.Failed),
             "terminal parent invalidation must fail its attached protection"
         );
-        assertEq(failed.triggerBountyUsdc, 0, "invalidation must refund the trigger bounty");
+        assertEq(failed.triggerBountyAssets, 0, "invalidation must refund the trigger bounty");
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "invalidation must release the trade lock");
         assertEq(router.pendingOrderCounts(ALICE), 0, "invalidation must remove the parent from the queue");
-        assertEq(router.getAccountReservations(ALICE).committedMarginUsdc, 0, "parent margin must be unlocked");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "all bounty reservations must clear");
+        assertEq(router.getAccountReservations(ALICE).committedMarginAssets, 0, "parent margin must be unlocked");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "all bounty reservations must clear");
         assertEq(
-            _freeSettlementUsdc(ALICE),
-            freeBefore - parentBountyUsdc,
+            _freeSettlementAssets(ALICE),
+            freeBefore - parentBountyAssets,
             "margin and protection bounties must return while the existing parent-bounty policy pays the keeper"
         );
         assertEq(
             _settlementBalance(EXECUTION_KEEPER) - keeperBefore,
-            parentBountyUsdc,
+            parentBountyAssets,
             "the ordinary parent execution bounty must follow the existing terminal-failure policy"
         );
         (uint256 liveSize,,,,,,) = engine.positions(ALICE);
@@ -2933,15 +2944,15 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
-            maxExecutionNotionalUsdc: 13_333e6,
-            maxGrossAccountDebitUsdc: 9999e6,
-            maxActionChargeUsdc: 888e6,
-            maxExplicitFeesUsdc: 77e6
+            maxExecutionNotionalAssets: 13_333e6,
+            maxGrossAccountDebitAssets: 9999e6,
+            maxActionChargeAssets: 888e6,
+            maxExplicitFeesAssets: 77e6
         });
 
         vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0), params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0), params
         );
         vm.stopPrank();
 
@@ -2956,17 +2967,17 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.pendingOrderCounts(ALICE), 1, "only parent should count as pending");
         _assertStoredCloseLimits(protectionId, params.closeLimits);
         assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc,
-            _totalProtectionBountyUsdc() + _executionBountyReserve(parentOrderId),
+            router.getAccountReservations(ALICE).executionBountyAssets,
+            _totalProtectionBountyAssets() + _executionBountyReserve(parentOrderId),
             "view should include parent and staged-protection bounties"
         );
 
         PositionProtectionTypes.PositionProtectionParams memory replacement = _params(85_000_000, 115_000_000);
         replacement.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
-            maxExecutionNotionalUsdc: 14_444e6,
-            maxGrossAccountDebitUsdc: 8888e6,
-            maxActionChargeUsdc: 666e6,
-            maxExplicitFeesUsdc: 55e6
+            maxExecutionNotionalAssets: 14_444e6,
+            maxGrossAccountDebitAssets: 8888e6,
+            maxActionChargeAssets: 666e6,
+            maxExplicitFeesAssets: 55e6
         });
         vm.prank(ALICE);
         protectionActions.replacePositionProtection(protectionId, replacement);
@@ -3000,8 +3011,8 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.pendingOrderCounts(ALICE), 0, "parent should be terminal");
         _assertStoredCloseLimits(protectionId, replacement.closeLimits);
         assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc,
-            _totalProtectionBountyUsdc(),
+            router.getAccountReservations(ALICE).executionBountyAssets,
+            _totalProtectionBountyAssets(),
             "only protection bounties should remain after opening bounty payment"
         );
         (uint256 liveSize,,,,,,) = engine.positions(ALICE);
@@ -3014,7 +3025,7 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_ValidFillSurvivesIfAcceptedMarkIsAheadOfEngine() public {
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(request, params);
 
@@ -3034,9 +3045,9 @@ contract PositionProtectionTest is BasePerpTest {
             protectionViews.getPositionProtection(protectionId);
         assertEq(uint8(_orderRecord(parentOrderId).status), uint8(IOrderRouterAccounting.OrderStatus.Executed));
         assertEq(uint8(protection.status), uint8(PositionProtectionTypes.PositionProtectionStatus.Failed));
-        assertEq(protection.triggerBountyUsdc, 0, "unarmed trigger bounty must be released");
+        assertEq(protection.triggerBountyAssets, 0, "unarmed trigger bounty must be released");
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "failed protection must release lock");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "bounty reserve must clear");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "bounty reserve must clear");
         (uint256 liveSize,,,,,,) = engine.positions(ALICE);
         assertEq(liveSize, POSITION_SIZE, "valid parent fill must survive protection failure");
     }
@@ -3044,7 +3055,7 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_RetainsCallerBoundedRequestAndPublicIdentity() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         request.clientOrderId = keccak256("bounded-protected-parent");
         request.bounds.submitBy = uint64(block.timestamp + 1);
         request.bounds.executionWindowSeconds = uint32(uint256(uint64(block.timestamp + 1)) - block.timestamp);
@@ -3078,7 +3089,7 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_RejectsMalformedOrUnboundedParentAndRollsBack() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         bytes32 currentConfigHash = request.bounds.expectedConfigHash;
 
         request.bounds.expectedConfigHash = bytes32(0);
@@ -3089,19 +3100,19 @@ contract PositionProtectionTest is BasePerpTest {
             )
         );
 
-        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         request.targetPrice = 0;
         _expectAttachedOpenCommitRevert(
             request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ZeroTargetPrice.selector)
         );
 
-        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         request.isClose = true;
         _expectAttachedOpenCommitRevert(
             request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__Unauthorized.selector)
         );
 
-        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         request.clientOrderId = OrderV3Types.protocolClientOrderId(keccak256("protected-parent"));
         _expectAttachedOpenCommitRevert(
             request,
@@ -3110,15 +3121,15 @@ contract PositionProtectionTest is BasePerpTest {
             )
         );
 
-        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
-        uint256 executionBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(POSITION_SIZE);
-        request.bounds.maxExecutionBountyUsdc = executionBountyUsdc - 1;
+        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
+        uint256 executionBountyAssets = _quoteOpenOrderExecutionBountyAssets(POSITION_SIZE);
+        request.bounds.maxExecutionBountyAssets = executionBountyAssets - 1;
         _expectAttachedOpenCommitRevert(
             request,
             abi.encodeWithSelector(
                 IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound.selector,
-                executionBountyUsdc,
-                executionBountyUsdc - 1
+                executionBountyAssets,
+                executionBountyAssets - 1
             )
         );
     }
@@ -3126,7 +3137,7 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_RejectsStaleConfigAtCommitAndRollsBack() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         bytes32 staleConfigHash = request.bounds.expectedConfigHash;
         _setRouterConfig(_routerConfig());
         _refreshMark(MARK_PRICE);
@@ -3153,7 +3164,7 @@ contract PositionProtectionTest is BasePerpTest {
         _refreshMark(MARK_PRICE);
 
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) =
             protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
@@ -3178,7 +3189,7 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_DisallowedExecutionModeFailsParentAndProtection() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         request.bounds.allowedExecutionModes = 2;
 
         vm.prank(ALICE);
@@ -3189,11 +3200,11 @@ contract PositionProtectionTest is BasePerpTest {
         vm.warp(block.timestamp + 1);
         assertFalse(engine.isFadWindow(), "execution must occur in live mode");
         bytes[] memory updateData = _mockPythUpdateData(MARK_PRICE);
-        uint256 keeperBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
-        uint256 expectedBounty = _orderRecord(parentOrderId).executionBountyUsdc;
+        uint256 keeperBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
+        uint256 expectedBounty = _orderRecord(parentOrderId).executionBountyAssets;
         vm.prank(EXECUTION_KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(parentOrderId, updateData);
-        assertEq(clearinghouse.balanceUsdc(EXECUTION_KEEPER) - keeperBefore, expectedBounty, "parent cleaner credit");
+        assertEq(clearinghouse.balanceAssets(EXECUTION_KEEPER) - keeperBefore, expectedBounty, "parent cleaner credit");
         OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), parentOrderId);
         assertEq(outcome.executor, EXECUTION_KEEPER, "parent terminal executor");
@@ -3211,20 +3222,20 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_FinancialBoundFailureFailsParentAndProtection() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
-        uint256 executionNotionalUsdc = (POSITION_SIZE * MARK_PRICE) / 1e20;
-        request.bounds.maxExecutionNotionalUsdc = executionNotionalUsdc - 1;
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
+        uint256 executionNotionalAssets = (POSITION_SIZE * MARK_PRICE) / 1e20;
+        request.bounds.maxExecutionNotionalAssets = executionNotionalAssets - 1;
 
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) =
             protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         bytes[] memory updateData = _mockPythUpdateData(MARK_PRICE);
-        uint256 keeperBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
-        uint256 expectedBounty = _orderRecord(parentOrderId).executionBountyUsdc;
+        uint256 keeperBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
+        uint256 expectedBounty = _orderRecord(parentOrderId).executionBountyAssets;
         vm.prank(EXECUTION_KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(parentOrderId, updateData);
-        assertEq(clearinghouse.balanceUsdc(EXECUTION_KEEPER) - keeperBefore, expectedBounty, "parent cleaner credit");
+        assertEq(clearinghouse.balanceAssets(EXECUTION_KEEPER) - keeperBefore, expectedBounty, "parent cleaner credit");
         OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), parentOrderId);
         assertEq(outcome.executor, EXECUTION_KEEPER, "parent terminal executor");
@@ -3249,12 +3260,12 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_ExactReplayAndClientIdConflictAreRejectedWithoutMutation() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(request, params);
 
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
         uint64 nextParentBefore = router.nextCommitId();
         uint64 nextProtectionBefore = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
         bytes32 protectionHash = keccak256(abi.encode(protectionViews.getPositionProtection(protectionId)));
@@ -3264,9 +3275,9 @@ contract PositionProtectionTest is BasePerpTest {
         protectionActions.commitOpenOrderWithProtection(request, params);
 
         OrderV3Types.OrderRequest memory conflict =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         conflict.clientOrderId = request.clientOrderId;
-        conflict.bounds.maxExplicitFeesUsdc -= 1;
+        conflict.bounds.maxExplicitFeesAssets -= 1;
         bytes32 existingIntentHash = router.lifecycleBook().hashOrderRequest(ALICE, request);
         bytes32 suppliedIntentHash = router.lifecycleBook().hashOrderRequest(ALICE, conflict);
         vm.expectRevert(
@@ -3287,7 +3298,7 @@ contract PositionProtectionTest is BasePerpTest {
             nextProtectionBefore,
             "retry must not allocate protection"
         );
-        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "retry must roll back tentative bounty locks");
+        assertEq(_freeSettlementAssets(ALICE), freeBefore, "retry must roll back tentative bounty locks");
         assertEq(
             keccak256(abi.encode(protectionViews.getPositionProtection(protectionId))),
             protectionHash,
@@ -3307,7 +3318,7 @@ contract PositionProtectionTest is BasePerpTest {
         (bool success,) = address(protectionBook)
             .call(
                 abi.encodeWithSelector(
-                    legacySelector, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, uint256(0), params
+                    legacySelector, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, uint256(0), params
                 )
             );
 
@@ -3318,7 +3329,7 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_Trigger_PublicRawIdPreclaimCannotPoisonProtocolClose() public {
         _startRecordingLogs();
-        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
 
         uint64 protectionId = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
         uint64 poisonOrderId = router.nextCommitId();
@@ -3373,7 +3384,7 @@ contract PositionProtectionTest is BasePerpTest {
 
         vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0), params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0), params
         );
         vm.stopPrank();
 
@@ -3416,20 +3427,20 @@ contract PositionProtectionTest is BasePerpTest {
         pletherOracle.updatePrice(BOB, _priceData(LONG_TAKE_PROFIT), IPletherOracle.PriceMode.MarkRefresh);
         assertEq(engine.lastMarkPrice(), MARK_PRICE, "oracle update must not refresh the engine mark");
         _expectAttachedOpenCommitRevert(
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0),
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0),
             abi.encodeWithSelector(PositionProtectionBook.PositionProtectionBook__OracleMarkAhead.selector)
         );
         router.updateMarkPrice(new bytes[](0));
 
         _expectAttachedOpenCommitRevert(
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0),
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0),
             abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector)
         );
 
         vm.warp(uint256(engine.lastMarkTime()) + 1);
         router.updateMarkPrice(_livePriceData(MARK_PRICE));
         OrderV3Types.OrderRequest memory request =
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) =
             protectionActions.commitOpenOrderWithProtection(request, _params(80_000_000, LONG_STOP_LOSS));
@@ -3452,15 +3463,15 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_AttachedOpen_SlippageFailureRefundsProtectionBounties() public {
         _startRecordingLogs();
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
 
         vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_STOP_LOSS), params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, LONG_STOP_LOSS), params
         );
         vm.stopPrank();
-        uint256 parentBountyUsdc = _executionBountyReserve(parentOrderId);
+        uint256 parentBountyAssets = _executionBountyReserve(parentOrderId);
 
         bytes[] memory executionData = _mockPythUpdateData(MARK_PRICE);
         vm.prank(EXECUTION_KEEPER);
@@ -3473,13 +3484,13 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(PositionProtectionTypes.PositionProtectionStatus.Failed),
             "terminal parent failure should fail attached protection"
         );
-        assertEq(failed.triggerBountyUsdc, 0, "failed attached protection should release trigger bounty");
+        assertEq(failed.triggerBountyAssets, 0, "failed attached protection should release trigger bounty");
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "failure should clear active protection");
         assertEq(router.pendingOrderCounts(ALICE), 0, "failed parent should leave no order");
-        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "failure should clear all reserves");
+        assertEq(router.getAccountReservations(ALICE).executionBountyAssets, 0, "failure should clear all reserves");
         assertEq(
-            _freeSettlementUsdc(ALICE),
-            freeBefore - parentBountyUsdc,
+            _freeSettlementAssets(ALICE),
+            freeBefore - parentBountyAssets,
             "only the ordinary parent clearer bounty should remain spent"
         );
         (uint256 liveSize,,,,,,) = engine.positions(ALICE);
@@ -3489,37 +3500,37 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_RiskOffRefundFailsProtectionAndReleasesAllReservesExactlyOnce() public {
         _startRecordingLogs();
         RiskOffRefundFixture memory fixture;
-        fixture.freeBefore = _freeSettlementUsdc(ALICE);
+        fixture.freeBefore = _freeSettlementAssets(ALICE);
         fixture.settlementBefore = _settlementBalance(ALICE);
         fixture.cleanerSettlementBefore = _settlementBalance(CAROL);
 
         vm.startPrank(ALICE);
         (fixture.parentOrderId, fixture.protectionId) = protectionActions.commitOpenOrderWithProtection(
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0),
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0),
             _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
         );
         vm.stopPrank();
 
-        fixture.parentMarginUsdc = _remainingCommittedMargin(fixture.parentOrderId);
-        fixture.parentBountyUsdc = _executionBountyReserve(fixture.parentOrderId);
-        fixture.protectionBountiesUsdc = _totalProtectionBountyUsdc();
+        fixture.parentMarginAssets = _remainingCommittedMargin(fixture.parentOrderId);
+        fixture.parentBountyAssets = _executionBountyReserve(fixture.parentOrderId);
+        fixture.protectionBountiesAssets = _totalProtectionBountyAssets();
 
         {
-            uint256 totalReservedUsdc =
-                fixture.parentMarginUsdc + fixture.parentBountyUsdc + fixture.protectionBountiesUsdc;
+            uint256 totalReservedAssets =
+                fixture.parentMarginAssets + fixture.parentBountyAssets + fixture.protectionBountiesAssets;
             IOrderRouterAccounting.AccountReservationView memory stagedReservations =
                 router.getAccountReservations(ALICE);
 
             assertEq(
-                fixture.freeBefore - _freeSettlementUsdc(ALICE),
-                totalReservedUsdc,
+                fixture.freeBefore - _freeSettlementAssets(ALICE),
+                totalReservedAssets,
                 "setup must lock every reserve exactly"
             );
             assertEq(_settlementBalance(ALICE), fixture.settlementBefore, "reservation must not debit gross settlement");
-            assertEq(stagedReservations.committedMarginUsdc, fixture.parentMarginUsdc, "parent margin reserve");
+            assertEq(stagedReservations.committedMarginAssets, fixture.parentMarginAssets, "parent margin reserve");
             assertEq(
-                stagedReservations.executionBountyUsdc,
-                fixture.parentBountyUsdc + fixture.protectionBountiesUsdc,
+                stagedReservations.executionBountyAssets,
+                fixture.parentBountyAssets + fixture.protectionBountiesAssets,
                 "parent and protection bounty reserves"
             );
             assertEq(stagedReservations.pendingOrderCount, 1, "only the parent open should be queued");
@@ -3546,7 +3557,10 @@ contract PositionProtectionTest is BasePerpTest {
             Vm.Log[] memory riskOffLogs = _takeRecordedLogs();
             vm.clearMockedCalls();
             _assertSingleRiskOffRefund(
-                riskOffLogs, ALICE, fixture.parentMarginUsdc, fixture.parentBountyUsdc + fixture.protectionBountiesUsdc
+                riskOffLogs,
+                ALICE,
+                fixture.parentMarginAssets,
+                fixture.parentBountyAssets + fixture.protectionBountiesAssets
             );
         }
 
@@ -3555,7 +3569,7 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(IOrderRouterAccounting.OrderStatus.Failed),
             "risk-off parent must fail"
         );
-        assertEq(_orderRecord(fixture.parentOrderId).executionBountyUsdc, 0, "parent must retain no unpaid bounty");
+        assertEq(_orderRecord(fixture.parentOrderId).executionBountyAssets, 0, "parent must retain no unpaid bounty");
         assertFalse(_orderRecord(fixture.parentOrderId).inAccountQueue, "parent must leave the account queue");
         assertFalse(_orderRecord(fixture.parentOrderId).inMarginQueue, "parent must leave the margin queue");
         assertEq(_orderRecord(fixture.parentOrderId).nextGlobalOrderId, 0, "parent global next link");
@@ -3581,7 +3595,7 @@ contract PositionProtectionTest is BasePerpTest {
             );
             assertEq(failed.parentOrderId, fixture.parentOrderId, "terminal protection should retain its parent id");
             assertEq(failed.linkedOrderId, 0, "failed staged protection must never create a close");
-            assertEq(failed.triggerBountyUsdc, 0, "risk-off must refund the trigger bounty");
+            assertEq(failed.triggerBountyAssets, 0, "risk-off must refund the trigger bounty");
         }
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "risk-off must clear the active protection");
 
@@ -3594,18 +3608,20 @@ contract PositionProtectionTest is BasePerpTest {
                 "parent margin reservation must be released"
             );
             assertEq(
-                releasedParent.originalAmountUsdc, fixture.parentMarginUsdc, "parent original margin must be retained"
+                releasedParent.originalAmountAssets,
+                fixture.parentMarginAssets,
+                "parent original margin must be retained"
             );
-            assertEq(releasedParent.remainingAmountUsdc, 0, "parent margin must have no remainder");
+            assertEq(releasedParent.remainingAmountAssets, 0, "parent margin must have no remainder");
         }
         {
             IOrderRouterAccounting.AccountReservationView memory clearedReservations =
                 router.getAccountReservations(ALICE);
-            assertEq(clearedReservations.committedMarginUsdc, 0, "no parent margin may remain reserved");
-            assertEq(clearedReservations.executionBountyUsdc, 0, "no parent or protection bounty may remain reserved");
+            assertEq(clearedReservations.committedMarginAssets, 0, "no parent margin may remain reserved");
+            assertEq(clearedReservations.executionBountyAssets, 0, "no parent or protection bounty may remain reserved");
             assertEq(clearedReservations.pendingOrderCount, 0, "no parent order may remain live");
         }
-        assertEq(_freeSettlementUsdc(ALICE), fixture.freeBefore, "every reserve must return to free settlement");
+        assertEq(_freeSettlementAssets(ALICE), fixture.freeBefore, "every reserve must return to free settlement");
         assertEq(_settlementBalance(ALICE), fixture.settlementBefore, "risk-off refund must preserve gross settlement");
         assertEq(
             _settlementBalance(CAROL), fixture.cleanerSettlementBefore, "permissionless cleaner must receive no bounty"
@@ -3615,13 +3631,15 @@ contract PositionProtectionTest is BasePerpTest {
         vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotRiskOff.selector);
         router.clearRiskOffOrder(fixture.parentOrderId);
 
-        assertEq(_freeSettlementUsdc(ALICE), fixture.freeBefore, "retry must not double-release reserves");
+        assertEq(_freeSettlementAssets(ALICE), fixture.freeBefore, "retry must not double-release reserves");
         assertEq(_settlementBalance(CAROL), fixture.cleanerSettlementBefore, "retry must not credit the cleaner");
         assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc, 0, "retry must leave all bounty reserves cleared"
+            router.getAccountReservations(ALICE).executionBountyAssets,
+            0,
+            "retry must leave all bounty reserves cleared"
         );
         assertEq(
-            clearinghouse.getOrderReservation(fixture.parentOrderId).remainingAmountUsdc,
+            clearinghouse.getOrderReservation(fixture.parentOrderId).remainingAmountAssets,
             0,
             "retry must release no margin"
         );
@@ -3632,7 +3650,7 @@ contract PositionProtectionTest is BasePerpTest {
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0), params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0), params
         );
         vm.stopPrank();
         routerAdmin.pause();
@@ -3645,7 +3663,7 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 nextExecuteBefore = router.nextExecuteId();
         uint64 globalTailBefore = router.globalTailOrderId();
         uint64 accountHeadBefore = router.accountHeadOrderId(ALICE);
-        uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeSettlementBefore = _freeSettlementAssets(ALICE);
 
         vm.mockCallRevert(
             address(clearinghouse),
@@ -3681,7 +3699,7 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.nextExecuteId(), nextExecuteBefore, "global head must roll back");
         assertEq(router.globalTailOrderId(), globalTailBefore, "global tail must roll back");
         assertEq(router.accountHeadOrderId(ALICE), accountHeadBefore, "account head must roll back");
-        assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "free settlement must roll back");
+        assertEq(_freeSettlementAssets(ALICE), freeSettlementBefore, "free settlement must roll back");
     }
 
     function test_AttachedOpen_ParentExpiryBatchFailsProtectionsAndRefundsTheirBounties() public {
@@ -3690,12 +3708,12 @@ contract PositionProtectionTest is BasePerpTest {
 
         vm.startPrank(ALICE);
         (uint64 aliceParentId, uint64 aliceProtectionId) = protectionActions.commitOpenOrderWithProtection(
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0), params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0), params
         );
         vm.stopPrank();
         vm.startPrank(BOB);
         (uint64 bobParentId, uint64 bobProtectionId) = protectionActions.commitOpenOrderWithProtection(
-            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0), params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0), params
         );
         vm.stopPrank();
         assertEq(aliceParentId, 1, "Alice parent queue id");
@@ -3741,17 +3759,17 @@ contract PositionProtectionTest is BasePerpTest {
         }
         OrderV3Types.OrderRequest memory request = _manualCloseRequest(side);
         request.bounds.allowedExecutionModes = frozen ? 4 : 1;
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
-        uint256 refund = protectionViews.getPositionProtection(protectionId).triggerBountyUsdc;
-        uint256 triggerKeeperBefore = clearinghouse.balanceUsdc(TRIGGER_KEEPER);
-        uint256 executorBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
+        uint256 refund = protectionViews.getPositionProtection(protectionId).triggerBountyAssets;
+        uint256 triggerKeeperBefore = clearinghouse.balanceAssets(TRIGGER_KEEPER);
+        uint256 executorBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
         router.commitOrder(request);
         vm.prank(ALICE);
         uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
-        assertEq(_freeSettlementUsdc(ALICE), freeBefore + refund, "unpaid trigger bounty refunded atomically");
-        assertEq(clearinghouse.balanceUsdc(TRIGGER_KEEPER), triggerKeeperBefore, "trigger keeper not paid");
+        assertEq(_freeSettlementAssets(ALICE), freeBefore + refund, "unpaid trigger bounty refunded atomically");
+        assertEq(clearinghouse.balanceAssets(TRIGGER_KEEPER), triggerKeeperBefore, "trigger keeper not paid");
         assertFalse(router.lifecycleBook().isProtectionAttempt(orderId), "ordinary manual close");
         _assertManualExitProtectionCancelled(protectionId);
 
@@ -3784,7 +3802,7 @@ contract PositionProtectionTest is BasePerpTest {
             assertEq(outcome.oraclePublishTime, expectedPublication, "frozen execution accepts pre-commit stale quote");
         }
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None), "no execution bounty");
-        assertEq(clearinghouse.balanceUsdc(EXECUTION_KEEPER), executorBefore, "executor receives no bounty");
+        assertEq(clearinghouse.balanceAssets(EXECUTION_KEEPER), executorBefore, "executor receives no bounty");
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
         assertEq(remainingSize, 0, "entire position closed");
         assertEq(router.pendingOrderCounts(ALICE), 0, "completed close leaves queue");
@@ -3811,7 +3829,7 @@ contract PositionProtectionTest is BasePerpTest {
             "protection remains cancelled"
         );
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "active protection cleared");
-        assertEq(protection.triggerBountyUsdc, 0, "trigger reserve released");
+        assertEq(protection.triggerBountyAssets, 0, "trigger reserve released");
         assertEq(protection.linkedOrderId, 0, "manual close does not become a trigger child");
         assertEq(
             uint8(protection.triggeredLeg),
@@ -3850,9 +3868,9 @@ contract PositionProtectionTest is BasePerpTest {
         );
         bytes32 accountHash = keccak256(
             abi.encode(
-                clearinghouse.balanceUsdc(ALICE),
-                _freeSettlementUsdc(ALICE),
-                clearinghouse.actionReserveUsdc(ALICE),
+                clearinghouse.balanceAssets(ALICE),
+                _freeSettlementAssets(ALICE),
+                clearinghouse.actionReserveAssets(ALICE),
                 router.getAccountReservations(ALICE),
                 router.pendingCloseSize(ALICE),
                 router.accountHeadOrderId(ALICE)
@@ -3874,18 +3892,18 @@ contract PositionProtectionTest is BasePerpTest {
         uint256 takeProfit,
         uint256 stopLoss
     ) internal returns (uint64 protectionId) {
-        return _createProtectionFor(ALICE, side, POSITION_SIZE, POSITION_MARGIN_USDC, takeProfit, stopLoss);
+        return _createProtectionFor(ALICE, side, POSITION_SIZE, POSITION_MARGIN_ASSETS, takeProfit, stopLoss);
     }
 
     function _createProtectionFor(
         address account,
         CfdTypes.Side side,
         uint256 size,
-        uint256 marginUsdc,
+        uint256 marginAssets,
         uint256 takeProfit,
         uint256 stopLoss
     ) internal returns (uint64 protectionId) {
-        _open(account, side, size, marginUsdc, MARK_PRICE);
+        _open(account, side, size, marginAssets, MARK_PRICE);
         vm.prank(account);
         protectionId = protectionActions.createPositionProtection(_params(takeProfit, stopLoss));
     }
@@ -3997,10 +4015,10 @@ contract PositionProtectionTest is BasePerpTest {
         params.takeProfitTriggerPrice = takeProfit;
         params.stopLossTriggerPrice = stopLoss;
         params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max
         });
     }
 
@@ -4009,10 +4027,10 @@ contract PositionProtectionTest is BasePerpTest {
         PositionProtectionTypes.CloseFinancialLimits memory expected
     ) internal view {
         PositionProtectionTypes.CloseFinancialLimits memory actual = protectionViews.closeFinancialLimits(protectionId);
-        assertEq(actual.maxExecutionNotionalUsdc, expected.maxExecutionNotionalUsdc, "stored notional ceiling");
-        assertEq(actual.maxGrossAccountDebitUsdc, expected.maxGrossAccountDebitUsdc, "stored gross debit ceiling");
-        assertEq(actual.maxActionChargeUsdc, expected.maxActionChargeUsdc, "stored action charge ceiling");
-        assertEq(actual.maxExplicitFeesUsdc, expected.maxExplicitFeesUsdc, "stored explicit fees ceiling");
+        assertEq(actual.maxExecutionNotionalAssets, expected.maxExecutionNotionalAssets, "stored notional ceiling");
+        assertEq(actual.maxGrossAccountDebitAssets, expected.maxGrossAccountDebitAssets, "stored gross debit ceiling");
+        assertEq(actual.maxActionChargeAssets, expected.maxActionChargeAssets, "stored action charge ceiling");
+        assertEq(actual.maxExplicitFeesAssets, expected.maxExplicitFeesAssets, "stored explicit fees ceiling");
     }
 
     function _assertPendingCloseLimits(
@@ -4020,10 +4038,10 @@ contract PositionProtectionTest is BasePerpTest {
         PositionProtectionTypes.CloseFinancialLimits memory expected
     ) internal view {
         OrderV3Types.ExecutionBounds memory policy = router.lifecycleBook().pendingPolicy(orderId);
-        assertEq(policy.maxExecutionNotionalUsdc, expected.maxExecutionNotionalUsdc, "pending notional ceiling");
-        assertEq(policy.maxGrossAccountDebitUsdc, expected.maxGrossAccountDebitUsdc, "pending gross debit ceiling");
-        assertEq(policy.maxActionChargeUsdc, expected.maxActionChargeUsdc, "pending action charge ceiling");
-        assertEq(policy.maxExplicitFeesUsdc, expected.maxExplicitFeesUsdc, "pending explicit fees ceiling");
+        assertEq(policy.maxExecutionNotionalAssets, expected.maxExecutionNotionalAssets, "pending notional ceiling");
+        assertEq(policy.maxGrossAccountDebitAssets, expected.maxGrossAccountDebitAssets, "pending gross debit ceiling");
+        assertEq(policy.maxActionChargeAssets, expected.maxActionChargeAssets, "pending action charge ceiling");
+        assertEq(policy.maxExplicitFeesAssets, expected.maxExplicitFeesAssets, "pending explicit fees ceiling");
     }
 
     function _publicBoundedRequest(
@@ -4033,7 +4051,7 @@ contract PositionProtectionTest is BasePerpTest {
         request.clientOrderId = clientOrderId;
         request.side = CfdTypes.Side.LONG;
         request.sizeDelta = POSITION_SIZE;
-        request.marginDelta = isClose ? 0 : POSITION_MARGIN_USDC;
+        request.marginDelta = isClose ? 0 : POSITION_MARGIN_ASSETS;
         request.targetPrice = isClose ? engine.CAP_PRICE() : 1;
         request.isClose = isClose;
         request.bounds = OrderV3Types.ExecutionBounds({
@@ -4043,14 +4061,14 @@ contract PositionProtectionTest is BasePerpTest {
             ),
             allowedExecutionModes: 1 | 2 | 4,
             expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
-            maxExecutionBountyUsdc: type(uint256).max,
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max,
+            maxExecutionBountyAssets: type(uint256).max,
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max,
             maxPostPositionSize: type(uint256).max,
-            minPostSettlementBalanceUsdc: 0,
-            minPostPositionEquityUsdc: 0,
+            minPostSettlementBalanceAssets: 0,
+            minPostPositionEquityAssets: 0,
             maxPostLeverageBps: type(uint32).max
         });
     }
@@ -4072,7 +4090,7 @@ contract PositionProtectionTest is BasePerpTest {
         OrderV3Types.OrderRequest memory request,
         bytes memory revertData
     ) internal {
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
         uint64 nextParentBefore = router.nextCommitId();
         uint64 nextProtectionBefore = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
 
@@ -4086,27 +4104,27 @@ contract PositionProtectionTest is BasePerpTest {
             nextProtectionBefore,
             "rejection must not allocate protection"
         );
-        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "rejection must roll back protection bounty locks");
+        assertEq(_freeSettlementAssets(ALICE), freeBefore, "rejection must roll back protection bounty locks");
         assertEq(router.pendingOrderCounts(ALICE), 0, "rejection must not queue parent");
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "rejection must not stage protection");
     }
 
-    /// @dev The fixture opens 10,000 USDC notional with a 10 bps reserve and a 50% keeper share.
+    /// @dev The fixture opens 10,000 settlement token notional with a 10 bps reserve and a 50% keeper share.
     function _liquidateProtectedPositionAsKeeper() internal {
         _mockPythUpdateData(150_000_000);
         bytes[] memory updateData = _livePriceData(150_000_000);
         uint256 expectedReserve = ((POSITION_SIZE * MARK_PRICE) / 1e20) * 10 / 10_000;
-        assertEq(clearinghouse.liquidationReserveUsdc(ALICE), expectedReserve, "funded opening reserve");
-        uint256 keeperBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
-        uint256 harnessBefore = clearinghouse.balanceUsdc(address(this));
+        assertEq(clearinghouse.liquidationReserveAssets(ALICE), expectedReserve, "funded opening reserve");
+        uint256 keeperBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
+        uint256 harnessBefore = clearinghouse.balanceAssets(address(this));
         vm.prank(EXECUTION_KEEPER);
         router.executeLiquidation(ALICE, updateData);
         assertEq(
-            clearinghouse.balanceUsdc(EXECUTION_KEEPER) - keeperBefore,
+            clearinghouse.balanceAssets(EXECUTION_KEEPER) - keeperBefore,
             expectedReserve / 2,
             "liquidation keeper receives the reserve-capped share"
         );
-        assertEq(clearinghouse.balanceUsdc(address(this)), harnessBefore, "fixture cannot receive keeper credit");
+        assertEq(clearinghouse.balanceAssets(address(this)), harnessBefore, "fixture cannot receive keeper credit");
     }
 
     function _assertAttachedOpenTerminalFailure(
@@ -4125,44 +4143,44 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(PositionProtectionTypes.PositionProtectionStatus.Failed),
             "protection must fail with parent"
         );
-        assertEq(failed.triggerBountyUsdc, 0, "trigger bounty must clear");
+        assertEq(failed.triggerBountyAssets, 0, "trigger bounty must clear");
         assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "trade lock must clear");
         assertEq(router.pendingOrderCounts(ALICE), 0, "parent must leave queue");
         (uint256 liveSize,,,,,,) = engine.positions(ALICE);
         assertEq(liveSize, 0, "failed parent must not create position");
     }
 
-    function _totalProtectionBountyUsdc() internal view returns (uint256) {
-        return router.positionProtectionTriggerBountyUsdc();
+    function _totalProtectionBountyAssets() internal view returns (uint256) {
+        return router.positionProtectionTriggerBountyAssets();
     }
 
-    function _settlementBufferTargetUsdc(
-        uint256 maxLiabilityUsdc
+    function _settlementBufferTargetAssets(
+        uint256 maxLiabilityAssets
     ) internal view returns (uint256) {
-        return SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engine.settlementBufferBps());
+        return SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, engine.settlementBufferBps());
     }
 
     function _drainPoolTo(
-        uint256 targetAssetsUsdc
+        uint256 targetAssets
     ) internal {
-        uint256 assetsUsdc = pool.totalAssets();
-        assertGt(assetsUsdc, targetAssetsUsdc, "fixture must have drainable pool assets");
+        uint256 assets = pool.totalAssets();
+        assertGt(assets, targetAssets, "fixture must have drainable pool assets");
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), assetsUsdc - targetAssetsUsdc);
-        assertEq(pool.totalAssets(), targetAssetsUsdc, "fixture must reach the requested pool assets");
+        settlementToken.transfer(address(0xDEAD), assets - targetAssets);
+        assertEq(pool.totalAssets(), targetAssets, "fixture must reach the requested pool assets");
     }
 
     function _riskBoundaryFixture(
         CfdTypes.RiskParams memory riskParams,
         uint256 requiredMarginBps
     ) internal view returns (RiskBoundaryFixture memory fixture) {
-        uint256 notionalUsdc = (POSITION_SIZE * MARK_PRICE) / 1e20;
-        fixture.requirementUsdc = (notionalUsdc * requiredMarginBps) / 10_000;
-        fixture.exactOpeningMarginDeltaUsdc = fixture.requirementUsdc
-            + _engineExecutionFeeUsdc(POSITION_SIZE, MARK_PRICE)
-            + _liquidationReserveTargetUsdc(notionalUsdc, riskParams);
-        fixture.plusOneOpeningMarginDeltaUsdc = fixture.exactOpeningMarginDeltaUsdc + 1;
-        fixture.protectionBountiesUsdc = _totalProtectionBountyUsdc();
+        uint256 notionalAssets = (POSITION_SIZE * MARK_PRICE) / 1e20;
+        fixture.requirementAssets = (notionalAssets * requiredMarginBps) / 10_000;
+        fixture.exactOpeningMarginDeltaAssets = fixture.requirementAssets
+            + _engineExecutionFeeAssets(POSITION_SIZE, MARK_PRICE)
+            + _liquidationReserveTargetAssets(notionalAssets, riskParams);
+        fixture.plusOneOpeningMarginDeltaAssets = fixture.exactOpeningMarginDeltaAssets + 1;
+        fixture.protectionBountiesAssets = _totalProtectionBountyAssets();
     }
 
     function _postMarkInitialMarginBoundaryFixture(
@@ -4171,33 +4189,33 @@ contract PositionProtectionTest is BasePerpTest {
         fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
         uint256 lots = POSITION_SIZE / CfdTypes.SIZE_QUANTUM;
         uint256 postMarkRequirement = lots * POST_MARK_PRICE * riskParams.initMarginBps / 10_000;
-        uint256 openingSurplus = lots * (POST_MARK_PRICE - MARK_PRICE) + postMarkRequirement - fixture.requirementUsdc;
-        fixture.exactOpeningMarginDeltaUsdc += openingSurplus;
-        fixture.plusOneOpeningMarginDeltaUsdc += openingSurplus;
-        fixture.requirementUsdc = postMarkRequirement;
+        uint256 openingSurplus = lots * (POST_MARK_PRICE - MARK_PRICE) + postMarkRequirement - fixture.requirementAssets;
+        fixture.exactOpeningMarginDeltaAssets += openingSurplus;
+        fixture.plusOneOpeningMarginDeltaAssets += openingSurplus;
+        fixture.requirementAssets = postMarkRequirement;
     }
 
-    function _liquidationReserveTargetUsdc(
-        uint256 notionalUsdc,
+    function _liquidationReserveTargetAssets(
+        uint256 notionalAssets,
         CfdTypes.RiskParams memory riskParams
-    ) internal pure returns (uint256 reserveTargetUsdc) {
-        reserveTargetUsdc = (notionalUsdc * riskParams.bountyBps) / 10_000;
-        if (reserveTargetUsdc < riskParams.minBountyUsdc) {
-            reserveTargetUsdc = riskParams.minBountyUsdc;
+    ) internal pure returns (uint256 reserveTargetAssets) {
+        reserveTargetAssets = (notionalAssets * riskParams.bountyBps) / 10_000;
+        if (reserveTargetAssets < riskParams.minBountyAssets) {
+            reserveTargetAssets = riskParams.minBountyAssets;
         }
     }
 
     function _seedAuthenticatedTraderClaim(
         address account,
-        uint256 claimUsdc
+        uint256 claimAssets
     ) internal {
         bytes32 oldCurveHash = terminalNavBook.curveHashOf(account);
-        uint256 oldAccountClaimUsdc = engine.traderClaimBalanceUsdc(account);
-        uint256 oldTotalClaimUsdc = engine.totalTraderClaimBalanceUsdc();
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
-            .checked_write(claimUsdc);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()")
-            .checked_write(oldTotalClaimUsdc - oldAccountClaimUsdc + claimUsdc);
+        uint256 oldAccountClaimAssets = engine.traderClaimBalanceAssets(account);
+        uint256 oldTotalClaimAssets = engine.totalTraderClaimBalanceAssets();
+        stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(account)
+            .checked_write(claimAssets);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()")
+            .checked_write(oldTotalClaimAssets - oldAccountClaimAssets + claimAssets);
         vm.prank(address(engine));
         terminalNavBook.syncFromEngine(account, oldCurveHash);
         vm.prank(address(engine));
@@ -4207,9 +4225,9 @@ contract PositionProtectionTest is BasePerpTest {
     function _withdrawAllFreeSettlement(
         address account
     ) internal {
-        uint256 freeSettlementUsdc = _freeSettlementUsdc(account);
+        uint256 freeSettlementAssets = _freeSettlementAssets(account);
         vm.prank(account);
-        clearinghouse.withdraw(account, freeSettlementUsdc);
+        clearinghouse.withdraw(account, freeSettlementAssets);
     }
 
     function _assertExpiredAttachedProtection(
@@ -4224,7 +4242,7 @@ contract PositionProtectionTest is BasePerpTest {
             uint8(PositionProtectionTypes.PositionProtectionStatus.Failed),
             "expired parent should fail its staged protection"
         );
-        assertEq(failed.triggerBountyUsdc, 0, "expiry should refund the staged trigger bounty");
+        assertEq(failed.triggerBountyAssets, 0, "expiry should refund the staged trigger bounty");
         assertEq(protectionViews.activePositionProtectionId(account), 0, "expiry should clear the trade lock");
         assertEq(
             uint8(_orderRecord(parentOrderId).status),
@@ -4232,14 +4250,14 @@ contract PositionProtectionTest is BasePerpTest {
             "expired parent should be terminally failed"
         );
         assertEq(router.pendingOrderCounts(account), 0, "expiry should clear the account queue");
-        assertEq(router.getAccountReservations(account).executionBountyUsdc, 0, "expiry should clear every reserve");
+        assertEq(router.getAccountReservations(account).executionBountyAssets, 0, "expiry should clear every reserve");
     }
 
     function _assertSingleRiskOffRefund(
         Vm.Log[] memory logs,
         address expectedAccount,
-        uint256 expectedMarginUsdc,
-        uint256 expectedBountyUsdc
+        uint256 expectedMarginAssets,
+        uint256 expectedBountyAssets
     ) internal view {
         uint256 matches;
         for (uint256 i; i < logs.length; ++i) {
@@ -4252,9 +4270,9 @@ contract PositionProtectionTest is BasePerpTest {
             }
             ++matches;
             assertEq(address(uint160(uint256(entry.topics[1]))), expectedAccount, "risk-off refund account");
-            (uint256 releasedMarginUsdc, uint256 refundableBountyUsdc) = abi.decode(entry.data, (uint256, uint256));
-            assertEq(releasedMarginUsdc, expectedMarginUsdc, "risk-off released margin");
-            assertEq(refundableBountyUsdc, expectedBountyUsdc, "risk-off aggregate bounty refund");
+            (uint256 releasedMarginAssets, uint256 refundableBountyAssets) = abi.decode(entry.data, (uint256, uint256));
+            assertEq(releasedMarginAssets, expectedMarginAssets, "risk-off released margin");
+            assertEq(refundableBountyAssets, expectedBountyAssets, "risk-off aggregate bounty refund");
         }
         assertEq(matches, 1, "exactly one aggregate risk-off refund event");
     }

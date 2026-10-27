@@ -148,21 +148,21 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     ///      an uncovered remainder independently marks the account liquidatable. Negative VPI must have full
     ///      dedicated-reserve backing; an underfunded floor also marks the account liquidatable, while excess reserve
     ///      never adds price collateral. Negative net equity is floored at zero. Without a position, clearinghouse
-    ///      account equity is returned. Monetary fields use 6-decimal USDC units.
+    ///      account equity is returned. Monetary fields use 6-decimal settlement token units.
     /// @param account Canonical perps account to inspect.
     /// @return viewData Trader account summary derived from the account lens and router.
     function getTraderAccount(
         address account
     ) external view returns (PerpsViewTypes.TraderAccountView memory viewData) {
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = ACCOUNT_LENS.getAccountLedgerSnapshot(account);
-        viewData.equityUsdc = snapshot.hasPosition
-            ? (snapshot.netEquityUsdc > 0 ? uint256(snapshot.netEquityUsdc) : 0)
-            : snapshot.accountEquityUsdc;
-        viewData.withdrawableUsdc = ACCOUNT_LENS.getWithdrawableUsdc(account);
+        viewData.equityAssets = snapshot.hasPosition
+            ? (snapshot.netEquityAssets > 0 ? uint256(snapshot.netEquityAssets) : 0)
+            : snapshot.accountEquityAssets;
+        viewData.withdrawableAssets = ACCOUNT_LENS.getWithdrawableAssets(account);
 
         IOrderRouterAccounting.AccountReservationView memory reservation = ORDER_ROUTER.getAccountReservations(account);
-        viewData.pendingOrderMarginUsdc = reservation.committedMarginUsdc;
-        viewData.pendingExecutionBountyUsdc = reservation.executionBountyUsdc;
+        viewData.pendingOrderMarginAssets = reservation.committedMarginAssets;
+        viewData.pendingExecutionBountyAssets = reservation.executionBountyAssets;
 
         PerpsViewTypes.PositionView memory position = _getPositionView(account);
         viewData.hasOpenPosition = position.exists;
@@ -171,7 +171,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     /// @notice Returns the live position and its current maintenance requirement for an account.
     /// @dev Returns a zeroed view when no position exists. Position size uses 18 decimals, prices use
-    ///      8 decimals, and margin, PnL, and maintenance requirement use 6-decimal USDC.
+    ///      8 decimals, and margin, PnL, and maintenance requirement use 6-decimal settlement token.
     /// @param account Canonical perps account to inspect.
     /// @return viewData Position summary at the engine's current stored mark and calendar state.
     function getPosition(
@@ -183,7 +183,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     /// @notice Returns all currently pending orders for an account.
     /// @dev The public surface only returns pending orders because executed and failed orders are not
     ///      part of the compact product-facing queue summary. Size uses 18 decimals; margin uses signed
-    ///      6-decimal USDC and acceptable price uses 8 decimals. The traversal relies on the router's
+    ///      6-decimal settlement token and acceptable price uses 8 decimals. The traversal relies on the router's
     ///      pending count and account-linked FIFO queue being consistent.
     /// @param account Canonical perps account to inspect.
     /// @return pending Pending orders in account FIFO order.
@@ -201,7 +201,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
                 orderId: current.orderId,
                 side: current.side,
                 sizeDelta: current.sizeDelta,
-                marginDeltaUsdc: int256(current.marginDelta),
+                marginDeltaAssets: int256(current.marginDelta),
                 acceptablePrice: current.targetPrice,
                 isReduceOnly: current.isClose,
                 status: PerpsViewTypes.OrderStatus.Pending
@@ -251,7 +251,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns the compact senior tranche view.
-    /// @dev Asset amounts use 6-decimal USDC. `maxWithdrawUsdc` is the pool's current capacity for a synchronized
+    /// @dev Asset amounts use 6-decimal settlement token. `maxWithdrawAssets` is the pool's current capacity for a synchronized
     ///      Senior redemption-funding phase, not an amount that a holder can withdraw synchronously.
     ///      For nonzero supply, `sharePrice` is the raw `(totalAssets * 1e18) / effectiveTotalSupply` quotient and does
     ///      not normalize differing asset/share decimals. Senior effective supply equals raw supply and its
@@ -262,7 +262,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns the compact junior tranche view.
-    /// @dev Asset amounts use 6-decimal USDC. `maxWithdrawUsdc` is the pool's current synchronized Junior-funding
+    /// @dev Asset amounts use 6-decimal settlement token. `maxWithdrawAssets` is the pool's current synchronized Junior-funding
     ///      capacity after the matured-Senior-priority gate, not an amount that a holder can withdraw synchronously.
     ///      For nonzero supply, `sharePrice` is the raw `(totalAssets * 1e18) / effectiveTotalSupply` quotient and does
     ///      not normalize differing asset/share decimals. Effective supply includes uncheckpointed maintenance-fee
@@ -426,8 +426,8 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.side = snapshot.side;
         viewData.size = snapshot.size;
         viewData.entryPrice = snapshot.entryPrice;
-        viewData.marginUsdc = snapshot.margin;
-        viewData.unrealizedPnlUsdc = snapshot.unrealizedPnlUsdc;
+        viewData.marginAssets = snapshot.margin;
+        viewData.unrealizedPnlAssets = snapshot.unrealizedPnlAssets;
         viewData.liquidatable = snapshot.liquidatable;
         (
             uint256 vpiFactor,
@@ -440,8 +440,8 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         maxSkewRatio;
         initMarginBps;
         uint256 requiredBps = ENGINE.isFadWindow() ? fadMarginBps : maintMarginBps;
-        uint256 notionalUsdc = (snapshot.size * ENGINE.lastMarkPrice()) / 1e20;
-        viewData.maintenanceMarginUsdc = (notionalUsdc * requiredBps) / 10_000;
+        uint256 notionalAssets = (snapshot.size * ENGINE.lastMarkPrice()) / 1e20;
+        viewData.maintenanceMarginAssets = (notionalAssets * requiredBps) / 10_000;
     }
 
     /// @notice Builds a tranche view from its ERC-4626 vault and pool-level asynchronous-entry/exit constraints.
@@ -449,7 +449,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     ///      raw `(totalAssets * 1e18) / accruedTotalSupply` quotient is returned without decimal normalization.
     /// @param vault ERC-4626 tranche vault to inspect.
     /// @param isSenior True for the senior tranche and false for the junior tranche.
-    /// @return viewData Compact tranche view. The legacy `maxWithdrawUsdc` field remains available as the current
+    /// @return viewData Compact tranche view. The legacy `maxWithdrawAssets` field remains available as the current
     ///         queue-funding capacity; `withdrawEnabled` reports whether new funding can settle and does not gate
     ///         claims already backed by vault escrow.
     function _getTrancheView(
@@ -461,17 +461,17 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         }
 
         IAsyncTrancheVaultLensView vaultView = IAsyncTrancheVaultLensView(vault);
-        uint256 totalAssetsUsdc = IERC4626(vault).totalAssets();
+        uint256 totalAssets = IERC4626(vault).totalAssets();
         uint256 totalShares = IERC20(vault).totalSupply();
         uint256 effectiveTotalShares = vaultView.accruedTotalSupply();
-        viewData.totalAssetsUsdc = totalAssetsUsdc;
+        viewData.totalAssets = totalAssets;
         viewData.totalShares = totalShares;
         viewData.effectiveTotalShares = effectiveTotalShares;
         viewData.pendingMaintenanceFeeShares = vaultView.pendingMaintenanceFeeShares();
         viewData.maintenanceFeeAprBps = vaultView.maintenanceFeeAprBps();
         viewData.maintenanceFeeRecipient = vaultView.maintenanceFeeRecipient();
-        viewData.sharePrice = effectiveTotalShares == 0 ? 1e18 : (totalAssetsUsdc * 1e18) / effectiveTotalShares;
-        viewData.maxWithdrawUsdc = isSenior ? HOUSE_POOL.getMaxSeniorWithdraw() : HOUSE_POOL.getMaxJuniorWithdraw();
+        viewData.sharePrice = effectiveTotalShares == 0 ? 1e18 : (totalAssets * 1e18) / effectiveTotalShares;
+        viewData.maxWithdrawAssets = isSenior ? HOUSE_POOL.getMaxSeniorWithdraw() : HOUSE_POOL.getMaxJuniorWithdraw();
         viewData.frozenLpFeeBps = HOUSE_POOL.frozenLpFeeBps(isSenior);
         viewData.depositEnabled = HOUSE_POOL.canAcceptTrancheDeposits(isSenior);
         viewData.withdrawEnabled = HOUSE_POOL.isWithdrawalLive();

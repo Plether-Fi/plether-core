@@ -30,17 +30,17 @@ library CloseCommitmentLib {
             revert ICfdEngineTypes.CfdEngine__MarkPriceStale();
         }
 
-        effects.settlementBeforeUsdc = snap.accountBuckets.settlementBalanceUsdc;
-        effects.carryCollectedUsdc = CfdEnginePlanLib.projectCloseCommitCarry(snap);
-        effects.carryOutstandingUsdc = snap.unsettledCarryUsdc;
+        effects.settlementBeforeAssets = snap.accountBuckets.settlementBalanceAssets;
+        effects.carryCollectedAssets = CfdEnginePlanLib.projectCloseCommitCarry(snap);
+        effects.carryOutstandingAssets = snap.unsettledCarryAssets;
         if (size != snap.position.size) {
-            if (snap.unsettledCarryUsdc != 0) {
-                revert ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded(snap.unsettledCarryUsdc);
+            if (snap.unsettledCarryAssets != 0) {
+                revert ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded(snap.unsettledCarryAssets);
             }
             uint256 bps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
             if (PositionRiskAccountingLib.buildExactPriceRiskState(
                     snap.position,
-                    snap.positionEntryCostUsdcAtoms,
+                    snap.positionEntryCostAssetAtoms,
                     snap.lastMarkPrice,
                     snap.capPrice,
                     snap.position.margin + snap.traderClaimBalanceForAccount,
@@ -50,8 +50,8 @@ library CloseCommitmentLib {
                 revert ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy();
             }
         }
-        effects.settlementAfterUsdc = snap.accountBuckets.settlementBalanceUsdc;
-        effects.freeSettlementAfterUsdc = snap.accountBuckets.freeSettlementUsdc;
+        effects.settlementAfterAssets = snap.accountBuckets.settlementBalanceAssets;
+        effects.freeSettlementAfterAssets = snap.accountBuckets.freeSettlementAssets;
     }
 
 }

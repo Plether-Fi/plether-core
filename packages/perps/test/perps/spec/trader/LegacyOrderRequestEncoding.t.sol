@@ -44,14 +44,14 @@ contract LegacyOrderRequestEncodingTest is Test {
             executionWindowSeconds: type(uint32).max,
             allowedExecutionModes: type(uint8).max,
             expectedConfigHash: bytes32(type(uint256).max),
-            maxExecutionBountyUsdc: type(uint256).max,
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max,
+            maxExecutionBountyAssets: type(uint256).max,
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max,
             maxPostPositionSize: type(uint256).max,
-            minPostSettlementBalanceUsdc: type(uint256).max,
-            minPostPositionEquityUsdc: type(uint256).max,
+            minPostSettlementBalanceAssets: type(uint256).max,
+            minPostPositionEquityAssets: type(uint256).max,
             maxPostLeverageBps: type(uint32).max
         });
         _assertEncoding(request);

@@ -493,18 +493,18 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
 
     function test_SettlementHold_StopsNewSeniorReservationsAndUnlocksExistingCommitment() public {
         uint256 assets = 10_000e6;
-        uint256 reservedBefore = pool.reservedSeniorDepositAssetsUsdc();
+        uint256 reservedBefore = pool.reservedSeniorDepositAssets();
 
-        usdc.mint(ALICE, assets);
+        settlementToken.mint(ALICE, assets);
         vm.startPrank(ALICE);
-        usdc.approve(address(seniorVault), assets);
+        settlementToken.approve(address(seniorVault), assets);
         uint256 requestId = seniorVault.requestDeposit(assets, ALICE, ALICE);
         vm.stopPrank();
 
         vm.warp(pool.lpEpochStart(requestId));
         pool.pauseLpEpochSettlement();
         assertTrue(pool.lpEpochSettlementPaused());
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedBefore + assets);
+        assertEq(pool.reservedSeniorDepositAssets(), reservedBefore + assets);
         assertEq(seniorVault.pendingDepositRequest(requestId, ALICE), assets);
         assertEq(seniorVault.maxRequestDeposit(ALICE), 0);
 
@@ -520,9 +520,9 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         assertEq(seniorVault.cancelPendingDeposit(requestId), assets);
 
         assertTrue(pool.lpEpochSettlementPaused(), "cancellation must not release the settlement hold");
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedBefore);
+        assertEq(pool.reservedSeniorDepositAssets(), reservedBefore);
         assertEq(seniorVault.pendingDepositRequest(requestId, ALICE), 0);
-        assertEq(usdc.balanceOf(ALICE), assets, "cancellation must return the Senior deposit escrow");
+        assertEq(settlementToken.balanceOf(ALICE), assets, "cancellation must return the Senior deposit escrow");
     }
 
     function test_SettlementHold_DoesNotMakeHealthyMaturedDepositCancellable() public {
@@ -548,7 +548,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         assertGt(rawAssets, retainedAssets, "fixture must have enough pool cash to impair Senior");
 
         pool.pauseLpEpochSettlement();
-        usdc.burn(address(pool), rawAssets - retainedAssets);
+        settlementToken.burn(address(pool), rawAssets - retainedAssets);
 
         vm.prank(address(seniorVault));
         pool.reconcile();
@@ -558,7 +558,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         assertEq(pool.seniorPrincipal(), retainedAssets, "direct reconcile must impair Senior while held");
 
         uint256 recapitalization = targetSeniorPrincipal - retainedAssets;
-        usdc.mint(address(pool), recapitalization);
+        settlementToken.mint(address(pool), recapitalization);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             recapitalization,
@@ -566,12 +566,12 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
             IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
-        assertEq(pool.pendingRecapitalizationUsdc(), recapitalization);
+        assertEq(pool.pendingRecapitalizationAssets(), recapitalization);
         vm.prank(address(seniorVault));
         pool.reconcile();
 
         assertTrue(pool.lpEpochSettlementPaused(), "recovery accounting must not release the settlement hold");
-        assertEq(pool.pendingRecapitalizationUsdc(), 0);
+        assertEq(pool.pendingRecapitalizationAssets(), 0);
         assertEq(pool.seniorPrincipal(), targetSeniorPrincipal, "recapitalization must restore Senior while held");
         assertEq(pool.seniorHighWaterMark(), targetSeniorPrincipal);
     }

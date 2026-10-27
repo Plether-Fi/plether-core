@@ -8,8 +8,8 @@ import {Test} from "forge-std/Test.sol";
 
 struct TestCurveInput {
     uint112 lots;
-    uint144 entryCostUsdcAtoms;
-    uint144 collectibleCapUsdcAtoms;
+    uint144 entryCostAssetAtoms;
+    uint144 collectibleCapAssetAtoms;
     CfdTypes.Side side;
 }
 
@@ -31,9 +31,9 @@ contract TerminalNavEngineDriver {
     }
 
     mapping(address account => PositionState position) private _positions;
-    mapping(address account => uint256 entryCostUsdcAtoms) private _entryCosts;
-    mapping(address account => uint256 pledgeUsdc) private _pledges;
-    mapping(address account => uint256 claimUsdc) private _claims;
+    mapping(address account => uint256 entryCostAssetAtoms) private _entryCosts;
+    mapping(address account => uint256 pledgeAssets) private _pledges;
+    mapping(address account => uint256 claimAssets) private _claims;
 
     constructor(
         uint32 capPrice
@@ -53,8 +53,8 @@ contract TerminalNavEngineDriver {
         TestCurveInput calldata input
     ) external {
         _positions[account] = PositionState({size: uint256(input.lots) * SIZE_QUANTUM, side: input.side});
-        _entryCosts[account] = input.entryCostUsdcAtoms;
-        _pledges[account] = input.collectibleCapUsdcAtoms;
+        _entryCosts[account] = input.entryCostAssetAtoms;
+        _pledges[account] = input.collectibleCapAssetAtoms;
         _claims[account] = 0;
     }
 
@@ -98,19 +98,19 @@ contract TerminalNavEngineDriver {
         return (position.size, 0, 0, 0, position.side, 0, 0);
     }
 
-    function positionEntryCostUsdcAtoms(
+    function positionEntryCostAssetAtoms(
         address account
     ) external view returns (uint256) {
         return _entryCosts[account];
     }
 
-    function traderClaimBalanceUsdc(
+    function traderClaimBalanceAssets(
         address account
     ) external view returns (uint256) {
         return _claims[account];
     }
 
-    function pnlPledgeUsdc(
+    function pnlPledgeAssets(
         address account
     ) external view returns (uint256) {
         return _pledges[account];
@@ -153,7 +153,7 @@ abstract contract TerminalNavBookV2TestFixture is Test {
         uint144 cap,
         CfdTypes.Side side
     ) internal pure returns (TestCurveInput memory input) {
-        input = TestCurveInput({lots: lots, entryCostUsdcAtoms: entryCost, collectibleCapUsdcAtoms: cap, side: side});
+        input = TestCurveInput({lots: lots, entryCostAssetAtoms: entryCost, collectibleCapAssetAtoms: cap, side: side});
     }
 
     function _seededInput(
@@ -201,7 +201,7 @@ abstract contract TerminalNavBookV2TestFixture is Test {
                 expected += _directValue(curve, mark);
             }
         }
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(mark), expected);
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(mark), expected);
     }
 
     function _assertCriticalMarks(
@@ -225,7 +225,7 @@ abstract contract TerminalNavBookV2TestFixture is Test {
         uint32 mark
     ) internal view {
         ITerminalNavBookV2.CurveRecord memory curve = book.curveOf(account);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(mark), _directValue(curve, mark));
+        assertEq(book.terminalLpPriceDeltaAssetAtoms(mark), _directValue(curve, mark));
     }
 
     function _directValue(
@@ -233,9 +233,9 @@ abstract contract TerminalNavBookV2TestFixture is Test {
         uint32 mark
     ) internal pure returns (int256 value) {
         int256 markedNotional = int256(uint256(curve.lots) * uint256(mark));
-        int256 entryCost = int256(uint256(curve.entryCostUsdcAtoms));
+        int256 entryCost = int256(uint256(curve.entryCostAssetAtoms));
         int256 uncapped = curve.side == CfdTypes.Side.LONG ? markedNotional - entryCost : entryCost - markedNotional;
-        int256 cap = int256(uint256(curve.effectiveCapUsdcAtoms));
+        int256 cap = int256(uint256(curve.effectiveCapAssetAtoms));
         return uncapped > cap ? cap : uncapped;
     }
 
@@ -244,9 +244,9 @@ abstract contract TerminalNavBookV2TestFixture is Test {
     ) internal pure returns (uint32 breakpoint) {
         uint256 numerator;
         if (curve.side == CfdTypes.Side.LONG) {
-            numerator = uint256(curve.entryCostUsdcAtoms) + uint256(curve.effectiveCapUsdcAtoms);
-        } else if (curve.effectiveCapUsdcAtoms < curve.entryCostUsdcAtoms) {
-            numerator = uint256(curve.entryCostUsdcAtoms) - uint256(curve.effectiveCapUsdcAtoms);
+            numerator = uint256(curve.entryCostAssetAtoms) + uint256(curve.effectiveCapAssetAtoms);
+        } else if (curve.effectiveCapAssetAtoms < curve.entryCostAssetAtoms) {
+            numerator = uint256(curve.entryCostAssetAtoms) - uint256(curve.effectiveCapAssetAtoms);
         } else {
             return 0;
         }

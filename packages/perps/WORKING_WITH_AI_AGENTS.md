@@ -25,13 +25,13 @@ Before funding an account:
 3. Restrict the agent's account permissions to approved targets and selectors, token allowances, ETH value, exposure,
    and session duration. Trading authority does not need to include withdrawals or arbitrary transfers.
 
-Approve the Clearinghouse to spend settlement USDC, then call `depositMargin(amount)` from the trading account.
+Approve the Clearinghouse to spend settlement USDG, then call `depositMargin(amount)` from the trading account.
 This credits margin custody and checkpoints carry. Alternatively, a payer can call `depositFor(account, amount)`;
 that credits the beneficiary's free settlement without collecting carry or granting the payer trading authority.
 Existing carry remains due. `Deposit` and `DepositFor` describe one credit with additional payer metadata, not two
 credits. See [BRIDGE_FUNDING.md](BRIDGE_FUNDING.md) for bridge-specific evidence and fallback handling.
 
-The Router and its sidecars do not custody trader USDC. Call the Router for orders and execution, and its discovered
+The Router and its sidecars do not custody trader USDG. Call the Router for orders and execution, and its discovered
 protection Book for protection actions. Sidecars are implementation modules, not alternate trader entrypoints.
 
 ## Direction, prices, and units
@@ -48,7 +48,7 @@ All order and protection prices use the raw FX-basket quote, even if your UI dis
 
 | Quantity | Contract units |
 | --- | --- |
-| USDC amounts | 6 decimals: `1e6` is 1 USDC |
+| USDG amounts | 6 decimals: `1e6` is 1 USDG |
 | Prices | 8 decimals: `1e8` is a raw price of 1 |
 | Position size | 18 decimals, in lots of `1e20` (100 tokens) |
 | Time | Unix seconds |
@@ -97,14 +97,14 @@ maximum only when your account policy intentionally permits that exposure.
 | `executionWindowSeconds` | Duration from commitment to execution deadline |
 | `allowedExecutionModes` | Mask: Live `1`, Fad `2`, Frozen `4`; combine permitted bits |
 | `expectedConfigHash` | Exact execution configuration accepted by the account |
-| `maxExecutionBountyUsdc` | Maximum order bounty reserved at commitment |
-| `maxExecutionNotionalUsdc` | Maximum planner-assessed execution notional |
-| `maxGrossAccountDebitUsdc` | Maximum aggregate settlement debit, consumed trader claims, and reserved bounty |
-| `maxActionChargeUsdc` | Maximum assessed action charge after carry, signed virtual price impact (VPI), fees, and frozen spread are combined |
-| `maxExplicitFeesUsdc` | Maximum execution fee plus any frozen-close spread |
+| `maxExecutionBountyAssets` | Maximum order bounty reserved at commitment |
+| `maxExecutionNotionalAssets` | Maximum planner-assessed execution notional |
+| `maxGrossAccountDebitAssets` | Maximum aggregate settlement debit, consumed trader claims, and reserved bounty |
+| `maxActionChargeAssets` | Maximum assessed action charge after carry, signed virtual price impact (VPI), fees, and frozen spread are combined |
+| `maxExplicitFeesAssets` | Maximum execution fee plus any frozen-close spread |
 | `maxPostPositionSize` | Maximum resulting position size |
-| `minPostSettlementBalanceUsdc` | Minimum total internal settlement custody, including locked value; restrictions below |
-| `minPostPositionEquityUsdc` | Minimum resulting position equity |
+| `minPostSettlementBalanceAssets` | Minimum total internal settlement custody, including locked value; restrictions below |
+| `minPostPositionEquityAssets` | Minimum resulting position equity |
 | `maxPostLeverageBps` | Maximum resulting position leverage |
 
 The evaluator constructs authoritative Engine and Clearinghouse state immediately before execution. An agent cannot
@@ -113,13 +113,13 @@ because no position remains; other limits still apply.
 
 A **positive settlement floor** is supported only for an open from a flat account with no pending orders, including
 an attached protected open. It is rejected for increases, closes, and overlapping orders. The account must fund at
-least `minPostSettlementBalanceUsdc + maxGrossAccountDebitUsdc` in total custody at commitment. While this order is
+least `minPostSettlementBalanceAssets + maxGrossAccountDebitAssets` in total custody at commitment. While this order is
 pending, withdrawals preserve that amount and new orders are blocked; exact replays remain valid. The floor is
 released when the order becomes terminal. A positive floor combined with an unlimited gross-debit ceiling cannot
 be funded. Use zero for requests outside this supported case.
 
-Limits do not guarantee execution or immediately withdrawable USDC. Profitable settlement may create a senior trader
-claim until the HousePool can fund it. `minPostSettlementBalanceUsdc` is a custody floor, not a wallet cash balance.
+Limits do not guarantee execution or immediately withdrawable USDG. Profitable settlement may create a senior trader
+claim until the HousePool can fund it. `minPostSettlementBalanceAssets` is a custody floor, not a wallet cash balance.
 
 ### Configuration and execution modes
 
@@ -251,7 +251,7 @@ the untriggered side of a fresh mark and no higher than `CAP_PRICE`. Creation, r
 require an unfrozen oracle; an already-latched retry does not re-evaluate the trigger.
 
 Supply `PositionProtectionParams` with thresholds and four `closeLimits`: maximum execution notional, gross account
-debit, action charge, and explicit fees. All use six-decimal USDC and zero means zero allowance. Read retained limits
+debit, action charge, and explicit fees. All use six-decimal USDG and zero means zero allowance. Read retained limits
 with `closeFinancialLimits(protectionId)`; they are separate from `getPositionProtection`.
 
 | Action | Requirements and effect |

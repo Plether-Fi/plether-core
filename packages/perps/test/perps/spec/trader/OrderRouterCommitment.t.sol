@@ -22,39 +22,41 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
-        uint256 keeperUsdcBefore = _settlementBalance(address(this));
+        uint256 keeperAssetsBefore = _settlementBalance(address(this));
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         assertEq(_sideMaxProfit(CfdTypes.Side.LONG), 50_000 * 1e6, "Max liability = $50k for 50k LONG at $1.00");
 
-        uint256 freeUsdc = pool.getFreeUSDC();
-        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 freeAssets = pool.getFreeAssets();
+        uint256 fees = clearinghouse.balanceAssets(engine.protocolTreasury());
         assertEq(fees, 20_000_000, "Protocol should still retain the full 4 bps execution fee");
         assertEq(
-            _settlementBalance(address(this)) - keeperUsdcBefore,
+            _settlementBalance(address(this)) - keeperAssetsBefore,
             200_000,
-            "Keeper should receive the 0.20 USDC capped reward as clearinghouse credit"
+            "Keeper should receive the 0.20 settlementToken capped reward as clearinghouse credit"
         );
         uint256 maxLiability = _maxLiability();
         uint256 settlementBuffer =
-            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
-        uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceUsdc() + settlementBuffer;
+            SolvencyAccountingLib.settlementBufferTargetAssets(maxLiability, engine.settlementBufferBps());
+        uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceAssets() + settlementBuffer;
         uint256 expectedFree = pool.totalAssets() > expectedReserved ? pool.totalAssets() - expectedReserved : 0;
-        assertEq(freeUsdc, expectedFree, "Free USDC should exclude liabilities, claims, and settlement headroom");
-
-        (,, uint256 maxSeniorWithdrawUsdc, uint256 maxJuniorWithdrawUsdc) = pool.getPendingTrancheState();
-        uint256 bobMaxWithdraw = _maxRequestableJuniorAssets(bob);
-        assertLe(maxSeniorWithdrawUsdc, freeUsdc, "senior request capacity must remain cash-backed");
         assertEq(
-            maxJuniorWithdrawUsdc,
-            freeUsdc,
+            freeAssets, expectedFree, "Free settlementToken should exclude liabilities, claims, and settlement headroom"
+        );
+
+        (,, uint256 maxSeniorWithdrawAssets, uint256 maxJuniorWithdrawAssets) = pool.getPendingTrancheState();
+        uint256 bobMaxWithdraw = _maxRequestableJuniorAssets(bob);
+        assertLe(maxSeniorWithdrawAssets, freeAssets, "senior request capacity must remain cash-backed");
+        assertEq(
+            maxJuniorWithdrawAssets,
+            freeAssets,
             "without a senior redemption backlog, junior request capacity may use the full free-cash budget"
         );
         assertEq(
             bobMaxWithdraw,
-            maxJuniorWithdrawUsdc,
-            "junior LP should only withdraw the junior tranche share of free USDC"
+            maxJuniorWithdrawAssets,
+            "junior LP should only withdraw the junior tranche share of free settlementToken"
         );
     }
 
@@ -124,9 +126,9 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
         _startRecordingLogs();
         address trader = address(0x3342);
         address account = trader;
-        usdc.mint(trader, 251_500_000);
+        settlementToken.mint(trader, 251_500_000);
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), 251_500_000);
+        settlementToken.approve(address(clearinghouse), 251_500_000);
         clearinghouse.deposit(account, 251_500_000);
         vm.stopPrank();
 
@@ -137,7 +139,7 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
         vm.roll(block.number + 1);
         router.executeOrder(1, openPrice);
 
-        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
+        uint256 freeSettlementBefore = clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets;
         assertEq(
             freeSettlementBefore,
             1_300_000,
@@ -145,16 +147,16 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
         );
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
-        uint256 marginBefore = clearinghouse.pnlPledgeUsdc(account);
-        uint256 expectedCarry = _expectedIndexedCarryUsdc(account);
+        uint256 marginBefore = clearinghouse.pnlPledgeAssets(account);
+        uint256 expectedCarry = _expectedIndexedCarryAssets(account);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
-        assertEq(clearinghouse.pnlPledgeUsdc(account), marginBefore - expectedCarry);
+        assertEq(clearinghouse.pnlPledgeAssets(account), marginBefore - expectedCarry);
         assertEq(_executionBountyReserve(2), 0, "Stale close commit should still reservation the full bounty");
         assertEq(
-            clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
+            clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets,
             1_300_000,
             "Stale close fallback should realize indexed carry before reserving from free settlement"
         );
@@ -164,9 +166,9 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
         _startRecordingLogs();
         address trader = address(0x3343);
         address account = trader;
-        usdc.mint(trader, 252_000_000);
+        settlementToken.mint(trader, 252_000_000);
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), 252_000_000);
+        settlementToken.approve(address(clearinghouse), 252_000_000);
         clearinghouse.deposit(account, 252_000_000);
         vm.stopPrank();
 
@@ -177,7 +179,7 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
         vm.roll(block.number + 1);
         router.executeOrder(1, openPrice);
 
-        uint256 freeSettlementBefore = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
+        uint256 freeSettlementBefore = clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets;
         (, uint256 marginBefore,,,,,) = engine.positions(account);
         assertEq(
             freeSettlementBefore,
@@ -189,8 +191,8 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 expectedCarry = _expectedIndexedCarryUsdc(account);
-        uint256 reservedSettlementBefore = clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc;
+        uint256 expectedCarry = _expectedIndexedCarryAssets(account);
+        uint256 reservedSettlementBefore = clearinghouse.getLockedMarginBuckets(account).reservedSettlementAssets;
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
@@ -199,12 +201,12 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
         uint256 marginConsumed = marginBefore - marginAfter;
         assertEq(_executionBountyReserve(2), 0, "Fresh carry checkpoint should still reservation the full bounty");
         assertEq(
-            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc - reservedSettlementBefore,
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementAssets - reservedSettlementBefore,
             0,
-            "Close commit should reserve exactly 0.20 USDC of bounty value"
+            "Close commit should reserve exactly 0.20 settlementToken of bounty value"
         );
         assertApproxEqAbs(
-            clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
+            clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets,
             freeSettlementBefore,
             32,
             "Carry-aware reservation should only consume the reduced close-order bounty from post-carry free settlement"

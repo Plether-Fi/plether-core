@@ -200,7 +200,7 @@ def main():
                 "handler": read_uint(token, "balanceOf(address)", HANDLER),
                 "beneficiary": read_uint(token, "balanceOf(address)", BENEFICIARY),
                 "clearinghouse": read_uint(token, "balanceOf(address)", house),
-                "settlementCredit": read_uint(house, "balanceUsdc(address)", BENEFICIARY),
+                "settlementCredit": read_uint(house, "balanceAssets(address)", BENEFICIARY),
                 "allowance": read_uint(token, "allowance(address,address)", HANDLER, house),
             }
             success = name == "success"

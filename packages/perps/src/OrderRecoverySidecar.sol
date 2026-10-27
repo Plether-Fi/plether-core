@@ -11,7 +11,7 @@ import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterE
 
 interface IRecoveryEngineClaims {
 
-    function traderClaimBalanceUsdc(
+    function traderClaimBalanceAssets(
         address account
     ) external view returns (uint256);
 
@@ -128,7 +128,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         request.observedConfigHash = observedConfigHash;
         uint256 mark = engine.lastMarkPrice();
         request.neutralMarkPrice = mark;
-        request.poolDepthUsdc = IHousePool(engine.pool()).totalAssets();
+        request.poolDepthAssets = IHousePool(engine.pool()).totalAssets();
         request.bountyAccountingPrice = mark == 0 ? 1e8 : mark;
         uint256 cap = engine.CAP_PRICE();
         if (request.bountyAccountingPrice > cap) {
@@ -151,10 +151,10 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.reason = OrderV3Types.TerminalReason.ExpiredReservationMismatch;
         _state(host, receipt, true);
         IMarginClearinghouse.BountyRecovery memory recovery = host.expireMismatchedOrderFromSidecar(request.orderId);
-        receipt.bountyUsdc = recovery.freeUsdc;
-        receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
+        receipt.bountyAssets = recovery.freeAssets;
+        receipt.bounty.bountyRefundedAssets = receipt.bountyAssets;
         receipt.bounty.discrepancy = OrderV3Types.ReservationDiscrepancy(recovery.discrepancy);
-        if (receipt.bountyUsdc != 0) {
+        if (receipt.bountyAssets != 0) {
             receipt.bountyRecipient = pending.account;
             receipt.bountyDisposition = OrderV3Types.BountyDisposition.RefundedToAccount;
         }
@@ -179,15 +179,15 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.failure = failure;
         _state(host, receipt, true);
         IOrderRouterExecutionHost.BountySettlement memory settled = _settle(host, request, reason);
-        if (settled.bountyUsdc != pending.executionBountyUsdc) {
+        if (settled.bountyAssets != pending.executionBountyAssets) {
             revert RecoveryIdentityMismatch();
         }
-        receipt.bountyUsdc = settled.bountyUsdc;
+        receipt.bountyAssets = settled.bountyAssets;
         receipt.bountyDisposition = settled.bountyDisposition;
         receipt.bountyRecipient = settled.bountyRecipient;
-        receipt.bounty.bountyRefundedUsdc = settled.bountyRefundedUsdc;
+        receipt.bounty.bountyRefundedAssets = settled.bountyRefundedAssets;
         if (settled.bountyDisposition == OrderV3Types.BountyDisposition.Paid) {
-            receipt.bounty.bountyPaidUsdc = settled.bountyUsdc - settled.bountyRefundedUsdc;
+            receipt.bounty.bountyPaidAssets = settled.bountyAssets - settled.bountyRefundedAssets;
         }
         _state(host, receipt, false);
         return _finalize(book, receipt);
@@ -204,7 +204,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.priceSource = request.priceSource;
         receipt.executionPrice = request.executionPrice;
         receipt.neutralMarkPrice = request.neutralMarkPrice;
-        receipt.poolDepthUsdc = request.poolDepthUsdc;
+        receipt.poolDepthAssets = request.poolDepthAssets;
         receipt.oraclePublishTime = request.oraclePublishTime;
     }
 
@@ -236,7 +236,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         IOrderRouterExecutionHost host = IOrderRouterExecutionHost(address(this));
         IOrderLifecycleBook book = IOrderLifecycleBook(host.lifecycleBook());
         OrderV3Types.PendingIntent memory pending = book.pendingIntent(input.orderId);
-        if (pending.account == address(0) || input.bountyUsdc != pending.executionBountyUsdc) {
+        if (pending.account == address(0) || input.bountyAssets != pending.executionBountyAssets) {
             revert OrderRecoverySidecar__OrderIdentityMismatch(input.orderId);
         }
         _validateSettledTerminalInput(host, pending, input);
@@ -247,15 +247,15 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.priceSource = input.priceSource;
         receipt.executionPrice = input.executionPrice;
         receipt.neutralMarkPrice = input.neutralMarkPrice;
-        receipt.poolDepthUsdc = input.poolDepthUsdc;
+        receipt.poolDepthAssets = input.poolDepthAssets;
         receipt.oraclePublishTime = input.oraclePublishTime;
         receipt.priceReachedEngine = input.priceReachedEngine;
-        receipt.bountyUsdc = input.bountyUsdc;
+        receipt.bountyAssets = input.bountyAssets;
         receipt.bountyRecipient = input.bountyRecipient;
         receipt.bountyDisposition = input.bountyDisposition;
         receipt.failure = input.failure;
-        receipt.bounty.bountyRefundedUsdc = input.bountyRefundedUsdc;
-        receipt.bounty.bountyForfeitedUsdc = input.bountyUsdc - input.bountyRefundedUsdc;
+        receipt.bounty.bountyRefundedAssets = input.bountyRefundedAssets;
+        receipt.bounty.bountyForfeitedAssets = input.bountyAssets - input.bountyRefundedAssets;
         _state(host, receipt, true);
         _state(host, receipt, false);
         // The lifecycle book independently checks reason, evidence, recipient, entitlement and disposition.
@@ -274,18 +274,18 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         if (!failureIsEmpty) {
             revert OrderRecoverySidecar__InvalidSettledReason();
         }
-        uint256 refund = input.reason == OrderV3Types.TerminalReason.RiskOff ? input.bountyUsdc : 0;
+        uint256 refund = input.reason == OrderV3Types.TerminalReason.RiskOff ? input.bountyAssets : 0;
         OrderV3Types.BountyDisposition disposition;
         address recipient;
-        if (input.bountyUsdc != 0) {
-            uint256 forfeited = input.bountyUsdc - refund;
+        if (input.bountyAssets != 0) {
+            uint256 forfeited = input.bountyAssets - refund;
             recipient = forfeited == 0 ? pending.account : ICfdEngineCore(host.engine()).protocolTreasury();
             disposition = refund == 0
                 ? OrderV3Types.BountyDisposition.Forfeited
                 : OrderV3Types.BountyDisposition.RefundedToAccount;
         }
         if (
-            input.bountyRefundedUsdc != refund || input.bountyDisposition != disposition
+            input.bountyRefundedAssets != refund || input.bountyDisposition != disposition
                 || input.bountyRecipient != recipient
         ) {
             revert OrderRecoverySidecar__InvalidSettledReason();
@@ -318,7 +318,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.expectedConfigHash = pending.bounds.expectedConfigHash;
         receipt.commitment = pending.commitment;
         receipt.timing = pending.timing;
-        receipt.bounty.bountyEntitlementUsdc = pending.executionBountyUsdc;
+        receipt.bounty.bountyEntitlementAssets = pending.executionBountyAssets;
         receipt.status = OrderV3Types.LifecycleStatus.Failed;
         receipt.executor = executor;
     }
@@ -329,15 +329,15 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         bool beforeState
     ) private view {
         ICfdEngineCore engine = ICfdEngineCore(host.engine());
-        uint256 balance = IMarginClearinghouse(engine.clearinghouse()).balanceUsdc(receipt.account);
-        uint256 claim = IRecoveryEngineClaims(address(engine)).traderClaimBalanceUsdc(receipt.account);
+        uint256 balance = IMarginClearinghouse(engine.clearinghouse()).balanceAssets(receipt.account);
+        uint256 claim = IRecoveryEngineClaims(address(engine)).traderClaimBalanceAssets(receipt.account);
         if (beforeState) {
-            receipt.economics.preSettlementBalanceUsdc = balance;
-            receipt.economics.preTraderClaimBalanceUsdc = claim;
+            receipt.economics.preSettlementBalanceAssets = balance;
+            receipt.economics.preTraderClaimBalanceAssets = claim;
         } else {
-            receipt.economics.postSettlementBalanceUsdc = balance;
-            receipt.economics.postTraderClaimBalanceUsdc = claim;
-            (receipt.economics.postPositionSize, receipt.economics.postPositionMarginUsdc,,,,,) =
+            receipt.economics.postSettlementBalanceAssets = balance;
+            receipt.economics.postTraderClaimBalanceAssets = claim;
+            (receipt.economics.postPositionSize, receipt.economics.postPositionMarginAssets,,,,,) =
                 engine.positions(receipt.account);
         }
     }

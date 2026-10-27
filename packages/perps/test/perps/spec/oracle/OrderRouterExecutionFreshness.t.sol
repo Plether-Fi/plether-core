@@ -128,7 +128,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1051, 1050);
         bytes[] memory empty = _pythUpdateData();
         address aliceAccount = alice;
-        uint256 settlementBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 settlementBefore = clearinghouse.balanceAssets(aliceAccount);
 
         vm.warp(1200);
         vm.roll(block.number + 1);
@@ -140,7 +140,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
             "Router-validated refund path should not revert during settlement credit finalization"
         );
         assertEq(
-            settlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            settlementBefore - clearinghouse.balanceAssets(aliceAccount),
             200_000,
             "Trader refund path should consume the reserved bounty from the post-commit settlement baseline"
         );
@@ -159,7 +159,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         _setDegradedModeForTest();
         vm.warp(block.timestamp + 6);
 
-        uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 aliceSettlementBefore = clearinghouse.balanceAssets(aliceAccount);
         uint256 keeperBefore = _settlementBalance(address(this));
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
@@ -174,7 +174,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
             "Current policy should still pay the clearer while preserving FIFO progress"
         );
         assertEq(
-            aliceSettlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            aliceSettlementBefore - clearinghouse.balanceAssets(aliceAccount),
             200_000,
             "Trader settlement should pay the reserved bounty while preserving FIFO progress"
         );

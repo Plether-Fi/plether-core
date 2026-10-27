@@ -36,15 +36,15 @@ contract EngineCloseSettlementTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 1);
 
         _closeAt(shortAccount, CfdTypes.Side.SHORT, 10_000e18, 1e8, poolDepth, accrualTime);
 
         (uint256 size,,,,,,) = engine.positions(shortAccount);
         assertEq(size, 0, "Illiquid profitable close close should still destroy the position");
         assertEq(
-            engine.traderClaimBalanceUsdc(shortAccount),
-            preview.traderClaimBalanceUsdc,
+            engine.traderClaimBalanceAssets(shortAccount),
+            preview.traderClaimBalanceAssets,
             "Live close should match preview"
         );
     }
@@ -60,77 +60,77 @@ contract EngineCloseSettlementTest is CfdEngineTestBase {
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
 
         _removePnlPledgeAndSyncTerminalCurve(account);
-        uint256 reserve = clearinghouse.liquidationReserveUsdc(account);
+        uint256 reserve = clearinghouse.liquidationReserveAssets(account);
         vm.startPrank(address(engine));
         clearinghouse.releaseLiquidationReserve(account, reserve);
         clearinghouse.consumeActionCharge(account, reserve, 0, 0, address(pool), address(0), 0);
         vm.stopPrank();
 
         ICfdEngineTypes.ClosePreview memory withoutClaim = engineLens.previewClose(account, size, closePrice);
-        uint256 assessedFeeUsdc = _engineExecutionFeeUsdc(size, closePrice);
-        assertLt(withoutClaim.realizedPnlUsdc, 0, "Setup must realize an isolated trader price loss");
-        uint256 priceLossUsdc = uint256(-withoutClaim.realizedPnlUsdc);
-        uint256 extraClaimUsdc = assessedFeeUsdc + withoutClaim.frozenSpreadUsdc / 2;
+        uint256 assessedFeeAssets = _engineExecutionFeeAssets(size, closePrice);
+        assertLt(withoutClaim.realizedPnlAssets, 0, "Setup must realize an isolated trader price loss");
+        uint256 priceLossAssets = uint256(-withoutClaim.realizedPnlAssets);
+        uint256 extraClaimAssets = assessedFeeAssets + withoutClaim.frozenSpreadAssets / 2;
 
         assertTrue(withoutClaim.valid, "Terminal close should remain valid without physical collateral");
         assertLt(
-            withoutClaim.seizedCollateralUsdc,
-            priceLossUsdc,
+            withoutClaim.seizedCollateralAssets,
+            priceLossAssets,
             "Price loss above the PnL pledge should remain a diagnostic writeoff"
         );
-        assertEq(withoutClaim.executionFeeUsdc, 0, "No physical value should collect the execution fee");
-        assertEq(withoutClaim.frozenSpreadPaidUsdc, 0, "No physical value should collect the spread");
+        assertEq(withoutClaim.executionFeeAssets, 0, "No physical value should collect the execution fee");
+        assertEq(withoutClaim.frozenSpreadPaidAssets, 0, "No physical value should collect the spread");
         assertEq(
-            withoutClaim.frozenSpreadWaivedUsdc,
-            withoutClaim.frozenSpreadUsdc,
+            withoutClaim.frozenSpreadWaivedAssets,
+            withoutClaim.frozenSpreadAssets,
             "Without a claim the entire frozen spread should be waivable"
         );
 
-        uint256 traderClaimUsdc = priceLossUsdc + extraClaimUsdc;
-        _seedAuthenticatedTraderClaim(account, traderClaimUsdc);
+        uint256 traderClaimAssets = priceLossAssets + extraClaimAssets;
+        _seedAuthenticatedTraderClaim(account, traderClaimAssets);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
         assertTrue(preview.valid, "Claim-funded terminal frozen close should be valid");
         assertEq(
-            preview.existingTraderClaimConsumedUsdc,
-            priceLossUsdc,
+            preview.existingTraderClaimConsumedAssets,
+            priceLossAssets,
             "Same-account claim should net only the exact price loss"
         );
         assertEq(
-            preview.existingTraderClaimRemainingUsdc,
-            extraClaimUsdc,
+            preview.existingTraderClaimRemainingAssets,
+            extraClaimAssets,
             "Action charges must not consume claim value left after price-loss netting"
         );
-        assertEq(preview.seizedCollateralUsdc, 0, "Claim-first price netting should preserve the isolated PnL pledge");
-        assertEq(preview.executionFeeUsdc, 0, "Execution fee must be waived without eligible action collateral");
-        assertEq(preview.frozenSpreadPaidUsdc, 0, "Frozen spread must not consume same-account claim value");
+        assertEq(preview.seizedCollateralAssets, 0, "Claim-first price netting should preserve the isolated PnL pledge");
+        assertEq(preview.executionFeeAssets, 0, "Execution fee must be waived without eligible action collateral");
+        assertEq(preview.frozenSpreadPaidAssets, 0, "Frozen spread must not consume same-account claim value");
         assertEq(
-            preview.frozenSpreadWaivedUsdc,
-            preview.frozenSpreadUsdc,
+            preview.frozenSpreadWaivedAssets,
+            preview.frozenSpreadAssets,
             "Frozen spread with no eligible action collateral should be fully waived"
         );
         assertEq(
-            preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
-            preview.frozenSpreadUsdc,
+            preview.frozenSpreadPaidAssets + preview.frozenSpreadWaivedAssets,
+            preview.frozenSpreadAssets,
             "Paid and waived spread should conserve the assessment"
         );
 
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint256 poolAssetsBefore = pool.totalAssets();
         vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
         emit FrozenCloseSpreadSettled(
-            account, preview.frozenSpreadUsdc, preview.frozenSpreadPaidUsdc, preview.frozenSpreadWaivedUsdc
+            account, preview.frozenSpreadAssets, preview.frozenSpreadPaidAssets, preview.frozenSpreadWaivedAssets
         );
         _close(account, CfdTypes.Side.LONG, size, closePrice);
 
         assertEq(
-            engine.traderClaimBalanceUsdc(account),
-            extraClaimUsdc,
+            engine.traderClaimBalanceAssets(account),
+            extraClaimAssets,
             "Live close should leave action-ineligible claim value untouched"
         );
         assertEq(
-            engine.totalTraderClaimBalanceUsdc(),
-            extraClaimUsdc,
+            engine.totalTraderClaimBalanceAssets(),
+            extraClaimAssets,
             "Aggregate claims should fall only by the exact price-loss netting amount"
         );
         assertEq(
@@ -139,7 +139,7 @@ contract EngineCloseSettlementTest is CfdEngineTestBase {
             "Claim-funded terminal close should remove the account's exact terminal-NAV curve"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             treasuryBefore,
             "Treasury must not recover execution fees from trader claims"
         );
@@ -285,7 +285,7 @@ contract EngineCloseSettlementTest is CfdEngineTestBase {
         uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.LONG) > _sideMaxProfit(CfdTypes.Side.SHORT)
             ? _sideMaxProfit(CfdTypes.Side.LONG)
             : _sideMaxProfit(CfdTypes.Side.SHORT);
-        assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Pool should be insolvent");
+        assertTrue(settlementToken.balanceOf(address(pool)) < maxLiab, "Pool should be insolvent");
 
         CfdTypes.Order memory aliceClose = CfdTypes.Order({
             account: aliceAccount,

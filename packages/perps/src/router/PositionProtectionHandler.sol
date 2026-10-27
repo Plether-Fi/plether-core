@@ -33,7 +33,7 @@ abstract contract PositionProtectionHandler is OrderCommitHandler, ReentrancyGua
 
     function _protectionBountiesToForfeitOnLiquidation(
         address account
-    ) internal virtual override returns (uint256 forfeitedUsdc) {
+    ) internal virtual override returns (uint256 forfeitedAssets) {
         return positionProtectionBook.forfeitOnLiquidation(account);
     }
 

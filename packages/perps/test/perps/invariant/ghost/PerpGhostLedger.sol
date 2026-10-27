@@ -11,16 +11,16 @@ contract PerpGhostLedger {
     address public immutable handler;
 
     struct WalletFlows {
-        uint256 mintedUsdc;
-        uint256 depositedUsdc;
-        uint256 withdrawnUsdc;
+        uint256 mintedAssets;
+        uint256 depositedAssets;
+        uint256 withdrawnAssets;
     }
 
     mapping(address => LiquidationSnapshot) internal liquidationSnapshots;
     mapping(address => uint256) public accountGeneration;
     mapping(address => WalletFlows) internal walletFlows;
-    mapping(address => uint256) internal committedMarginUsdc;
-    uint256 internal totalTrackedCommittedMarginUsdc;
+    mapping(address => uint256) internal committedMarginAssets;
+    uint256 internal totalTrackedCommittedMarginAssets;
 
     error PerpGhostLedger__Unauthorized();
 
@@ -45,54 +45,54 @@ contract PerpGhostLedger {
     ///      Economic entitlement is checked separately by the fixed-input liquidation lifecycle scenarios.
     function recordMintAndDeposit(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external {
         if (msg.sender != handler) {
             revert PerpGhostLedger__Unauthorized();
         }
-        walletFlows[account].mintedUsdc += amountUsdc;
-        walletFlows[account].depositedUsdc += amountUsdc;
+        walletFlows[account].mintedAssets += amountAssets;
+        walletFlows[account].depositedAssets += amountAssets;
     }
 
     function recordWithdrawal(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external {
         if (msg.sender != handler) {
             revert PerpGhostLedger__Unauthorized();
         }
-        walletFlows[account].withdrawnUsdc += amountUsdc;
+        walletFlows[account].withdrawnAssets += amountAssets;
     }
 
     function expectedWalletFromSubmittedFlows(
         address account
     ) external view returns (uint256) {
         WalletFlows memory flows = walletFlows[account];
-        return flows.mintedUsdc + flows.withdrawnUsdc - flows.depositedUsdc;
+        return flows.mintedAssets + flows.withdrawnAssets - flows.depositedAssets;
     }
 
     function increaseCommittedMargin(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external {
         if (msg.sender != handler) {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        committedMarginUsdc[account] += amountUsdc;
-        totalTrackedCommittedMarginUsdc += amountUsdc;
+        committedMarginAssets[account] += amountAssets;
+        totalTrackedCommittedMarginAssets += amountAssets;
     }
 
     function decreaseCommittedMargin(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external {
         if (msg.sender != handler) {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        committedMarginUsdc[account] -= amountUsdc;
-        totalTrackedCommittedMarginUsdc -= amountUsdc;
+        committedMarginAssets[account] -= amountAssets;
+        totalTrackedCommittedMarginAssets -= amountAssets;
     }
 
     function liquidationSnapshot(
@@ -104,11 +104,11 @@ contract PerpGhostLedger {
     function committedMarginSnapshot(
         address account
     ) external view returns (uint256) {
-        return committedMarginUsdc[account];
+        return committedMarginAssets[account];
     }
 
     function totalCommittedMarginSnapshot() external view returns (uint256) {
-        return totalTrackedCommittedMarginUsdc;
+        return totalTrackedCommittedMarginAssets;
     }
 
 }

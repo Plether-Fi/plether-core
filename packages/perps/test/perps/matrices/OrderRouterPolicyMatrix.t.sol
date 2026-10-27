@@ -29,8 +29,8 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint256 traderSettlementBefore = clearinghouse.balanceAssets(traderAccount);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
 
         vm.warp(block.timestamp + router.maxExecutionWindowSeconds() + 1);
         bytes[] memory empty = _mockPythUpdateData();
@@ -38,13 +38,13 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
-            pending.executionBountyUsdc,
+            clearinghouse.balanceAssets(keeperAccount) - keeperSettlementBefore,
+            pending.executionBountyAssets,
             "Expired open should pay the clearer from reserved bounty settlement"
         );
         assertEq(
-            traderSettlementBefore - clearinghouse.balanceUsdc(traderAccount),
-            pending.executionBountyUsdc,
+            traderSettlementBefore - clearinghouse.balanceAssets(traderAccount),
+            pending.executionBountyAssets,
             "Expired open cleanup should debit only the already-reserved bounty"
         );
     }
@@ -58,8 +58,8 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 1e8, true);
 
-        uint256 traderWalletBefore = usdc.balanceOf(ALICE);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint256 traderWalletBefore = settlementToken.balanceOf(ALICE);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
 
         vm.warp(block.timestamp + router.maxExecutionWindowSeconds() + 1);
         bytes[] memory empty = _mockPythUpdateData();
@@ -67,11 +67,15 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, empty);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
+            clearinghouse.balanceAssets(keeperAccount) - keeperSettlementBefore,
             0,
             "Expired close should still credit the clearer even after carry-aware settlement crediting"
         );
-        assertEq(usdc.balanceOf(ALICE) - traderWalletBefore, 0, "Expired close should not refund the trader wallet");
+        assertEq(
+            settlementToken.balanceOf(ALICE) - traderWalletBefore,
+            0,
+            "Expired close should not refund the trader wallet"
+        );
     }
 
     function test_SlippageOpenPaysClearerExactlyOnce() public {
@@ -83,11 +87,11 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1.5e8, false);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(ALICE);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
-        uint256 custodyBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 keeperWalletBefore = usdc.balanceOf(KEEPER);
+        uint256 traderSettlementBefore = clearinghouse.balanceAssets(ALICE);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(KEEPER);
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
+        uint256 custodyBefore = settlementToken.balanceOf(address(clearinghouse));
+        uint256 keeperWalletBefore = settlementToken.balanceOf(KEEPER);
         uint256 keeperEthBefore = KEEPER.balance;
 
         bytes[] memory priceData = _mockPythUpdateData(1e8);
@@ -102,29 +106,33 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Slippage));
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
         assertEq(outcome.bountyRecipient, KEEPER, "The executor receives ordinary slippage cleanup bounty");
-        assertEq(outcome.bountyUsdc, pending.executionBountyUsdc, "Receipt must account for the whole reserved bounty");
-        assertEq(clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore, pending.executionBountyUsdc);
-        assertEq(traderSettlementBefore - clearinghouse.balanceUsdc(ALICE), pending.executionBountyUsdc);
-        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), treasuryBefore, "No bounty goes to treasury");
-        assertEq(usdc.balanceOf(address(clearinghouse)), custodyBefore, "Bounty payment only reattributes custody");
-        assertEq(usdc.balanceOf(KEEPER), keeperWalletBefore, "Payment is an internal USDC credit");
+        assertEq(
+            outcome.bountyAssets, pending.executionBountyAssets, "Receipt must account for the whole reserved bounty"
+        );
+        assertEq(clearinghouse.balanceAssets(KEEPER) - keeperSettlementBefore, pending.executionBountyAssets);
+        assertEq(traderSettlementBefore - clearinghouse.balanceAssets(ALICE), pending.executionBountyAssets);
+        assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), treasuryBefore, "No bounty goes to treasury");
+        assertEq(
+            settlementToken.balanceOf(address(clearinghouse)), custodyBefore, "Bounty payment only reattributes custody"
+        );
+        assertEq(settlementToken.balanceOf(KEEPER), keeperWalletBefore, "Payment is an internal settlementToken credit");
         assertEq(KEEPER.balance, keeperEthBefore, "Execution bounty is not native ETH");
         assertEq(router.nextExecuteId(), 0, "Terminal failure must unpin the FIFO head");
         assertEq(router.pendingOrderCounts(ALICE), 0);
-        assertEq(clearinghouse.lockedMarginUsdc(ALICE), 0, "Committed margin and bounty reserve must be released");
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ALICE), 0, "No bounty obligation may remain");
+        assertEq(clearinghouse.lockedMarginAssets(ALICE), 0, "Committed margin and bounty reserve must be released");
+        assertEq(clearinghouse.totalBountyReservationsAssets(ALICE), 0, "No bounty obligation may remain");
         IOrderRouterAccounting.AccountReservationView memory remaining = router.getAccountReservations(ALICE);
         assertEq(remaining.pendingOrderCount, 0);
-        assertEq(remaining.executionBountyUsdc, 0);
-        assertEq(remaining.committedMarginUsdc, 0);
+        assertEq(remaining.executionBountyAssets, 0);
+        assertEq(remaining.committedMarginAssets, 0);
 
         vm.prank(KEEPER);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__NoOrdersToExecute.selector);
         router.executeOrder(1, priceData);
-        assertEq(clearinghouse.balanceUsdc(KEEPER), keeperSettlementBefore + pending.executionBountyUsdc);
-        assertEq(clearinghouse.balanceUsdc(ALICE), traderSettlementBefore - pending.executionBountyUsdc);
-        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), treasuryBefore);
-        assertEq(usdc.balanceOf(address(clearinghouse)), custodyBefore, "Replay cannot change custody");
+        assertEq(clearinghouse.balanceAssets(KEEPER), keeperSettlementBefore + pending.executionBountyAssets);
+        assertEq(clearinghouse.balanceAssets(ALICE), traderSettlementBefore - pending.executionBountyAssets);
+        assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), treasuryBefore);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), custodyBefore, "Replay cannot change custody");
     }
 
     function test_OpenSlippageCleanup_DoesNotFurtherCreditTrader() public {
@@ -141,7 +149,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1.5e8, false);
 
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
+        uint256 traderSettlementBefore = clearinghouse.balanceAssets(traderAccount);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -149,7 +157,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, priceData);
 
         assertLe(
-            clearinghouse.balanceUsdc(traderAccount),
+            clearinghouse.balanceAssets(traderAccount),
             traderSettlementBefore,
             "Open-order slippage cleanup should not credit trader settlement after reservation"
         );
@@ -163,7 +171,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
+        uint256 traderSettlementBefore = clearinghouse.balanceAssets(traderAccount);
         uint64 carryTimestampBefore = _lastCarryTimestamp(traderAccount);
         _fundTrader(BOB, 1e6);
         vm.prank(address(router));
@@ -179,7 +187,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         assertEq(engine.lastMarkPrice(), 110_000_000, "Refund cleanup should refresh the cached engine mark");
         assertLt(carryTimestampBefore, _lastCarryTimestamp(traderAccount), "Carry clock should advance");
         assertGt(
-            clearinghouse.balanceUsdc(traderAccount),
+            clearinghouse.balanceAssets(traderAccount),
             traderSettlementBefore,
             "Validated stale helper credit should still reach settlement"
         );
@@ -188,9 +196,9 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
     function test_SlippageClosePaysClearer() public {
         address account = ALICE;
         address keeperAccount = KEEPER;
-        usdc.mint(ALICE, 400_500_000);
+        settlementToken.mint(ALICE, 400_500_000);
         vm.startPrank(ALICE);
-        usdc.approve(address(clearinghouse), 400_500_000);
+        settlementToken.approve(address(clearinghouse), 400_500_000);
         clearinghouse.deposit(account, 400_500_000);
         vm.stopPrank();
 
@@ -204,27 +212,27 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.prank(ALICE);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0.8e8, true);
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         bytes[] memory closePrice = _mockPythUpdateData();
         vm.prank(KEEPER);
         router.executeOrder(2, closePrice);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
+            clearinghouse.balanceAssets(keeperAccount) - keeperSettlementBefore,
             0,
             "Close slippage miss should still credit the clearer through the carry-aware keeper settlement path"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             feesBefore,
             "Close slippage bounty goes to the clearer, not the protocol treasury"
         );
         assertEq(uint256(_orderRecord(2).status), uint256(IOrderRouterAccounting.OrderStatus.Failed));
         IOrderRouterAccounting.AccountReservationView memory remaining = router.getAccountReservations(account);
         assertEq(remaining.pendingOrderCount, 0);
-        assertEq(remaining.executionBountyUsdc, 0);
-        assertEq(remaining.committedMarginUsdc, 0);
+        assertEq(remaining.executionBountyAssets, 0);
+        assertEq(remaining.committedMarginAssets, 0);
     }
 
     function test_CreditKeeperExecutionBounty_RealizesCarryBeforeCreditingSettlement() public {
@@ -233,21 +241,21 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         _fundTrader(KEEPER, 20_000e6);
         _open(keeperAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
-        uint256 freeSettlementBeforeDrain = _freeSettlementUsdc(keeperAccount);
+        uint256 freeSettlementBeforeDrain = _freeSettlementAssets(keeperAccount);
         assertGt(freeSettlementBeforeDrain, 0, "Setup must leave free settlement to drain");
         vm.prank(KEEPER);
         clearinghouse.withdraw(keeperAccount, freeSettlementBeforeDrain);
-        assertEq(_freeSettlementUsdc(keeperAccount), 0, "Setup must drain all free keeper settlement");
+        assertEq(_freeSettlementAssets(keeperAccount), 0, "Setup must drain all free keeper settlement");
 
         uint256 warpedTime = block.timestamp + 30 days;
         vm.warp(warpedTime);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(warpedTime));
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        uint256 expectedCarry = _expectedIndexedCarryUsdc(keeperAccount);
-        uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(keeperAccount);
-        uint256 unsettledCarryBefore = engine.unsettledCarryUsdc(keeperAccount);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
+        uint256 expectedCarry = _expectedIndexedCarryAssets(keeperAccount);
+        uint256 pledgeBefore = clearinghouse.pnlPledgeAssets(keeperAccount);
+        uint256 unsettledCarryBefore = engine.unsettledCarryAssets(keeperAccount);
         bytes32 terminalCurveHashBefore = terminalNavBook.curveHashOf(keeperAccount);
         ITerminalNavBookV2.CurveRecord memory terminalCurveBefore = terminalNavBook.curveOf(keeperAccount);
         ITerminalNavBookV2.BookState memory terminalBookBefore = terminalNavBook.bookState();
@@ -261,29 +269,29 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         engine.creditBounty(BOB, KEEPER, 1e6, 1e8, uint64(warpedTime));
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccount),
+            clearinghouse.balanceAssets(keeperAccount),
             keeperSettlementBefore + 1e6 - expectedCarry,
             "Carry is collected from margin before incoming bounty reaches settlement"
         );
         assertEq(
-            engine.unsettledCarryUsdc(keeperAccount), 0, "Margin covers carry without spending the incoming bounty"
+            engine.unsettledCarryAssets(keeperAccount), 0, "Margin covers carry without spending the incoming bounty"
         );
-        assertEq(_freeSettlementUsdc(keeperAccount), 1e6, "Incoming bounty should remain newly free settlement");
-        assertEq(clearinghouse.pnlPledgeUsdc(keeperAccount), pledgeBefore - expectedCarry, "Only carry debits pledge");
+        assertEq(_freeSettlementAssets(keeperAccount), 1e6, "Incoming bounty should remain newly free settlement");
+        assertEq(clearinghouse.pnlPledgeAssets(keeperAccount), pledgeBefore - expectedCarry, "Only carry debits pledge");
 
         bytes32 terminalCurveHashAfter = terminalNavBook.curveHashOf(keeperAccount);
         ITerminalNavBookV2.CurveRecord memory terminalCurveAfter = terminalNavBook.curveOf(keeperAccount);
         ITerminalNavBookV2.BookState memory terminalBookAfter = terminalNavBook.bookState();
         assertNotEq(terminalCurveHashAfter, terminalCurveHashBefore, "Margin debit must change the curve commitment");
         assertEq(
-            terminalCurveAfter.effectiveCapUsdcAtoms,
-            terminalCurveBefore.effectiveCapUsdcAtoms - expectedCarry,
+            terminalCurveAfter.effectiveCapAssetAtoms,
+            terminalCurveBefore.effectiveCapAssetAtoms - expectedCarry,
             "Terminal cap reflects exactly the margin-funded carry debit"
         );
         assertEq(terminalCurveAfter.lots, terminalCurveBefore.lots, "Bounty credit must preserve terminal lots");
         assertEq(
-            terminalCurveAfter.entryCostUsdcAtoms,
-            terminalCurveBefore.entryCostUsdcAtoms,
+            terminalCurveAfter.entryCostAssetAtoms,
+            terminalCurveBefore.entryCostAssetAtoms,
             "Bounty credit must preserve terminal entry cost"
         );
         assertEq(uint8(terminalCurveAfter.side), uint8(terminalCurveBefore.side), "Bounty credit must preserve side");
@@ -313,7 +321,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
         uint64 carryTimestampBefore = _lastCarryTimestamp(keeperAccount);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
@@ -322,7 +330,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccount),
+            clearinghouse.balanceAssets(keeperAccount),
             keeperSettlementBefore,
             "Failed-order clearer payout should still credit settlement when the cached mark is stale"
         );
@@ -344,8 +352,8 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
+        uint256 traderSettlementBefore = clearinghouse.balanceAssets(traderAccount);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -353,13 +361,13 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
-            pending.executionBountyUsdc,
+            clearinghouse.balanceAssets(keeperAccount) - keeperSettlementBefore,
+            pending.executionBountyAssets,
             "Protocol invalidation should pay the clearer so queue-head cleanup remains incentive compatible"
         );
         assertEq(
-            traderSettlementBefore - clearinghouse.balanceUsdc(traderAccount),
-            pending.executionBountyUsdc,
+            traderSettlementBefore - clearinghouse.balanceAssets(traderAccount),
+            pending.executionBountyAssets,
             "Protocol invalidation should debit only the already-reserved bounty"
         );
     }
@@ -370,13 +378,13 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address keeperAccount = KEEPER;
 
         vm.startPrank(eve);
-        usdc.mint(eve, 1e6);
-        usdc.approve(address(clearinghouse), 1e6);
+        settlementToken.mint(eve, 1e6);
+        settlementToken.approve(address(clearinghouse), 1e6);
         clearinghouse.deposit(eveAccount, 1e6);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
         vm.stopPrank();
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -384,7 +392,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
+            clearinghouse.balanceAssets(keeperAccount) - keeperSettlementBefore,
             200_000,
             "User-invalid open should pay the clearer into clearinghouse custody"
         );
@@ -407,8 +415,8 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(1)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
-        uint256 traderWalletBefore = usdc.balanceOf(ALICE);
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint256 traderWalletBefore = settlementToken.balanceOf(ALICE);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -416,12 +424,14 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
+            clearinghouse.balanceAssets(keeperAccount) - keeperSettlementBefore,
             0,
             "Untyped close revert should keep the clearer-paid fallback"
         );
         assertEq(
-            usdc.balanceOf(ALICE) - traderWalletBefore, 0, "Untyped close revert should not refund the trader wallet"
+            settlementToken.balanceOf(ALICE) - traderWalletBefore,
+            0,
+            "Untyped close revert should not refund the trader wallet"
         );
     }
 
@@ -437,7 +447,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(1)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -445,7 +455,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         router.executeOrder(1, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
+            clearinghouse.balanceAssets(keeperAccount) - keeperSettlementBefore,
             0,
             "Non-slippage close terminal failures should stay on the clearer-paid path"
         );

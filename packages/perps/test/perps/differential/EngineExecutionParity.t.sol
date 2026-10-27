@@ -27,7 +27,7 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
             "Preview should accept the healthy open"
         );
 
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         _open(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
 
         (uint256 size, uint256 margin,,,,,) = engine.positions(account);
@@ -35,7 +35,7 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         assertGt(margin, 0, "Live open should leave positive position margin");
         assertLt(margin, 5000e6, "Live open margin should reflect execution costs after the successful preview");
         assertGt(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - feesBefore,
             0,
             "Live open should collect protocol revenue after success"
         );
@@ -50,8 +50,8 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertTrue(preview.valid, "Setup close preview should be valid");
-        assertGt(preview.immediatePayoutUsdc, 0, "Profitable liquid close should pay immediately");
-        assertEq(preview.traderClaimBalanceUsdc, 0, "Liquid profitable close should not defer payout");
+        assertGt(preview.immediatePayoutAssets, 0, "Profitable liquid close should pay immediately");
+        assertEq(preview.traderClaimBalanceAssets, 0, "Liquid profitable close should not defer payout");
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
@@ -69,12 +69,12 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertTrue(preview.valid, "Setup close preview should be valid");
-        assertEq(preview.immediatePayoutUsdc, 0, "Illiquid profitable close should not pay immediately");
-        assertGt(preview.traderClaimBalanceUsdc, 0, "Illiquid profitable close should defer payout");
+        assertEq(preview.immediatePayoutAssets, 0, "Illiquid profitable close should not pay immediately");
+        assertGt(preview.traderClaimBalanceAssets, 0, "Illiquid profitable close should defer payout");
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
@@ -92,8 +92,8 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 10_000e18, 120_000_000);
         assertTrue(preview.valid, "Setup loss close preview should be valid");
-        assertEq(preview.immediatePayoutUsdc, 0, "Loss-making close should not create immediate payout");
-        assertEq(preview.traderClaimBalanceUsdc, 0, "Loss-making close should not create trader claim");
+        assertEq(preview.immediatePayoutAssets, 0, "Loss-making close should not create immediate payout");
+        assertEq(preview.traderClaimBalanceAssets, 0, "Loss-making close should not create trader claim");
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         _close(account, CfdTypes.Side.LONG, 10_000e18, 120_000_000);
@@ -137,29 +137,29 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 0.8e8);
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 0.8e8);
 
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
 
-        assertLt(preview.vpiDeltaUsdc, 0, "Frozen close should preserve normal signed VPI");
-        assertEq(preview.frozenSpreadUsdc, 400e6, "Preview should assess the configured fixed spread");
-        uint256 vpiRebateUsdc = uint256(-preview.vpiDeltaUsdc);
+        assertLt(preview.vpiDeltaAssets, 0, "Frozen close should preserve normal signed VPI");
+        assertEq(preview.frozenSpreadAssets, 400e6, "Preview should assess the configured fixed spread");
+        uint256 vpiRebateAssets = uint256(-preview.vpiDeltaAssets);
         assertEq(
-            preview.frozenSpreadPaidUsdc,
-            preview.frozenSpreadUsdc - vpiRebateUsdc,
+            preview.frozenSpreadPaidAssets,
+            preview.frozenSpreadAssets - vpiRebateAssets,
             "Preview should offset the signed VPI rebate before collecting frozen spread"
         );
         assertEq(
-            preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
-            preview.frozenSpreadUsdc,
+            preview.frozenSpreadPaidAssets + preview.frozenSpreadWaivedAssets,
+            preview.frozenSpreadAssets,
             "Previewed paid and offset spread must conserve the assessment"
         );
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            preview.executionFeeUsdc,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeAssets,
             "Treasury should receive the execution fee but none of the LP-owned frozen spread"
         );
     }
@@ -197,23 +197,24 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 110_000_000);
-        uint256 collectibleCapUsdc = engineAccountLens.getAccountLedgerSnapshot(account).terminalPriceCollectibleCapUsdc;
+        uint256 collectibleCapAssets =
+            engineAccountLens.getAccountLedgerSnapshot(account).terminalPriceCollectibleCapAssets;
         uint256 poolAssetsBefore = pool.totalAssets();
 
         assertTrue(preview.valid, "Terminal price tail must not block a full close");
-        assertLt(preview.realizedPnlUsdc, 0, "Setup must realize a terminal price loss");
-        uint256 priceLossUsdc = uint256(-preview.realizedPnlUsdc);
-        assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must exceed the exact price collectible cap");
-        assertEq(preview.seizedCollateralUsdc, collectibleCapUsdc, "Preview must collect the exact price cap only");
+        assertLt(preview.realizedPnlAssets, 0, "Setup must realize a terminal price loss");
+        uint256 priceLossAssets = uint256(-preview.realizedPnlAssets);
+        assertGt(priceLossAssets, collectibleCapAssets, "Setup must exceed the exact price collectible cap");
+        assertEq(preview.seizedCollateralAssets, collectibleCapAssets, "Preview must collect the exact price cap only");
 
-        uint256 writtenOffUsdc = priceLossUsdc - collectibleCapUsdc;
+        uint256 writtenOffAssets = priceLossAssets - collectibleCapAssets;
         vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
-        emit PriceLossWrittenOff(account, writtenOffUsdc);
+        emit PriceLossWrittenOff(account, writtenOffAssets);
         _close(account, CfdTypes.Side.LONG, 100_000e18, 110_000_000);
 
         assertEq(
             pool.totalAssets() - poolAssetsBefore,
-            collectibleCapUsdc,
+            collectibleCapAssets,
             "Only the exact collectible price cap should become LP cash"
         );
         assertEq(
@@ -292,20 +293,20 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
 
         assertEq(interfacePreview.liquidatable, contractPreview.liquidatable);
         assertEq(interfacePreview.oraclePrice, contractPreview.oraclePrice);
-        assertEq(interfacePreview.equityUsdc, contractPreview.equityUsdc);
-        assertEq(interfacePreview.pnlUsdc, contractPreview.pnlUsdc);
-        assertEq(interfacePreview.reachableCollateralUsdc, contractPreview.reachableCollateralUsdc);
-        assertEq(interfacePreview.liquidationChargeUsdc, contractPreview.liquidationChargeUsdc);
-        assertEq(interfacePreview.keeperBountyUsdc, contractPreview.keeperBountyUsdc);
-        assertEq(interfacePreview.protocolLiquidationFeeUsdc, contractPreview.protocolLiquidationFeeUsdc);
-        assertEq(interfacePreview.lpLiquidationFeeUsdc, contractPreview.lpLiquidationFeeUsdc);
-        assertEq(interfacePreview.seizedCollateralUsdc, contractPreview.seizedCollateralUsdc);
-        assertEq(interfacePreview.immediatePayoutUsdc, contractPreview.immediatePayoutUsdc);
-        assertEq(interfacePreview.traderClaimBalanceUsdc, contractPreview.traderClaimBalanceUsdc);
+        assertEq(interfacePreview.equityAssets, contractPreview.equityAssets);
+        assertEq(interfacePreview.pnlAssets, contractPreview.pnlAssets);
+        assertEq(interfacePreview.reachableCollateralAssets, contractPreview.reachableCollateralAssets);
+        assertEq(interfacePreview.liquidationChargeAssets, contractPreview.liquidationChargeAssets);
+        assertEq(interfacePreview.keeperBountyAssets, contractPreview.keeperBountyAssets);
+        assertEq(interfacePreview.protocolLiquidationFeeAssets, contractPreview.protocolLiquidationFeeAssets);
+        assertEq(interfacePreview.lpLiquidationFeeAssets, contractPreview.lpLiquidationFeeAssets);
+        assertEq(interfacePreview.seizedCollateralAssets, contractPreview.seizedCollateralAssets);
+        assertEq(interfacePreview.immediatePayoutAssets, contractPreview.immediatePayoutAssets);
+        assertEq(interfacePreview.traderClaimBalanceAssets, contractPreview.traderClaimBalanceAssets);
         assertEq(interfacePreview.triggersDegradedMode, contractPreview.triggersDegradedMode);
         assertEq(interfacePreview.postOpDegradedMode, contractPreview.postOpDegradedMode);
-        assertEq(interfacePreview.effectiveAssetsAfterUsdc, contractPreview.effectiveAssetsAfterUsdc);
-        assertEq(interfacePreview.maxLiabilityAfterUsdc, contractPreview.maxLiabilityAfterUsdc);
+        assertEq(interfacePreview.effectiveAssetsAfterAssets, contractPreview.effectiveAssetsAfterAssets);
+        assertEq(interfacePreview.maxLiabilityAfterAssets, contractPreview.maxLiabilityAfterAssets);
     }
 
     function test_LiquidationPreview_IlliquidTraderClaimMatchesLiveOutcome() public {
@@ -320,7 +321,7 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 1);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 1);
 
         vm.warp(uint256(engine.lastMarkTime()) + 1);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
@@ -335,8 +336,8 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
-            engine.traderClaimBalanceUsdc(account),
-            preview.traderClaimBalanceUsdc,
+            engine.traderClaimBalanceAssets(account),
+            preview.traderClaimBalanceAssets,
             "Illiquid liquidation preview should match live trader claim balance"
         );
         assertEq(

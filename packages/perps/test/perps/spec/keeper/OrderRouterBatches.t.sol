@@ -20,10 +20,10 @@ contract OrderRouterBatchesTest is OrderRouterTestBase {
     function test_BatchExecution_AllSucceed() public {
         _startRecordingLogs();
         address carol = address(0x333);
-        usdc.mint(carol, 10_000 * 1e6);
+        settlementToken.mint(carol, 10_000 * 1e6);
         vm.deal(carol, 10 ether);
         vm.startPrank(carol);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(carol, 10_000 * 1e6);
         vm.stopPrank();
 
@@ -54,7 +54,7 @@ contract OrderRouterBatchesTest is OrderRouterTestBase {
         assertEq(
             keeperAfter - keeperBefore,
             600_000,
-            "Keeper should receive the 0.20 USDC capped reward per successful order"
+            "Keeper should receive the 0.20 settlementToken capped reward per successful order"
         );
 
         assertEq(uint256(_orderRecord(1).status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
@@ -65,10 +65,10 @@ contract OrderRouterBatchesTest is OrderRouterTestBase {
     function test_BatchExecution_SuccessfulOrdersEndExecuted() public {
         _startRecordingLogs();
         address carol = address(0x334);
-        usdc.mint(carol, 10_000 * 1e6);
+        settlementToken.mint(carol, 10_000 * 1e6);
         vm.deal(carol, 10 ether);
         vm.startPrank(carol);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(carol, 10_000 * 1e6);
         vm.stopPrank();
 
@@ -87,8 +87,10 @@ contract OrderRouterBatchesTest is OrderRouterTestBase {
         assertEq(uint256(secondRecord.status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
         assertEq(_remainingCommittedMargin(1), 0, "Executed batch order should clear committed margin reservation");
         assertEq(_remainingCommittedMargin(2), 0, "Executed batch order should clear committed margin reservation");
-        assertEq(firstRecord.executionBountyUsdc, 0, "Executed batch order should clear execution bounty reservation");
-        assertEq(secondRecord.executionBountyUsdc, 0, "Executed batch order should clear execution bounty reservation");
+        assertEq(firstRecord.executionBountyAssets, 0, "Executed batch order should clear execution bounty reservation");
+        assertEq(
+            secondRecord.executionBountyAssets, 0, "Executed batch order should clear execution bounty reservation"
+        );
     }
 
     function test_BatchExecution_MixedResults() public {
@@ -147,7 +149,7 @@ contract OrderRouterBatchesTest is OrderRouterTestBase {
         router.executeOrderBatch(5, empty);
     }
 
-    function test_BatchExecution_RefundsExcessEthAndCreditsReservedUsdcBounties() public {
+    function test_BatchExecution_RefundsExcessEthAndCreditsReservedAssetsBounties() public {
         _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
@@ -156,16 +158,18 @@ contract OrderRouterBatchesTest is OrderRouterTestBase {
 
         bytes[] memory empty = _mockPythUpdateData();
         uint256 keeperEthBefore = address(this).balance;
-        uint256 keeperUsdcBefore = _settlementBalance(address(this));
+        uint256 keeperAssetsBefore = _settlementBalance(address(this));
         router.executeOrderBatch{value: 0.1 ether}(2, empty);
         uint256 keeperEthAfter = address(this).balance;
-        uint256 keeperUsdcAfter = _settlementBalance(address(this));
+        uint256 keeperAssetsAfter = _settlementBalance(address(this));
 
         assertEq(
             keeperEthAfter - keeperEthBefore, 0, "Batch execution should refund unused ETH when no Pyth fee is due"
         );
         assertEq(
-            keeperUsdcAfter - keeperUsdcBefore, 400_000, "Keeper should receive capped USDC rewards for both orders"
+            keeperAssetsAfter - keeperAssetsBefore,
+            400_000,
+            "Keeper should receive capped settlementToken rewards for both orders"
         );
     }
 

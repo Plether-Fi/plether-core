@@ -18,7 +18,7 @@ contract PhantomExecFeeTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -35,9 +35,9 @@ contract PhantomExecFeeTest is BasePerpTest {
         _fundJunior(bob, lpDeposit);
 
         uint256 margin = 1002e6;
-        usdc.mint(alice, margin);
+        settlementToken.mint(alice, margin);
         vm.startPrank(alice);
-        usdc.approve(address(clearinghouse), margin);
+        settlementToken.approve(address(clearinghouse), margin);
         address account = alice;
         clearinghouse.deposit(account, margin);
 
@@ -51,7 +51,7 @@ contract PhantomExecFeeTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
-        uint256 openFee = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 openFee = clearinghouse.balanceAssets(engine.protocolTreasury());
 
         vm.warp(block.timestamp + 1);
         vm.prank(alice);
@@ -59,7 +59,7 @@ contract PhantomExecFeeTest is BasePerpTest {
 
         assertEq(router.nextCommitId(), 3, "Close intents should reserve a flat keeper bounty from free settlement");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             openFee,
             "Committing the close should not accrue additional protocol fees"
         );

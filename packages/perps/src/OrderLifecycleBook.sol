@@ -63,10 +63,10 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     bytes32 public constant override INTENT_TYPEHASH = keccak256(
         "PletherOrderIntentV3(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,"
         "uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint64 submitBy,uint32 executionWindowSeconds,"
-        "uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyUsdc,"
-        "uint256 maxExecutionNotionalUsdc,uint256 maxGrossAccountDebitUsdc,uint256 maxActionChargeUsdc,"
-        "uint256 maxExplicitFeesUsdc,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceUsdc,"
-        "uint256 minPostPositionEquityUsdc,uint32 maxPostLeverageBps)"
+        "uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyAssets,"
+        "uint256 maxExecutionNotionalAssets,uint256 maxGrossAccountDebitAssets,uint256 maxActionChargeAssets,"
+        "uint256 maxExplicitFeesAssets,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceAssets,"
+        "uint256 minPostPositionEquityAssets,uint32 maxPostLeverageBps)"
     );
 
     /// @inheritdoc IOrderLifecycleBook
@@ -97,11 +97,11 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     /// @dev Bounties already fit uint96 in the clearinghouse. Other amounts retain their full uint256 domain.
     ///      Pre-commitment custody is exactly post-commitment custody plus collected carry.
     struct StoredCommitment {
-        uint256 carryCollectedUsdc;
-        uint256 carryOutstandingUsdc;
-        uint96 bountyFromFreeUsdc;
-        uint256 settlementAfterUsdc;
-        uint256 freeSettlementAfterUsdc;
+        uint256 carryCollectedAssets;
+        uint256 carryOutstandingAssets;
+        uint96 bountyFromFreeAssets;
+        uint256 settlementAfterAssets;
+        uint256 freeSettlementAfterAssets;
     }
 
     /// @dev Reorders the three narrow policy fields into one slot without narrowing any public bound.
@@ -111,14 +111,14 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         uint8 allowedExecutionModes;
         uint32 maxPostLeverageBps;
         bytes32 expectedConfigHash;
-        uint256 maxExecutionBountyUsdc;
-        uint256 maxExecutionNotionalUsdc;
-        uint256 maxGrossAccountDebitUsdc;
-        uint256 maxActionChargeUsdc;
-        uint256 maxExplicitFeesUsdc;
+        uint256 maxExecutionBountyAssets;
+        uint256 maxExecutionNotionalAssets;
+        uint256 maxGrossAccountDebitAssets;
+        uint256 maxActionChargeAssets;
+        uint256 maxExplicitFeesAssets;
         uint256 maxPostPositionSize;
-        uint256 minPostSettlementBalanceUsdc;
-        uint256 minPostPositionEquityUsdc;
+        uint256 minPostSettlementBalanceAssets;
+        uint256 minPostPositionEquityAssets;
     }
 
     /// @dev Packed storage representation expanded into the public PendingIntent tuple on reads.
@@ -126,7 +126,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         address account;
         bytes32 clientOrderId;
         bytes32 intentHash;
-        uint256 executionBountyUsdc;
+        uint256 executionBountyAssets;
         StoredCommitment commitment;
         StoredExecutionBounds bounds;
         OrderV3Types.OrderTiming timing;
@@ -240,7 +240,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         address account,
         uint64 proposedOrderId,
         OrderV3Types.OrderRequest calldata request,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) external override onlyRouter returns (uint64 resolvedOrderId, bytes32 intentHash, bool replayed) {
         if (account == address(0)) {
             revert OrderLifecycleBook__ZeroAccount();
@@ -268,9 +268,9 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         if (proposedOrderId == 0) {
             revert OrderLifecycleBook__ZeroOrderId();
         }
-        if (executionBountyUsdc > request.bounds.maxExecutionBountyUsdc) {
+        if (executionBountyAssets > request.bounds.maxExecutionBountyAssets) {
             revert OrderLifecycleBook__ExecutionBountyAboveBound(
-                executionBountyUsdc, request.bounds.maxExecutionBountyUsdc
+                executionBountyAssets, request.bounds.maxExecutionBountyAssets
             );
         }
         if (
@@ -300,7 +300,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         pending.account = account;
         pending.clientOrderId = request.clientOrderId;
         pending.intentHash = intentHash;
-        pending.executionBountyUsdc = executionBountyUsdc;
+        pending.executionBountyAssets = executionBountyAssets;
         pending.timing = timing;
         pending.bounds = StoredExecutionBounds({
             submitBy: request.bounds.submitBy,
@@ -308,18 +308,18 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             allowedExecutionModes: request.bounds.allowedExecutionModes,
             maxPostLeverageBps: request.bounds.maxPostLeverageBps,
             expectedConfigHash: request.bounds.expectedConfigHash,
-            maxExecutionBountyUsdc: request.bounds.maxExecutionBountyUsdc,
-            maxExecutionNotionalUsdc: request.bounds.maxExecutionNotionalUsdc,
-            maxGrossAccountDebitUsdc: request.bounds.maxGrossAccountDebitUsdc,
-            maxActionChargeUsdc: request.bounds.maxActionChargeUsdc,
-            maxExplicitFeesUsdc: request.bounds.maxExplicitFeesUsdc,
+            maxExecutionBountyAssets: request.bounds.maxExecutionBountyAssets,
+            maxExecutionNotionalAssets: request.bounds.maxExecutionNotionalAssets,
+            maxGrossAccountDebitAssets: request.bounds.maxGrossAccountDebitAssets,
+            maxActionChargeAssets: request.bounds.maxActionChargeAssets,
+            maxExplicitFeesAssets: request.bounds.maxExplicitFeesAssets,
             maxPostPositionSize: request.bounds.maxPostPositionSize,
-            minPostSettlementBalanceUsdc: request.bounds.minPostSettlementBalanceUsdc,
-            minPostPositionEquityUsdc: request.bounds.minPostPositionEquityUsdc
+            minPostSettlementBalanceAssets: request.bounds.minPostSettlementBalanceAssets,
+            minPostPositionEquityAssets: request.bounds.minPostPositionEquityAssets
         });
 
         emit IntentRegistered(
-            proposedOrderId, account, request.clientOrderId, intentHash, executionBountyUsdc, request, timing
+            proposedOrderId, account, request.clientOrderId, intentHash, executionBountyAssets, request, timing
         );
         return (proposedOrderId, intentHash, false);
     }
@@ -332,29 +332,31 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         if (pending.account == address(0)) {
             revert OrderLifecycleBook__OrderNotPending(orderId);
         }
-        uint256 gross = effects.carryCollectedUsdc + pending.executionBountyUsdc;
-        if (gross > pending.bounds.maxGrossAccountDebitUsdc) {
+        uint256 gross = effects.carryCollectedAssets + pending.executionBountyAssets;
+        if (gross > pending.bounds.maxGrossAccountDebitAssets) {
             revert OrderLifecycleBook__CommitmentBoundExceeded(
-                OrderV3Types.ConstraintKind.GrossAccountDebit, gross, pending.bounds.maxGrossAccountDebitUsdc
+                OrderV3Types.ConstraintKind.GrossAccountDebit, gross, pending.bounds.maxGrossAccountDebitAssets
             );
         }
-        if (effects.carryCollectedUsdc > pending.bounds.maxActionChargeUsdc) {
+        if (effects.carryCollectedAssets > pending.bounds.maxActionChargeAssets) {
             revert OrderLifecycleBook__CommitmentBoundExceeded(
-                OrderV3Types.ConstraintKind.ActionCharge, effects.carryCollectedUsdc, pending.bounds.maxActionChargeUsdc
+                OrderV3Types.ConstraintKind.ActionCharge,
+                effects.carryCollectedAssets,
+                pending.bounds.maxActionChargeAssets
             );
         }
         if (
-            effects.settlementBeforeUsdc != effects.settlementAfterUsdc + effects.carryCollectedUsdc
-                || effects.bountyFromFreeUsdc != pending.executionBountyUsdc
+            effects.settlementBeforeAssets != effects.settlementAfterAssets + effects.carryCollectedAssets
+                || effects.bountyFromFreeAssets != pending.executionBountyAssets
         ) {
             revert OrderLifecycleBook__InvalidCommitmentEffects();
         }
         pending.commitment = StoredCommitment({
-            carryCollectedUsdc: effects.carryCollectedUsdc,
-            carryOutstandingUsdc: effects.carryOutstandingUsdc,
-            bountyFromFreeUsdc: SafeCast.toUint96(effects.bountyFromFreeUsdc),
-            settlementAfterUsdc: effects.settlementAfterUsdc,
-            freeSettlementAfterUsdc: effects.freeSettlementAfterUsdc
+            carryCollectedAssets: effects.carryCollectedAssets,
+            carryOutstandingAssets: effects.carryOutstandingAssets,
+            bountyFromFreeAssets: SafeCast.toUint96(effects.bountyFromFreeAssets),
+            settlementAfterAssets: effects.settlementAfterAssets,
+            freeSettlementAfterAssets: effects.freeSettlementAfterAssets
         });
     }
 
@@ -368,13 +370,13 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         }
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(CLEARINGHOUSE);
         clearinghouse.validateBountyReservation(
-            pending.account, IMarginClearinghouse.BountyKind.Order, orderId, pending.executionBountyUsdc
+            pending.account, IMarginClearinghouse.BountyKind.Order, orderId, pending.executionBountyAssets
         );
         IMarginClearinghouse.BountyReservation memory reservation =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId);
         uint256 freeFunded =
-            _protectionAttempts[orderId] ? pending.executionBountyUsdc : pending.commitment.bountyFromFreeUsdc;
-        if (reservation.freeFundedUsdc != freeFunded) {
+            _protectionAttempts[orderId] ? pending.executionBountyAssets : pending.commitment.bountyFromFreeAssets;
+        if (reservation.freeFundedAssets != freeFunded) {
             revert OrderLifecycleBook__BountyFundingMismatch(orderId);
         }
     }
@@ -413,16 +415,17 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         // Discrepancy recovery authenticates the independent committed funding, even if the entitlement word is
         // corrupt. The receipt retains that reported entitlement as evidence; arbitrary partial refunds stay invalid.
         uint256 expectedResolvedBounty = reservationMismatch && !_protectionAttempts[receipt.orderId]
-            ? pending.commitment.bountyFromFreeUsdc
-            : pending.executionBountyUsdc;
+            ? pending.commitment.bountyFromFreeAssets
+            : pending.executionBountyAssets;
         if (
             receipt.account != pending.account || receipt.clientOrderId != pending.clientOrderId
                 || receipt.intentHash != pending.intentHash
                 || receipt.expectedConfigHash != pending.bounds.expectedConfigHash
                 || keccak256(abi.encode(receipt.commitment))
                     != keccak256(abi.encode(_expandCommitment(pending.commitment)))
-                || receipt.bounty.bountyEntitlementUsdc != pending.executionBountyUsdc
-                || (receipt.bountyUsdc != expectedResolvedBounty && !(reservationMismatch && receipt.bountyUsdc == 0))
+                || receipt.bounty.bountyEntitlementAssets != pending.executionBountyAssets
+                || (receipt.bountyAssets != expectedResolvedBounty
+                    && !(reservationMismatch && receipt.bountyAssets == 0))
                 || keccak256(abi.encode(receipt.timing)) != keccak256(abi.encode(pending.timing))
         ) {
             revert OrderLifecycleBook__ReceiptIdentityMismatch(receipt.orderId);
@@ -470,7 +473,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         intent.account = stored.account;
         intent.clientOrderId = stored.clientOrderId;
         intent.intentHash = stored.intentHash;
-        intent.executionBountyUsdc = stored.executionBountyUsdc;
+        intent.executionBountyAssets = stored.executionBountyAssets;
         intent.commitment = _expandCommitment(stored.commitment);
         intent.bounds = _expandBounds(stored.bounds);
         intent.timing = stored.timing;
@@ -479,12 +482,12 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     function _expandCommitment(
         StoredCommitment storage stored
     ) private view returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
-        effects.carryCollectedUsdc = stored.carryCollectedUsdc;
-        effects.carryOutstandingUsdc = stored.carryOutstandingUsdc;
-        effects.bountyFromFreeUsdc = stored.bountyFromFreeUsdc;
-        effects.settlementAfterUsdc = stored.settlementAfterUsdc;
-        effects.settlementBeforeUsdc = effects.settlementAfterUsdc + effects.carryCollectedUsdc;
-        effects.freeSettlementAfterUsdc = stored.freeSettlementAfterUsdc;
+        effects.carryCollectedAssets = stored.carryCollectedAssets;
+        effects.carryOutstandingAssets = stored.carryOutstandingAssets;
+        effects.bountyFromFreeAssets = stored.bountyFromFreeAssets;
+        effects.settlementAfterAssets = stored.settlementAfterAssets;
+        effects.settlementBeforeAssets = effects.settlementAfterAssets + effects.carryCollectedAssets;
+        effects.freeSettlementAfterAssets = stored.freeSettlementAfterAssets;
     }
 
     /// @inheritdoc IOrderLifecycleBook
@@ -511,14 +514,14 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         bounds.executionWindowSeconds = stored.executionWindowSeconds;
         bounds.allowedExecutionModes = stored.allowedExecutionModes;
         bounds.expectedConfigHash = stored.expectedConfigHash;
-        bounds.maxExecutionBountyUsdc = stored.maxExecutionBountyUsdc;
-        bounds.maxExecutionNotionalUsdc = stored.maxExecutionNotionalUsdc;
-        bounds.maxGrossAccountDebitUsdc = stored.maxGrossAccountDebitUsdc;
-        bounds.maxActionChargeUsdc = stored.maxActionChargeUsdc;
-        bounds.maxExplicitFeesUsdc = stored.maxExplicitFeesUsdc;
+        bounds.maxExecutionBountyAssets = stored.maxExecutionBountyAssets;
+        bounds.maxExecutionNotionalAssets = stored.maxExecutionNotionalAssets;
+        bounds.maxGrossAccountDebitAssets = stored.maxGrossAccountDebitAssets;
+        bounds.maxActionChargeAssets = stored.maxActionChargeAssets;
+        bounds.maxExplicitFeesAssets = stored.maxExplicitFeesAssets;
         bounds.maxPostPositionSize = stored.maxPostPositionSize;
-        bounds.minPostSettlementBalanceUsdc = stored.minPostSettlementBalanceUsdc;
-        bounds.minPostPositionEquityUsdc = stored.minPostPositionEquityUsdc;
+        bounds.minPostSettlementBalanceAssets = stored.minPostSettlementBalanceAssets;
+        bounds.minPostPositionEquityAssets = stored.minPostPositionEquityAssets;
         bounds.maxPostLeverageBps = stored.maxPostLeverageBps;
     }
 
@@ -569,12 +572,12 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
                 receipt.status != OrderV3Types.LifecycleStatus.Failed
                     || block.timestamp <= receipt.timing.executionDeadline
                     || receipt.bounty.discrepancy == OrderV3Types.ReservationDiscrepancy.None
-                    || receipt.bounty.bountyPaidUsdc != 0 || receipt.bounty.bountyForfeitedUsdc != 0
-                    || receipt.bountyUsdc != receipt.bounty.bountyRefundedUsdc || !_isEmptyFailure(receipt.failure)
+                    || receipt.bounty.bountyPaidAssets != 0 || receipt.bounty.bountyForfeitedAssets != 0
+                    || receipt.bountyAssets != receipt.bounty.bountyRefundedAssets || !_isEmptyFailure(receipt.failure)
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
             }
-            if (receipt.bountyUsdc == 0
+            if (receipt.bountyAssets == 0
                     ? (receipt.bountyRecipient != address(0)
                             || receipt.bountyDisposition != OrderV3Types.BountyDisposition.None)
                     : (receipt.bountyRecipient != receipt.account
@@ -586,8 +589,8 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         }
         if (
             receipt.bounty.discrepancy != OrderV3Types.ReservationDiscrepancy.None
-                || receipt.bounty.bountyPaidUsdc + receipt.bounty.bountyRefundedUsdc
-                        + receipt.bounty.bountyForfeitedUsdc != receipt.bountyUsdc
+                || receipt.bounty.bountyPaidAssets + receipt.bounty.bountyRefundedAssets
+                        + receipt.bounty.bountyForfeitedAssets != receipt.bountyAssets
         ) {
             revert OrderLifecycleBook__InvalidTerminalOutcome();
         }
@@ -701,7 +704,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         uint256 forfeited;
         address recipient;
         OrderV3Types.BountyDisposition disposition;
-        uint256 bounty = receipt.bountyUsdc;
+        uint256 bounty = receipt.bountyAssets;
         if (bounty != 0) {
             if (receipt.reason == OrderV3Types.TerminalReason.RiskOff) {
                 refunded = bounty;
@@ -720,8 +723,8 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
 
         if (
             receipt.bountyDisposition != disposition || receipt.bountyRecipient != recipient
-                || receipt.bounty.bountyPaidUsdc != paid || receipt.bounty.bountyRefundedUsdc != refunded
-                || receipt.bounty.bountyForfeitedUsdc != forfeited
+                || receipt.bounty.bountyPaidAssets != paid || receipt.bounty.bountyRefundedAssets != refunded
+                || receipt.bounty.bountyForfeitedAssets != forfeited
         ) {
             revert OrderLifecycleBook__InvalidTerminalOutcome();
         }
@@ -767,28 +770,28 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         OrderV3Types.ConstraintKind constraint
     ) private view returns (uint256 limit) {
         if (constraint == OrderV3Types.ConstraintKind.ExecutionBounty) {
-            return bounds.maxExecutionBountyUsdc;
+            return bounds.maxExecutionBountyAssets;
         }
         if (constraint == OrderV3Types.ConstraintKind.ExecutionNotional) {
-            return bounds.maxExecutionNotionalUsdc;
+            return bounds.maxExecutionNotionalAssets;
         }
         if (constraint == OrderV3Types.ConstraintKind.GrossAccountDebit) {
-            return bounds.maxGrossAccountDebitUsdc;
+            return bounds.maxGrossAccountDebitAssets;
         }
         if (constraint == OrderV3Types.ConstraintKind.ActionCharge) {
-            return bounds.maxActionChargeUsdc;
+            return bounds.maxActionChargeAssets;
         }
         if (constraint == OrderV3Types.ConstraintKind.ExplicitFees) {
-            return bounds.maxExplicitFeesUsdc;
+            return bounds.maxExplicitFeesAssets;
         }
         if (constraint == OrderV3Types.ConstraintKind.PostPositionSize) {
             return bounds.maxPostPositionSize;
         }
         if (constraint == OrderV3Types.ConstraintKind.PostSettlementBalance) {
-            return bounds.minPostSettlementBalanceUsdc;
+            return bounds.minPostSettlementBalanceAssets;
         }
         if (constraint == OrderV3Types.ConstraintKind.PostPositionEquity) {
-            return bounds.minPostPositionEquityUsdc;
+            return bounds.minPostPositionEquityAssets;
         }
         if (constraint == OrderV3Types.ConstraintKind.PostLeverage) {
             return bounds.maxPostLeverageBps;

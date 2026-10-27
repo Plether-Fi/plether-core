@@ -24,6 +24,8 @@ interface IHousePoolMaintenanceFeeAdminView {
 /// @title TrancheVault
 /// @notice Fully asynchronous ERC-7540-style entry point for one HousePool tranche.
 /// @dev The vault escrows request tokens and claim tokens. HousePool alone moves epochs into claimable state.
+///      The underlying is the pool's six-decimal settlement token, including MockUSDG on the new testnet stack.
+///      All asset amounts refer to that configured token and use its accounting units.
 // Legacy integration interfaces are implemented structurally; the pool settlement fragment is intentionally local to HousePool.
 // slither-disable-next-line missing-inheritance
 contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
@@ -247,14 +249,14 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     }
 
     constructor(
-        IERC20 _usdc,
+        IERC20 _settlementToken,
         address _pool,
         bool _isSenior,
         string memory _name,
         string memory _symbol,
         uint256 _initialMaintenanceFeeAprBps,
         address _initialMaintenanceFeeRecipient
-    ) ERC4626(_usdc) ERC20(_name, _symbol) {
+    ) ERC4626(_settlementToken) ERC20(_name, _symbol) {
         POOL = IHousePool(_pool);
         IS_SENIOR = _isSenior;
         if (_isSenior) {
@@ -506,8 +508,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     }
 
     function totalAssets() public view override returns (uint256) {
-        (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc,,) = POOL.getPendingTrancheState();
-        return IS_SENIOR ? seniorPrincipalUsdc : juniorPrincipalUsdc;
+        (uint256 seniorPrincipalAssets, uint256 juniorPrincipalAssets,,) = POOL.getPendingTrancheState();
+        return IS_SENIOR ? seniorPrincipalAssets : juniorPrincipalAssets;
     }
 
     function convertToShares(
@@ -1586,7 +1588,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (!POOL.canAcceptOrdinaryDeposits()) {
             revert TrancheVault__TradingNotActive();
         }
-        if (assets < POOL.minTrancheDepositUsdc()) {
+        if (assets < POOL.minTrancheDepositAssets()) {
             revert TrancheVault__DepositTooSmall();
         }
         uint256 maxAssets = maxRequestDeposit(controller);
@@ -1610,7 +1612,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         uint256 shares,
         uint256 maxShares
     ) internal view {
-        if (estimateRedeemAssets(shares) < POOL.minTrancheDepositUsdc() && shares < maxShares) {
+        if (estimateRedeemAssets(shares) < POOL.minTrancheDepositAssets() && shares < maxShares) {
             revert TrancheVault__WithdrawalTooSmall();
         }
     }
@@ -1650,7 +1652,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
 
     function _seniorDepositCapacity() internal view returns (uint256 capacity) {
         capacity = POOL.getSeniorDepositCapacity();
-        if (capacity < POOL.minTrancheDepositUsdc()) {
+        if (capacity < POOL.minTrancheDepositAssets()) {
             return 0;
         }
     }
@@ -1844,8 +1846,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     }
 
     function _depositPricingAssets() internal view returns (uint256 assets) {
-        (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc) = POOL.getPendingDepositTrancheState();
-        return IS_SENIOR ? seniorPrincipalUsdc : juniorPrincipalUsdc;
+        (uint256 seniorPrincipalAssets, uint256 juniorPrincipalAssets) = POOL.getPendingDepositTrancheState();
+        return IS_SENIOR ? seniorPrincipalAssets : juniorPrincipalAssets;
     }
 
     function _convertToSharesUsingAssets(

@@ -104,9 +104,10 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         _openFunded(CfdTypes.Side.LONG);
         FailedChain memory chain = _commitFailedChain(CfdTypes.Side.LONG, false);
         bytes32 originalPosition = _positionDigest();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(BOUNTY_KEEPER);
-        uint256 allBounties = _bountyReservation(chain.closeId).amountUsdc + _bountyReservation(chain.openId).amountUsdc
-            + _bountyReservation(chain.wrongCloseId).amountUsdc + _bountyReservation(chain.followerId).amountUsdc;
+        uint256 keeperBefore = clearinghouse.balanceAssets(BOUNTY_KEEPER);
+        uint256 allBounties = _bountyReservation(chain.closeId).amountAssets
+            + _bountyReservation(chain.openId).amountAssets + _bountyReservation(chain.wrongCloseId).amountAssets
+            + _bountyReservation(chain.followerId).amountAssets;
         bytes[] memory update = _mockPythUpdateData(BOUNTY_PRICE);
         vm.recordLogs();
         vm.prank(BOUNTY_KEEPER);
@@ -122,7 +123,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         _assertSideFailure(_receipt(logs, chain.wrongCloseId));
         assertEq(uint8(_receipt(logs, chain.followerId).status), uint8(OrderV3Types.LifecycleStatus.Executed));
         assertEq(_positionDigest(), originalPosition);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), keeperBefore + allBounties);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_KEEPER), keeperBefore + allBounties);
         _assertChainResolved(chain);
     }
 
@@ -132,13 +133,13 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
             CfdTypes.Side original = CfdTypes.Side(side);
             _openFunded(original);
             CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
-            snap.unsettledCarryUsdc = 1e6;
+            snap.unsettledCarryAssets = 1e6;
             CfdTypes.Order memory wrong = _closeOrder(_opposite(original));
             CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snap, wrong, BOUNTY_PRICE);
             assertFalse(delta.valid);
             assertEq(uint8(delta.revertCode), 7);
-            assertEq(delta.pendingCarryUsdc, 0, "side rejection precedes carry assessment");
-            assertEq(delta.realizedCarryUsdc, 0, "side rejection precedes carry collection");
+            assertEq(delta.pendingCarryAssets, 0, "side rejection precedes carry assessment");
+            assertEq(delta.realizedCarryAssets, 0, "side rejection precedes carry collection");
             OrderV3Types.OrderRequest memory request = _bountyRequest(original, true, BOUNTY_SIZE, 0);
             vm.expectRevert(_sideFailureData());
             policyEvaluator.evaluateClose(snap, delta, request.bounds, 0);
@@ -148,8 +149,8 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
             CfdTypes.Order memory right = _closeOrder(original);
             delta = engine.planner().planClose(snap, right, BOUNTY_PRICE);
             assertTrue(delta.valid, "same-side close retains existing economics");
-            assertEq(delta.pendingCarryUsdc, 1e6);
-            assertEq(delta.realizedCarryUsdc, 1e6);
+            assertEq(delta.pendingCarryAssets, 1e6);
+            assertEq(delta.realizedCarryAssets, 1e6);
             assertTrue(vm.revertToStateAndDelete(checkpoint));
         }
     }
@@ -167,7 +168,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         FailedChain memory chain = _commitFailedChain(CfdTypes.Side.LONG, false);
         _failPredecessors(chain, BOUNTY_KEEPER);
         bytes32 digest = _bountyStateDigest(chain.wrongCloseId);
-        uint256 keeperBefore = clearinghouse.balanceUsdc(BOUNTY_KEEPER);
+        uint256 keeperBefore = clearinghouse.balanceAssets(BOUNTY_KEEPER);
         vm.mockCallRevert(
             address(router.lifecycleBook()),
             abi.encodeWithSelector(IOrderLifecycleBook.finalize.selector),
@@ -179,7 +180,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
         assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.ReceiptFailure));
         assertEq(_bountyStateDigest(chain.wrongCloseId), digest);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), keeperBefore);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_KEEPER), keeperBefore);
         vm.clearMockedCalls();
         _assertSideFailure(
             _bountyExecute(chain.wrongCloseId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Failed)
@@ -222,11 +223,11 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         _failPredecessors(chain, executor);
         FailureState memory beforeState = FailureState({
             position: _positionDigest(),
-            settlement: clearinghouse.balanceUsdc(BOUNTY_TRADER),
-            executorSettlement: clearinghouse.balanceUsdc(executor),
+            settlement: clearinghouse.balanceAssets(BOUNTY_TRADER),
+            executorSettlement: clearinghouse.balanceAssets(executor),
             poolAssets: pool.totalAssets(),
-            pledge: clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER),
-            bounty: _bountyReservation(chain.wrongCloseId).amountUsdc
+            pledge: clearinghouse.pnlPledgeAssets(BOUNTY_TRADER),
+            bounty: _bountyReservation(chain.wrongCloseId).amountAssets
         });
         assertEq(beforeState.bounty, 0);
         bytes[] memory update = _mockPythUpdateData(BOUNTY_PRICE);
@@ -252,13 +253,15 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         uint256 shift = confidence ? 20_000 : 0; // Two equal feeds, 100_000 confidence atoms, 20% multiplier.
         assertEq(receipt.executionPrice, original == CfdTypes.Side.SHORT ? BOUNTY_PRICE + shift : BOUNTY_PRICE - shift);
         assertEq(receipt.executor, executor);
-        assertEq(receipt.bounty.bountyPaidUsdc, beforeState.bounty);
-        assertEq(receipt.bounty.bountyRefundedUsdc, 0);
+        assertEq(receipt.bounty.bountyPaidAssets, beforeState.bounty);
+        assertEq(receipt.bounty.bountyRefundedAssets, 0);
         assertEq(receipt.bountyRecipient, address(0));
         assertEq(_positionDigest(), beforeState.position);
-        assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), beforeState.pledge);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), beforeState.settlement - (self ? 0 : beforeState.bounty));
-        assertEq(clearinghouse.balanceUsdc(executor), beforeState.executorSettlement + (self ? 0 : beforeState.bounty));
+        assertEq(clearinghouse.pnlPledgeAssets(BOUNTY_TRADER), beforeState.pledge);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), beforeState.settlement - (self ? 0 : beforeState.bounty));
+        assertEq(
+            clearinghouse.balanceAssets(executor), beforeState.executorSettlement + (self ? 0 : beforeState.bounty)
+        );
         assertEq(pool.totalAssets(), beforeState.poolAssets);
         assertEq(router.accountHeadOrderId(BOUNTY_TRADER), 0);
         assertEq(router.nextExecuteId(), chain.followerId);
@@ -382,7 +385,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
             address(engine).staticcall(abi.encodeWithSelector(engine.positions.selector, BOUNTY_TRADER));
         assertTrue(ok);
         return keccak256(
-            abi.encode(state, engine.positionEntryCostUsdcAtoms(BOUNTY_TRADER), engine.positionEpoch(BOUNTY_TRADER))
+            abi.encode(state, engine.positionEntryCostAssetAtoms(BOUNTY_TRADER), engine.positionEpoch(BOUNTY_TRADER))
         );
     }
 

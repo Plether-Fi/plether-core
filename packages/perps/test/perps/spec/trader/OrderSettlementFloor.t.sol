@@ -26,8 +26,8 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
 
     function _request() private view returns (OrderV3Types.OrderRequest memory r) {
         r = _bountyRequest(CfdTypes.Side.LONG, false, BOUNTY_SIZE, 250e6);
-        r.bounds.minPostSettlementBalanceUsdc = MINIMUM;
-        r.bounds.maxGrossAccountDebitUsdc = GROSS;
+        r.bounds.minPostSettlementBalanceAssets = MINIMUM;
+        r.bounds.maxGrossAccountDebitAssets = GROSS;
     }
 
     function _commit(
@@ -42,8 +42,8 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         uint256 amount,
         bool marginApi
     ) private {
-        uint256 balance = clearinghouse.balanceUsdc(BOUNTY_TRADER);
-        uint256 wallet = usdc.balanceOf(BOUNTY_TRADER);
+        uint256 balance = clearinghouse.balanceAssets(BOUNTY_TRADER);
+        uint256 wallet = settlementToken.balanceOf(BOUNTY_TRADER);
         vm.expectRevert(
             abi.encodeWithSelector(
                 IOrderRouterErrors.OrderRouter__SettlementFloorWithdrawal.selector, id, balance - amount, MINIMUM, GROSS
@@ -55,8 +55,8 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         } else {
             clearinghouse.withdraw(BOUNTY_TRADER, amount);
         }
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), balance, "provisional debit rolls back");
-        assertEq(usdc.balanceOf(BOUNTY_TRADER), wallet);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), balance, "provisional debit rolls back");
+        assertEq(settlementToken.balanceOf(BOUNTY_TRADER), wallet);
     }
 
     function testFuzz_WithdrawalFloorBothApis(
@@ -67,7 +67,7 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         _fundTrader(BOUNTY_TRADER, uint256(extra) + 1);
         uint64 id = _commit(_request());
         uint256 surplus = FUNDING + extra + 1 - MINIMUM - GROSS;
-        assertEq(engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER), surplus);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), surplus);
         _expectFloor(id, surplus + 1, marginApi);
         vm.prank(BOUNTY_TRADER);
         if (marginApi) {
@@ -75,8 +75,8 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         } else {
             clearinghouse.withdraw(BOUNTY_TRADER, surplus);
         }
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), MINIMUM + GROSS);
-        assertEq(engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER), 0);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), MINIMUM + GROSS);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
         _expectFloor(id, 1, !marginApi);
         vm.prank(BOUNTY_TRADER);
         clearinghouse.withdrawMargin(0);
@@ -86,7 +86,7 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         for (uint256 offset; offset < 3; ++offset) {
             uint256 snapshot = vm.snapshotState();
             OrderV3Types.OrderRequest memory r = _request();
-            r.bounds.minPostSettlementBalanceUsdc = FUNDING - GROSS + offset - 1;
+            r.bounds.minPostSettlementBalanceAssets = FUNDING - GROSS + offset - 1;
             uint64 expectedId = router.nextCommitId();
             if (offset == 2) {
                 vm.expectRevert(
@@ -94,28 +94,28 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
                         IOrderRouterErrors.OrderRouter__SettlementFloorFunding.selector,
                         expectedId,
                         FUNDING,
-                        r.bounds.minPostSettlementBalanceUsdc,
+                        r.bounds.minPostSettlementBalanceAssets,
                         GROSS
                     )
                 );
                 _commit(r);
                 assertEq(router.nextCommitId(), expectedId);
                 assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 0);
-                assertEq(clearinghouse.totalBountyReservationsUsdc(BOUNTY_TRADER), 0);
-                assertEq(clearinghouse.getAccountUsdcBuckets(BOUNTY_TRADER).totalLockedMarginUsdc, 0);
+                assertEq(clearinghouse.totalBountyReservationsAssets(BOUNTY_TRADER), 0);
+                assertEq(clearinghouse.getAccountAssetBuckets(BOUNTY_TRADER).totalLockedMarginAssets, 0);
             } else {
                 uint64 id = _commit(r);
                 assertEq(id, expectedId);
                 assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 1);
             }
-            assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), FUNDING);
+            assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), FUNDING);
             assertTrue(vm.revertToStateAndDelete(snapshot));
         }
     }
 
     function test_UnboundedGrossPositiveMinimumRejectedAsUnfundable() public {
         OrderV3Types.OrderRequest memory r = _request();
-        r.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
+        r.bounds.maxGrossAccountDebitAssets = type(uint256).max;
         vm.expectRevert(
             abi.encodeWithSelector(
                 IOrderRouterErrors.OrderRouter__SettlementFloorFunding.selector,
@@ -131,7 +131,7 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
 
     function test_MinimumAboveCustodyRejectsWithoutArithmeticPanic() public {
         OrderV3Types.OrderRequest memory request = _request();
-        request.bounds.minPostSettlementBalanceUsdc = type(uint256).max;
+        request.bounds.minPostSettlementBalanceAssets = type(uint256).max;
         vm.expectRevert(
             abi.encodeWithSelector(
                 IOrderRouterErrors.OrderRouter__SettlementFloorFunding.selector,
@@ -143,14 +143,14 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         );
         _commit(request);
         assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 0);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), FUNDING);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), FUNDING);
     }
 
     function test_FloorBlocksLaterOrdersButExactReplayIsIdempotent() public {
         OrderV3Types.OrderRequest memory original = _request();
         uint64 id = _commit(original);
         OrderV3Types.OrderRequest memory later = _request();
-        later.bounds.minPostSettlementBalanceUsdc = 0;
+        later.bounds.minPostSettlementBalanceAssets = 0;
         vm.expectRevert(
             abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__SettlementFloorOrderPending.selector, id)
         );
@@ -165,7 +165,7 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
 
     function test_PositiveFloorRejectsOverlapIncreaseAndBothCloseSizes() public {
         OrderV3Types.OrderRequest memory ordinary = _request();
-        ordinary.bounds.minPostSettlementBalanceUsdc = 0;
+        ordinary.bounds.minPostSettlementBalanceAssets = 0;
         uint64 id = _commit(ordinary);
         OrderV3Types.OrderRequest memory overlapping = _request();
         vm.expectRevert(IOrderRouterErrors.OrderRouter__SettlementFloorUnsupported.selector);
@@ -192,10 +192,10 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         uint64 other = _bountyCommit(BOUNTY_OTHER, CfdTypes.Side.LONG, false, BOUNTY_SIZE, 250e6);
         uint64 id = _commit(_request());
         _fundTrader(BOUNTY_TRADER, 50e6);
-        assertEq(engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER), 150e6);
-        uint256 bounty = router.lifecycleBook().pendingIntent(other).executionBountyUsdc;
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 150e6);
+        uint256 bounty = router.lifecycleBook().pendingIntent(other).executionBountyAssets;
         _bountyExecute(other, BOUNTY_PRICE, BOUNTY_TRADER, OrderV3Types.LifecycleStatus.Executed);
-        assertEq(engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER), 150e6 + bounty);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 150e6 + bounty);
         _expectFloor(id, 150e6 + bounty + 1, false);
     }
 
@@ -204,7 +204,7 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         _fundTrader(BOUNTY_OTHER, 123e6);
         vm.prank(BOUNTY_OTHER);
         clearinghouse.withdrawMargin(123e6);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_OTHER), 0);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_OTHER), 0);
     }
 
     function test_AttachedProtectionUsesSameFloorAndExecutionReleasesIt() public {
@@ -215,10 +215,10 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         params.takeProfitTriggerPrice = 90_000_000;
         params.stopLossTriggerPrice = 110_000_000;
         params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max
         });
         OrderV3Types.OrderRequest memory request = _request();
         vm.prank(BOUNTY_TRADER);
@@ -226,7 +226,7 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         _expectFloor(id, 100e6 + 1, true);
         _bountyExecute(id, price, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
         assertEq(router.accountHeadOrderId(BOUNTY_TRADER), 0);
-        assertGt(engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER), 100e6);
+        assertGt(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 100e6);
     }
 
     function testFuzz_SuccessConsumesDeclaredAllowanceAndReleasesFloor(
@@ -239,12 +239,12 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         OrderV3Types.OrderReceipt memory receipt = _bountyExecute(
             id, BOUNTY_PRICE, self ? BOUNTY_TRADER : BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed
         );
-        assertGe(receipt.economics.postSettlementBalanceUsdc, MINIMUM);
-        assertLe(receipt.economics.grossAccountDebitUsdc, GROSS);
+        assertGe(receipt.economics.postSettlementBalanceAssets, MINIMUM);
+        assertLe(receipt.economics.grossAccountDebitAssets, GROSS);
         assertEq(_commit(request), id, "terminal replay bypasses new live-position admission");
         _assertBountyResolved(id);
         assertEq(router.accountHeadOrderId(BOUNTY_TRADER), 0);
-        uint256 available = engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER);
+        uint256 available = engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER);
         assertGt(available, 0);
         vm.prank(BOUNTY_TRADER);
         clearinghouse.withdrawMargin(available);
@@ -277,7 +277,7 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
                 uint8(fault == 0 ? OrderV3Types.PendingReason.EngineFailure : OrderV3Types.PendingReason.ReceiptFailure)
             );
             assertEq(keccak256(abi.encode(router.lifecycleBook().pendingIntent(id))), intent);
-            assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), FUNDING);
+            assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), FUNDING);
             _expectFloor(id, 100e6 + 1, false);
             vm.clearMockedCalls();
             _bountyExecute(id, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
@@ -293,7 +293,7 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
                 r.targetPrice = 2e8;
             }
             if (reason == 1) {
-                r.bounds.maxActionChargeUsdc = 0;
+                r.bounds.maxActionChargeAssets = 0;
             }
             if (reason == 2) {
                 r.bounds.allowedExecutionModes = 2;
@@ -347,8 +347,8 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
             assertEq(router.accountHeadOrderId(BOUNTY_TRADER), 0);
             assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 0);
             _assertBountyResolved(id);
-            uint256 balance = clearinghouse.balanceUsdc(BOUNTY_TRADER);
-            assertEq(engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER), balance);
+            uint256 balance = clearinghouse.balanceAssets(BOUNTY_TRADER);
+            assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), balance);
             vm.prank(BOUNTY_TRADER);
             clearinghouse.withdrawMargin(balance);
             assertTrue(vm.revertToStateAndDelete(snapshot));
@@ -369,7 +369,7 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         uint256 gasBefore = gasleft();
         clearinghouse.withdrawMargin(1e6);
         uint256 measured = gasBefore - gasleft();
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), FUNDING - 1e6);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), FUNDING - 1e6);
         emit log_named_uint("withdraw_without_settlement_floor", measured);
     }
 
@@ -379,18 +379,18 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         uint256 gasBefore = gasleft();
         clearinghouse.withdrawMargin(1e6);
         uint256 measured = gasBefore - gasleft();
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), FUNDING - 1e6);
-        assertEq(engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER), 99e6);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), FUNDING - 1e6);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 99e6);
         emit log_named_uint("withdraw_with_settlement_floor", measured);
     }
 
     function assertFloorFundedForTest() external view {
         uint64 id = router.accountHeadOrderId(BOUNTY_TRADER);
         OrderV3Types.ExecutionBounds memory policy = router.lifecycleBook().pendingPolicy(id);
-        uint256 balance = clearinghouse.balanceUsdc(BOUNTY_TRADER);
+        uint256 balance = clearinghouse.balanceAssets(BOUNTY_TRADER);
         require(
-            balance >= policy.minPostSettlementBalanceUsdc
-                && balance - policy.minPostSettlementBalanceUsdc >= policy.maxGrossAccountDebitUsdc,
+            balance >= policy.minPostSettlementBalanceAssets
+                && balance - policy.minPostSettlementBalanceAssets >= policy.maxGrossAccountDebitAssets,
             "funded floor violated"
         );
     }
@@ -410,20 +410,20 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         uint64 open = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, false, BOUNTY_SIZE, 250e6);
         _bountyExecute(open, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
         uint64 close = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
-        uint256 externalShock = usdc.balanceOf(address(pool));
-        usdc.burn(address(pool), externalShock);
+        uint256 externalShock = settlementToken.balanceOf(address(pool));
+        settlementToken.burn(address(pool), externalShock);
         _bountyExecute(close, 90_000_000, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
-        assertEq(engine.traderClaimBalanceUsdc(BOUNTY_TRADER), 996_400_000);
-        usdc.mint(address(pool), externalShock);
+        assertEq(engine.traderClaimBalanceAssets(BOUNTY_TRADER), 996_400_000);
+        settlementToken.mint(address(pool), externalShock);
         assertFalse(engine.degradedMode(), "flat account leaves no directional liability");
         uint64 id = _commit(_request());
-        uint256 beforeBalance = clearinghouse.balanceUsdc(BOUNTY_TRADER);
-        uint256 beforeSurplus = engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER);
+        uint256 beforeBalance = clearinghouse.balanceAssets(BOUNTY_TRADER);
+        uint256 beforeSurplus = engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER);
         vm.prank(BOUNTY_TRADER);
         engine.settleTraderClaim(BOUNTY_TRADER);
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), beforeBalance + 996_400_000);
-        assertEq(engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER), beforeSurplus + 996_400_000);
-        assertEq(engine.unsettledCarryUsdc(BOUNTY_TRADER), 0);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), beforeBalance + 996_400_000);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), beforeSurplus + 996_400_000);
+        assertEq(engine.unsettledCarryAssets(BOUNTY_TRADER), 0);
         assertEq(router.accountHeadOrderId(BOUNTY_TRADER), id);
         _expectFloor(id, beforeSurplus + 996_400_000 + 1, true);
     }

@@ -2,13 +2,13 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 /// @notice Independent execution-fee ledger for funded live-market opens and full closes.
@@ -21,20 +21,20 @@ contract PerpFeeHandler is Test {
     uint256 public constant POSITION_SIZE = 50_000e18;
     uint256 public constant ENTRY_PRICE = 1e8;
 
-    MockUSDC public immutable usdc;
+    MockSettlementToken public immutable settlementToken;
     MockPyth public immutable mockPyth;
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
     LegacyOrderRouterHarness public immutable router;
     uint256 public immutable feeBps;
-    uint256 public immutable initialTreasuryWalletUsdc;
+    uint256 public immutable initialTreasuryWalletAssets;
 
     address[2] internal actors;
     mapping(address => bool) public ghostHasPosition;
 
-    uint256 public ghostTrackedFeesUsdc;
-    uint256 public ghostAccruedFeesUsdc;
-    uint256 public ghostWithdrawnFeesUsdc;
+    uint256 public ghostTrackedFeesAssets;
+    uint256 public ghostAccruedFeesAssets;
+    uint256 public ghostWithdrawnFeesAssets;
     uint256 public attempts;
     uint256 public skippedActions;
     uint256 public successfulOpens;
@@ -47,19 +47,19 @@ contract PerpFeeHandler is Test {
     OrderV3Types.TerminalReason public lastTerminalReason;
 
     constructor(
-        MockUSDC _usdc,
+        MockSettlementToken _settlementToken,
         MockPyth _mockPyth,
         CfdEngine _engine,
         MarginClearinghouse _clearinghouse,
         LegacyOrderRouterHarness _router
     ) {
-        usdc = _usdc;
+        settlementToken = _settlementToken;
         mockPyth = _mockPyth;
         engine = _engine;
         clearinghouse = _clearinghouse;
         router = _router;
         feeBps = _engine.executionFeeBps();
-        initialTreasuryWalletUsdc = _usdc.balanceOf(_engine.protocolTreasury());
+        initialTreasuryWalletAssets = _settlementToken.balanceOf(_engine.protocolTreasury());
         actors[0] = address(0x8101);
         actors[1] = address(0x8102);
     }
@@ -135,7 +135,7 @@ contract PerpFeeHandler is Test {
 
     function withdrawTreasuryFees() external {
         ++attempts;
-        uint256 amount = ghostTrackedFeesUsdc;
+        uint256 amount = ghostTrackedFeesAssets;
         if (amount == 0) {
             ++skippedActions;
             return;
@@ -143,8 +143,8 @@ contract PerpFeeHandler is Test {
         address treasury = engine.protocolTreasury();
         vm.prank(treasury);
         try clearinghouse.withdraw(treasury, amount) {
-            ghostTrackedFeesUsdc = 0;
-            ghostWithdrawnFeesUsdc += amount;
+            ghostTrackedFeesAssets = 0;
+            ghostWithdrawnFeesAssets += amount;
             ++successfulWithdrawals;
         } catch (bytes memory reason) {
             _recordUnexpectedFailure(reason);
@@ -167,22 +167,22 @@ contract PerpFeeHandler is Test {
         }
     }
 
-    /// @dev Size is 18 decimals, price 8, settlement 6; the second division floors the fee in USDC atoms.
+    /// @dev Size is 18 decimals, price 8, settlement 6; the second division floors the fee in settlement token atoms.
     function expectedExecutionFee(
         uint256 size,
         uint256 price,
         uint256 rateBps
     ) public pure returns (uint256) {
-        uint256 notionalUsdc = size * price / 1e20;
-        return notionalUsdc * rateBps / 10_000;
+        uint256 notionalAssets = size * price / 1e20;
+        return notionalAssets * rateBps / 10_000;
     }
 
     function _accrueExpectedFee(
         uint256 price
     ) internal {
         uint256 expectedFee = expectedExecutionFee(POSITION_SIZE, price, feeBps);
-        ghostTrackedFeesUsdc += expectedFee;
-        ghostAccruedFeesUsdc += expectedFee;
+        ghostTrackedFeesAssets += expectedFee;
+        ghostAccruedFeesAssets += expectedFee;
     }
 
     function _execute(
@@ -211,9 +211,9 @@ contract PerpFeeHandler is Test {
     function _fundActor(
         address actor
     ) internal returns (bool funded) {
-        usdc.mint(actor, 25_000e6);
+        settlementToken.mint(actor, 25_000e6);
         vm.startPrank(actor);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         try clearinghouse.deposit(actor, 25_000e6) {
             funded = true;
         } catch (bytes memory reason) {

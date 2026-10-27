@@ -82,9 +82,9 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         actions = IPositionProtectionActions(address(router.positionProtectionBook()));
         views = IPositionProtectionViews(address(router.positionProtectionBook()));
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.positionProtectionTriggerBountyUsdc = TRIGGER_BOUNTY;
-        config.minOpenOrderExecutionBountyUsdc = OPEN_BOUNTY;
-        config.maxOpenOrderExecutionBountyUsdc = OPEN_BOUNTY;
+        config.positionProtectionTriggerBountyAssets = TRIGGER_BOUNTY;
+        config.minOpenOrderExecutionBountyAssets = OPEN_BOUNTY;
+        config.maxOpenOrderExecutionBountyAssets = OPEN_BOUNTY;
         config.orderSettlementWindow = config.maxExecutionWindowSeconds;
         _setRouterConfig(config);
     }
@@ -139,7 +139,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
             if (accounts[actors[i]].protectionId != 0) {
                 _liquidate(actors[i]);
             }
-            assertEq(clearinghouse.totalBountyReservationsUsdc(actors[i]), 0, "drain leaves no reservation");
+            assertEq(clearinghouse.totalBountyReservationsAssets(actors[i]), 0, "drain leaves no reservation");
         }
         _assertModel();
     }
@@ -151,10 +151,10 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         _createExisting(account);
         uint256 expectedReserve = TRIGGER_BOUNTY;
         assertEq(accounts[account].funded, expectedReserve);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(account), expectedReserve);
+        assertEq(clearinghouse.totalBountyReservationsAssets(account), expectedReserve);
         uint256 healthyState = vm.snapshotState();
 
-        stdstore.target(address(clearinghouse)).sig("totalBountyReservationsUsdc(address)").with_key(account)
+        stdstore.target(address(clearinghouse)).sig("totalBountyReservationsAssets(address)").with_key(account)
             .checked_write(expectedReserve + 1);
         assertEq(accounts[account].funded, expectedReserve, "Subject corruption must not resynchronize the model");
         vm.expectRevert(bytes("canonical total: 350001 != 350000"));
@@ -175,10 +175,11 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         assertEq(uint8(protections[protectionId].status), uint8(Protection.PositionProtectionStatus.Executed));
         assertEq(triggerPaid, TRIGGER_BOUNTY);
         assertEq(executionPaid, 0);
-        assertEq(clearinghouse.balanceUsdc(EXECUTION_KEEPER), 0);
+        assertEq(clearinghouse.balanceAssets(EXECUTION_KEEPER), 0);
         uint256 healthyState = vm.snapshotState();
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(EXECUTION_KEEPER).checked_write(1);
+        stdstore.target(address(clearinghouse)).sig("balanceAssets(address)").with_key(EXECUTION_KEEPER)
+            .checked_write(1);
         assertEq(executionPaid, 0, "Subject corruption must not resynchronize the payout model");
         vm.expectRevert(bytes("execution paid once: 1 != 0"));
         this.assertIndependentBountyModel();
@@ -248,11 +249,11 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
             _open(account, CfdTypes.Side.LONG, SIZE, MARGIN, ENTRY_PRICE);
             accounts[account].position = true;
         }
-        uint256 balanceBefore = clearinghouse.balanceUsdc(account);
+        uint256 balanceBefore = clearinghouse.balanceAssets(account);
         vm.prank(account);
         uint64 id = actions.createPositionProtection(_params());
         _newProtection(account, id, 0, Protection.PositionProtectionStatus.Armed);
-        assertEq(clearinghouse.balanceUsdc(account), balanceBefore, "create only locks funds");
+        assertEq(clearinghouse.balanceAssets(account), balanceBefore, "create only locks funds");
         _assertModel();
     }
 
@@ -262,13 +263,13 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         _fundTrader(account, 10_000e6);
         router.updateMarkPrice(_freshData(ENTRY_PRICE, 0));
         OrderV3Types.OrderRequest memory request = _request();
-        uint256 balanceBefore = clearinghouse.balanceUsdc(account);
+        uint256 balanceBefore = clearinghouse.balanceAssets(account);
         vm.prank(account);
         (uint64 orderId, uint64 protectionId) = actions.commitOpenOrderWithProtection(request, _params());
         _newProtection(account, protectionId, orderId, Protection.PositionProtectionStatus.PendingOpen);
         _newOrder(account, orderId, protectionId, false);
         accounts[account].funded += OPEN_BOUNTY;
-        assertEq(clearinghouse.balanceUsdc(account), balanceBefore, "attach only locks funds");
+        assertEq(clearinghouse.balanceAssets(account), balanceBefore, "attach only locks funds");
         _assertModel();
     }
 
@@ -276,14 +277,14 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         address account
     ) internal {
         ModelProtection storage p = protections[accounts[account].protectionId];
-        uint256 balanceBefore = clearinghouse.balanceUsdc(account);
+        uint256 balanceBefore = clearinghouse.balanceAssets(account);
         vm.prank(account);
         actions.cancelPositionProtection(accounts[account].protectionId);
         accounts[account].refunded += p.trigger;
         p.trigger = 0;
         p.status = Protection.PositionProtectionStatus.Cancelled;
         accounts[account].protectionId = 0;
-        assertEq(clearinghouse.balanceUsdc(account), balanceBefore, "refund cannot mint or transfer settlement");
+        assertEq(clearinghouse.balanceAssets(account), balanceBefore, "refund cannot mint or transfer settlement");
         _assertModel();
     }
 
@@ -324,13 +325,13 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         address account
     ) internal {
         uint64 id = accounts[account].protectionId;
-        uint256 balanceBefore = clearinghouse.balanceUsdc(account);
+        uint256 balanceBefore = clearinghouse.balanceAssets(account);
         vm.prank(EXECUTION_KEEPER);
         uint64 orderId = actions.retryPositionProtectionClose(id);
         protections[id].attempt = orderId;
         protections[id].status = Protection.PositionProtectionStatus.Triggered;
         _newOrder(account, orderId, id, true);
-        assertEq(clearinghouse.balanceUsdc(account), balanceBefore, "retry needs no new funding");
+        assertEq(clearinghouse.balanceAssets(account), balanceBefore, "retry needs no new funding");
         _assertModel();
     }
 
@@ -340,20 +341,20 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         if (block.timestamp <= o.deadline) {
             vm.warp(uint256(o.deadline) + 1);
         }
-        uint256 balanceBefore = clearinghouse.balanceUsdc(o.account);
+        uint256 balanceBefore = clearinghouse.balanceAssets(o.account);
         vm.prank(EXECUTION_KEEPER);
         router.executeOrder(id, new bytes[](0));
         ModelProtection storage p = protections[o.protectionId];
         if (o.close) {
             p.status = Protection.PositionProtectionStatus.Latched;
-            assertEq(clearinghouse.balanceUsdc(o.account), balanceBefore, "expiry must retain the retry bounty");
+            assertEq(clearinghouse.balanceAssets(o.account), balanceBefore, "expiry must retain the retry bounty");
         } else {
             _payOrder(o);
             if (p.status == Protection.PositionProtectionStatus.PendingOpen) {
                 _refundProtection(p);
             }
             assertEq(
-                clearinghouse.balanceUsdc(o.account),
+                clearinghouse.balanceAssets(o.account),
                 balanceBefore - OPEN_BOUNTY,
                 "only the ordinary expiry bounty is paid"
             );
@@ -392,7 +393,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
             if (!o.pending || o.close) {
                 continue;
             }
-            uint256 balanceBefore = clearinghouse.balanceUsdc(o.account);
+            uint256 balanceBefore = clearinghouse.balanceAssets(o.account);
             vm.prank(EXECUTION_KEEPER);
             router.clearRiskOffOrder(orderIds[i]);
             accounts[o.account].refunded += OPEN_BOUNTY;
@@ -401,7 +402,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
                 _refundProtection(p);
             }
             _finishOrder(o);
-            assertEq(clearinghouse.balanceUsdc(o.account), balanceBefore, "risk-off only releases classifications");
+            assertEq(clearinghouse.balanceAssets(o.account), balanceBefore, "risk-off only releases classifications");
             _assertModel();
         }
         routerAdmin.unpause();
@@ -412,10 +413,10 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         address account
     ) internal {
         router.updateMarkPrice(_freshData(ENTRY_PRICE, 0));
-        uint256 free = _freeSettlementUsdc(account);
+        uint256 free = _freeSettlementAssets(account);
         vm.prank(account);
         clearinghouse.withdraw(account, free);
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint64 protectionId = accounts[account].protectionId;
         ModelProtection storage p = protections[protectionId];
         uint64 orderId = accounts[account].orderId;
@@ -432,7 +433,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
             _finishOrder(orders[orderId]);
         }
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
             expectedForfeiture,
             "liquidation forfeits each unpaid bounty once"
         );
@@ -515,7 +516,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
             assertEq(uint8(actual.status), uint8(p.status), "protection lifecycle");
             assertEq(actual.parentOrderId, p.parent, "parent linkage");
             assertEq(actual.linkedOrderId, p.attempt, "latest attempt linkage");
-            assertEq(actual.triggerBountyUsdc, p.trigger, "public trigger balance");
+            assertEq(actual.triggerBountyAssets, p.trigger, "public trigger balance");
             unpaid[_actorIndex(p.account)] += p.trigger;
         }
         for (uint256 i; i < orderIds.length; ++i) {
@@ -531,16 +532,16 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
             address account = actors[i];
             ModelAccount storage a = accounts[account];
             assertEq(a.funded, unpaid[i] + a.paid + a.refunded + a.forfeited, "independent bounty conservation");
-            assertEq(clearinghouse.totalBountyReservationsUsdc(account), unpaid[i], "canonical total");
-            assertEq(clearinghouse.actionReserveUsdc(account), unpaid[i], "reserve backing with zero VPI");
-            assertEq(router.getAccountReservations(account).executionBountyUsdc, unpaid[i], "Router aggregate");
+            assertEq(clearinghouse.totalBountyReservationsAssets(account), unpaid[i], "canonical total");
+            assertEq(clearinghouse.actionReserveAssets(account), unpaid[i], "reserve backing with zero VPI");
+            assertEq(router.getAccountReservations(account).executionBountyAssets, unpaid[i], "Router aggregate");
             assertEq(views.activePositionProtectionId(account), a.protectionId, "active protection");
             assertEq(router.pendingOrderCounts(account), a.orderId == 0 ? 0 : 1, "live attempt/parent count");
             (uint256 size,,,,,,) = engine.positions(account);
             assertEq(size, a.position ? SIZE : 0, "position lifecycle");
         }
-        assertEq(clearinghouse.balanceUsdc(TRIGGER_KEEPER), triggerPaid, "trigger paid once");
-        assertEq(clearinghouse.balanceUsdc(EXECUTION_KEEPER), executionPaid, "execution paid once");
+        assertEq(clearinghouse.balanceAssets(TRIGGER_KEEPER), triggerPaid, "trigger paid once");
+        assertEq(clearinghouse.balanceAssets(EXECUTION_KEEPER), executionPaid, "execution paid once");
     }
 
     function _assertReservation(
@@ -551,14 +552,14 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
     ) internal view {
         IMarginClearinghouse.BountyReservation memory actual = clearinghouse.getBountyReservation(kind, id);
         assertEq(actual.account, account, "namespace account attribution");
-        assertEq(actual.amountUsdc, amount, "namespace amount including terminal records");
+        assertEq(actual.amountAssets, amount, "namespace amount including terminal records");
     }
 
     function _pendingAmounts(
         uint64 id
     ) internal view returns (uint256 bounty, uint256 margin) {
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(id);
-        return (pending.executionBountyUsdc, pending.committedMarginUsdc);
+        return (pending.executionBountyAssets, pending.committedMarginAssets);
     }
 
     function _actorIndex(
@@ -590,10 +591,10 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
             takeProfitTriggerPrice: 0,
             stopLossTriggerPrice: STOP_PRICE,
             closeLimits: Protection.CloseFinancialLimits({
-                maxExecutionNotionalUsdc: type(uint256).max,
-                maxGrossAccountDebitUsdc: type(uint256).max,
-                maxActionChargeUsdc: type(uint256).max,
-                maxExplicitFeesUsdc: type(uint256).max
+                maxExecutionNotionalAssets: type(uint256).max,
+                maxGrossAccountDebitAssets: type(uint256).max,
+                maxActionChargeAssets: type(uint256).max,
+                maxExplicitFeesAssets: type(uint256).max
             })
         });
     }
@@ -609,11 +610,11 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
             uint32(uint256(uint64(block.timestamp + router.maxExecutionWindowSeconds())) - block.timestamp);
         request.bounds.allowedExecutionModes = 7;
         request.bounds.expectedConfigHash = router.lifecycleBook().currentExecutionConfigHash();
-        request.bounds.maxExecutionBountyUsdc = type(uint256).max;
-        request.bounds.maxExecutionNotionalUsdc = type(uint256).max;
-        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
-        request.bounds.maxActionChargeUsdc = type(uint256).max;
-        request.bounds.maxExplicitFeesUsdc = type(uint256).max;
+        request.bounds.maxExecutionBountyAssets = type(uint256).max;
+        request.bounds.maxExecutionNotionalAssets = type(uint256).max;
+        request.bounds.maxGrossAccountDebitAssets = type(uint256).max;
+        request.bounds.maxActionChargeAssets = type(uint256).max;
+        request.bounds.maxExplicitFeesAssets = type(uint256).max;
         request.bounds.maxPostPositionSize = type(uint256).max;
         request.bounds.maxPostLeverageBps = type(uint32).max;
     }

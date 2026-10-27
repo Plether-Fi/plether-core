@@ -29,14 +29,14 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         address account = trader;
         uint256 sizeDelta = 3400e18;
         uint256 marginDelta = 110e6;
-        uint256 executionBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(sizeDelta);
+        uint256 executionBountyAssets = _quoteOpenOrderExecutionBountyAssets(sizeDelta);
 
-        _fundTrader(trader, marginDelta + executionBountyUsdc);
+        _fundTrader(trader, marginDelta + executionBountyAssets);
         _open(account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8);
 
         assertEq(
-            _freeSettlementUsdc(account),
-            executionBountyUsdc,
+            _freeSettlementAssets(account),
+            executionBountyAssets,
             "setup must leave only the future execution bounty as free settlement"
         );
 
@@ -44,12 +44,12 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, sizeDelta, 0, 1e8, false);
 
         assertLt(
-            _freeSettlementUsdc(account),
-            executionBountyUsdc,
+            _freeSettlementAssets(account),
+            executionBountyAssets,
             "commit should materially reduce the only free settlement while reserving the execution bounty"
         );
 
-        uint256 keeperBefore = clearinghouse.balanceUsdc(address(this));
+        uint256 keeperBefore = clearinghouse.balanceAssets(address(this));
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
@@ -62,7 +62,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         );
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            executionBountyUsdc,
+            executionBountyAssets,
             "keeper should receive the reserved execution bounty as clearinghouse credit after terminal failure"
         );
         assertEq(
@@ -90,7 +90,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         vm.stopPrank();
 
         assertEq(
-            clearinghouse.lockedMarginUsdc(account),
+            clearinghouse.lockedMarginAssets(account),
             1500 * 1e6 + 400_000,
             "Both committed margins and execution bounties should be locked"
         );
@@ -103,17 +103,17 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         IMarginClearinghouse.PnlIsolationBuckets memory afterFirstOrderBuckets =
             clearinghouse.getPnlIsolationBuckets(account);
         assertEq(
-            afterFirstOrderBuckets.pnlPledgeUsdc,
+            afterFirstOrderBuckets.pnlPledgeAssets,
             posMargin,
             "Position tuple and canonical PnL-pledge bucket should agree"
         );
-        assertEq(afterFirstOrderBuckets.orderMarginUsdc, 500 * 1e6, "Order 2 committed margin should remain isolated");
+        assertEq(afterFirstOrderBuckets.orderMarginAssets, 500 * 1e6, "Order 2 committed margin should remain isolated");
         assertEq(
-            afterFirstOrderBuckets.actionReserveUsdc, 200_000, "Only order 2 execution bounty should remain reserved"
+            afterFirstOrderBuckets.actionReserveAssets, 200_000, "Only order 2 execution bounty should remain reserved"
         );
         assertEq(
-            clearinghouse.lockedMarginUsdc(account),
-            posMargin + afterFirstOrderBuckets.liquidationReserveUsdc + 500 * 1e6 + 200_000,
+            clearinghouse.lockedMarginAssets(account),
+            posMargin + afterFirstOrderBuckets.liquidationReserveAssets + 500 * 1e6 + 200_000,
             "Typed locks should preserve order 2 margin and the liquidation reserve"
         );
         assertEq(_remainingCommittedMargin(1), 0, "Order 1 committed margin must be cleared on success");
@@ -125,12 +125,12 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         IMarginClearinghouse.PnlIsolationBuckets memory afterFailedOrderBuckets =
             clearinghouse.getPnlIsolationBuckets(account);
         assertEq(
-            clearinghouse.lockedMarginUsdc(account),
-            posMarginAfter + afterFailedOrderBuckets.liquidationReserveUsdc,
+            clearinghouse.lockedMarginAssets(account),
+            posMarginAfter + afterFailedOrderBuckets.liquidationReserveAssets,
             "Failed order 2 should unlock only order margin and action reserve"
         );
-        assertEq(afterFailedOrderBuckets.orderMarginUsdc, 0);
-        assertEq(afterFailedOrderBuckets.actionReserveUsdc, 0);
+        assertEq(afterFailedOrderBuckets.orderMarginAssets, 0);
+        assertEq(afterFailedOrderBuckets.actionReserveAssets, 0);
         assertEq(_remainingCommittedMargin(2), 0, "Order 2 committed margin must be cleared on failure");
     }
 
@@ -145,12 +145,14 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
 
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         assertEq(
-            reservation.committedMarginUsdc,
+            reservation.committedMarginAssets,
             1500 * 1e6,
             "Reservation view should sum committed margin across pending opens"
         );
         assertEq(
-            reservation.executionBountyUsdc, 400_000, "Open and close orders should both reservation execution bounties"
+            reservation.executionBountyAssets,
+            400_000,
+            "Open and close orders should both reservation execution bounties"
         );
         assertEq(reservation.pendingOrderCount, 2, "Reservation view should count queued orders");
     }
@@ -167,8 +169,8 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(account);
         assertEq(reservation.pendingOrderCount, 2);
-        assertEq(reservation.committedMarginUsdc, 1500 * 1e6);
-        assertEq(reservation.executionBountyUsdc, 400_000);
+        assertEq(reservation.committedMarginAssets, 1500 * 1e6);
+        assertEq(reservation.executionBountyAssets, 400_000);
         assertEq(pending.length, 2);
         assertFalse(pending[1].isClose);
     }
@@ -203,7 +205,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(103_000_000, uint64(vm.getBlockTimestamp()));
 
-        assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
+        assertEq(_freeSettlementAssets(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
         vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
@@ -227,7 +229,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         _open(account, CfdTypes.Side.LONG, positionSize, 50_000e6, 1e8, depth);
 
         (, uint256 marginBeforeCommit,,,,,) = engine.positions(account);
-        assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
+        assertEq(_freeSettlementAssets(account), 0, "setup must fully consume free settlement");
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, partialCloseSize, 0, 0, true);
@@ -265,7 +267,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         // Exhaust free settlement so the live action charge reaches exactly the intended order margin.
-        uint256 freeSettlement = clearinghouse.getFreeBuyingPowerUsdc(account);
+        uint256 freeSettlement = clearinghouse.getFreeBuyingPowerAssets(account);
         vm.prank(account);
         clearinghouse.withdraw(account, freeSettlement);
         vm.prank(address(engine));
@@ -273,7 +275,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
 
         assertEq(_remainingCommittedMargin(1), 600 * 1e6, "Partial consumption should leave residual committed margin");
         assertEq(
-            clearinghouse.getOrderReservation(1).remainingAmountUsdc,
+            clearinghouse.getOrderReservation(1).remainingAmountAssets,
             600 * 1e6,
             "Reservation residual should match router-side committed margin residual"
         );
@@ -294,7 +296,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         vm.stopPrank();
 
         // Exhaust free settlement so the live action charge reaches exactly the intended order margin.
-        uint256 freeSettlement = clearinghouse.getFreeBuyingPowerUsdc(account);
+        uint256 freeSettlement = clearinghouse.getFreeBuyingPowerAssets(account);
         vm.prank(account);
         clearinghouse.withdraw(account, freeSettlement);
         vm.prank(address(engine));
@@ -319,12 +321,12 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         );
         assertTrue(_isInMarginQueue(2), "Residual positive-margin order should remain in the margin queue");
         assertEq(
-            clearinghouse.getOrderReservation(1).remainingAmountUsdc,
+            clearinghouse.getOrderReservation(1).remainingAmountAssets,
             0,
             "First reservation should be fully consumed alongside router head exposure"
         );
         assertEq(
-            clearinghouse.getOrderReservation(2).remainingAmountUsdc,
+            clearinghouse.getOrderReservation(2).remainingAmountAssets,
             250 * 1e6,
             "Later reservation should retain its committed margin"
         );
@@ -339,19 +341,19 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 250 * 1e6, 2e8, false);
         vm.stopPrank();
 
-        uint256 freeSettlement = _freeSettlementUsdc(account);
+        uint256 freeSettlement = _freeSettlementAssets(account);
         vm.prank(alice);
         clearinghouse.withdraw(account, freeSettlement);
 
         IMarginClearinghouse.LockedMarginBuckets memory beforeBuckets = clearinghouse.getLockedMarginBuckets(account);
-        assertEq(beforeBuckets.committedOrderMarginUsdc, 500 * 1e6, "Setup must lock both committed-order buckets");
+        assertEq(beforeBuckets.committedOrderMarginAssets, 500 * 1e6, "Setup must lock both committed-order buckets");
 
         vm.prank(address(engine));
-        (uint256 seizedUsdc, uint256 shortfallUsdc) =
+        (uint256 seizedAssets, uint256 shortfallAssets) =
             clearinghouse.consumePnlPledgeLoss(account, 300 * 1e6, address(engine));
 
-        assertEq(seizedUsdc, 0, "Price loss cannot seize committed-order margin");
-        assertEq(shortfallUsdc, 300 * 1e6, "Loss without a PnL pledge should remain uncovered");
+        assertEq(seizedAssets, 0, "Price loss cannot seize committed-order margin");
+        assertEq(shortfallAssets, 300 * 1e6, "Loss without a PnL pledge should remain uncovered");
         assertEq(_remainingCommittedMargin(1), 250 * 1e6, "First order margin should remain isolated");
         assertEq(_remainingCommittedMargin(2), 250 * 1e6, "Second order margin should remain isolated");
 
@@ -363,7 +365,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         IMarginClearinghouse.OrderReservation memory firstReservation = clearinghouse.getOrderReservation(1);
         IMarginClearinghouse.OrderReservation memory secondReservation = clearinghouse.getOrderReservation(2);
         assertEq(
-            afterBuckets.committedOrderMarginUsdc,
+            afterBuckets.committedOrderMarginAssets,
             0,
             "Normal order finalization should release both committed-order buckets"
         );
@@ -388,12 +390,12 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
             _remainingCommittedMargin(1), 250 * 1e6, "Router should still track the per-order committed margin locally"
         );
         assertEq(
-            reservation.remainingAmountUsdc,
+            reservation.remainingAmountAssets,
             250 * 1e6,
             "Clearinghouse reservation should mirror the router committed margin"
         );
         assertEq(
-            summary.activeCommittedOrderMarginUsdc,
+            summary.activeCommittedOrderMarginAssets,
             250 * 1e6,
             "Reservation summary should match the live committed-order bucket"
         );
@@ -413,20 +415,20 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 250 * 1e6, 2e8, false);
         vm.stopPrank();
 
-        uint256 freeSettlement = _freeSettlementUsdc(account);
+        uint256 freeSettlement = _freeSettlementAssets(account);
         vm.prank(alice);
         clearinghouse.withdraw(account, freeSettlement);
 
         vm.prank(address(engine));
         clearinghouse.consumeActionCharge(account, 300 * 1e6, 0, 300 * 1e6, address(engine), address(0), 0);
-        assertEq(clearinghouse.getOrderReservation(1).remainingAmountUsdc, 0);
-        assertEq(clearinghouse.getOrderReservation(2).remainingAmountUsdc, 200 * 1e6);
+        assertEq(clearinghouse.getOrderReservation(1).remainingAmountAssets, 0);
+        assertEq(clearinghouse.getOrderReservation(2).remainingAmountAssets, 200 * 1e6);
 
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
         assertEq(
-            clearinghouse.getOrderReservation(1).remainingAmountUsdc,
+            clearinghouse.getOrderReservation(1).remainingAmountAssets,
             0,
             "Consumed reservation should remain zero after execution cleanup"
         );

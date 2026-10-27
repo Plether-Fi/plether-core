@@ -56,13 +56,13 @@ interface IOrderLiquidationBatchHost {
         uint64 orderId
     ) external view returns (IOrderRouterAccounting.PendingOrderView memory pending, uint64 nextAccountOrderId);
 
-    function minOpenNotionalUsdc() external view returns (uint256);
+    function minOpenNotionalAssets() external view returns (uint256);
 
     function openOrderExecutionBountyBps() external view returns (uint256);
 
-    function minOpenOrderExecutionBountyUsdc() external view returns (uint256);
+    function minOpenOrderExecutionBountyAssets() external view returns (uint256);
 
-    function maxOpenOrderExecutionBountyUsdc() external view returns (uint256);
+    function maxOpenOrderExecutionBountyAssets() external view returns (uint256);
 
     function executeCommitOrderItem() external;
 
@@ -168,7 +168,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     function commitProtectedClose(
         address account,
         OrderV3Types.OrderRequest calldata request,
-        uint256 triggerBountyRefundUsdc
+        uint256 triggerBountyRefundAssets
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
@@ -176,7 +176,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         // The Book has taken the trigger-bounty classification. Release it without a carry checkpoint so all
         // commitment carry is collected, bounded and recorded by the ordinary close path below.
         IMarginClearinghouse(host.engine().clearinghouse())
-            .releaseReservedExecutionBountyToSource(account, triggerBountyRefundUsdc);
+            .releaseReservedExecutionBountyToSource(account, triggerBountyRefundAssets);
         return _commitOrder(host, account, request, true);
     }
 
@@ -231,36 +231,36 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         _validateFreshRequest(host, account, request, enforceProtectionLock);
-        uint256 executionBountyUsdc;
+        uint256 executionBountyAssets;
         if (request.isClose) {
             _validateCloseAdmission(host, account, request.side, request.sizeDelta);
         } else {
-            executionBountyUsdc =
+            executionBountyAssets =
                 _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
         }
-        if (executionBountyUsdc > request.bounds.maxExecutionBountyUsdc) {
+        if (executionBountyAssets > request.bounds.maxExecutionBountyAssets) {
             revert IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound(
-                executionBountyUsdc, request.bounds.maxExecutionBountyUsdc
+                executionBountyAssets, request.bounds.maxExecutionBountyAssets
             );
         }
-        if (executionBountyUsdc > request.bounds.maxGrossAccountDebitUsdc) {
+        if (executionBountyAssets > request.bounds.maxGrossAccountDebitAssets) {
             revert OrderRouter__ExecutionBountyAboveGrossDebit(
-                executionBountyUsdc, request.bounds.maxGrossAccountDebitUsdc
+                executionBountyAssets, request.bounds.maxGrossAccountDebitAssets
             );
         }
 
         orderId = host.nextCommitId();
         (uint64 registeredOrderId,, bool replayed) =
-            book.registerPending(account, orderId, request, executionBountyUsdc);
+            book.registerPending(account, orderId, request, executionBountyAssets);
         if (replayed || registeredOrderId != orderId) {
             revert IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed(orderId);
         }
-        _queueCommittedOrder(host, account, orderId, request, executionBountyUsdc);
-        uint256 minimum = request.bounds.minPostSettlementBalanceUsdc;
+        _queueCommittedOrder(host, account, orderId, request, executionBountyAssets);
+        uint256 minimum = request.bounds.minPostSettlementBalanceAssets;
         if (minimum != 0) {
             // Reservations have completed. A positive floor reserves the declared worst-case debit, not a preview.
-            uint256 balance = IMarginClearinghouse(host.engine().clearinghouse()).balanceUsdc(account);
-            uint256 maximumDebit = request.bounds.maxGrossAccountDebitUsdc;
+            uint256 balance = IMarginClearinghouse(host.engine().clearinghouse()).balanceAssets(account);
+            uint256 maximumDebit = request.bounds.maxGrossAccountDebitAssets;
             if (balance < minimum || balance - minimum < maximumDebit) {
                 revert OrderRouter__SettlementFloorFunding(orderId, balance, minimum, maximumDebit);
             }
@@ -301,10 +301,10 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
         OrderValidationLib.validateBaseCommit(request.sizeDelta, request.marginDelta, request.isClose);
         uint64 head = host.accountHeadOrderId(account);
-        if (head != 0 && host.lifecycleBook().pendingPolicy(head).minPostSettlementBalanceUsdc != 0) {
+        if (head != 0 && host.lifecycleBook().pendingPolicy(head).minPostSettlementBalanceAssets != 0) {
             revert OrderRouter__SettlementFloorOrderPending(head);
         }
-        if (bounds.minPostSettlementBalanceUsdc != 0) {
+        if (bounds.minPostSettlementBalanceAssets != 0) {
             (uint256 positionSize,,,,,,) = host.engine().positions(account);
             if (request.isClose || positionSize != 0 || head != 0) {
                 revert OrderRouter__SettlementFloorUnsupported();
@@ -358,7 +358,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         // and the Router's bounded pending-order count, while commitPrice is capped.
         if (
             sizeDelta < queuedPosition.size
-                && (sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice < host.minOpenNotionalUsdc()
+                && (sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice < host.minOpenNotionalAssets()
         ) {
             revert OrderRouter__CommitValidation(11);
         }
@@ -407,7 +407,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta
-    ) private view returns (uint256 executionBountyUsdc) {
+    ) private view returns (uint256 executionBountyAssets) {
         ICfdEngineCore engine = host.engine();
         uint256 commitPrice = _commitReferencePrice(engine);
         uint256 lots = sizeDelta / CfdTypes.SIZE_QUANTUM;
@@ -415,8 +415,8 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert OrderRouter__PredictableOpenInvalid(uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
         }
         // Quantum was checked at admission. uint112 lots times the uint32-capped mark fits uint144 exactly.
-        uint256 notionalUsdc = lots * commitPrice;
-        if (notionalUsdc < host.minOpenNotionalUsdc()) {
+        uint256 notionalAssets = lots * commitPrice;
+        if (notionalAssets < host.minOpenNotionalAssets()) {
             revert OrderRouter__CommitValidation(11);
         }
 
@@ -445,13 +445,13 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             }
         }
 
-        executionBountyUsdc = (notionalUsdc * host.openOrderExecutionBountyBps()) / 10_000;
-        uint256 minimumBountyUsdc = host.minOpenOrderExecutionBountyUsdc();
-        if (executionBountyUsdc < minimumBountyUsdc) {
-            executionBountyUsdc = minimumBountyUsdc;
+        executionBountyAssets = (notionalAssets * host.openOrderExecutionBountyBps()) / 10_000;
+        uint256 minimumBountyAssets = host.minOpenOrderExecutionBountyAssets();
+        if (executionBountyAssets < minimumBountyAssets) {
+            executionBountyAssets = minimumBountyAssets;
         }
-        uint256 maximumBountyUsdc = host.maxOpenOrderExecutionBountyUsdc();
-        return executionBountyUsdc > maximumBountyUsdc ? maximumBountyUsdc : executionBountyUsdc;
+        uint256 maximumBountyAssets = host.maxOpenOrderExecutionBountyAssets();
+        return executionBountyAssets > maximumBountyAssets ? maximumBountyAssets : executionBountyAssets;
     }
 
     function _commitReferencePrice(
@@ -470,7 +470,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         address account,
         uint64 orderId,
         OrderV3Types.OrderRequest calldata request,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) private {
         bytes memory itemCall = abi.encodeWithSelector(
             IOrderLiquidationBatchHost.executeCommitOrderItem.selector,
@@ -481,7 +481,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             request.targetPrice,
             request.side,
             request.isClose,
-            executionBountyUsdc
+            executionBountyAssets
         );
         (bool recorded, bytes memory revertData) = address(host).call(itemCall);
         if (!recorded) {
@@ -615,7 +615,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             _registerProtectionTrigger(host, protectionId, linkedOrderId, plan);
             _queueProtectionAttempt(host, linkedOrderId, plan.account, plan.side, plan.size);
             engine.creditBounty(
-                plan.account, refundRecipient, plan.triggerBountyUsdc, snapshot.markPrice, snapshot.publishTime
+                plan.account, refundRecipient, plan.triggerBountyAssets, snapshot.markPrice, snapshot.publishTime
             );
         }
         _sendEth(host.admin(), refundRecipient, msg.value - pythFee);
@@ -670,11 +670,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         request.bounds.executionWindowSeconds = uint32(host.maxExecutionWindowSeconds());
         request.bounds.allowedExecutionModes = ALL_V3_EXECUTION_MODES;
         request.bounds.expectedConfigHash = bytes32(0);
-        request.bounds.maxExecutionBountyUsdc = 0;
-        request.bounds.maxExecutionNotionalUsdc = limits.maxExecutionNotionalUsdc;
-        request.bounds.maxGrossAccountDebitUsdc = limits.maxGrossAccountDebitUsdc;
-        request.bounds.maxActionChargeUsdc = limits.maxActionChargeUsdc;
-        request.bounds.maxExplicitFeesUsdc = limits.maxExplicitFeesUsdc;
+        request.bounds.maxExecutionBountyAssets = 0;
+        request.bounds.maxExecutionNotionalAssets = limits.maxExecutionNotionalAssets;
+        request.bounds.maxGrossAccountDebitAssets = limits.maxGrossAccountDebitAssets;
+        request.bounds.maxActionChargeAssets = limits.maxActionChargeAssets;
+        request.bounds.maxExplicitFeesAssets = limits.maxExplicitFeesAssets;
         request.bounds.maxPostPositionSize = type(uint256).max;
         request.bounds.maxPostLeverageBps = type(uint32).max;
     }

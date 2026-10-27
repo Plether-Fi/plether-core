@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { encodeAbiParameters, encodeEventTopics, sha256, toHex, type AbiParameter, type Hex } from "viem";
 import {
-  decodeVerifiedOrderFinalized, hashOrderReceiptV5, orderLifecycleV4Abi, orderLifecycleV5Abi,
+  decodeVerifiedOrderFinalized, hashOrderReceiptV5, orderLifecycleV5Abi,
   type OrderReceiptV5, type TerminalOutcomeV5,
 } from "../src/index.js";
+
+import { orderLifecycleV4Abi } from "./compatibility/historical/orderLifecycleV4Abi.js";
 
 const book = "0x1111111111111111111111111111111111111111";
 const router = "0x2222222222222222222222222222222222222222";
@@ -42,7 +44,7 @@ describe("authenticated terminal history", () => {
     expect(currentNames).not.toContain("closeMode");
     expect(currentNames).toContain("timing");
     const currentTuple = JSON.stringify(event.inputs[6]);
-    for (const retired of ["bountyFromPledgeUsdc", "bountyRetainedUsdc", "sourcePositionEpoch"]) {
+    for (const retired of ["bountyFromPledgeAssets", "bountyRetainedAssets", "sourcePositionEpoch"]) {
       expect(currentTuple).not.toContain(retired);
     }
   });
@@ -58,28 +60,28 @@ describe("authenticated terminal history", () => {
     // This is a consumer encoding/authentication fixture; on-chain Book tests establish economic authority.
     const terminal: OrderReceiptV5 = { ...receipt,
       status: bountyDisposition === 1 ? 2 : 3, reason: bountyDisposition === 1 ? 1 : bountyDisposition === 2 ? 9 : 6,
-      bountyDisposition, bountyUsdc: 200_000n, bountyRecipient: bountyDisposition === 3 ? account : router, executor: router,
-      commitment: { ...receipt.commitment, bountyFromFreeUsdc: 200_000n },
-      bounty: { ...receipt.bounty, bountyEntitlementUsdc: 200_000n,
-        bountyRefundedUsdc: bountyDisposition === 3 ? 200_000n : 0n,
-        bountyPaidUsdc: bountyDisposition === 1 ? 200_000n : 0n,
-        bountyForfeitedUsdc: bountyDisposition === 2 ? 200_000n : 0n },
+      bountyDisposition, bountyAssets: 200_000n, bountyRecipient: bountyDisposition === 3 ? account : router, executor: router,
+      commitment: { ...receipt.commitment, bountyFromFreeAssets: 200_000n },
+      bounty: { ...receipt.bounty, bountyEntitlementAssets: 200_000n,
+        bountyRefundedAssets: bountyDisposition === 3 ? 200_000n : 0n,
+        bountyPaidAssets: bountyDisposition === 1 ? 200_000n : 0n,
+        bountyForfeitedAssets: bountyDisposition === 2 ? 200_000n : 0n },
     };
     const terminalHash = hashOrderReceiptV5({ ...context, receipt: terminal });
     const terminalSummary = { ...summary, status: terminal.status, reason: terminal.reason, receiptHash: terminalHash };
     const log = { ...logFor(terminal), data: encodeAbiParameters(event.inputs.filter((p) => !p.indexed),
       [terminalHash, context.terminalBlock, context.terminalTime, terminal]) };
     expect(decodeVerifiedOrderFinalized({ ...input, summary: terminalSummary, log }).receipt).toEqual(terminal);
-    const changed = { ...terminal, bounty: { ...terminal.bounty, bountyRefundedUsdc: 150_001n } };
+    const changed = { ...terminal, bounty: { ...terminal.bounty, bountyRefundedAssets: 150_001n } };
     const forged = { ...log, data: encodeAbiParameters(event.inputs.filter((p) => !p.indexed),
       [terminalHash, context.terminalBlock, context.terminalTime, changed]) };
     expect(() => decodeVerifiedOrderFinalized({ ...input, summary: terminalSummary, log: forged })).toThrow(/authenticated history/);
   });
   it("rejects altered economics, commitment, bounty and indexed identity", () => {
     for (const changed of [
-      { ...receipt, economics: { ...receipt.economics, postSettlementBalanceUsdc: 1n } },
-      { ...receipt, commitment: { ...receipt.commitment, carryCollectedUsdc: 1n } },
-      { ...receipt, bounty: { ...receipt.bounty, bountyRefundedUsdc: 1n } },
+      { ...receipt, economics: { ...receipt.economics, postSettlementBalanceAssets: 1n } },
+      { ...receipt, commitment: { ...receipt.commitment, carryCollectedAssets: 1n } },
+      { ...receipt, bounty: { ...receipt.bounty, bountyRefundedAssets: 1n } },
       { ...receipt, timing: { ...receipt.timing, executionDeadline: 1n } },
     ]) expect(() => decodeVerifiedOrderFinalized({ ...input, log: logFor(changed) })).toThrow(/authenticated history/);
     const log = logFor();

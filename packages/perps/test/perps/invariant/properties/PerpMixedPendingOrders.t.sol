@@ -33,7 +33,7 @@ contract PerpMixedPendingOrdersTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
         handler = new PerpMixedAccountingHandler(
-            usdc,
+            settlementToken,
             baseMockPyth,
             engine,
             clearinghouse,
@@ -229,7 +229,7 @@ contract PerpMixedPendingOrdersTest is BasePerpTest {
         handler.commitOpen(0, 117, 120_000_002);
         uint64 id = handler.orders().head();
         IMarginClearinghouse.OrderReservation memory corrupt = clearinghouse.getOrderReservation(id);
-        corrupt.remainingAmountUsdc -= 1;
+        corrupt.remainingAmountAssets -= 1;
         vm.mockCall(
             address(clearinghouse),
             abi.encodeWithSelector(clearinghouse.getOrderReservation.selector, id),

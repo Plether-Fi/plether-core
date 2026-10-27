@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -21,7 +22,6 @@ import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract PerpOraclePathHandler is Test {
@@ -107,11 +107,11 @@ contract PerpOraclePathHandler is Test {
         config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.minOpenNotionalAssets = router.minOpenNotionalAssets();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.minOpenOrderExecutionBountyAssets = router.minOpenOrderExecutionBountyAssets();
+        config.maxOpenOrderExecutionBountyAssets = router.maxOpenOrderExecutionBountyAssets();
+        config.positionProtectionTriggerBountyAssets = router.positionProtectionTriggerBountyAssets();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();
         config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
@@ -134,11 +134,11 @@ contract PerpOraclePathHandler is Test {
         config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.minOpenNotionalAssets = router.minOpenNotionalAssets();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.minOpenOrderExecutionBountyAssets = router.minOpenOrderExecutionBountyAssets();
+        config.maxOpenOrderExecutionBountyAssets = router.maxOpenOrderExecutionBountyAssets();
+        config.positionProtectionTriggerBountyAssets = router.positionProtectionTriggerBountyAssets();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();
         config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
@@ -358,8 +358,8 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        settlementToken = new MockSettlementToken();
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
 
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
@@ -368,13 +368,13 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
 
         pool.setSeniorVault(address(seniorVault));

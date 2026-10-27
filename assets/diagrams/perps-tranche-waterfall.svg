@@ -61,7 +61,7 @@
 <text x="308.675" y="627.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">3 · Junior Receives Surplus</text>
 <text x="706.7249999999999" y="458.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#92400e">1 · Junior Absorbs First Loss</text>
 <text x="706.7249999999999" y="551.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#92400e">2 · Senior Absorbs Last Loss</text>
-<text x="945.075" y="134" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">distributable = USDC balance − pending fees − unrealized trader gains</text>
+<text x="945.075" y="134" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">distributable = asset balance − pending fees − unrealized trader gains</text>
 <text x="308.675" y="703.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Senior protected: principal and yield paid before junior sees revenue</text>
 <text x="706.7249999999999" y="627.85" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">Junior subordinated: fully wiped before senior takes any impairment</text>
 </svg>

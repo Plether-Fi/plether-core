@@ -138,9 +138,9 @@ abstract contract SettlementMonitorLensTestFixture is BasePerpTest {
         address owner,
         uint256 assets
     ) internal returns (uint256 requestId) {
-        usdc.mint(owner, assets);
+        settlementToken.mint(owner, assets);
         vm.startPrank(owner);
-        usdc.approve(address(vault), assets);
+        settlementToken.approve(address(vault), assets);
         requestId = vault.requestDeposit(assets, owner, owner);
         vm.stopPrank();
     }

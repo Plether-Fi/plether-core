@@ -7,7 +7,7 @@ pragma solidity 0.8.35;
 library CfdTypes {
 
     /// @notice Canonical position-size quantum: one lot represents 100 synthetic tokens.
-    /// @dev With 8-decimal prices, `lots * price` is exactly denominated in 6-decimal USDC atoms.
+    /// @dev With 8-decimal prices, `lots * price` is exactly denominated in 6-decimal settlement token atoms.
     uint256 internal constant SIZE_QUANTUM = 1e20;
 
     /// @notice Direction of a position or order relative to Plether's dollar index.
@@ -23,18 +23,18 @@ library CfdTypes {
     /// @dev Live `margin` is read from the clearinghouse-owned PnL-pledge bucket; the engine does not store a separate
     ///      per-position margin balance. Planner snapshots may project changes to that live value in memory.
     /// @param size Position notional in synthetic-token units (18 decimals).
-    /// @param margin Current or projected clearinghouse PnL pledge in USDC units (6 decimals).
+    /// @param margin Current or projected clearinghouse PnL pledge in settlement token units (6 decimals).
     /// @param entryPrice Display-only average entry mark, floored from exact remaining entry cost per lot (8 decimals).
-    /// @param maxProfitUsdc Cumulative maximum-profit envelope used for solvency accounting (6-decimal USDC).
+    /// @param maxProfitAssets Cumulative maximum-profit envelope used for solvency accounting (6-decimal settlement token).
     /// @param side Direction of the position.
     /// @param lastUpdateTime Unix timestamp of the position's most recent state change.
     /// @param lastCarryTimestamp Unix timestamp through which carry has been checkpointed; unpaid carry may remain.
-    /// @param vpiAccrued Signed cumulative VPI charged (positive) or rebated (negative), in 6-decimal USDC.
+    /// @param vpiAccrued Signed cumulative VPI charged (positive) or rebated (negative), in 6-decimal settlement token.
     struct Position {
         uint256 size; // [18 dec] Notional size in synthetic tokens
         uint256 margin; // [6 dec] Current or projected clearinghouse PnL pledge
         uint256 entryPrice; // [8 dec] Display-only average; exact basis is stored separately
-        uint256 maxProfitUsdc; // [6 dec] Cumulative max profit tracked to avoid truncation underflow
+        uint256 maxProfitAssets; // [6 dec] Cumulative max profit tracked to avoid truncation underflow
         Side side; // [uint8] Trade direction
         uint64 lastUpdateTime; // [uint64] Timestamp of last modification
         uint64 lastCarryTimestamp; // [uint64] Last carry checkpoint; collection can be incomplete
@@ -44,7 +44,7 @@ library CfdTypes {
     /// @notice A delayed trade intent waiting for keeper execution.
     /// @param account Canonical clearinghouse account that submitted the order.
     /// @param sizeDelta Position-size change in synthetic-token units (18 decimals).
-    /// @param marginDelta Margin committed by an open/increase order in 6-decimal USDC; close orders require zero.
+    /// @param marginDelta Margin committed by an open/increase order in 6-decimal settlement token; close orders require zero.
     /// @param targetPrice Direction-aware execution limit (8 decimals); production V3 commits require it nonzero.
     /// @param commitTime Unix timestamp at submission, used for expiry and post-commit oracle checks.
     /// @param commitBlock Execution-chain block number at submission (L2 on Arbitrum), used to block same-block
@@ -96,7 +96,7 @@ library CfdTypes {
     /// @param initMarginBps Initial-margin ratio for opens and increases in basis points.
     /// @param fadMarginBps Maintenance-margin ratio used during the FAD window in basis points.
     /// @param baseCarryBps Annualized rate at full side utilization, in basis points, applied to LP-backed profit exposure.
-    /// @param minBountyUsdc Minimum liquidation charge/reserve and initial-equity floor in 6-decimal USDC.
+    /// @param minBountyAssets Minimum liquidation charge/reserve and initial-equity floor in 6-decimal settlement token.
     /// @param bountyBps Variable total liquidation-charge rate applied to notional in basis points.
     /// @param keeperShareBps Keeper share of the collected liquidation charge in basis points.
     /// @param protocolShareBps Protocol-treasury share of the collected liquidation charge in basis points; LPs receive
@@ -108,7 +108,7 @@ library CfdTypes {
         uint256 initMarginBps; // e.g., 150 (1.5%)
         uint256 fadMarginBps; // e.g., 300 (3%)
         uint256 baseCarryBps; // e.g., 500 (5% annualized on LP-backed profit exposure at full utilization)
-        uint256 minBountyUsdc; // e.g., 1_000_000 ($1 USDC total charge floor)
+        uint256 minBountyAssets; // e.g., 1_000_000 ($1 settlementToken total charge floor)
         uint256 bountyBps; // e.g., 10 (0.10% of notional total charge)
         uint256 keeperShareBps; // e.g., 5_000 (50% of the collected charge)
         uint256 protocolShareBps; // e.g., 0 (protocol fee disabled by default)

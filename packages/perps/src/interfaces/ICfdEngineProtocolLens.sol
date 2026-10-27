@@ -6,7 +6,7 @@ import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewT
 
 /// @notice Rich protocol and HousePool integration read surface for internal tooling.
 /// @dev Permissionless and read-only. Reads cached state without refreshing a mark or mutating the engine. Monetary
-///      fields use 6-decimal USDC, prices use 8 decimals, and timestamps or durations use seconds.
+///      fields use 6-decimal settlement token, prices use 8 decimals, and timestamps or durations use seconds.
 interface ICfdEngineProtocolLens {
 
     /// @notice Returns the detailed protocol accounting snapshot.

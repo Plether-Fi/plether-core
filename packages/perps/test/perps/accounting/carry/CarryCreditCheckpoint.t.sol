@@ -45,9 +45,10 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         // Synthetic claims must retain the production ordering: close the old net-depth carry interval first.
         engine.checkpointCarryIndexes();
         bytes32 oldHash = terminalNavBook.curveHashOf(account);
-        uint256 total = engine.totalTraderClaimBalanceUsdc() - engine.traderClaimBalanceUsdc(account) + amount;
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account).checked_write(amount);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(total);
+        uint256 total = engine.totalTraderClaimBalanceAssets() - engine.traderClaimBalanceAssets(account) + amount;
+        stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(account)
+            .checked_write(amount);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(total);
         vm.prank(address(engine));
         terminalNavBook.syncFromEngine(account, oldHash);
         _authenticate(account);
@@ -56,7 +57,7 @@ contract CarryCreditCheckpointTest is BasePerpTest {
     function _arrears(
         uint256 amount
     ) private {
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(ACCOUNT).checked_write(amount);
+        stdstore.target(address(engine)).sig("unsettledCarryAssets(address)").with_key(ACCOUNT).checked_write(amount);
     }
 
     function _checkpoint() private {
@@ -99,7 +100,7 @@ contract CarryCreditCheckpointTest is BasePerpTest {
             (uint256 r, uint256 f, uint256 m, uint256 unpaid) =
                 abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
             assertEq(r, f + m);
-            assertEq(unpaid, engine.unsettledCarryUsdc(account));
+            assertEq(unpaid, engine.unsettledCarryAssets(account));
             margin += m;
             free += f;
             ++count;
@@ -140,10 +141,10 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         bool claim,
         uint256 scenario
     ) private {
-        IMarginClearinghouse.AccountUsdcBuckets memory beforeBuckets = clearinghouse.getAccountUsdcBuckets(ACCOUNT);
+        IMarginClearinghouse.AccountAssetBuckets memory beforeBuckets = clearinghouse.getAccountAssetBuckets(ACCOUNT);
         CollectionCase memory c;
-        c.margin = beforeBuckets.activePositionMarginUsdc;
-        c.free = beforeBuckets.freeSettlementUsdc;
+        c.margin = beforeBuckets.activePositionMarginAssets;
+        c.free = beforeBuckets.freeSettlementAssets;
         c.due = scenario == 0 ? 0 : scenario == 1 ? c.margin : scenario == 2 ? c.margin + c.free / 2 : c.margin + c.free;
         if (scenario >= 4) {
             c.due += 30e6;
@@ -166,47 +167,47 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         assertEq(count, c.due == 0 ? 0 : 1);
         assertEq(collectedMargin, c.marginPaid);
         assertEq(collectedFree, c.freePaid);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), c.margin - c.marginPaid + (claim ? c.credit : 0));
-        assertEq(_freeSettlementUsdc(ACCOUNT), c.free - c.freePaid + (claim ? 0 : c.credit));
+        assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), c.margin - c.marginPaid + (claim ? c.credit : 0));
+        assertEq(_freeSettlementAssets(ACCOUNT), c.free - c.freePaid + (claim ? 0 : c.credit));
         uint256 remaining = c.due - c.marginPaid - c.freePaid;
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), remaining, "credit must not fund this collection");
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), remaining, "credit must not fund this collection");
         assertEq(pool.totalAssets(), c.poolBefore + c.marginPaid + c.freePaid - (claim ? c.credit : 0));
         assertEq(
-            clearinghouse.getAccountUsdcBuckets(ACCOUNT).otherLockedMarginUsdc, beforeBuckets.otherLockedMarginUsdc
+            clearinghouse.getAccountAssetBuckets(ACCOUNT).otherLockedMarginAssets, beforeBuckets.otherLockedMarginAssets
         );
-        assertEq(clearinghouse.actionReserveUsdc(ACCOUNT), 30e6);
-        assertEq(clearinghouse.vpiRebateReserveUsdc(ACCOUNT), 10e6);
-        assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), claim ? 0 : 2000e6);
-        assertEq(clearinghouse.actionReserveUsdc(SOURCE), 10_000e6 - (claim ? 0 : c.credit));
+        assertEq(clearinghouse.actionReserveAssets(ACCOUNT), 30e6);
+        assertEq(clearinghouse.vpiRebateReserveAssets(ACCOUNT), 10e6);
+        assertEq(engine.traderClaimBalanceAssets(ACCOUNT), claim ? 0 : 2000e6);
+        assertEq(clearinghouse.actionReserveAssets(SOURCE), 10_000e6 - (claim ? 0 : c.credit));
         assertEq(
             terminalNavBook.bookState().bookVersion,
             c.version + (c.marginPaid > 0 ? 1 : 0),
             "only outer bracket changes the curve"
         );
-        assertEq(_sideState(CfdTypes.Side.LONG).totalMargin, clearinghouse.pnlPledgeUsdc(ACCOUNT));
-        assertEq(engine.sideBorrowBaseUsdc(0), _positionBorrowBaseUsdc(ACCOUNT));
+        assertEq(_sideState(CfdTypes.Side.LONG).totalMargin, clearinghouse.pnlPledgeAssets(ACCOUNT));
+        assertEq(engine.sideBorrowBaseAssets(0), _positionBorrowBaseAssets(ACCOUNT));
         _authenticate(ACCOUNT);
         if (claim) {
             assertFalse(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).liquidatable);
             assertFalse(engineLens.previewLiquidation(ACCOUNT, 1e8).liquidatable);
         }
-        assertEq(_expectedIndexedCarryUsdc(ACCOUNT), 0);
+        assertEq(_expectedIndexedCarryAssets(ACCOUNT), 0);
         _checkpoint();
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), remaining > c.credit ? remaining - c.credit : 0);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), remaining > c.credit ? remaining - c.credit : 0);
     }
 
     function test_HealthProjectsNewCreditAgainstRetainedArrears() public {
         _fixture();
-        uint256 available = clearinghouse.pnlPledgeUsdc(ACCOUNT) + _freeSettlementUsdc(ACCOUNT);
+        uint256 available = clearinghouse.pnlPledgeAssets(ACCOUNT) + _freeSettlementAssets(ACCOUNT);
         _arrears(available + 30e6);
         _credit(false, 100e6);
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), 30e6);
-        assertEq(_freeSettlementUsdc(ACCOUNT), 100e6);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), 30e6);
+        assertEq(_freeSettlementAssets(ACCOUNT), 100e6);
         assertFalse(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).liquidatable);
         assertFalse(engineLens.previewLiquidation(ACCOUNT, 1e8).liquidatable);
         _checkpoint();
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), 0);
-        assertEq(_freeSettlementUsdc(ACCOUNT), 70e6);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), 0);
+        assertEq(_freeSettlementAssets(ACCOUNT), 70e6);
         _authenticate(ACCOUNT);
     }
 
@@ -225,8 +226,8 @@ contract CarryCreditCheckpointTest is BasePerpTest {
                 }
                 uint64 markTime = engine.lastMarkTime();
                 uint256 expectedIndex = _currentSideCarryIndex(CfdTypes.Side.LONG);
-                uint256 due = _expectedIndexedCarryUsdc(ACCOUNT);
-                uint256 margin = clearinghouse.pnlPledgeUsdc(ACCOUNT);
+                uint256 due = _expectedIndexedCarryAssets(ACCOUNT);
+                uint256 margin = clearinghouse.pnlPledgeAssets(ACCOUNT);
                 if (route == 0) {
                     vm.prank(ACCOUNT);
                     engine.settleTraderClaim(ACCOUNT);
@@ -234,7 +235,7 @@ contract CarryCreditCheckpointTest is BasePerpTest {
                     vm.prank(address(router));
                     engine.creditBounty(SOURCE, ACCOUNT, 10e6, 1e8, markTime);
                 }
-                assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), margin - due + (route == 0 ? 2000e6 : 0));
+                assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), margin - due + (route == 0 ? 2000e6 : 0));
                 assertEq(engine.sideCarryIndex(0), expectedIndex, "old borrow base and pool depth");
                 assertEq(_lastCarryTimestamp(ACCOUNT), block.timestamp);
                 assertEq(engine.lastMarkTime(), markTime, "credit must not invent a fresh mark");
@@ -249,14 +250,14 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         _claim(SOURCE, 1000e6);
         vm.warp(block.timestamp + 30 days);
         uint256 index = _currentSideCarryIndex(CfdTypes.Side.LONG);
-        uint256 margin = clearinghouse.pnlPledgeUsdc(ACCOUNT);
+        uint256 margin = clearinghouse.pnlPledgeAssets(ACCOUNT);
         uint256 assets = pool.totalAssets();
         vm.prank(SOURCE);
         engine.settleTraderClaim(SOURCE);
         assertEq(engine.sideCarryIndex(0), index);
         assertEq(pool.totalAssets(), assets - 1000e6);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), margin);
-        assertEq(_freeSettlementUsdc(SOURCE), 1000e6);
+        assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), margin);
+        assertEq(_freeSettlementAssets(SOURCE), 1000e6);
         _authenticate(SOURCE);
     }
 
@@ -273,17 +274,17 @@ contract CarryCreditCheckpointTest is BasePerpTest {
 
     function test_SelfBountyProtectsReserveThenReleasesFullCredit() public {
         _fixture();
-        uint256 available = clearinghouse.pnlPledgeUsdc(ACCOUNT) + _freeSettlementUsdc(ACCOUNT);
+        uint256 available = clearinghouse.pnlPledgeAssets(ACCOUNT) + _freeSettlementAssets(ACCOUNT);
         _arrears(available + 30e6);
-        uint256 beforeBalance = clearinghouse.balanceUsdc(ACCOUNT);
+        uint256 beforeBalance = clearinghouse.balanceAssets(ACCOUNT);
         vm.prank(address(router));
         engine.creditBounty(ACCOUNT, ACCOUNT, 10e6, 1e8, uint64(block.timestamp));
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), beforeBalance - available);
-        assertEq(clearinghouse.actionReserveUsdc(ACCOUNT), 20e6);
-        assertEq(_freeSettlementUsdc(ACCOUNT), 10e6);
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), 30e6);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), beforeBalance - available);
+        assertEq(clearinghouse.actionReserveAssets(ACCOUNT), 20e6);
+        assertEq(_freeSettlementAssets(ACCOUNT), 10e6);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), 30e6);
         _checkpoint();
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), 20e6);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), 20e6);
         _authenticate(ACCOUNT);
     }
 
@@ -300,12 +301,12 @@ contract CarryCreditCheckpointTest is BasePerpTest {
     ) private {
         _fixture();
         _claim(TRADER, 4000e6);
-        uint256 available = clearinghouse.pnlPledgeUsdc(ACCOUNT) + _freeSettlementUsdc(ACCOUNT);
+        uint256 available = clearinghouse.pnlPledgeAssets(ACCOUNT) + _freeSettlementAssets(ACCOUNT);
         _arrears(available + 30e6);
-        uint256 targetCash = engine.totalTraderClaimBalanceUsdc() - available - (fail ? 1 : 0);
+        uint256 targetCash = engine.totalTraderClaimBalanceAssets() - available - (fail ? 1 : 0);
         uint256 drain = pool.rawAssets() - targetCash;
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), drain);
+        settlementToken.transfer(address(0xDEAD), drain);
         bytes32 beforeState = _stateHash();
         if (fail) {
             vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
@@ -316,10 +317,10 @@ contract CarryCreditCheckpointTest is BasePerpTest {
             _authenticate(ACCOUNT);
         } else {
             assertEq(pool.totalAssets(), 4000e6);
-            assertEq(engine.totalTraderClaimBalanceUsdc(), 4000e6);
-            assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), 2000e6);
-            assertEq(engine.unsettledCarryUsdc(ACCOUNT), 30e6);
-            assertEq(engine.traderClaimBalanceUsdc(TRADER), 4000e6);
+            assertEq(engine.totalTraderClaimBalanceAssets(), 4000e6);
+            assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), 2000e6);
+            assertEq(engine.unsettledCarryAssets(ACCOUNT), 30e6);
+            assertEq(engine.traderClaimBalanceAssets(TRADER), 4000e6);
             _authenticate(ACCOUNT);
         }
     }
@@ -334,8 +335,8 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         assertEq(_stateHash(), beforeState);
         _credit(false, 10e6);
         _authenticate(ACCOUNT);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), 0);
-        assertEq(_freeSettlementUsdc(ACCOUNT), 10e6);
+        assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), 0);
+        assertEq(_freeSettlementAssets(ACCOUNT), 10e6);
     }
 
     function test_NestedCreditCollectionBlocksTransientNavReadsAndRollsBackTokenFailure() public {
@@ -344,15 +345,15 @@ contract CarryCreditCheckpointTest is BasePerpTest {
             uint256 snapshot = vm.snapshotState();
             _arrears(6000e6);
             CarryNavProbeToken failing = new CarryNavProbeToken(address(engine), true);
-            vm.etch(address(usdc), address(failing).code);
+            vm.etch(address(settlementToken), address(failing).code);
             bytes32 beforeState = _stateHash();
             vm.expectRevert(bytes("downstream revert"));
             _credit(route == 0, route == 0 ? 2000e6 : 10e6);
             assertEq(_stateHash(), beforeState);
             CarryNavProbeToken probe = new CarryNavProbeToken(address(engine), false);
-            vm.etch(address(usdc), address(probe).code);
+            vm.etch(address(settlementToken), address(probe).code);
             _credit(route == 0, route == 0 ? 2000e6 : 10e6);
-            assertEq(CarryNavProbeToken(address(usdc)).blockedReads(), 1);
+            assertEq(CarryNavProbeToken(address(settlementToken)).blockedReads(), 1);
             _authenticate(ACCOUNT);
             assertTrue(vm.revertToState(snapshot));
         }
@@ -364,13 +365,13 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         _open(TRADER, CfdTypes.Side.SHORT, 100_000e18, 3000e6, 1e8);
         _arrears(6000e6);
         vm.warp(block.timestamp + 1 days);
-        uint256 unpaid = 6000e6 + _expectedIndexedCarryUsdc(ACCOUNT) - clearinghouse.pnlPledgeUsdc(ACCOUNT)
-            - _freeSettlementUsdc(ACCOUNT);
+        uint256 unpaid = 6000e6 + _expectedIndexedCarryAssets(ACCOUNT) - clearinghouse.pnlPledgeAssets(ACCOUNT)
+            - _freeSettlementAssets(ACCOUNT);
         uint256 depth = pool.totalAssets();
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(TRADER, 0.9e8);
         assertTrue(preview.liquidatable);
         CarryNavProbeToken probe = new CarryNavProbeToken(address(engine), false);
-        vm.etch(address(usdc), address(probe).code);
+        vm.etch(address(settlementToken), address(probe).code);
         bytes32 beforeState = _stateHash();
         vm.mockCallRevert(
             address(engine.settlementSidecar()),
@@ -381,14 +382,14 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         vm.prank(address(router));
         engine.liquidatePosition(TRADER, 0.9e8, depth, uint64(block.timestamp), ACCOUNT);
         assertEq(_stateHash(), beforeState);
-        assertEq(CarryNavProbeToken(address(usdc)).blockedReads(), 0);
+        assertEq(CarryNavProbeToken(address(settlementToken)).blockedReads(), 0);
         vm.clearMockedCalls();
         vm.prank(address(router));
         engine.liquidatePosition(TRADER, 0.9e8, depth, uint64(block.timestamp), ACCOUNT);
-        assertEq(CarryNavProbeToken(address(usdc)).blockedReads(), 2);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), 0);
-        assertGt(_freeSettlementUsdc(ACCOUNT), 0, "full keeper bounty remains available");
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), unpaid);
+        assertEq(CarryNavProbeToken(address(settlementToken)).blockedReads(), 2);
+        assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), 0);
+        assertGt(_freeSettlementAssets(ACCOUNT), 0, "full keeper bounty remains available");
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), unpaid);
         _authenticate(ACCOUNT);
         _authenticate(TRADER);
     }
@@ -400,16 +401,16 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         if (seed & 1 != 0) {
             vm.warp(block.timestamp + 250 * 365 days);
             _checkpoint();
-            assertGt(engine.unsettledCarryUsdc(ACCOUNT), 0);
+            assertGt(engine.unsettledCarryAssets(ACCOUNT), 0);
         }
-        uint256 startingArrears = engine.unsettledCarryUsdc(ACCOUNT);
+        uint256 startingArrears = engine.unsettledCarryAssets(ACCOUNT);
         uint256 accrued;
         uint256 marginCollected;
         uint256 freeCollected;
         for (uint256 i; i < 8; ++i) {
             seed = uint256(keccak256(abi.encode(seed, i)));
             vm.warp(block.timestamp + seed % (80 * 365 days));
-            accrued += _expectedIndexedCarryUsdc(ACCOUNT);
+            accrued += _expectedIndexedCarryAssets(ACCOUNT);
             uint256 action = seed % 4;
             if (action == 0) {
                 _claim(ACCOUNT, 1 + seed % 500e6);
@@ -428,15 +429,15 @@ contract CarryCreditCheckpointTest is BasePerpTest {
             marginCollected += m;
             freeCollected += f;
             if (seed & 4 != 0) {
-                assertEq(_expectedIndexedCarryUsdc(ACCOUNT), 0);
+                assertEq(_expectedIndexedCarryAssets(ACCOUNT), 0);
                 vm.recordLogs();
                 _checkpoint();
                 (m, f,) = _collected(ACCOUNT);
                 marginCollected += m;
                 freeCollected += f;
             }
-            assertEq(startingArrears + accrued, marginCollected + freeCollected + engine.unsettledCarryUsdc(ACCOUNT));
-            assertEq(engine.sideBorrowBaseUsdc(0), _positionBorrowBaseUsdc(ACCOUNT));
+            assertEq(startingArrears + accrued, marginCollected + freeCollected + engine.unsettledCarryAssets(ACCOUNT));
+            assertEq(engine.sideBorrowBaseAssets(0), _positionBorrowBaseAssets(ACCOUNT));
             _authenticate(ACCOUNT);
         }
     }
@@ -448,9 +449,9 @@ contract CarryCreditCheckpointTest is BasePerpTest {
             abi.encode(
                 _read(address(engine), abi.encodeWithSelector(engine.positions.selector, account)),
                 _read(address(engine), abi.encodeWithSelector(engine.positionCarryState.selector, account)),
-                clearinghouse.getAccountUsdcBuckets(account),
-                engine.unsettledCarryUsdc(account),
-                engine.traderClaimBalanceUsdc(account),
+                clearinghouse.getAccountAssetBuckets(account),
+                engine.unsettledCarryAssets(account),
+                engine.traderClaimBalanceAssets(account),
                 terminalNavBook.curveHashOf(account)
             )
         );
@@ -465,17 +466,17 @@ contract CarryCreditCheckpointTest is BasePerpTest {
                 engine.sideCarryIndex(1),
                 engine.sideCarryTimestamp(0),
                 engine.sideCarryTimestamp(1),
-                engine.sideBorrowBaseUsdc(0),
-                engine.sideBorrowBaseUsdc(1)
+                engine.sideBorrowBaseAssets(0),
+                engine.sideBorrowBaseAssets(1)
             )
         );
         bytes32 custodyHash = keccak256(
             abi.encode(
                 pool.rawAssets(),
                 pool.accountedAssets(),
-                usdc.balanceOf(address(clearinghouse)),
-                usdc.balanceOf(address(engine)),
-                engine.totalTraderClaimBalanceUsdc(),
+                settlementToken.balanceOf(address(clearinghouse)),
+                settlementToken.balanceOf(address(engine)),
+                engine.totalTraderClaimBalanceAssets(),
                 engine.lastMarkPrice(),
                 engine.lastMarkTime()
             )

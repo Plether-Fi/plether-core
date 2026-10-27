@@ -38,8 +38,8 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         uint256 seniorHighWaterMark;
         uint256 seniorTotalSupply;
         uint256 accountedAssets;
-        uint256 poolUsdc;
-        uint256 vaultUsdc;
+        uint256 poolAssets;
+        uint256 vaultAssets;
         uint256 pendingDepositEscrowAssets;
         uint256 pendingRedeemEscrowShares;
         uint256 depositClaimEscrowShares;
@@ -62,13 +62,13 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
 
     function test_ConstructorInitializesJuniorFeeAtDeploymentTreasuryAndEmitsCheckpoint() public {
         HousePool deploymentPool =
-            new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
+            new HousePool(address(settlementToken), address(engine), address(housePoolRedemptionMathSidecar));
         TrancheVault deploymentSenior = new TrancheVault(
-            IERC20(address(usdc)),
+            IERC20(address(settlementToken)),
             address(deploymentPool),
             true,
             "Deployment Senior LP",
-            "deploymentSeniorUSDC",
+            "deploymentSeniorAssets",
             0,
             address(0)
         );
@@ -79,11 +79,11 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         vm.expectEmit(true, false, false, true, expectedJunior);
         emit MaintenanceFeeConfigInitialized(100, engine.protocolTreasury(), checkpointBoundary);
         TrancheVault deploymentJunior = new TrancheVault(
-            IERC20(address(usdc)),
+            IERC20(address(settlementToken)),
             address(deploymentPool),
             false,
             "Deployment Junior LP",
-            "deploymentJuniorUSDC",
+            "deploymentJuniorAssets",
             100,
             engine.protocolTreasury()
         );
@@ -99,47 +99,69 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
 
     function test_ConstructorRejectsSeniorFeeAndInvalidJuniorConfigs() public {
         HousePool deploymentPool =
-            new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
+            new HousePool(address(settlementToken), address(engine), address(housePoolRedemptionMathSidecar));
 
         vm.expectRevert(TrancheVault.TrancheVault__MaintenanceFeeSeniorUnsupported.selector);
-        new TrancheVault(IERC20(address(usdc)), address(deploymentPool), true, "Senior", "s", 100, FEE_RECIPIENT);
+        new TrancheVault(
+            IERC20(address(settlementToken)), address(deploymentPool), true, "Senior", "s", 100, FEE_RECIPIENT
+        );
 
         vm.expectRevert(TrancheVault.TrancheVault__MaintenanceFeeSeniorUnsupported.selector);
-        new TrancheVault(IERC20(address(usdc)), address(deploymentPool), true, "Senior", "s", 0, FEE_RECIPIENT);
+        new TrancheVault(
+            IERC20(address(settlementToken)), address(deploymentPool), true, "Senior", "s", 0, FEE_RECIPIENT
+        );
 
-        TrancheVault deploymentSenior =
-            new TrancheVault(IERC20(address(usdc)), address(deploymentPool), true, "Senior", "s", 0, address(0));
+        TrancheVault deploymentSenior = new TrancheVault(
+            IERC20(address(settlementToken)), address(deploymentPool), true, "Senior", "s", 0, address(0)
+        );
         deploymentPool.setSeniorVault(address(deploymentSenior));
 
         vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRate.selector);
-        new TrancheVault(IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 1001, FEE_RECIPIENT);
+        new TrancheVault(
+            IERC20(address(settlementToken)), address(deploymentPool), false, "Junior", "j", 1001, FEE_RECIPIENT
+        );
 
         vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
-        new TrancheVault(IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 1, address(0));
+        new TrancheVault(IERC20(address(settlementToken)), address(deploymentPool), false, "Junior", "j", 1, address(0));
 
         vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
         new TrancheVault(
-            IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 1, address(deploymentPool)
+            IERC20(address(settlementToken)), address(deploymentPool), false, "Junior", "j", 1, address(deploymentPool)
         );
 
         vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
         new TrancheVault(
-            IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 1, address(deploymentSenior)
+            IERC20(address(settlementToken)),
+            address(deploymentPool),
+            false,
+            "Junior",
+            "j",
+            1,
+            address(deploymentSenior)
         );
 
         address expectedJunior = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
         vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
-        new TrancheVault(IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 1, expectedJunior);
+        new TrancheVault(
+            IERC20(address(settlementToken)), address(deploymentPool), false, "Junior", "j", 1, expectedJunior
+        );
     }
 
     function test_FirstJuniorSeedAfterElapsedZeroSupplyHasNoRetroactiveDilution() public {
         HousePool deploymentPool =
-            new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
-        TrancheVault deploymentSenior =
-            new TrancheVault(IERC20(address(usdc)), address(deploymentPool), true, "Senior", "s", 0, address(0));
+            new HousePool(address(settlementToken), address(engine), address(housePoolRedemptionMathSidecar));
+        TrancheVault deploymentSenior = new TrancheVault(
+            IERC20(address(settlementToken)), address(deploymentPool), true, "Senior", "s", 0, address(0)
+        );
         deploymentPool.setSeniorVault(address(deploymentSenior));
         TrancheVault deploymentJunior = new TrancheVault(
-            IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 100, engine.protocolTreasury()
+            IERC20(address(settlementToken)),
+            address(deploymentPool),
+            false,
+            "Junior",
+            "j",
+            100,
+            engine.protocolTreasury()
         );
         deploymentPool.setJuniorVault(address(deploymentJunior));
 
@@ -236,11 +258,11 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         candidateJunior.proposeMaintenanceFeeConfig(200, address(futureSenior));
 
         TrancheVault imposterJunior = new TrancheVault(
-            IERC20(address(usdc)),
+            IERC20(address(settlementToken)),
             address(deploymentPool),
             false,
             "Imposter Junior LP",
-            "imposterJuniorUSDC",
+            "imposterJuniorAssets",
             0,
             address(0)
         );
@@ -276,10 +298,10 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         assertEq(pendingAprBps, 1000);
         assertEq(pendingRecipient, FEE_RECIPIENT);
 
-        juniorVault.proposeMaintenanceFeeConfig(100, address(usdc));
+        juniorVault.proposeMaintenanceFeeConfig(100, address(settlementToken));
         (pendingAprBps, pendingRecipient) = juniorVault.pendingMaintenanceFeeConfig();
         assertEq(pendingAprBps, 100, "asset recipient is intentionally permitted");
-        assertEq(pendingRecipient, address(usdc));
+        assertEq(pendingRecipient, address(settlementToken));
 
         juniorVault.proposeMaintenanceFeeConfig(0, FEE_RECIPIENT);
         (pendingAprBps, pendingRecipient) = juniorVault.pendingMaintenanceFeeConfig();
@@ -629,7 +651,7 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         vm.prank(LP);
         uint256 claimedAssets = juniorVault.claimRedeem(requestId, redeemShares, LP, LP);
         assertEq(claimedAssets, result.juniorFundedAssets);
-        assertEq(usdc.balanceOf(LP), claimedAssets);
+        assertEq(settlementToken.balanceOf(LP), claimedAssets);
     }
 
     function test_PartialRedeemFundingCheckpointsOnceAndContinuesCumulatively() public {
@@ -771,11 +793,13 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         uint256 checkpointBoundaryBefore = juniorVault.maintenanceFeeCheckpointBoundary();
         uint256 recipientBalanceBefore = juniorVault.balanceOf(FEE_RECIPIENT);
         uint256 pendingDepositEscrowBefore = juniorVault.pendingDepositEscrowAssets();
-        uint256 vaultUsdcBefore = usdc.balanceOf(address(juniorVault));
-        uint256 poolUsdcBefore = usdc.balanceOf(address(pool));
+        uint256 vaultAssetsBefore = settlementToken.balanceOf(address(juniorVault));
+        uint256 poolAssetsBefore = settlementToken.balanceOf(address(pool));
 
         vm.mockCall(
-            address(usdc), abi.encodeWithSelector(IERC20.balanceOf.selector, address(pool)), abi.encode(poolUsdcBefore)
+            address(settlementToken),
+            abi.encodeWithSelector(IERC20.balanceOf.selector, address(pool)),
+            abi.encode(poolAssetsBefore)
         );
         vm.expectRevert();
         pool.settleLpEpoch(0, 0);
@@ -786,8 +810,8 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), checkpointBoundaryBefore);
         assertEq(juniorVault.balanceOf(FEE_RECIPIENT), recipientBalanceBefore);
         assertEq(juniorVault.pendingDepositEscrowAssets(), pendingDepositEscrowBefore);
-        assertEq(usdc.balanceOf(address(juniorVault)), vaultUsdcBefore);
-        assertEq(usdc.balanceOf(address(pool)), poolUsdcBefore);
+        assertEq(settlementToken.balanceOf(address(juniorVault)), vaultAssetsBefore);
+        assertEq(settlementToken.balanceOf(address(pool)), poolAssetsBefore);
         assertEq(juniorVault.claimableDepositRequest(requestId, LP), 0);
 
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
@@ -1079,22 +1103,23 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         internal
         returns (HousePool deploymentPool, TrancheVault deploymentSenior, TrancheVault deploymentJunior)
     {
-        deploymentPool = new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
+        deploymentPool =
+            new HousePool(address(settlementToken), address(engine), address(housePoolRedemptionMathSidecar));
         deploymentSenior = new TrancheVault(
-            IERC20(address(usdc)),
+            IERC20(address(settlementToken)),
             address(deploymentPool),
             true,
             "Deployment Senior LP",
-            "deploymentSeniorUSDC",
+            "deploymentSeniorAssets",
             0,
             address(0)
         );
         deploymentJunior = new TrancheVault(
-            IERC20(address(usdc)),
+            IERC20(address(settlementToken)),
             address(deploymentPool),
             false,
             "Deployment Junior LP",
-            "deploymentJuniorUSDC",
+            "deploymentJuniorAssets",
             0,
             address(0)
         );
@@ -1104,9 +1129,9 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         address lp,
         uint256 assets
     ) internal returns (uint256 requestId) {
-        usdc.mint(lp, assets);
+        settlementToken.mint(lp, assets);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         requestId = juniorVault.requestDeposit(assets, lp, lp);
         vm.stopPrank();
     }
@@ -1128,24 +1153,24 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
     }
 
     function _reserveLiquidityLeaving(
-        uint256 targetFreeUsdc
+        uint256 targetFreeAssets
     ) internal returns (uint256 positionSize) {
         uint256 assets = pool.totalAssets();
-        assertGt(assets, targetFreeUsdc, "target free cash must be below pool assets");
-        uint256 reservedUsdc = assets - targetFreeUsdc;
-        uint256 maxLiabilityUsdc = reservedUsdc * 10_000 / (10_000 + engine.settlementBufferBps());
-        maxLiabilityUsdc -= maxLiabilityUsdc % 100e6;
-        uint256 margin = maxLiabilityUsdc / 10 + 10e6;
+        assertGt(assets, targetFreeAssets, "target free cash must be below pool assets");
+        uint256 reservedAssets = assets - targetFreeAssets;
+        uint256 maxLiabilityAssets = reservedAssets * 10_000 / (10_000 + engine.settlementBufferBps());
+        maxLiabilityAssets -= maxLiabilityAssets % 100e6;
+        uint256 margin = maxLiabilityAssets / 10 + 10e6;
         _fundTrader(TRADER, margin);
-        positionSize = maxLiabilityUsdc * 1e12;
+        positionSize = maxLiabilityAssets * 1e12;
         _open(TRADER, CfdTypes.Side.LONG, positionSize, margin, 1e8);
-        uint256 settlementBufferUsdc =
-            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engine.settlementBufferBps());
-        uint256 expectedFreeUsdc = assets - maxLiabilityUsdc - settlementBufferUsdc;
-        assertEq(pool.getFreeUSDC(), expectedFreeUsdc, "position must create the quantized cash budget");
-        assertGe(expectedFreeUsdc, targetFreeUsdc, "lot quantization must not over-reserve the target budget");
+        uint256 settlementBufferAssets =
+            SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, engine.settlementBufferBps());
+        uint256 expectedFreeAssets = assets - maxLiabilityAssets - settlementBufferAssets;
+        assertEq(pool.getFreeAssets(), expectedFreeAssets, "position must create the quantized cash budget");
+        assertGe(expectedFreeAssets, targetFreeAssets, "lot quantization must not over-reserve the target budget");
         assertLe(
-            expectedFreeUsdc - targetFreeUsdc,
+            expectedFreeAssets - targetFreeAssets,
             101e6,
             "one liability lot plus its buffer bounds the target-budget rounding"
         );
@@ -1157,8 +1182,8 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         snapshot.seniorHighWaterMark = pool.seniorHighWaterMark();
         snapshot.seniorTotalSupply = seniorVault.totalSupply();
         snapshot.accountedAssets = pool.accountedAssets();
-        snapshot.poolUsdc = usdc.balanceOf(address(pool));
-        snapshot.vaultUsdc = usdc.balanceOf(address(juniorVault));
+        snapshot.poolAssets = settlementToken.balanceOf(address(pool));
+        snapshot.vaultAssets = settlementToken.balanceOf(address(juniorVault));
         snapshot.pendingDepositEscrowAssets = juniorVault.pendingDepositEscrowAssets();
         snapshot.pendingRedeemEscrowShares = juniorVault.pendingRedeemEscrowShares();
         snapshot.depositClaimEscrowShares = juniorVault.depositClaimEscrowShares();
@@ -1174,8 +1199,8 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         assertEq(actual.seniorHighWaterMark, expected.seniorHighWaterMark, "senior HWM changed");
         assertEq(actual.seniorTotalSupply, expected.seniorTotalSupply, "senior raw supply changed");
         assertEq(actual.accountedAssets, expected.accountedAssets, "accounted assets changed");
-        assertEq(actual.poolUsdc, expected.poolUsdc, "pool USDC changed");
-        assertEq(actual.vaultUsdc, expected.vaultUsdc, "vault USDC changed");
+        assertEq(actual.poolAssets, expected.poolAssets, "pool settlementToken changed");
+        assertEq(actual.vaultAssets, expected.vaultAssets, "vault settlementToken changed");
         assertEq(
             actual.pendingDepositEscrowAssets, expected.pendingDepositEscrowAssets, "pending deposit escrow changed"
         );

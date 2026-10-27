@@ -63,21 +63,21 @@ Generate types from [CfdClosePreview.sol](src/CfdClosePreview.sol) and [OrderV3T
 | Field | Meaning |
 | --- | --- |
 | `replayOrderId` | Existing order ID for an exact request replay; zero for a new preview. Check this first. |
-| `commitment` | Collected/outstanding carry and settlement before/after commitment. `bountyFromFreeUsdc` is zero for a close. |
-| `commitmentCarryUsdc` | Alias of `commitment.carryCollectedUsdc`, useful for explaining the commitment checkpoint. |
+| `commitment` | Collected/outstanding carry and settlement before/after commitment. `bountyFromFreeAssets` is zero for a close. |
+| `commitmentCarryAssets` | Alias of `commitment.carryCollectedAssets`, useful for explaining the commitment checkpoint. |
 | `assessment` | Projected execution and post-state, with commitment carry already included in the aggregate charge and debit fields. |
 
-There is no `executionBountyUsdc` result. Close execution earns zero bounty; native gas and oracle update fees remain separate. Do not add a close-bounty deposit requirement to the review flow.
+There is no `executionBountyAssets` result. Close execution earns zero bounty; native gas and oracle update fees remain separate. Do not add a close-bounty deposit requirement to the review flow.
 
 Commitment collects carry even though the close bounty is zero. The projected execution starts from the resulting account state. In particular:
 
-- `assessment.preSettlementBalanceUsdc` is custody **after** commitment carry. `commitment.settlementBeforeUsdc` is the pre-commitment balance.
-- `grossAccountDebitUsdc`, `actionChargeAssessedUsdc`, `actionChargeCollectedUsdc`, and `carryUsdc` already include collected commitment carry. Do not add `commitmentCarryUsdc` again when displaying totals or deriving bounds.
-- `carryUsdc` is assessed carry, not necessarily the cash collected. A full close can leave uncollectible carry to the full-close settlement rules. Gross debit also includes trader-claim consumption, so it is not the same as a wallet payment or net cash loss.
-- `postSettlementBalanceUsdc` is total internal custody, including locked funds. `assessment.close.postFreeSettlementUsdc` is projected free settlement. `assessment.postTraderClaimUsdc` is a separate claim balance, not immediately spendable USDC.
-- `safeMarginReleaseUsdc` is the pledge that may be released while preserving residual health. `actionChargeFromReleasedMarginUsdc` and `netReleasedMarginUsdc` explain how much of that release pays charges and how much remains.
+- `assessment.preSettlementBalanceAssets` is custody **after** commitment carry. `commitment.settlementBeforeAssets` is the pre-commitment balance.
+- `grossAccountDebitAssets`, `actionChargeAssessedAssets`, `actionChargeCollectedAssets`, and `carryAssets` already include collected commitment carry. Do not add `commitmentCarryAssets` again when displaying totals or deriving bounds.
+- `carryAssets` is assessed carry, not necessarily the cash collected. A full close can leave uncollectible carry to the full-close settlement rules. Gross debit also includes trader-claim consumption, so it is not the same as a wallet payment or net cash loss.
+- `postSettlementBalanceAssets` is total internal custody, including locked funds. `assessment.close.postFreeSettlementAssets` is projected free settlement. `assessment.postTraderClaimAssets` is a separate claim balance, not immediately spendable USDG.
+- `safeMarginReleaseAssets` is the pledge that may be released while preserving residual health. `actionChargeFromReleasedMarginAssets` and `netReleasedMarginAssets` explain how much of that release pays charges and how much remains.
 
-USDC amounts use 6 decimals, prices 8, and sizes 18. Valid sizes are multiples of `1e20` (100 tokens). PnL, VPI and post-position equity are signed; retain integer precision in clients.
+USDG amounts use 6 decimals, prices 8, and sizes 18. Valid sizes are multiples of `1e20` (100 tokens). PnL, VPI and post-position equity are signed; retain integer precision in clients.
 
 ## Admission and bound checks
 
@@ -85,7 +85,7 @@ A fresh public close needs a nonzero, unused client ID outside the protocol-rese
 
 `submitBy` must be at or after the reviewed timestamp. `executionWindowSeconds` must be positive and no greater than the Router's configured maximum. At execution, a LONG close accepts a price at or below its target; a SHORT close accepts a price at or above it. See [order timing](CANONICAL_ENTRYPOINTS.md#order-timing) for the delayed execution window.
 
-Set `maxExecutionBountyUsdc = 0` for the zero-bounty close and `minPostSettlementBalanceUsdc = 0`: positive settlement floors are unsupported on closes. Bounds are inclusive; zero maximum bounds are real zero allowances. Full closes skip residual equity/leverage checks during assessment, but fresh public requests still require a nonzero `maxPostLeverageBps`. Execution modes are enum values `None=0, Live=1, Fad=2, Frozen=3`; allowed-mode bits are `Live=1, Fad=2, Frozen=4`.
+Set `maxExecutionBountyAssets = 0` for the zero-bounty close and `minPostSettlementBalanceAssets = 0`: positive settlement floors are unsupported on closes. Bounds are inclusive; zero maximum bounds are real zero allowances. Full closes skip residual equity/leverage checks during assessment, but fresh public requests still require a nonzero `maxPostLeverageBps`. Execution modes are enum values `None=0, Live=1, Fad=2, Frozen=3`; allowed-mode bits are `Live=1, Fad=2, Frozen=4`.
 
 Partial closes must fund outstanding carry at commitment and meet commitment health checks. Execution independently requires a healthy residual position and collectible partial-close charges. Full closes have no residual-position health requirement. Both still require valid mark/price inputs and the user's other bounds.
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../utils/MockSettlementToken.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
@@ -22,7 +23,6 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 /// @dev Direct production Router benchmarks; no LegacyOrderRouterHarness is deployed.
@@ -39,7 +39,7 @@ abstract contract DirectCloseGasFixture is Test {
     address internal constant KEEPER = address(0xB0B);
     bytes32 internal constant FEED = bytes32(uint256(1));
 
-    MockUSDC internal usdc;
+    MockSettlementToken internal settlementToken;
     MockPyth internal pyth;
     MarginClearinghouse internal clearinghouse;
     CfdEngine internal engine;
@@ -50,9 +50,9 @@ abstract contract DirectCloseGasFixture is Test {
 
     function setUp() public virtual {
         vm.warp(START_TIME);
-        usdc = new MockUSDC();
-        measuredAccounts.push(address(usdc));
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        settlementToken = new MockSettlementToken();
+        measuredAccounts.push(address(settlementToken));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         measuredAccounts.push(address(clearinghouse));
         CfdTypes.RiskParams memory risk = CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
@@ -61,12 +61,12 @@ abstract contract DirectCloseGasFixture is Test {
             initMarginBps: 150,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
-        engine = new CfdEngine(address(usdc), address(clearinghouse), 2e8, risk, 50);
+        engine = new CfdEngine(address(settlementToken), address(clearinghouse), 2e8, risk, 50);
         measuredAccounts.push(address(engine));
         CfdEnginePlanner planner = new CfdEnginePlanner();
         measuredAccounts.push(address(planner));
@@ -82,11 +82,12 @@ abstract contract DirectCloseGasFixture is Test {
         measuredAccounts.push(address(lens));
         HousePoolRedemptionMathSidecar poolMath = new HousePoolRedemptionMathSidecar();
         measuredAccounts.push(address(poolMath));
-        pool = new HousePool(address(usdc), address(engine), address(poolMath));
+        pool = new HousePool(address(settlementToken), address(engine), address(poolMath));
         measuredAccounts.push(address(pool));
-        TrancheVault senior = new TrancheVault(usdc, address(pool), true, "Senior", "sUSDC", 0, address(0));
+        TrancheVault senior = new TrancheVault(settlementToken, address(pool), true, "Senior", "sAssets", 0, address(0));
         measuredAccounts.push(address(senior));
-        TrancheVault junior = new TrancheVault(usdc, address(pool), false, "Junior", "jUSDC", 0, address(0));
+        TrancheVault junior =
+            new TrancheVault(settlementToken, address(pool), false, "Junior", "jAssets", 0, address(0));
         measuredAccounts.push(address(junior));
         pool.setSeniorVault(address(senior));
         pool.setJuniorVault(address(junior));
@@ -130,28 +131,28 @@ abstract contract DirectCloseGasFixture is Test {
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
             juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
-            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorExposureAssets: type(uint256).max - 1,
             maxSeniorShareBps: 9999
         });
         pool.proposePoolConfig(config);
         vm.warp(pool.poolConfigActivationTime());
         pool.finalizePoolConfig();
         vm.warp(START_TIME);
-        usdc.mint(address(this), 1_002_000e6);
-        usdc.approve(address(pool), 2000e6);
+        settlementToken.mint(address(this), 1_002_000e6);
+        settlementToken.approve(address(pool), 2000e6);
         pool.initializeSeedPosition(false, 1000e6, address(this));
         pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
-        usdc.approve(address(junior), 1_000_000e6);
+        settlementToken.approve(address(junior), 1_000_000e6);
         uint256 depositId = junior.requestDeposit(1_000_000e6, address(this), address(this));
         vm.warp(junior.depositEpochStart(depositId));
         pool.settleLpEpoch(0, 0);
         junior.claimDeposit(depositId, 1_000_000e6, address(this), address(this));
         router.updateMarkPrice(_updateData());
         // The opening, reserve, and withdrawal all use public lifecycle entry points.
-        usdc.mint(ACCOUNT, 1000e6);
+        settlementToken.mint(ACCOUNT, 1000e6);
         vm.startPrank(ACCOUNT);
-        usdc.approve(address(clearinghouse), 1000e6);
+        settlementToken.approve(address(clearinghouse), 1000e6);
         clearinghouse.deposit(ACCOUNT, 1000e6);
         vm.stopPrank();
         OrderV3Types.OrderRequest memory openRequest = _request(false);
@@ -161,11 +162,11 @@ abstract contract DirectCloseGasFixture is Test {
         vm.prank(KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(openId, update);
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
-        uint256 free = clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
+        uint256 free = clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets;
         vm.prank(ACCOUNT);
         clearinghouse.withdraw(ACCOUNT, free);
         vm.warp(vm.getBlockTimestamp() + 30);
-        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0);
+        assertEq(clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets, 0);
         measuredAccounts.push(router.admin());
         measuredAccounts.push(address(router.positionProtectionBook()));
     }
@@ -192,14 +193,14 @@ abstract contract DirectCloseGasFixture is Test {
             executionWindowSeconds: uint32(router.maxExecutionWindowSeconds()),
             allowedExecutionModes: 7,
             expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
-            maxExecutionBountyUsdc: type(uint256).max,
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max,
+            maxExecutionBountyAssets: type(uint256).max,
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max,
             maxPostPositionSize: isClose ? SIZE - _closeSize() : SIZE,
-            minPostSettlementBalanceUsdc: 0,
-            minPostPositionEquityUsdc: 0,
+            minPostSettlementBalanceAssets: 0,
+            minPostPositionEquityAssets: 0,
             maxPostLeverageBps: type(uint32).max
         });
     }
@@ -230,9 +231,9 @@ abstract contract DirectCloseGasFixture is Test {
         IMarginClearinghouse.BountyReservation memory reservation =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
         assertEq(uint8(reservation.state), uint8(IMarginClearinghouse.BountyReservationState.Active));
-        assertEq(reservation.freeFundedUsdc, 0);
-        assertEq(reservation.amountUsdc, 0);
-        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0);
+        assertEq(reservation.freeFundedAssets, 0);
+        assertEq(reservation.amountAssets, 0);
+        assertEq(clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets, 0);
     }
 
 }
@@ -273,7 +274,7 @@ abstract contract DirectCloseExecuteGasFixture is DirectCloseGasFixture {
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
         assertEq(remaining, SIZE - _closeSize());
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+        assertEq(clearinghouse.totalBountyReservationsAssets(ACCOUNT), 0);
     }
 
 }

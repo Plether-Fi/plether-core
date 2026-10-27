@@ -31,7 +31,7 @@ contract PerpMixedInteractionTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
         handler = new MixedLpTestHarness(
-            usdc,
+            settlementToken,
             baseMockPyth,
             engine,
             clearinghouse,

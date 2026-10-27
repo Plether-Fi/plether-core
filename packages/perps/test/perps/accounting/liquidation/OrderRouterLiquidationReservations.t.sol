@@ -26,7 +26,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 9,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -40,7 +40,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
         _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(address(this));
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(address(this));
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, address(this));
@@ -54,8 +54,8 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
-            clearinghouse.balanceUsdc(address(this)) - keeperSettlementBefore,
-            preview.keeperBountyUsdc,
+            clearinghouse.balanceAssets(address(this)) - keeperSettlementBefore,
+            preview.keeperBountyAssets,
             "Immediate liquidation bounty should credit the keeper clearinghouse balance"
         );
     }
@@ -72,7 +72,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
         vm.mockCallRevert(
             address(pool),
-            abi.encodeWithSelector(pool.payOut.selector, address(clearinghouse), preview.keeperBountyUsdc),
+            abi.encodeWithSelector(pool.payOut.selector, address(clearinghouse), preview.keeperBountyAssets),
             abi.encodeWithSignature("Error(string)", "pool illiquid")
         );
 
@@ -85,8 +85,8 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         LiquidationParityObserved memory observed = _observeLiquidationParity(account, address(this), beforeSnapshot);
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
         assertEq(
-            observed.keeperSettlementUsdc,
-            preview.keeperBountyUsdc,
+            observed.keeperSettlementAssets,
+            preview.keeperBountyAssets,
             "Keeper bounty should settle directly inside the clearinghouse"
         );
     }
@@ -106,9 +106,11 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody open-order bounty reservation");
         assertEq(
-            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            settlementToken.balanceOf(address(router)), 0, "Router should not custody open-order bounty reservation"
+        );
+        assertEq(
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementAssets,
             _executionBountyReserve(1) * queuedOrderCount,
             "Clearinghouse should reserve the shielded open-order bounty reservation"
         );
@@ -130,15 +132,15 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still clear the underwater position");
-        assertEq(router.getAccountReservations(account).executionBountyUsdc, 0);
+        assertEq(router.getAccountReservations(account).executionBountyAssets, 0);
         assertEq(
-            preview.reachableCollateralUsdc,
-            snapshotBefore.activePositionMarginUsdc + snapshotBefore.traderClaimBalanceUsdc,
+            preview.reachableCollateralAssets,
+            snapshotBefore.activePositionMarginAssets + snapshotBefore.traderClaimBalanceAssets,
             "Price-loss reachability should include only PnL pledge and same-account claims"
         );
         assertGt(
-            snapshotBefore.liquidationReachableSettlementUsdc,
-            preview.reachableCollateralUsdc,
+            snapshotBefore.liquidationReachableSettlementAssets,
+            preview.reachableCollateralAssets,
             "Setup should retain non-price-risk settlement outside liquidation reachability"
         );
         assertEq(
@@ -147,9 +149,9 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
             "Liquidation should clear the global queue head when only liquidated-account orders remain"
         );
         assertEq(
-            clearinghouse.balanceUsdc(account),
-            snapshotBefore.settlementBalanceUsdc - snapshotBefore.executionBountyReserveUsdc
-                - preview.seizedCollateralUsdc - preview.keeperBountyUsdc - preview.protocolLiquidationFeeUsdc,
+            clearinghouse.balanceAssets(account),
+            snapshotBefore.settlementBalanceAssets - snapshotBefore.executionBountyReserveAssets
+                - preview.seizedCollateralAssets - preview.keeperBountyAssets - preview.protocolLiquidationFeeAssets,
             "Trader settlement should retain isolated value without recovering forfeited execution bounties"
         );
     }
@@ -177,7 +179,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 25e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 25e6);
 
         vm.warp(block.timestamp + 60 days);
         while (engine.isOracleFrozen()) {
@@ -191,13 +193,13 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
 
-        uint256 keeperBefore = clearinghouse.balanceUsdc(address(this));
+        uint256 keeperBefore = clearinghouse.balanceAssets(address(this));
         _ensureLaterOracleTime();
         router.executeLiquidation(account, priceData);
 
         assertEq(
-            clearinghouse.balanceUsdc(address(this)) - keeperBefore,
-            expectedPreview.keeperBountyUsdc,
+            clearinghouse.balanceAssets(address(this)) - keeperBefore,
+            expectedPreview.keeperBountyAssets,
             "Liquidation bounty should use post-forfeiture clearinghouse reachability"
         );
     }
@@ -216,10 +218,12 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         vm.stopPrank();
 
         assertEq(
-            usdc.balanceOf(address(router)), 0, "Router should not custody prefunded close-order bounty reservation"
+            settlementToken.balanceOf(address(router)),
+            0,
+            "Router should not custody prefunded close-order bounty reservation"
         );
         assertEq(
-            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementAssets,
             0,
             "Clearinghouse should reserve prefunded close-order bounty reservation"
         );
@@ -227,7 +231,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshotBefore =
             engineAccountLens.getAccountLedgerSnapshot(account);
         uint256 poolAssetsBefore = pool.totalAssets();
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
@@ -235,12 +239,12 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         _ensureLaterOracleTime();
         router.executeLiquidation(account, priceData);
 
-        assertEq(snapshotBefore.executionBountyReserveUsdc, 0, "Unpaid close orders do not reserve settlement");
+        assertEq(snapshotBefore.executionBountyReserveAssets, 0, "Unpaid close orders do not reserve settlement");
         assertEq(router.pendingOrderCounts(account), 0, "Liquidation should clear queued close orders");
         assertEq(_executionBountyReserve(1), 0, "Liquidation should forfeit the first close-order bounty reservation");
         assertEq(_executionBountyReserve(2), 0, "Liquidation should forfeit the second close-order bounty reservation");
         assertEq(
-            usdc.balanceOf(address(router)),
+            settlementToken.balanceOf(address(router)),
             0,
             "Router should not retain close-order bounty reservation after liquidation"
         );
@@ -248,7 +252,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
             pool.excessAssets(), 0, "Forfeited close-order bounty reservation should not remain quarantined as excess"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
             0,
             "Forfeited close-order bounty reservation should transfer into treasury margin"
         );
@@ -274,7 +278,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
-        uint256 traderUsdcBefore = usdc.balanceOf(trader);
+        uint256 traderAssetsBefore = settlementToken.balanceOf(trader);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
@@ -292,11 +296,15 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         router.executeOrderBatch(uint64(queuedOrderCount), priceData);
 
         assertEq(
-            usdc.balanceOf(trader),
-            traderUsdcBefore,
+            settlementToken.balanceOf(trader),
+            traderAssetsBefore,
             "Liquidated trader should not recover reservation after liquidation"
         );
-        assertEq(usdc.balanceOf(address(router)), 0, "Router should hold no reservation for post-liquidation recovery");
+        assertEq(
+            settlementToken.balanceOf(address(router)),
+            0,
+            "Router should hold no reservation for post-liquidation recovery"
+        );
     }
 
     function test_ExecuteLiquidation_ClearsOnlyLiquidatedAccountsPendingOrders() public {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {RecordedOrderReceipts} from "../../../utils/RecordedOrderReceipts.sol";
 import {CarryReferenceLedger} from "../ghost/CarryReferenceLedger.sol";
 import {CloseReferenceMath} from "../ghost/CloseReferenceMath.sol";
@@ -24,7 +25,6 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Persistent public-Router campaign joining carry, exact basis, VPI, claims, and delayed Junior deposits.
@@ -107,7 +107,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         bool refundable;
     }
 
-    MockUSDC public immutable usdc;
+    MockSettlementToken public immutable settlementToken;
     MockPyth public immutable pyth;
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
@@ -243,7 +243,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     bool public frozen;
 
     constructor(
-        MockUSDC usdc_,
+        MockSettlementToken settlementToken_,
         MockPyth pyth_,
         CfdEngine engine_,
         MarginClearinghouse clearinghouse_,
@@ -253,7 +253,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         OrderRouter router_,
         address owner_
     ) {
-        usdc = usdc_;
+        settlementToken = settlementToken_;
         pyth = pyth_;
         engine = engine_;
         clearinghouse = clearinghouse_;
@@ -275,9 +275,9 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         for (uint256 i; i < 4; ++i) {
             address account = actorAt(i);
             vm.deal(account, 100_000 ether);
-            usdc.mint(account, INITIAL_CASH);
+            settlementToken.mint(account, INITIAL_CASH);
             vm.startPrank(account);
-            usdc.approve(address(clearinghouse), type(uint256).max);
+            settlementToken.approve(address(clearinghouse), type(uint256).max);
             clearinghouse.deposit(account, INITIAL_CASH);
             vm.stopPrank();
             traders[i].cash = INITIAL_CASH;
@@ -466,11 +466,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         (uint256 projectedSenior, uint256 projectedJunior, uint256 projectedHwm) = _projectLpCapital();
         bool wiped = projectedJunior == 0;
         bool unavailable = projectedJunior == 0 || projectedSenior < projectedHwm;
-        usdc.mint(lpAt(i), amount);
+        settlementToken.mint(lpAt(i), amount);
         explicitFunding += amount;
         lp.wallet += amount;
         vm.startPrank(lpAt(i));
-        usdc.approve(address(junior), amount);
+        settlementToken.approve(address(junior), amount);
         if (wiped || unavailable) {
             vm.expectRevert(
                 wiped
@@ -1139,14 +1139,14 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 removed = expectedPoolCash;
         engine.checkpointCarryIndexes();
         carry.advance(vm.getBlockTimestamp());
-        usdc.burn(address(pool), removed);
+        settlementToken.burn(address(pool), removed);
         expectedPoolCash = 0;
         externalShockOut += removed;
         carry.changeDepth(0, vm.getBlockTimestamp());
         _trade(0, traders[0].lots, 0, true);
         // Positive low-depth VPI can absorb the whole gain; the cash allocation model authenticates that path too.
         // Restoration is another explicit environmental input; it does not reset any model expectation.
-        usdc.mint(address(pool), removed);
+        settlementToken.mint(address(pool), removed);
         expectedPoolCash += removed;
         externalShockIn += removed;
         carry.changeDepth(_depth(), vm.getBlockTimestamp());
@@ -1190,7 +1190,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 removed = expectedPoolCash;
         engine.checkpointCarryIndexes();
         carry.advance(vm.getBlockTimestamp());
-        usdc.burn(address(pool), removed);
+        settlementToken.burn(address(pool), removed);
         expectedPoolCash = 0;
         externalShockOut += removed;
         carry.changeDepth(0, vm.getBlockTimestamp());
@@ -1203,7 +1203,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertGt(arrears, 0, "carry exceeds unprotected collateral");
         assertEq(traders[3].margin, 0, "carry consumes pledge first");
         ++arrearsEpisodes;
-        usdc.mint(address(pool), removed);
+        settlementToken.mint(address(pool), removed);
         expectedPoolCash += removed;
         externalShockIn += removed;
         carry.changeDepth(_depth(), vm.getBlockTimestamp());
@@ -1424,11 +1424,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         carry.advance(vm.getBlockTimestamp());
         if (nextCash < expectedPoolCash) {
             uint256 removed = expectedPoolCash - nextCash;
-            usdc.burn(address(pool), removed);
+            settlementToken.burn(address(pool), removed);
             externalShockOut += removed;
         } else {
             uint256 added = nextCash - expectedPoolCash;
-            usdc.mint(address(pool), added);
+            settlementToken.mint(address(pool), added);
             externalShockIn += added;
         }
         expectedPoolCash = nextCash;
@@ -1672,7 +1672,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 i,
         uint256 amount
     ) internal {
-        usdc.mint(actorAt(i), amount);
+        settlementToken.mint(actorAt(i), amount);
         explicitFunding += amount;
         traders[i].cash += amount;
         // Deposit credits custody before collecting carry; update the independent free bucket before its checkpoint.
@@ -2006,7 +2006,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         OrderV3Types.OrderRequest memory request
     ) internal view returns (bytes32) {
         bytes32 tag = keccak256(
-            "PletherOrderIntentV3(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint64 submitBy,uint32 executionWindowSeconds,uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyUsdc,uint256 maxExecutionNotionalUsdc,uint256 maxGrossAccountDebitUsdc,uint256 maxActionChargeUsdc,uint256 maxExplicitFeesUsdc,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceUsdc,uint256 minPostPositionEquityUsdc,uint32 maxPostLeverageBps)"
+            "PletherOrderIntentV3(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint64 submitBy,uint32 executionWindowSeconds,uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyAssets,uint256 maxExecutionNotionalAssets,uint256 maxGrossAccountDebitAssets,uint256 maxActionChargeAssets,uint256 maxExplicitFeesAssets,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceAssets,uint256 minPostPositionEquityAssets,uint32 maxPostLeverageBps)"
         );
         return keccak256(abi.encode(tag, block.chainid, address(router), actorAt(i), request));
     }
@@ -2059,7 +2059,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             return 0;
         }
         uint256 queuedLots = orders.queuedLots(i, traders[i].lots, riskOffCutoff);
-        bool belowMinimum = lots * currentPrice < router.minOpenNotionalUsdc() && (!isClose || lots < queuedLots);
+        bool belowMinimum = lots * currentPrice < router.minOpenNotionalAssets() && (!isClose || lots < queuedLots);
         if (belowMinimum) {
             vm.prank(actorAt(i));
             vm.expectRevert(
@@ -2332,12 +2332,12 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         } else {
             PendingOrderReferenceLedger.Order memory o = orders.order(id);
             if (o.request.isClose && reason != OrderV3Types.TerminalReason.Executed) {
-                assertEq(o.bountyUsdc, 0);
+                assertEq(o.bountyAssets, 0);
                 ++unpaidFailedCloses;
                 ++unpaidFailureTransitions;
                 _modelBountyPayment(id, executor, o.bountyFree);
             } else {
-                _modelBountyPayment(id, executor, o.bountyUsdc);
+                _modelBountyPayment(id, executor, o.bountyAssets);
             }
         }
     }
@@ -2401,7 +2401,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 amount
     ) internal {
         PendingOrderReferenceLedger.Order memory o = orders.order(id);
-        assertEq(orders.takeBounty(id), o.bountyUsdc);
+        assertEq(orders.takeBounty(id), o.bountyAssets);
         if (executor == actorAt(o.actorIndex)) {
             carry.releaseProtectedWithoutCheckpoint(executor, amount);
         } else {
@@ -2427,7 +2427,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(receipt.executor, executor);
         assertEq(uint8(receipt.status), uint8(status));
         assertEq(uint8(receipt.reason), uint8(reason));
-        assertEq(receipt.bountyUsdc, o.bountyUsdc, "input-derived reserved bounty");
+        assertEq(receipt.bountyAssets, o.bountyAssets, "input-derived reserved bounty");
         _assertBountyOutcome(o, reason, executor);
         if (
             reason == OrderV3Types.TerminalReason.Executed || reason == OrderV3Types.TerminalReason.Slippage
@@ -2470,11 +2470,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (reason == OrderV3Types.TerminalReason.AccountLiquidated) {
             forfeited = o.bountyFree;
         } else if (reason == OrderV3Types.TerminalReason.RiskOff) {
-            refunded = o.bountyUsdc;
+            refunded = o.bountyAssets;
         } else if (o.request.isClose && reason != OrderV3Types.TerminalReason.Executed) {
             paid = o.bountyFree;
         } else {
-            paid = o.bountyUsdc;
+            paid = o.bountyAssets;
         }
         OrderV3Types.BountyDisposition disposition;
         address recipient;
@@ -2490,11 +2490,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         assertEq(uint8(receipt.bountyDisposition), uint8(disposition), "input-derived split disposition");
         assertEq(receipt.bountyRecipient, recipient);
-        assertEq(receipt.bounty.bountyEntitlementUsdc, o.bountyUsdc);
-        assertEq(receipt.bounty.bountyPaidUsdc, paid, "only earned bounty is paid");
-        assertEq(receipt.bounty.bountyRefundedUsdc, refunded, "refund matches modeled terminal disposition");
-        assertEq(receipt.bounty.bountyForfeitedUsdc, forfeited, "only free funding is forfeited");
-        assertEq(paid + refunded + forfeited, o.bountyUsdc);
+        assertEq(receipt.bounty.bountyEntitlementAssets, o.bountyAssets);
+        assertEq(receipt.bounty.bountyPaidAssets, paid, "only earned bounty is paid");
+        assertEq(receipt.bounty.bountyRefundedAssets, refunded, "refund matches modeled terminal disposition");
+        assertEq(receipt.bounty.bountyForfeitedAssets, forfeited, "only free funding is forfeited");
+        assertEq(paid + refunded + forfeited, o.bountyAssets);
     }
 
     function executeBatch(
@@ -2764,7 +2764,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             if (o.request.isClose) {
                 ++unpaidCloseLiquidations;
             }
-            assertEq(orders.takeBounty(o.id), o.bountyUsdc);
+            assertEq(orders.takeBounty(o.id), o.bountyAssets);
             uint256 amount = o.bountyFree;
             forfeitedOrderBounties[ids[j]] = amount;
             carry.consumeProtectedWithoutCheckpoint(actorAt(i), amount);
@@ -3146,11 +3146,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             }
             assertEq(marginIds.length, active);
             assertEq(summary.activeReservationCount, active);
-            assertEq(summary.activeCommittedOrderMarginUsdc, orders.margin(i));
-            assertEq(clearinghouse.orderMarginUsdc(account), orders.margin(i));
-            assertEq(clearinghouse.totalBountyReservationsUsdc(account), orders.bounty(i));
+            assertEq(summary.activeCommittedOrderMarginAssets, orders.margin(i));
+            assertEq(clearinghouse.orderMarginAssets(account), orders.margin(i));
+            assertEq(clearinghouse.totalBountyReservationsAssets(account), orders.bounty(i));
             assertEq(
-                clearinghouse.actionReserveUsdc(account),
+                clearinghouse.actionReserveAssets(account),
                 orders.bounty(i) + (traders[i].vpi < 0 ? uint256(-traders[i].vpi) : 0)
             );
             assertEq(engine.positionEpoch(account), positionEpochs[i], "independent position incarnation");
@@ -3171,8 +3171,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(uint8(pending.side), uint8(o.request.side));
         assertEq(pending.commitTime, o.commitTime);
         assertEq(pending.commitBlock, o.commitBlock);
-        assertEq(pending.committedMarginUsdc, o.remainingMargin);
-        assertEq(pending.executionBountyUsdc, o.remainingBounty);
+        assertEq(pending.committedMarginAssets, o.remainingMargin);
+        assertEq(pending.executionBountyAssets, o.remainingBounty);
         OrderV3Types.PendingIntent memory intent = router.lifecycleBook().pendingIntent(id);
         assertEq(intent.account, account);
         assertEq(intent.clientOrderId, o.request.clientOrderId);
@@ -3181,17 +3181,17 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(intent.timing.executionDeadline, o.deadline);
         assertEq(router.lifecycleBook().clientIntent(account, o.request.clientOrderId).orderId, id);
         IMarginClearinghouse.OrderReservation memory margin = clearinghouse.getOrderReservation(id);
-        assertEq(margin.remainingAmountUsdc, o.remainingMargin);
+        assertEq(margin.remainingAmountAssets, o.remainingMargin);
         assertEq(uint8(margin.status), uint8(o.marginStatus));
         IMarginClearinghouse.BountyReservation memory bounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
         assertEq(bounty.account, account);
-        assertEq(bounty.amountUsdc, o.remainingBounty);
-        assertEq(bounty.freeFundedUsdc, o.bountyFree);
-        assertEq(bounty.freeFundedUsdc, bounty.amountUsdc);
+        assertEq(bounty.amountAssets, o.remainingBounty);
+        assertEq(bounty.freeFundedAssets, o.bountyFree);
+        assertEq(bounty.freeFundedAssets, bounty.amountAssets);
         assertEq(uint8(bounty.state), uint8(IMarginClearinghouse.BountyReservationState.Active));
         if (o.request.isClose) {
-            assertEq(intent.commitment.carryCollectedUsdc, committedCarry[id]);
+            assertEq(intent.commitment.carryCollectedAssets, committedCarry[id]);
         }
     }
 
@@ -3210,11 +3210,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(pending.sizeDelta, 0);
         assertEq(next, 0);
         IMarginClearinghouse.OrderReservation memory margin = clearinghouse.getOrderReservation(id);
-        assertEq(margin.remainingAmountUsdc, 0);
+        assertEq(margin.remainingAmountAssets, 0);
         assertEq(uint8(margin.status), uint8(o.marginStatus));
         IMarginClearinghouse.BountyReservation memory bounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
-        assertEq(bounty.amountUsdc, 0);
+        assertEq(bounty.amountAssets, 0);
         assertEq(uint8(bounty.state), uint8(IMarginClearinghouse.BountyReservationState.Settled));
     }
 
@@ -3233,11 +3233,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         bytes32 account = keccak256(
             abi.encode(
                 position,
-                engine.positionEntryCostUsdcAtoms(actorAt(i)),
-                engine.unsettledCarryUsdc(actorAt(i)),
-                clearinghouse.balanceUsdc(actorAt(i)),
-                clearinghouse.getAccountUsdcBuckets(actorAt(i)),
-                engine.traderClaimBalanceUsdc(actorAt(i))
+                engine.positionEntryCostAssetAtoms(actorAt(i)),
+                engine.unsettledCarryAssets(actorAt(i)),
+                clearinghouse.balanceAssets(actorAt(i)),
+                clearinghouse.getAccountAssetBuckets(actorAt(i)),
+                engine.traderClaimBalanceAssets(actorAt(i))
             )
         );
         bytes32 indexes = keccak256(
@@ -3248,8 +3248,9 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
                 engine.sideCarryTimestamp(1)
             )
         );
-        bytes32 protocol =
-            keccak256(abi.encode(pool.accountedAssets(), usdc.balanceOf(address(pool)), router.nextCommitId()));
+        bytes32 protocol = keccak256(
+            abi.encode(pool.accountedAssets(), settlementToken.balanceOf(address(pool)), router.nextCommitId())
+        );
         return keccak256(abi.encode(account, indexes, protocol));
     }
 
@@ -3300,7 +3301,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             assertEq(uint8(receipt.reason), uint8(OrderV3Types.TerminalReason.RiskOff));
             assertEq(receipt.account, actorAt(o.actorIndex));
             assertEq(receipt.bountyRecipient, actorAt(o.actorIndex));
-            assertEq(receipt.bountyUsdc, o.bountyUsdc);
+            assertEq(receipt.bountyAssets, o.bountyAssets);
             assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.RefundedToAccount));
             orders.recordReceipt(o.id, receipt.receiptHash);
             ++riskOffOrders;
@@ -3377,7 +3378,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         _trade(i, 100, 300e6, false);
         _withdraw(i, _free(i));
         uint64 id = _commitTrade(i, 100, 0, true);
-        assertEq(orders.order(id).bountyUsdc, 0);
+        assertEq(orders.order(id).bountyAssets, 0);
         assertFalse(_liquidateAt(i, 100_000_002), "unpaid pending close preserves solvent position");
         assertEq(orders.head(), id);
         assertTrue(_liquidateAt(i, 140_000_002), "unpaid pending close cannot shield losses");
@@ -3393,7 +3394,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         _withdraw(i, _free(i));
         uint64 first = _commitTrade(i, traders[i].lots, 0, true);
         assertGt(first, 0);
-        assertEq(orders.order(first).bountyUsdc, 0);
+        assertEq(orders.order(first).bountyAssets, 0);
         uint256 nextBounty = 17 * currentPrice / 10_000;
         if (nextBounty > 200_000) {
             nextBounty = 200_000;
@@ -3473,16 +3474,18 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             (uint256 size, uint256 margin,, uint256 maxProfit,,, int256 vpi) = engine.positions(account);
             assertEq(size, t.lots * 1e20, "mixed exact lots");
             assertEq(margin, t.margin, "mixed independent pledge");
-            assertEq(engine.positionEntryCostUsdcAtoms(account), t.basis, "mixed exact entry basis");
+            assertEq(engine.positionEntryCostAssetAtoms(account), t.basis, "mixed exact entry basis");
             assertEq(maxProfit, i % 2 == 0 ? t.basis : t.lots * CAP - t.basis, "mixed endpoint liability");
             assertEq(vpi, t.vpi, "mixed lifetime VPI");
-            assertEq(clearinghouse.balanceUsdc(account), t.cash, "mixed account cash");
-            assertEq(engine.traderClaimBalanceUsdc(account), t.claim, "mixed independently generated claim");
-            assertEq(clearinghouse.liquidationReserveUsdc(account), t.liquidationReserve, "mixed liquidation reserve");
-            assertEq(clearinghouse.vpiRebateReserveUsdc(account), t.vpi < 0 ? uint256(-t.vpi) : 0, "mixed VPI backing");
-            assertEq(usdc.balanceOf(account), t.wallet, "mixed trader external custody");
+            assertEq(clearinghouse.balanceAssets(account), t.cash, "mixed account cash");
+            assertEq(engine.traderClaimBalanceAssets(account), t.claim, "mixed independently generated claim");
+            assertEq(clearinghouse.liquidationReserveAssets(account), t.liquidationReserve, "mixed liquidation reserve");
+            assertEq(
+                clearinghouse.vpiRebateReserveAssets(account), t.vpi < 0 ? uint256(-t.vpi) : 0, "mixed VPI backing"
+            );
+            assertEq(settlementToken.balanceOf(account), t.wallet, "mixed trader external custody");
             CarryReferenceLedger.Account memory carryAccount = carry.accountState(account);
-            assertEq(engine.unsettledCarryUsdc(account), carryAccount.arrears, "mixed carry arrears");
+            assertEq(engine.unsettledCarryAssets(account), carryAccount.arrears, "mixed carry arrears");
             assertEq(
                 carryAccount.totalNewCarry,
                 carryAccount.totalCollected + carryAccount.totalWaived + carryAccount.arrears,
@@ -3516,23 +3519,23 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             "persistent aggregate carry conservation"
         );
         assertEq(carryCollected, carry.totalCollected(), "complete independent carry collection attribution");
-        assertEq(usdc.balanceOf(address(clearinghouse)), custody, "mixed complete clearinghouse custody");
-        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), expectedTreasury, "mixed fee ownership");
-        assertEq(clearinghouse.balanceUsdc(KEEPER), expectedKeeper, "mixed exact-once keeper credits");
-        assertEq(engine.totalTraderClaimBalanceUsdc(), expectedClaims, "mixed aggregate claims");
-        assertEq(usdc.balanceOf(address(pool)), expectedPoolCash, "mixed modeled physical pool cash");
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), custody, "mixed complete clearinghouse custody");
+        assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), expectedTreasury, "mixed fee ownership");
+        assertEq(clearinghouse.balanceAssets(KEEPER), expectedKeeper, "mixed exact-once keeper credits");
+        assertEq(engine.totalTraderClaimBalanceAssets(), expectedClaims, "mixed aggregate claims");
+        assertEq(settlementToken.balanceOf(address(pool)), expectedPoolCash, "mixed modeled physical pool cash");
         assertEq(pool.accountedAssets(), expectedAccounted, "mixed canonical pool backing");
         assertEq(pool.seniorPrincipal(), expectedSenior, "mixed independent Senior waterfall");
         assertEq(pool.juniorPrincipal(), expectedJunior, "mixed independent Junior waterfall");
         assertEq(pool.seniorHighWaterMark(), expectedHwm, "mixed independent Senior HWM");
         (uint256 vaultCash, uint256 lpWallets) = _assertLpModel();
         assertEq(
-            usdc.totalSupply(),
+            settlementToken.totalSupply(),
             explicitFunding + externalShockIn - externalShockOut,
             "complete external issuance ledger"
         );
-        assertEq(usdc.balanceOf(address(engine)), 0, "Engine retains no settlement cash");
-        assertEq(usdc.balanceOf(address(router)), 0, "Router retains no settlement cash");
+        assertEq(settlementToken.balanceOf(address(engine)), 0, "Engine retains no settlement cash");
+        assertEq(settlementToken.balanceOf(address(router)), 0, "Router retains no settlement cash");
         assertEq(
             custody + expectedPoolCash + vaultCash + wallets + lpWallets + externalShockOut,
             explicitFunding + externalShockIn,
@@ -3542,7 +3545,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             (, uint256 oi,, uint256 margin) = engine.sides(side);
             assertEq(margin, expectedSideMargin[side], "mixed aggregate side margin");
             assertEq(oi, sideLots[side] * 1e20);
-            assertEq(engine.sideBorrowBaseUsdc(side), carry.sideState(side).borrowBase, "mixed carry borrow basis");
+            assertEq(engine.sideBorrowBaseAssets(side), carry.sideState(side).borrowBase, "mixed carry borrow basis");
             assertEq(engine.sideCarryIndex(side), carry.sideState(side).index, "mixed independent side carry index");
             assertEq(engine.sideCarryTimestamp(side), carry.sideState(side).timestamp, "mixed carry clock");
         }
@@ -3604,7 +3607,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             redemptionClaims += lp.claimRedeemAssets;
             wallets += lp.wallet;
             assertEq(junior.balanceOf(account), lp.shares, "mixed LP share ownership");
-            assertEq(usdc.balanceOf(account), lp.wallet, "mixed LP cancellation and redemption custody");
+            assertEq(settlementToken.balanceOf(account), lp.wallet, "mixed LP cancellation and redemption custody");
             assertEq(junior.lastDepositTime(account), lp.lastDepositTime, "mixed independent LP cooldown");
             if (lp.epoch != 0) {
                 assertEq(junior.pendingDepositRequest(lp.epoch, account), lp.pending, "mixed pending deposit ownership");
@@ -3656,7 +3659,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             _assertRedeemEpoch(modeledRedeemEpochIds[e]);
         }
         vaultCash = pending + redemptionClaims;
-        assertEq(usdc.balanceOf(address(junior)), vaultCash, "mixed complete LP cash escrow");
+        assertEq(settlementToken.balanceOf(address(junior)), vaultCash, "mixed complete LP cash escrow");
         assertEq(junior.pendingDepositEscrowAssets(), pending, "mixed pending deposit escrow");
         assertEq(junior.withdrawalEscrowAssets(), redemptionClaims, "mixed redemption entitlement and dust escrow");
         assertEq(

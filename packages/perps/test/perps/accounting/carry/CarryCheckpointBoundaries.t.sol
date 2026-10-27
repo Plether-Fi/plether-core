@@ -28,7 +28,7 @@ contract PendingDepositLifecycleCarryTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(150_000_000, uint64(vm.getBlockTimestamp()));
 
-        uint256 expectedFirst = _expectedIndexedCarryUsdc(checkpointed);
+        uint256 expectedFirst = _expectedIndexedCarryAssets(checkpointed);
         uint256 poolBeforeCheckpoint = pool.totalAssets();
         _fundTrader(checkpointed, 100e6);
         uint256 checkpointedFirstCarry = pool.totalAssets() - poolBeforeCheckpoint;
@@ -39,14 +39,14 @@ contract PendingDepositLifecycleCarryTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(50_000_000, uint64(vm.getBlockTimestamp()));
 
-        uint256 expectedSecond = _expectedIndexedCarryUsdc(checkpointed);
+        uint256 expectedSecond = _expectedIndexedCarryAssets(checkpointed);
         uint256 poolBeforeSecondCheckpoint = pool.totalAssets();
         _fundTrader(checkpointed, 100e6);
         uint256 checkpointedSecondCarry = pool.totalAssets() - poolBeforeSecondCheckpoint;
 
         assertGt(checkpointedSecondCarry, 0, "second interval should accrue carry");
         assertEq(checkpointedSecondCarry, expectedSecond);
-        uint256 expectedLazy = _expectedIndexedCarryUsdc(lazy);
+        uint256 expectedLazy = _expectedIndexedCarryAssets(lazy);
         uint256 poolBeforeLazyCheckpoint = pool.totalAssets();
         _fundTrader(lazy, 100e6);
         uint256 lazyCarry = pool.totalAssets() - poolBeforeLazyCheckpoint;
@@ -67,7 +67,7 @@ contract PendingDepositLifecycleCarryTest is BasePerpTest {
 
         _fundTrader(account, margin + 20_000e6);
         _open(account, CfdTypes.Side.LONG, size, margin, 1e8);
-        uint256 borrowBaseBefore = _positionBorrowBaseUsdc(account);
+        uint256 borrowBaseBefore = _positionBorrowBaseAssets(account);
 
         vm.warp(block.timestamp + 10 days);
         vm.prank(address(router));
@@ -80,7 +80,7 @@ contract PendingDepositLifecycleCarryTest is BasePerpTest {
 
         assertGt(realizedCarry, 0, "old borrow base should accrue before the margin increase");
         assertEq(
-            _positionBorrowBaseUsdc(account),
+            _positionBorrowBaseAssets(account),
             borrowBaseBefore + realizedCarry - 10_000e6,
             "added position margin should reduce future borrow base"
         );
@@ -100,12 +100,12 @@ contract SyntheticCarryCacheSettlementTest is BasePerpTest {
         _fundTrader(trader, 100_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 50_000e6, 1e8);
 
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(account)
+        stdstore.target(address(engine)).sig("unsettledCarryAssets(address)").with_key(account)
             .checked_write(uint256(10e6));
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 1e8);
 
-        assertEq(engine.unsettledCarryUsdc(account), 0, "Close should clear cached unsettled carry");
+        assertEq(engine.unsettledCarryAssets(account), 0, "Close should clear cached unsettled carry");
     }
 
     /// @dev accounting; source: ACCOUNTING_SPEC.md#lp-capital-carry.
@@ -120,7 +120,7 @@ contract SyntheticCarryCacheSettlementTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(account, 8000e6);
 
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(account)
+        stdstore.target(address(engine)).sig("unsettledCarryAssets(address)").with_key(account)
             .checked_write(uint256(1e6));
 
         bytes[] memory priceData = new bytes[](1);
@@ -129,7 +129,7 @@ contract SyntheticCarryCacheSettlementTest is BasePerpTest {
         vm.prank(keeper);
         router.executeLiquidation(account, priceData);
 
-        assertEq(engine.unsettledCarryUsdc(account), 0, "Liquidation should clear cached unsettled carry");
+        assertEq(engine.unsettledCarryAssets(account), 0, "Liquidation should clear cached unsettled carry");
     }
 
 }
@@ -146,7 +146,7 @@ contract CarryCollectionTimingTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -165,13 +165,13 @@ contract CarryCollectionTimingTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(120_000_000, uint64(vm.getBlockTimestamp()));
         _close(account, CfdTypes.Side.LONG, 200_000e18, 120_000_000);
-        uint256 markThenTradeBalance = clearinghouse.balanceUsdc(account);
+        uint256 markThenTradeBalance = clearinghouse.balanceAssets(account);
 
         vm.revertToState(snap);
 
         vm.warp(block.timestamp + 1 days);
         _close(account, CfdTypes.Side.LONG, 200_000e18, 120_000_000);
-        uint256 tradeOnlyBalance = clearinghouse.balanceUsdc(account);
+        uint256 tradeOnlyBalance = clearinghouse.balanceAssets(account);
 
         assertEq(tradeOnlyBalance, markThenTradeBalance, "Carry realization should not depend on update-vs-trade path");
     }
@@ -192,7 +192,7 @@ contract CarryAndMarginCheckpointCarryTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -234,7 +234,7 @@ contract HistoricalCarryCheckpointTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -246,26 +246,26 @@ contract HistoricalCarryCheckpointTest is BasePerpTest {
         _fundTrader(trader, 150_000e6);
         _open(trader, CfdTypes.Side.LONG, 200_000e18, 100_000e6, 1e8);
 
-        uint256 balanceBeforeCheckpoint = clearinghouse.balanceUsdc(trader);
+        uint256 balanceBeforeCheckpoint = clearinghouse.balanceAssets(trader);
         uint256 elapsed = 30 days;
-        uint256 entryPriceLpBackedNotionalUsdc = 9000e6;
-        uint256 minimumHistoricalCarryUsdc =
-            (entryPriceLpBackedNotionalUsdc * 500 * elapsed) / (CfdMath.SECONDS_PER_YEAR * 10_000);
+        uint256 entryPriceLpBackedNotionalAssets = 9000e6;
+        uint256 minimumHistoricalCarryAssets =
+            (entryPriceLpBackedNotionalAssets * 500 * elapsed) / (CfdMath.SECONDS_PER_YEAR * 10_000);
 
         vm.warp(block.timestamp + elapsed);
         vm.prank(address(router));
         engine.updateMarkPrice(0.5e8, uint64(vm.getBlockTimestamp()));
 
-        usdc.mint(trader, 1);
+        settlementToken.mint(trader, 1);
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), 1);
+        settlementToken.approve(address(clearinghouse), 1);
         clearinghouse.deposit(trader, 1);
         vm.stopPrank();
 
-        uint256 balanceAfterCheckpoint = clearinghouse.balanceUsdc(trader);
+        uint256 balanceAfterCheckpoint = clearinghouse.balanceAssets(trader);
         assertLe(
             balanceAfterCheckpoint,
-            balanceBeforeCheckpoint + 1 - minimumHistoricalCarryUsdc,
+            balanceBeforeCheckpoint + 1 - minimumHistoricalCarryAssets,
             "A favorable checkpoint price must not erase carry owed for historical LP-backed exposure"
         );
     }

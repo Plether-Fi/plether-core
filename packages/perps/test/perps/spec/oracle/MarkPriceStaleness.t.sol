@@ -24,8 +24,8 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract MarkPriceStalenessTest is BasePerpTest {
 
@@ -46,7 +46,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -58,15 +58,19 @@ contract MarkPriceStalenessTest is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        settlementToken = new MockSettlementToken();
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(engine.CAP_PRICE()))));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "jUSDC", 0, address(0));
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "sUSDC", 0, address(0));
+        juniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), false, "Junior LP", "jAssets", 0, address(0)
+        );
+        seniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), true, "Senior LP", "sAssets", 0, address(0)
+        );
         pool.setJuniorVault(address(juniorVault));
         pool.setSeniorVault(address(seniorVault));
         engine.setPool(address(pool));
@@ -140,7 +144,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
 
     function test_Constructor_IncompatibleEngineLensReverts() public {
         _expectInvalidRouterBindings(
-            address(usdc), address(pool), IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector
+            address(settlementToken), address(pool), IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector
         );
     }
 
@@ -171,7 +175,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
 
     function test_Constructor_IncompatibleHousePoolReverts() public {
         _expectInvalidRouterBindings(
-            address(engineLens), address(usdc), IOrderRouterErrors.OrderRouter__InvalidHousePool.selector
+            address(engineLens), address(settlementToken), IOrderRouterErrors.OrderRouter__InvalidHousePool.selector
         );
     }
 
@@ -183,7 +187,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
 
     function test_Constructor_HousePoolBoundToOtherEngineReverts() public {
         HousePool wrongPool =
-            new HousePool(address(usdc), address(0xBAD), address(new HousePoolRedemptionMathSidecar()));
+            new HousePool(address(settlementToken), address(0xBAD), address(new HousePoolRedemptionMathSidecar()));
         _expectInvalidRouterBindings(
             address(engineLens), address(wrongPool), IOrderRouterErrors.OrderRouter__InvalidHousePool.selector
         );

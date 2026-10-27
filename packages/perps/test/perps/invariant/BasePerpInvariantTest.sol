@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../utils/MockSettlementToken.sol";
 import {OrderRouterDebugLens} from "../../utils/OrderRouterDebugLens.sol";
 import {MockInvariantHousePool} from "./mocks/MockInvariantHousePool.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
@@ -26,12 +27,11 @@ import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 abstract contract BasePerpInvariantTest is Test {
 
-    MockUSDC internal usdc;
+    MockSettlementToken internal settlementToken;
     CfdEngine internal engine;
     CfdEngineAdmin internal engineAdmin;
     CfdEngineAccountLens internal engineAccountLens;
@@ -48,15 +48,15 @@ abstract contract BasePerpInvariantTest is Test {
     uint256 internal constant CAP_PRICE = 2e8;
 
     function setUp() public virtual {
-        usdc = new MockUSDC();
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        settlementToken = new MockSettlementToken();
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
 
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
-        housePool = new MockInvariantHousePool(address(usdc), address(engine));
+        housePool = new MockInvariantHousePool(address(settlementToken), address(engine));
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
         mockPyth.setPrice(bytes32(uint256(1)), int64(100_000_000), int32(-8), SafeCast.toUint64(SETUP_TIMESTAMP));
@@ -112,7 +112,7 @@ abstract contract BasePerpInvariantTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 9,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -130,7 +130,7 @@ abstract contract BasePerpInvariantTest is Test {
     function _deployEngine(
         CfdTypes.RiskParams memory riskParams_
     ) internal returns (CfdEngine deployedEngine) {
-        deployedEngine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_, 50);
+        deployedEngine = new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, riskParams_, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
         CfdEngineAdmin deployedEngineAdmin = new CfdEngineAdmin(address(deployedEngine), address(this));
@@ -163,7 +163,7 @@ abstract contract BasePerpInvariantTest is Test {
     function _remainingCommittedMargin(
         uint64 orderId
     ) internal view returns (uint256) {
-        return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
+        return clearinghouse.getOrderReservation(orderId).remainingAmountAssets;
     }
 
     function _isInMarginQueue(
@@ -172,16 +172,16 @@ abstract contract BasePerpInvariantTest is Test {
         return _orderRecord(orderId).inMarginQueue;
     }
 
-    function _freeSettlementUsdc(
+    function _freeSettlementAssets(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
+        return clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets;
     }
 
-    function _terminalReachableUsdc(
+    function _terminalReachableAssets(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
+        return clearinghouse.getAccountAssetBuckets(account).settlementBalanceAssets;
     }
 
     function _publicPosition(
@@ -200,8 +200,8 @@ abstract contract BasePerpInvariantTest is Test {
         return longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
     }
 
-    function _withdrawalReservedUsdc() internal view returns (uint256) {
-        return engineProtocolLens.getProtocolAccountingSnapshot().withdrawalReservedUsdc;
+    function _withdrawalReservedAssets() internal view returns (uint256) {
+        return engineProtocolLens.getProtocolAccountingSnapshot().withdrawalReservedAssets;
     }
 
     function _unrealizedTraderPnl() internal view returns (int256) {

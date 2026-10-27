@@ -30,10 +30,10 @@ contract TerminalEconomicStateWriteoffTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(loserAccount, 1e8);
-        uint256 priceLossUsdc = uint256(-preview.pnlUsdc);
-        uint256 collectibleCapUsdc =
-            engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapUsdc;
-        assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must contain an uncollectible terminal price tail");
+        uint256 priceLossAssets = uint256(-preview.pnlAssets);
+        uint256 collectibleCapAssets =
+            engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapAssets;
+        assertGt(priceLossAssets, collectibleCapAssets, "Setup must contain an uncollectible terminal price tail");
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
@@ -65,10 +65,11 @@ contract ReachableLiquidationWriteoffTest is BasePerpTest {
         uint256 liquidationPrice = 101_800_000;
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         assertTrue(preview.liquidatable, "Setup must remain below maintenance margin");
-        assertLt(preview.pnlUsdc, 0, "Setup must realize a trader price loss");
-        uint256 priceLossUsdc = uint256(-preview.pnlUsdc);
-        uint256 collectibleCapUsdc = engineAccountLens.getAccountLedgerSnapshot(account).terminalPriceCollectibleCapUsdc;
-        assertLe(priceLossUsdc, collectibleCapUsdc, "Setup price loss must remain fully collectible");
+        assertLt(preview.pnlAssets, 0, "Setup must realize a trader price loss");
+        uint256 priceLossAssets = uint256(-preview.pnlAssets);
+        uint256 collectibleCapAssets =
+            engineAccountLens.getAccountLedgerSnapshot(account).terminalPriceCollectibleCapAssets;
+        assertLe(priceLossAssets, collectibleCapAssets, "Setup price loss must remain fully collectible");
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
@@ -76,7 +77,7 @@ contract ReachableLiquidationWriteoffTest is BasePerpTest {
 
         (uint256 remainingSize,,,,,,) = engine.positions(account);
         assertEq(remainingSize, 0, "Liquidation should consume reachable price collateral and clear the position");
-        assertEq(clearinghouse.pnlPledgeUsdc(account), 0, "Terminal liquidation must release the PnL pledge bucket");
+        assertEq(clearinghouse.pnlPledgeAssets(account), 0, "Terminal liquidation must release the PnL pledge bucket");
     }
 
 }
@@ -101,11 +102,11 @@ contract TerminalPriceTailAccountingTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(loserAccount, 1e8);
-        assertLt(preview.pnlUsdc, 0, "Setup must realize a trader price loss");
-        uint256 priceLossUsdc = uint256(-preview.pnlUsdc);
-        uint256 collectibleCapUsdc =
-            engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapUsdc;
-        assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must contain an uncollectible terminal price tail");
+        assertLt(preview.pnlAssets, 0, "Setup must realize a trader price loss");
+        uint256 priceLossAssets = uint256(-preview.pnlAssets);
+        uint256 collectibleCapAssets =
+            engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapAssets;
+        assertGt(priceLossAssets, collectibleCapAssets, "Setup must contain an uncollectible terminal price tail");
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
@@ -114,9 +115,10 @@ contract TerminalPriceTailAccountingTest is BasePerpTest {
         (uint256 remainingSize,,,,,,) = engine.positions(loserAccount);
         assertEq(remainingSize, 0, "Diagnostic writeoff must not block terminal liquidation");
 
-        (bool debtGetterExists,) = address(engine).staticcall(abi.encodeWithSignature("accumulatedBadDebtUsdc()"));
+        (bool debtGetterExists,) = address(engine).staticcall(abi.encodeWithSignature("accumulatedBadDebtAssets()"));
         assertFalse(debtGetterExists, "V2 must not expose mutable accumulated-debt state");
-        (bool debtClearExists,) = address(engine).call(abi.encodeWithSignature("clearBadDebt(uint256)", priceLossUsdc));
+        (bool debtClearExists,) =
+            address(engine).call(abi.encodeWithSignature("clearBadDebt(uint256)", priceLossAssets));
         assertFalse(debtClearExists, "V2 must not expose the retired debt-clearing selector");
     }
 
@@ -135,7 +137,7 @@ contract AccountPriceCollateralWriteoffTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -163,11 +165,11 @@ contract AccountPriceCollateralWriteoffTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(loserAccount, 1e8);
-        assertLt(preview.pnlUsdc, 0, "Setup must realize a trader price loss");
-        uint256 priceLossUsdc = uint256(-preview.pnlUsdc);
-        uint256 collectibleCapUsdc =
-            engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapUsdc;
-        assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must contain a diagnostic price-loss writeoff");
+        assertLt(preview.pnlAssets, 0, "Setup must realize a trader price loss");
+        uint256 priceLossAssets = uint256(-preview.pnlAssets);
+        uint256 collectibleCapAssets =
+            engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapAssets;
+        assertGt(priceLossAssets, collectibleCapAssets, "Setup must contain a diagnostic price-loss writeoff");
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
@@ -210,14 +212,14 @@ contract ReservedSettlementBehaviorWriteoffTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 loserCollectibleCapUsdc =
-            engineAccountLens.getAccountLedgerSnapshot(bAccount).terminalPriceCollectibleCapUsdc;
-        assertEq(loserCollectibleCapUsdc, 930e6, "Fixture should leave 930 USDC of exact price collateral");
+        uint256 loserCollectibleCapAssets =
+            engineAccountLens.getAccountLedgerSnapshot(bAccount).terminalPriceCollectibleCapAssets;
+        assertEq(loserCollectibleCapAssets, 930e6, "Fixture should leave 930 settlementToken of exact price collateral");
 
         uint256 mtm = _poolMtmAdjustment();
         assertEq(
             mtm,
-            50_000e6 - loserCollectibleCapUsdc,
+            50_000e6 - loserCollectibleCapAssets,
             "Exact MtM should net only the loser's collectible cap against the winner liability"
         );
     }

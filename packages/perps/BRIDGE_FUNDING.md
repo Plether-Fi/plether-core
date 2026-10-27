@@ -1,5 +1,8 @@
 # Bridge funding into perps margin
 
+The new USDG testnet deployment has bridge funding disabled. This guide describes a separately reviewed USDC
+provider route. SDK token-address inputs use `settlementToken`.
+
 `MarginClearinghouse.depositFor(account, amount)` lets a third party pay USDC into another account's free settlement
 balance. The Across integration uses that method during a destination callback: approve the clearinghouse, deposit
 for the trading account, clear the allowance, and emit a quote-specific marker. If the action fails, the intended
@@ -94,14 +97,14 @@ require reconciliation again. Keep reconciliation for the original release avail
 
 The [bridge funding client](../perps-aa-client/src/bridgeFunding.ts) exports:
 
-- `buildDepositForCalls({usdc,clearinghouse,beneficiary,amount})`: raw approval and caller-funded deposit calls from
+- `buildDepositForCalls({settlementToken,clearinghouse,beneficiary,amount})`: raw approval and caller-funded deposit calls from
   the same payer. Batch atomically when supported; otherwise confirm approval before deposit. The supplied positive
   amount is fixed. This helper does not build the Across dynamic-balance message or clear allowance after failure.
 - `verifyBridgeFundingDeployment({client,deployment})`: checks chain ID, runtime hashes for token, clearinghouse,
   SpokePool proxy/implementation and handler, the SpokePool EIP-1967 implementation slot, and the clearinghouse's token
   binding at one captured block. It returns the verified addresses, chain ID, and observation block.
 
-`BridgeFundingDeployment` contains `chainId`, `usdc`, `clearinghouse`, `destinationSpokePool`,
+`BridgeFundingDeployment` contains `chainId`, `settlementToken`, `clearinghouse`, `destinationSpokePool`,
 `destinationSpokePoolImplementation`, `multicallHandler`, and each address's corresponding `*RuntimeCodeHash`.
 Populate these from a validated funding release. The helper does not prove `depositFor` behavior, provider support,
 the full core graph, or margin credit. USDC proxy governance and SpokePool upgrades remain external dependencies.

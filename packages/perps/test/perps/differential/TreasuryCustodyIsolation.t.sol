@@ -15,7 +15,7 @@ contract TreasuryCustodyIsolationTest is BasePerpTest {
         uint256 withdrawn = bound(uint256(withdrawal), 1, amount);
         address treasury = engine.protocolTreasury();
         uint256 backingBefore = pool.totalAssets();
-        uint256 poolCashBefore = usdc.balanceOf(address(pool));
+        uint256 poolCashBefore = settlementToken.balanceOf(address(pool));
         uint256 accountedBefore = pool.accountedAssets();
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory beforeSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
@@ -23,21 +23,21 @@ contract TreasuryCustodyIsolationTest is BasePerpTest {
 
         _fundTrader(treasury, amount);
         _assertPoolBacking(backingBefore);
-        assertEq(clearinghouse.balanceUsdc(treasury), amount);
+        assertEq(clearinghouse.balanceAssets(treasury), amount);
 
         vm.prank(treasury);
         clearinghouse.withdraw(treasury, withdrawn);
         _assertPoolBacking(backingBefore);
-        assertEq(clearinghouse.balanceUsdc(treasury), amount - withdrawn);
-        assertEq(usdc.balanceOf(treasury), withdrawn);
-        assertEq(usdc.balanceOf(address(pool)), poolCashBefore, "Treasury transfers never touched pool cash");
+        assertEq(clearinghouse.balanceAssets(treasury), amount - withdrawn);
+        assertEq(settlementToken.balanceOf(treasury), withdrawn);
+        assertEq(settlementToken.balanceOf(address(pool)), poolCashBefore, "Treasury transfers never touched pool cash");
         assertEq(pool.accountedAssets(), accountedBefore, "Treasury transfers never changed pool accounting");
         assertEq(keccak256(abi.encode(engineProtocolLens.getHousePoolInputSnapshot(60))), houseBefore);
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        assertEq(afterSnapshot.protocolTreasuryBalanceUsdc, amount - withdrawn);
-        afterSnapshot.protocolTreasuryBalanceUsdc = beforeSnapshot.protocolTreasuryBalanceUsdc;
+        assertEq(afterSnapshot.protocolTreasuryBalanceAssets, amount - withdrawn);
+        afterSnapshot.protocolTreasuryBalanceAssets = beforeSnapshot.protocolTreasuryBalanceAssets;
         assertEq(keccak256(abi.encode(afterSnapshot)), keccak256(abi.encode(beforeSnapshot)), "Only treasury changed");
     }
 
@@ -47,23 +47,27 @@ contract TreasuryCustodyIsolationTest is BasePerpTest {
         uint256 backingBefore = pool.totalAssets();
         _fundTrader(trader, 11_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
-        assertEq(clearinghouse.balanceUsdc(treasury), 40e6, "Opening fee stays in clearinghouse custody");
+        assertEq(clearinghouse.balanceAssets(treasury), 40e6, "Opening fee stays in clearinghouse custody");
         _assertPoolBacking(backingBefore);
 
         _close(trader, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
-        assertEq(clearinghouse.balanceUsdc(treasury), 72e6, "Closing fee adds $32 from the pool");
-        assertEq(usdc.balanceOf(address(pool)), backingBefore - 20_000e6, "$19,968 trader cash plus $32 fee left pool");
+        assertEq(clearinghouse.balanceAssets(treasury), 72e6, "Closing fee adds $32 from the pool");
+        assertEq(
+            settlementToken.balanceOf(address(pool)),
+            backingBefore - 20_000e6,
+            "$19,968 trader cash plus $32 fee left pool"
+        );
         _assertPoolBacking(backingBefore - 20_000e6);
 
         vm.prank(treasury);
         clearinghouse.withdraw(treasury, 72e6);
-        assertEq(clearinghouse.balanceUsdc(treasury), 0);
+        assertEq(clearinghouse.balanceAssets(treasury), 0);
         _assertPoolBacking(backingBefore - 20_000e6);
     }
 
     function test_TreasuryLargerThanPoolCannotEraseRemainingBacking() public {
         _fundTrader(engine.protocolTreasury(), 2_000_000e6);
-        usdc.burn(address(pool), usdc.balanceOf(address(pool)) - 10e6);
+        settlementToken.burn(address(pool), settlementToken.balanceOf(address(pool)) - 10e6);
         assertGt(pool.accountedAssets(), 10e6, "Raw custody, not the ledger, limits backing here");
         _assertPoolBacking(10e6);
     }
@@ -72,8 +76,8 @@ contract TreasuryCustodyIsolationTest is BasePerpTest {
         uint256 expected
     ) private view {
         assertEq(pool.totalAssets(), expected, "Expected backing follows actual custody movements");
-        assertEq(engineProtocolLens.getProtocolAccountingSnapshot().netPhysicalAssetsUsdc, expected);
-        assertEq(engineProtocolLens.getHousePoolInputSnapshot(60).netPhysicalAssetsUsdc, expected);
+        assertEq(engineProtocolLens.getProtocolAccountingSnapshot().netPhysicalAssets, expected);
+        assertEq(engineProtocolLens.getHousePoolInputSnapshot(60).netPhysicalAssets, expected);
     }
 
 }

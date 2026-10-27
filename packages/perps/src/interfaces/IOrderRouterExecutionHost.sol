@@ -34,7 +34,7 @@ interface IOrderRouterExecutionHost {
         OrderV3Types.PriceSource priceSource;
         uint256 executionPrice;
         uint256 neutralMarkPrice;
-        uint256 poolDepthUsdc;
+        uint256 poolDepthAssets;
         uint64 oraclePublishTime;
         uint256 bountyAccountingPrice;
         uint64 bountyAccountingPublishTime;
@@ -53,11 +53,11 @@ interface IOrderRouterExecutionHost {
         OrderV3Types.PriceSource priceSource;
         uint256 executionPrice;
         uint256 neutralMarkPrice;
-        uint256 poolDepthUsdc;
+        uint256 poolDepthAssets;
         uint64 oraclePublishTime;
         bool priceReachedEngine;
-        uint256 bountyUsdc;
-        uint256 bountyRefundedUsdc;
+        uint256 bountyAssets;
+        uint256 bountyRefundedAssets;
         address bountyRecipient;
         OrderV3Types.BountyDisposition bountyDisposition;
         OrderV3Types.FailureDetails failure;
@@ -66,8 +66,8 @@ interface IOrderRouterExecutionHost {
     /// @notice Canonical execution-bounty outcome returned by Router accounting.
     /// @dev Failed protection attempts may relatch for a fresh zero-bounty close; their terminal bounty is zero.
     struct BountySettlement {
-        uint256 bountyUsdc;
-        uint256 bountyRefundedUsdc;
+        uint256 bountyAssets;
+        uint256 bountyRefundedAssets;
         address bountyRecipient;
         OrderV3Types.BountyDisposition bountyDisposition;
     }
@@ -123,7 +123,7 @@ interface IOrderRouterExecutionHost {
     function refundRiskOffOrderFromSidecar(
         uint64 orderId,
         uint64 riskOffCutoff
-    ) external returns (uint256 refundedBountyUsdc);
+    ) external returns (uint256 refundedBountyAssets);
 
     /// @notice Finalizes lifecycle evidence after risk-off or liquidation accounting has already settled an order.
     function recordSettledTerminal(

@@ -23,7 +23,7 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
         _open(account, CfdTypes.Side.LONG, 50_000e18, 1000e6, 1e8);
         _open(counterpartyAccount, CfdTypes.Side.SHORT, 50_000e18, 50_000e6, 1e8);
 
-        assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
+        assertEq(_freeSettlementAssets(account), 0, "setup must fully consume free settlement");
         (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
@@ -34,7 +34,7 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
         assertEq(router.pendingOrderCounts(account), 1, "accepted close enters FIFO");
         assertEq(router.nextCommitId(), 2, "accepted close consumes one ID");
         assertEq(
-            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementAssets,
             0,
             "bounty is protected in action reserve"
         );
@@ -52,7 +52,7 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
         _open(account, CfdTypes.Side.LONG, 50_000e18, 1000e6, 1e8);
         _open(counterpartyAccount, CfdTypes.Side.SHORT, 50_000e18, 50_000e6, 1e8);
 
-        assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
+        assertEq(_freeSettlementAssets(account), 0, "setup must fully consume free settlement");
         (, uint256 marginBefore,,,,,) = engine.positions(account);
         assertEq(engine.lastMarkPrice(), 1e8, "setup should leave a stored mark price");
 
@@ -64,7 +64,7 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
         assertLe(marginAfter, marginBefore - 0, "commit collects carry and reserves its bounty");
         assertEq(router.pendingOrderCounts(account), 1, "accepted stale-mark close queues");
         assertEq(
-            clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(account).reservedSettlementAssets,
             0,
             "accepted close protects its bounty"
         );
@@ -86,15 +86,19 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
         uint256 partialCloseSize = 1000e18;
         _open(account, CfdTypes.Side.LONG, positionSize, 50_000e6, 1e8, depth);
 
-        uint256 freeSettlementBeforeCommit = _freeSettlementUsdc(account);
+        uint256 freeSettlementBeforeCommit = _freeSettlementAssets(account);
         assertGt(freeSettlementBeforeCommit, 200_000, "setup must leave free settlement to back the bounty");
-        assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after depositing into the clearinghouse");
+        assertEq(
+            settlementToken.balanceOf(trader),
+            0,
+            "trader wallet should start empty after depositing into the clearinghouse"
+        );
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, partialCloseSize, 0, 0, true);
 
         assertEq(
-            _freeSettlementUsdc(account),
+            _freeSettlementAssets(account),
             freeSettlementBeforeCommit - 0,
             "commit should temporarily seize the close bounty from free settlement"
         );
@@ -105,11 +109,13 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
         router.executeOrder(1, empty);
 
         assertGt(
-            _freeSettlementUsdc(account),
+            _freeSettlementAssets(account),
             freeSettlementBeforeCommit - 0,
             "successful partial close should release proportional PnL pledge into free settlement"
         );
-        assertEq(usdc.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet");
+        assertEq(
+            settlementToken.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet"
+        );
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
             0,
@@ -124,9 +130,9 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
         address carol = address(0x558);
         address carolAccount = carol;
 
-        usdc.mint(carol, 20_000 * 1e6);
+        settlementToken.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(carolAccount, 20_000 * 1e6);
         vm.stopPrank();
 

@@ -19,12 +19,13 @@ interface IPositionProtectionBookSource {
 }
 
 /// @title MarginClearinghouse
-/// @notice Custodies settlement USDC and maintains the margin buckets used by Plether perpetual accounts.
-/// @dev Account ids are addresses. A settlement balance is an internal claim on this contract's USDC custody;
+/// @notice Custodies the settlement token and maintains the margin buckets used by Plether perpetual accounts.
+/// @dev Account ids are addresses. A settlement balance is an internal claim on this contract's token custody;
 ///      PnL pledge, liquidation reserve, committed-order margin, and action reserve are encumbrances within that
-///      balance, not separate token balances. The contract assumes a standard six-decimal USDC implementation and
+///      balance, not separate token balances. The contract assumes a standard six-decimal ERC-20 implementation and
 ///      does not support fee-on-transfer accounting. The deployer owns the one-time engine wiring and rescue of
-///      non-settlement tokens through `Ownable2Step`.
+///      non-settlement tokens through `Ownable2Step`. Asset amounts use settlement-token units, including
+///      MockUSDG on the new testnet stack; unsolicited settlement-token transfers do not credit an account.
 /// @custom:security-contact contact@plether.com
 contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTransient {
 
@@ -33,22 +34,22 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     struct LiquidationSettlementExecution {
         address recipient;
         address keeper;
-        uint256 keeperBountyUsdc;
+        uint256 keeperBountyAssets;
         address protocolFeeAccount;
-        uint256 protocolFeeUsdc;
-        uint256 lpLiquidationFeeUsdc;
+        uint256 protocolFeeAssets;
+        uint256 lpLiquidationFeeAssets;
     }
 
     mapping(address => uint256) internal settlementBalances;
 
-    mapping(address => uint256) internal positionMarginUsdc;
-    mapping(address => uint256) internal committedOrderMarginUsdc;
-    mapping(address => uint256) internal reservedSettlementUsdc;
-    /// @dev Mandatory negative-lifetime-VPI floor contained inside `reservedSettlementUsdc`; never counted twice.
+    mapping(address => uint256) internal positionMarginAssets;
+    mapping(address => uint256) internal committedOrderMarginAssets;
+    mapping(address => uint256) internal reservedSettlementAssets;
+    /// @dev Mandatory negative-lifetime-VPI floor contained inside `reservedSettlementAssets`; never counted twice.
     mapping(address => uint256) internal vpiRebateReserveBalances;
     mapping(address => uint256) internal liquidationReserveBalances;
     mapping(uint64 => IMarginClearinghouse.OrderReservation) internal orderReservations;
-    mapping(address => uint256) internal activeCommittedOrderReservationUsdc;
+    mapping(address => uint256) internal activeCommittedOrderReservationAssets;
 
     struct ReservationQueue {
         uint64 head;
@@ -58,15 +59,15 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     mapping(address => ReservationQueue) internal reservationQueues;
     mapping(IMarginClearinghouse.BountyKind => mapping(uint64 => IMarginClearinghouse.BountyReservation)) internal
         bountyReservations;
-    mapping(address => uint256) public totalBountyReservationsUsdc;
+    mapping(address => uint256) public totalBountyReservationsAssets;
 
     error MarginClearinghouse__InvalidBountyReservation();
     event BountyReservationUpdated(
-        IMarginClearinghouse.BountyKind indexed kind, uint64 indexed id, address indexed account, uint256 amountUsdc
+        IMarginClearinghouse.BountyKind indexed kind, uint64 indexed id, address indexed account, uint256 amountAssets
     );
 
     /// @notice Settlement ERC-20 whose native units are used for every balance and margin amount.
-    /// @dev Expected to be six-decimal USDC; the constructor does not inspect the token contract or its decimals.
+    /// @dev Expected to have six decimals; the constructor does not inspect the token contract or its decimals.
     address public immutable settlementAsset;
 
     /// @notice Engine authorized to operate account balances and margin buckets.
@@ -93,7 +94,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     error MarginClearinghouse__InsufficientFreeEquity();
 
     /// @notice The account's settlement balance cannot cover a settlement debit or its remaining locked margin.
-    error MarginClearinghouse__InsufficientUsdcForSettlement();
+    error MarginClearinghouse__InsufficientAssetsForSettlement();
 
     /// @notice Settlement custody or the required reserved bucket cannot cover an operator-directed debit.
     error MarginClearinghouse__InsufficientAssetToSeize();
@@ -159,50 +160,52 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @dev Locking is an internal reclassification and does not itself move settlement tokens.
     /// @param account Account whose locked bucket increased
     /// @param bucket Locked-margin bucket that increased
-    /// @param amountUsdc Increase in six-decimal USDC units
-    event MarginLocked(address indexed account, IMarginClearinghouse.MarginBucket indexed bucket, uint256 amountUsdc);
+    /// @param amountAssets Increase in six-decimal settlement token units
+    event MarginLocked(address indexed account, IMarginClearinghouse.MarginBucket indexed bucket, uint256 amountAssets);
 
     /// @notice Emitted when an account's typed locked-margin bucket decreases.
     /// @dev The decrease may release funds or accompany a settlement debit; the event alone does not imply that
     ///      the amount became withdrawable.
     /// @param account Account whose locked bucket decreased
     /// @param bucket Locked-margin bucket that decreased
-    /// @param amountUsdc Decrease in six-decimal USDC units
-    event MarginUnlocked(address indexed account, IMarginClearinghouse.MarginBucket indexed bucket, uint256 amountUsdc);
+    /// @param amountAssets Decrease in six-decimal settlement token units
+    event MarginUnlocked(
+        address indexed account, IMarginClearinghouse.MarginBucket indexed bucket, uint256 amountAssets
+    );
 
     /// @notice Emitted when committed-order margin is locked against a new order id.
     /// @param orderId Order id assigned the reservation
     /// @param account Account whose committed-order margin backs the reservation
     /// @param bucket Reservation bucket used by the record
-    /// @param amountUsdc Original reserved amount in six-decimal USDC units
+    /// @param amountAssets Original reserved amount in six-decimal settlement token units
     event ReservationCreated(
         uint64 indexed orderId,
         address indexed account,
         IMarginClearinghouse.ReservationBucket indexed bucket,
-        uint256 amountUsdc
+        uint256 amountAssets
     );
 
     /// @notice Emitted when all or part of an active order reservation is consumed.
     /// @param orderId Order id whose reservation was consumed
     /// @param account Account that owns the reservation
-    /// @param amountUsdc Amount consumed in six-decimal USDC units
-    /// @param remainingAmountUsdc Amount still active after consumption, in six-decimal USDC units
+    /// @param amountAssets Amount consumed in six-decimal settlement token units
+    /// @param remainingAmountAssets Amount still active after consumption, in six-decimal settlement token units
     event ReservationConsumed(
-        uint64 indexed orderId, address indexed account, uint256 amountUsdc, uint256 remainingAmountUsdc
+        uint64 indexed orderId, address indexed account, uint256 amountAssets, uint256 remainingAmountAssets
     );
 
     /// @notice Emitted when the remaining amount of an active reservation is released.
     /// @param orderId Order id whose reservation was released
     /// @param account Account that owns the reservation
-    /// @param amountUsdc Amount released from committed-order margin, in six-decimal USDC units
-    event ReservationReleased(uint64 indexed orderId, address indexed account, uint256 amountUsdc);
+    /// @param amountAssets Amount released from committed-order margin, in six-decimal settlement token units
+    event ReservationReleased(uint64 indexed orderId, address indexed account, uint256 amountAssets);
 
     /// @notice Emitted after a risk-off refund releases order margin and refundable bounty classifications.
     /// @param account Account whose risk-off order reserves were released
-    /// @param releasedMarginUsdc Aggregate committed-order margin released in six-decimal USDC units
-    /// @param refundableBountyUsdc Reserved order and attached-protection bounties released in six-decimal USDC units
+    /// @param releasedMarginAssets Aggregate committed-order margin released in six-decimal settlement token units
+    /// @param refundableBountyAssets Reserved order and attached-protection bounties released in six-decimal settlement token units
     event RiskOffOrderReservesRefunded(
-        address indexed account, uint256 releasedMarginUsdc, uint256 refundableBountyUsdc
+        address indexed account, uint256 releasedMarginAssets, uint256 refundableBountyAssets
     );
 
     /// @notice Emitted when settlement value is debited from an account and routed to a recipient.
@@ -216,8 +219,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice Emitted when reserved settlement value is credited internally to another account.
     /// @param account Source account whose settlement value was debited
     /// @param recipient Clearinghouse account credited
-    /// @param amountUsdc Amount transferred in six-decimal USDC units
-    event ReservedSettlementTransferred(address indexed account, address indexed recipient, uint256 amountUsdc);
+    /// @param amountAssets Amount transferred in six-decimal settlement token units
+    event ReservedSettlementTransferred(address indexed account, address indexed recipient, uint256 amountAssets);
 
     /// @dev Restricts calls to the engine or its currently reported settlement sidecar.
     modifier onlyOperator() {
@@ -289,7 +292,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     /// @notice Deploys the clearinghouse and assigns ownership to the deployer.
     /// @dev `_settlementAsset` is stored without zero-address, code, symbol, or decimal validation.
-    /// @param _settlementAsset ERC-20 used for settlement custody; expected to be six-decimal USDC
+    /// @param _settlementAsset ERC-20 used for settlement custody; expected to be six-decimal settlement token
     constructor(
         address _settlementAsset
     ) Ownable(msg.sender) {
@@ -313,7 +316,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Rescues the full balance of an accidentally transferred non-settlement ERC-20.
-    /// @dev Owner-only. Settlement USDC is always excluded, even when sent without an account credit.
+    /// @dev Owner-only. Settlement settlement token is always excluded, even when sent without an account credit.
     ///      Does not change settlement balances or margin buckets. Transfer-tax tokens may deliver less than `amount`
     ///      emitted by `TokenRescued`.
     /// @param token Non-settlement ERC-20 to rescue
@@ -337,11 +340,11 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     // USER ACTIONS
     // ==========================================
 
-    /// @notice Transfers settlement USDC from the caller and credits the caller's margin account.
+    /// @notice Transfers settlement settlement token from the caller and credits the caller's margin account.
     /// @dev `account` must equal `msg.sender` and `amount` must be nonzero. Requires prior ERC-20 allowance. If the
     ///      engine is configured, the deposit invokes its carry-realization hook after crediting the balance.
     /// @param account Account receiving the deposit; must be the caller's address
-    /// @param amount Amount to transfer and credit, in six-decimal USDC units
+    /// @param amount Amount to transfer and credit, in six-decimal settlement token units
     function deposit(
         address account,
         uint256 amount
@@ -349,22 +352,22 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _deposit(account, msg.sender, amount);
     }
 
-    /// @notice Transfers settlement USDC from the caller into its canonical address-based margin account.
+    /// @notice Transfers settlement settlement token from the caller into its canonical address-based margin account.
     /// @dev Requires a nonzero amount and prior ERC-20 allowance. If the engine is configured, the deposit invokes
     ///      its carry-realization hook after crediting the balance.
-    /// @param amount Amount to transfer and credit, in six-decimal USDC units
+    /// @param amount Amount to transfer and credit, in six-decimal settlement token units
     function depositMargin(
         uint256 amount
     ) external nonReentrant {
         _deposit(msg.sender, msg.sender, amount);
     }
 
-    /// @notice Transfers the caller's USDC into custody and credits another account's free settlement.
+    /// @notice Transfers the caller's settlement token into custody and credits another account's free settlement.
     /// @dev Requires an exact, nonzero token transfer and a nonzero beneficiary. Does not allocate position margin,
     ///      checkpoint carry, or give the payer authority over the beneficiary. Existing carry remains due and is
     ///      projected or collected by the normal account actions. Self-funding and counterfactual accounts are allowed.
     /// @param account Account whose free settlement balance receives the deposit
-    /// @param amount Exact settlement-token amount to pull from the caller, in six-decimal USDC units
+    /// @param amount Exact settlement-token amount to pull from the caller, in six-decimal settlement token units
     function depositFor(
         address account,
         uint256 amount
@@ -385,18 +388,18 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__UnexpectedTransferAmount(amount, received);
         }
 
-        _creditSettlementUsdc(account, amount);
+        _creditSettlementAssets(account, amount);
 
         emit Deposit(account, settlementAsset, amount);
         emit DepositFor(msg.sender, account, amount);
     }
 
-    /// @notice Debits the caller's margin account and transfers settlement USDC to the caller.
+    /// @notice Debits the caller's margin account and transfers settlement settlement token to the caller.
     /// @dev `account` must equal `msg.sender`. Before transfer, the function checkpoints carry, applies the engine's
     ///      withdrawal guard when configured, and verifies the remaining settlement balance covers all locked
     ///      buckets. A zero amount is permitted but still runs those checks and hooks.
     /// @param account Account funding the withdrawal; must be the caller's address
-    /// @param amount Amount to debit and transfer, in six-decimal USDC units
+    /// @param amount Amount to debit and transfer, in six-decimal settlement token units
     function withdraw(
         address account,
         uint256 amount
@@ -404,10 +407,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _withdraw(account, msg.sender, amount);
     }
 
-    /// @notice Withdraws settlement USDC from the caller's canonical address-based margin account.
+    /// @notice Withdraws settlement settlement token from the caller's canonical address-based margin account.
     /// @dev Checkpoints carry, applies the configured engine's withdrawal guard, and verifies the remaining
     ///      settlement balance covers every locked bucket. A zero amount is permitted but still runs the checks.
-    /// @param amount Amount to debit and transfer, in six-decimal USDC units
+    /// @param amount Amount to debit and transfer, in six-decimal settlement token units
     function withdrawMargin(
         uint256 amount
     ) external nonReentrant {
@@ -461,13 +464,13 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             IWithdrawGuard(engine_).checkWithdraw(account);
         }
 
-        uint256 remainingEquity = getAccountEquityUsdc(account);
-        uint256 totalLockedMargin = _totalLockedMarginUsdc(account);
+        uint256 remainingEquity = getAccountEquityAssets(account);
+        uint256 totalLockedMargin = _totalLockedMarginAssets(account);
         if (remainingEquity < totalLockedMargin) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
         if (settlementBalances[account] < totalLockedMargin) {
-            revert MarginClearinghouse__InsufficientUsdcForSettlement();
+            revert MarginClearinghouse__InsufficientAssetsForSettlement();
         }
 
         IERC20(settlementAsset).safeTransfer(owner, amount);
@@ -478,13 +481,13 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     // VALUATION ENGINE
     // ==========================================
 
-    /// @notice Returns an account's internal settlement USDC balance.
+    /// @notice Returns an account's internal settlement settlement token balance.
     /// @dev This clearinghouse-local value does not include unrealized PnL or apply engine withdrawal guards.
     /// @param account Account to inspect
-    /// @return totalEquityUsdc Settlement balance in six-decimal USDC units
-    function getAccountEquityUsdc(
+    /// @return totalEquityAssets Settlement balance in six-decimal settlement token units
+    function getAccountEquityAssets(
         address account
-    ) public view override returns (uint256 totalEquityUsdc) {
+    ) public view override returns (uint256 totalEquityAssets) {
         return settlementBalances[account];
     }
 
@@ -492,67 +495,67 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @dev Equals `max(settlement balance - total locked margin, 0)` and excludes unrealized PnL and engine
     ///      withdrawal constraints.
     /// @param account Account to query
-    /// @return Unencumbered settlement balance in six-decimal USDC units
-    function getFreeBuyingPowerUsdc(
+    /// @return Unencumbered settlement balance in six-decimal settlement token units
+    function getFreeBuyingPowerAssets(
         address account
     ) public view override returns (uint256) {
-        uint256 equity = getAccountEquityUsdc(account);
-        uint256 encumbered = _totalLockedMarginUsdc(account);
+        uint256 equity = getAccountEquityAssets(account);
+        uint256 encumbered = _totalLockedMarginAssets(account);
         return equity > encumbered ? equity - encumbered : 0;
     }
 
     /// @notice Returns the account's settlement balance and its typed locked/free margin breakdown.
-    /// @dev `otherLockedMarginUsdc` combines liquidation, committed-order, and action-reserve margin. Every amount is in
-    ///      six-decimal USDC units; unrealized PnL and engine withdrawal guards are not included.
+    /// @dev `otherLockedMarginAssets` combines liquidation, committed-order, and action-reserve margin. Every amount is in
+    ///      six-decimal settlement token units; unrealized PnL and engine withdrawal guards are not included.
     /// @param account Account to inspect
     /// @return buckets Settlement balance, total locked, position locked, other locked, and free settlement amounts
-    function getAccountUsdcBuckets(
+    function getAccountAssetBuckets(
         address account
-    ) public view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
-        buckets = _buildAccountUsdcBuckets(account);
+    ) public view returns (IMarginClearinghouse.AccountAssetBuckets memory buckets) {
+        buckets = _buildAccountAssetBuckets(account);
     }
 
     /// @notice Returns the canonical V3 PnL-isolated settlement classification.
     function getPnlIsolationBuckets(
         address account
     ) public view returns (IMarginClearinghouse.PnlIsolationBuckets memory buckets) {
-        buckets.settlementBalanceUsdc = settlementBalances[account];
-        buckets.pnlPledgeUsdc = positionMarginUsdc[account];
-        buckets.liquidationReserveUsdc = liquidationReserveBalances[account];
-        buckets.orderMarginUsdc = committedOrderMarginUsdc[account];
-        buckets.actionReserveUsdc = reservedSettlementUsdc[account];
-        buckets.vpiRebateReserveUsdc = vpiRebateReserveBalances[account];
-        buckets.totalLockedUsdc = _totalLockedMarginUsdc(account);
-        buckets.freeSettlementUsdc = buckets.settlementBalanceUsdc > buckets.totalLockedUsdc
-            ? buckets.settlementBalanceUsdc - buckets.totalLockedUsdc
+        buckets.settlementBalanceAssets = settlementBalances[account];
+        buckets.pnlPledgeAssets = positionMarginAssets[account];
+        buckets.liquidationReserveAssets = liquidationReserveBalances[account];
+        buckets.orderMarginAssets = committedOrderMarginAssets[account];
+        buckets.actionReserveAssets = reservedSettlementAssets[account];
+        buckets.vpiRebateReserveAssets = vpiRebateReserveBalances[account];
+        buckets.totalLockedAssets = _totalLockedMarginAssets(account);
+        buckets.freeSettlementAssets = buckets.settlementBalanceAssets > buckets.totalLockedAssets
+            ? buckets.settlementBalanceAssets - buckets.totalLockedAssets
             : 0;
     }
 
-    function pnlPledgeUsdc(
+    function pnlPledgeAssets(
         address account
     ) external view returns (uint256) {
-        return positionMarginUsdc[account];
+        return positionMarginAssets[account];
     }
 
-    function liquidationReserveUsdc(
+    function liquidationReserveAssets(
         address account
     ) external view returns (uint256) {
         return liquidationReserveBalances[account];
     }
 
-    function orderMarginUsdc(
+    function orderMarginAssets(
         address account
     ) external view returns (uint256) {
-        return committedOrderMarginUsdc[account];
+        return committedOrderMarginAssets[account];
     }
 
-    function actionReserveUsdc(
+    function actionReserveAssets(
         address account
     ) external view returns (uint256) {
-        return reservedSettlementUsdc[account];
+        return reservedSettlementAssets[account];
     }
 
-    function vpiRebateReserveUsdc(
+    function vpiRebateReserveAssets(
         address account
     ) external view returns (uint256) {
         return vpiRebateReserveBalances[account];
@@ -564,27 +567,27 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     /// @notice Encumbers free settlement in the active-position margin bucket.
     /// @dev Callable only by the engine or its reported settlement sidecar. The settlement balance is unchanged;
-    ///      the call reverts if free settlement is less than `amountUsdc`. This entrypoint does not checkpoint carry.
+    ///      the call reverts if free settlement is less than `amountAssets`. This entrypoint does not checkpoint carry.
     /// @param account Account whose settlement should be encumbered
-    /// @param amountUsdc Amount to lock in six-decimal USDC units
+    /// @param amountAssets Amount to lock in six-decimal settlement token units
     function lockPositionMargin(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyOperator {
-        _lockMargin(account, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
+        _lockMargin(account, IMarginClearinghouse.MarginBucket.Position, amountAssets);
     }
 
     /// @notice Decreases an account's active-position margin bucket by an exact amount.
     /// @dev Callable only by the engine or its reported settlement sidecar. The settlement balance is unchanged, and
-    ///      the call reverts rather than clamping when `amountUsdc` exceeds the position-margin bucket. This
+    ///      the call reverts rather than clamping when `amountAssets` exceeds the position-margin bucket. This
     ///      entrypoint does not checkpoint carry.
     /// @param account Account whose position margin should be decreased
-    /// @param amountUsdc Exact amount to remove in six-decimal USDC units
+    /// @param amountAssets Exact amount to remove in six-decimal settlement token units
     function unlockPositionMargin(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyOperator {
-        _unlockMargin(account, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
+        _unlockMargin(account, IMarginClearinghouse.MarginBucket.Position, amountAssets);
     }
 
     /// @notice Verifies the planned release source against live custody before unlocking close collateral.
@@ -597,9 +600,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 cashChargeAfterVpi,
         uint256 vpiRelease
     ) external onlyOperator {
-        uint256 reserve = _spendableActionReserveUsdc(account);
+        uint256 reserve = _spendableActionReserveAssets(account);
         uint256 afterReserve = cashChargeAfterVpi > reserve ? cashChargeAfterVpi - reserve : 0;
-        uint256 free = getFreeBuyingPowerUsdc(account) + vpiRelease;
+        uint256 free = getFreeBuyingPowerAssets(account) + vpiRelease;
         uint256 needed = afterReserve > free ? afterReserve - free : 0;
         uint256 expected = needed < safeRelease ? needed : safeRelease;
         if (fromReleased != expected || netRelease != safeRelease - expected) {
@@ -613,22 +616,22 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      fits `uint96`, and permanently prevents reuse of an id once any record exists. No tokens move.
     /// @param account Account whose committed-order margin backs the reservation
     /// @param orderId Router order id receiving the reservation
-    /// @param amountUsdc Amount to reserve in six-decimal USDC units
+    /// @param amountAssets Amount to reserve in six-decimal settlement token units
     function reserveCommittedOrderMargin(
         address account,
         uint64 orderId,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyEngineOrOrderRouter {
         if (orderId == 0 || orderReservations[orderId].status != IMarginClearinghouse.ReservationStatus.None) {
             revert MarginClearinghouse__ReservationAlreadyExists();
         }
-        if (amountUsdc == 0) {
+        if (amountAssets == 0) {
             revert MarginClearinghouse__ZeroAmount();
         }
 
         _checkpointCarryBeforeMarginChange(account);
-        _lockMargin(account, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
-        uint96 amount96 = _toUint96(amountUsdc);
+        _lockMargin(account, IMarginClearinghouse.MarginBucket.CommittedOrder, amountAssets);
+        uint96 amount96 = _toUint96(amountAssets);
         uint64 previousOrderId = reservationQueues[account].tail;
         orderReservations[orderId] = IMarginClearinghouse.OrderReservation({
             previousOrderId: previousOrderId,
@@ -636,8 +639,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             account: account,
             bucket: IMarginClearinghouse.ReservationBucket.CommittedOrder,
             status: IMarginClearinghouse.ReservationStatus.Active,
-            originalAmountUsdc: amount96,
-            remainingAmountUsdc: amount96
+            originalAmountAssets: amount96,
+            remainingAmountAssets: amount96
         });
         if (previousOrderId == 0) {
             reservationQueues[account].head = orderId;
@@ -645,10 +648,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             orderReservations[previousOrderId].nextOrderId = orderId;
         }
         reservationQueues[account].tail = orderId;
-        activeCommittedOrderReservationUsdc[account] += amountUsdc;
+        activeCommittedOrderReservationAssets[account] += amountAssets;
         reservationQueues[account].count += 1;
 
-        emit ReservationCreated(orderId, account, IMarginClearinghouse.ReservationBucket.CommittedOrder, amountUsdc);
+        emit ReservationCreated(orderId, account, IMarginClearinghouse.ReservationBucket.CommittedOrder, amountAssets);
     }
 
     /// @notice Releases an order reservation during terminal Router cleanup if it remains active.
@@ -656,17 +659,17 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      zero. This path deliberately skips the carry checkpoint and only releases locked classification; it does
     ///      not change settlement balance or move tokens.
     /// @param orderId Order reservation id to release
-    /// @return releasedUsdc Remaining reservation amount released, or zero when the reservation is not active
+    /// @return releasedAssets Remaining reservation amount released, or zero when the reservation is not active
     function releaseOrderReservationForTerminalCleanup(
         uint64 orderId
-    ) external onlyOrderRouter returns (uint256 releasedUsdc) {
+    ) external onlyOrderRouter returns (uint256 releasedAssets) {
         IMarginClearinghouse.OrderReservation storage reservation = orderReservations[orderId];
         if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
             return 0;
         }
 
-        releasedUsdc = _releaseReservation(reservation, true);
-        emit ReservationReleased(orderId, reservation.account, releasedUsdc);
+        releasedAssets = _releaseReservation(reservation, true);
+        emit ReservationReleased(orderId, reservation.account, releasedAssets);
     }
 
     /// @notice Releases risk-off order margin and refundable bounty classifications back to free settlement.
@@ -677,13 +680,13 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      settlement to protect negative-VPI backing and all remaining clearinghouse bounty reservations.
     /// @param account Account receiving the released margin classifications
     /// @param orderIds Order reservation ids invalidated by the risk-off cutoff
-    /// @param refundableBountyUsdc Exact invalidated order and attached-protection bounties to unlock
-    /// @return releasedMarginUsdc Aggregate remaining committed-order margin released
+    /// @param refundableBountyAssets Exact invalidated order and attached-protection bounties to unlock
+    /// @return releasedMarginAssets Aggregate remaining committed-order margin released
     function releaseInvalidatedOrderReserves(
         address account,
         uint64[] calldata orderIds,
-        uint256 refundableBountyUsdc
-    ) external onlyOrderRouter returns (uint256 releasedMarginUsdc) {
+        uint256 refundableBountyAssets
+    ) external onlyOrderRouter returns (uint256 releasedMarginAssets) {
         for (uint256 i = 0; i < orderIds.length; ++i) {
             uint64 orderId = orderIds[i];
             IMarginClearinghouse.OrderReservation storage reservation = orderReservations[orderId];
@@ -698,16 +701,16 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
                 continue;
             }
 
-            uint256 releasedUsdc = _releaseReservation(reservation, true);
-            releasedMarginUsdc += releasedUsdc;
-            emit ReservationReleased(orderId, account, releasedUsdc);
+            uint256 releasedAssets = _releaseReservation(reservation, true);
+            releasedMarginAssets += releasedAssets;
+            emit ReservationReleased(orderId, account, releasedAssets);
         }
 
-        if (refundableBountyUsdc > 0) {
-            _requireActionReserveDecreaseAboveProtectedFloor(account, refundableBountyUsdc);
-            _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, refundableBountyUsdc);
+        if (refundableBountyAssets > 0) {
+            _requireActionReserveDecreaseAboveProtectedFloor(account, refundableBountyAssets);
+            _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, refundableBountyAssets);
         }
-        emit RiskOffOrderReservesRefunded(account, releasedMarginUsdc, refundableBountyUsdc);
+        emit RiskOffOrderReservesRefunded(account, releasedMarginAssets, refundableBountyAssets);
     }
 
     /// @notice Releases a settled order or protection-trigger bounty back to the same account that funded it.
@@ -716,31 +719,31 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      Router or its protection Book must first take the clearinghouse bounty record so the protected-reserve
     ///      floor remains exact. Atomic protection cancellation uses this before bounded close carry collection.
     /// @param account Account whose bounty classification is released to free settlement.
-    /// @param executionBountyUsdc Exact bounty amount in six-decimal USDC units.
+    /// @param executionBountyAssets Exact bounty amount in six-decimal settlement token units.
     function releaseReservedExecutionBountyToSource(
         address account,
-        uint256 executionBountyUsdc
+        uint256 executionBountyAssets
     ) external onlyOrderRouter {
-        if (executionBountyUsdc == 0) {
+        if (executionBountyAssets == 0) {
             return;
         }
-        _requireActionReserveDecreaseAboveProtectedFloor(account, executionBountyUsdc);
-        _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, executionBountyUsdc);
+        _requireActionReserveDecreaseAboveProtectedFloor(account, executionBountyAssets);
+        _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, executionBountyAssets);
     }
 
     /// @dev The clearinghouse owns FIFO traversal; every active reservation consumed must belong to `account`.
     function _consumeAccountOrderReservations(
         address account,
-        uint256 amountUsdc,
+        uint256 amountAssets,
         bool consumeBuckets
-    ) internal returns (uint256 consumedUsdc) {
-        if (amountUsdc == 0) {
+    ) internal returns (uint256 consumedAssets) {
+        if (amountAssets == 0) {
             return 0;
         }
 
         uint64[] memory reservationIds = _activeMarginReservationIds(account);
-        uint256 remainingUsdc = amountUsdc;
-        for (uint256 i = 0; i < reservationIds.length && remainingUsdc > 0; i++) {
+        uint256 remainingAssets = amountAssets;
+        for (uint256 i = 0; i < reservationIds.length && remainingAssets > 0; i++) {
             IMarginClearinghouse.OrderReservation storage reservation = orderReservations[reservationIds[i]];
             if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
                 continue;
@@ -749,20 +752,21 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
                 revert MarginClearinghouse__ReservationAccountMismatch(reservationIds[i], account, reservation.account);
             }
 
-            uint256 reservationConsumedUsdc =
-                remainingUsdc > reservation.remainingAmountUsdc ? reservation.remainingAmountUsdc : remainingUsdc;
-            if (reservationConsumedUsdc == 0) {
+            uint256 reservationConsumedAssets = remainingAssets > reservation.remainingAmountAssets
+                ? reservation.remainingAmountAssets
+                : remainingAssets;
+            if (reservationConsumedAssets == 0) {
                 continue;
             }
 
             _consumeReservation(
-                reservation, reservationConsumedUsdc, consumeBuckets, IMarginClearinghouse.ReservationStatus.Consumed
+                reservation, reservationConsumedAssets, consumeBuckets, IMarginClearinghouse.ReservationStatus.Consumed
             );
 
-            remainingUsdc -= reservationConsumedUsdc;
-            consumedUsdc += reservationConsumedUsdc;
+            remainingAssets -= reservationConsumedAssets;
+            consumedAssets += reservationConsumedAssets;
             emit ReservationConsumed(
-                reservationIds[i], account, reservationConsumedUsdc, reservation.remainingAmountUsdc
+                reservationIds[i], account, reservationConsumedAssets, reservation.remainingAmountAssets
             );
         }
     }
@@ -770,11 +774,11 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     function _releaseReservation(
         IMarginClearinghouse.OrderReservation storage reservation,
         bool consumeBuckets
-    ) internal returns (uint256 releasedUsdc) {
-        releasedUsdc = reservation.remainingAmountUsdc;
-        if (releasedUsdc > 0) {
+    ) internal returns (uint256 releasedAssets) {
+        releasedAssets = reservation.remainingAmountAssets;
+        if (releasedAssets > 0) {
             _consumeReservation(
-                reservation, releasedUsdc, consumeBuckets, IMarginClearinghouse.ReservationStatus.Released
+                reservation, releasedAssets, consumeBuckets, IMarginClearinghouse.ReservationStatus.Released
             );
         } else {
             _closeReservation(reservation, IMarginClearinghouse.ReservationStatus.Released);
@@ -783,26 +787,26 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     function _consumeReservation(
         IMarginClearinghouse.OrderReservation storage reservation,
-        uint256 amountUsdc,
+        uint256 amountAssets,
         bool consumeBuckets,
         IMarginClearinghouse.ReservationStatus terminalStatus
     ) internal {
-        reservation.remainingAmountUsdc -= _toUint96(amountUsdc);
+        reservation.remainingAmountAssets -= _toUint96(amountAssets);
         if (consumeBuckets) {
-            _consumeReservationBucket(reservation.account, reservation.bucket, amountUsdc);
+            _consumeReservationBucket(reservation.account, reservation.bucket, amountAssets);
         }
-        _decreaseActiveReservation(reservation.account, amountUsdc);
+        _decreaseActiveReservation(reservation.account, amountAssets);
 
-        if (reservation.remainingAmountUsdc == 0) {
+        if (reservation.remainingAmountAssets == 0) {
             _closeReservation(reservation, terminalStatus);
         }
     }
 
     function _decreaseActiveReservation(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
-        activeCommittedOrderReservationUsdc[account] -= amountUsdc;
+        activeCommittedOrderReservationAssets[account] -= amountAssets;
     }
 
     /// @notice Encumbers free settlement in the reserved-settlement bucket.
@@ -810,13 +814,13 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      Checkpoints carry before increasing the bucket. The settlement balance is unchanged, and insufficient
     ///      free settlement reverts.
     /// @param account Account whose settlement should be reserved
-    /// @param amountUsdc Amount to reserve in six-decimal USDC units
+    /// @param amountAssets Amount to reserve in six-decimal settlement token units
     function lockReservedSettlement(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyReservedSettlementLocker {
         _checkpointCarryBeforeMarginChange(account);
-        _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
+        _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountAssets);
     }
 
     /// @notice Decreases the reserved-settlement bucket, making the amount free settlement.
@@ -824,82 +828,82 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      position-protection book. Checkpoints carry and reverts rather than clamping on bucket underflow. The
     ///      settlement balance is unchanged.
     /// @param account Account whose reserved settlement should be unlocked
-    /// @param amountUsdc Exact amount to unlock in six-decimal USDC units
+    /// @param amountAssets Exact amount to unlock in six-decimal settlement token units
     function unlockReservedSettlement(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyReservedSettlementOperator {
         _checkpointCarryBeforeMarginChange(account);
-        _requireActionReserveDecreaseAboveProtectedFloor(account, amountUsdc);
-        _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
+        _requireActionReserveDecreaseAboveProtectedFloor(account, amountAssets);
+        _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountAssets);
     }
 
     /// @notice Locks free settlement into the action reserve and its mandatory negative-VPI sub-ledger.
-    /// @dev The sub-ledger is a floor inside `reservedSettlementUsdc`, not an additional locked bucket.
+    /// @dev The sub-ledger is a floor inside `reservedSettlementAssets`, not an additional locked bucket.
     function lockVpiRebateReserve(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyOperator {
-        if (amountUsdc == 0) {
+        if (amountAssets == 0) {
             return;
         }
-        _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
-        vpiRebateReserveBalances[account] += amountUsdc;
+        _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountAssets);
+        vpiRebateReserveBalances[account] += amountAssets;
     }
 
     /// @notice Reclassifies newly locked PnL pledge into mandatory negative-VPI backing without moving cash.
     function reclassifyPnlPledgeToVpiRebateReserve(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyOperator {
-        if (amountUsdc == 0) {
+        if (amountAssets == 0) {
             return;
         }
-        _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
-        reservedSettlementUsdc[account] += amountUsdc;
-        vpiRebateReserveBalances[account] += amountUsdc;
-        emit MarginLocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
+        _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.Position, amountAssets);
+        reservedSettlementAssets[account] += amountAssets;
+        vpiRebateReserveBalances[account] += amountAssets;
+        emit MarginLocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountAssets);
     }
 
     /// @notice Releases no-longer-required negative-VPI backing into free settlement.
     function releaseVpiRebateReserve(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyOperator {
-        if (amountUsdc == 0) {
+        if (amountAssets == 0) {
             return;
         }
-        if (vpiRebateReserveBalances[account] < amountUsdc) {
+        if (vpiRebateReserveBalances[account] < amountAssets) {
             revert MarginClearinghouse__ActionReserveMismatch();
         }
-        vpiRebateReserveBalances[account] -= amountUsdc;
-        _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
+        vpiRebateReserveBalances[account] -= amountAssets;
+        _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountAssets);
     }
 
     /// @notice Returns reserved negative-VPI backing to the LP pool as cash recovery.
     function consumeVpiRebateReserve(
         address account,
         address recipient,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyOperator {
-        if (amountUsdc == 0) {
+        if (amountAssets == 0) {
             return;
         }
         if (recipient == address(0)) {
             revert MarginClearinghouse__ZeroAddress();
         }
         if (
-            vpiRebateReserveBalances[account] < amountUsdc || reservedSettlementUsdc[account] < amountUsdc
-                || settlementBalances[account] < amountUsdc
+            vpiRebateReserveBalances[account] < amountAssets || reservedSettlementAssets[account] < amountAssets
+                || settlementBalances[account] < amountAssets
         ) {
             revert MarginClearinghouse__ActionReserveMismatch();
         }
-        vpiRebateReserveBalances[account] -= amountUsdc;
-        reservedSettlementUsdc[account] -= amountUsdc;
-        settlementBalances[account] -= amountUsdc;
-        IERC20(settlementAsset).safeTransfer(recipient, amountUsdc);
-        emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
-        emit AssetSeized(account, settlementAsset, amountUsdc, recipient);
+        vpiRebateReserveBalances[account] -= amountAssets;
+        reservedSettlementAssets[account] -= amountAssets;
+        settlementBalances[account] -= amountAssets;
+        IERC20(settlementAsset).safeTransfer(recipient, amountAssets);
+        emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountAssets);
+        emit AssetSeized(account, settlementAsset, amountAssets, recipient);
     }
 
     /// @notice Collects an action charge from spendable action reserve, free settlement, then committed order margin.
@@ -910,93 +914,94 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      into free settlement before this call; any charge above eligible value is waived.
     function consumeActionCharge(
         address account,
-        uint256 chargeUsdc,
-        uint256 actionReserveConsumedUsdc,
-        uint256 actionCommittedMarginConsumedUsdc,
+        uint256 chargeAssets,
+        uint256 actionReserveConsumedAssets,
+        uint256 actionCommittedMarginConsumedAssets,
         address recipient,
         address protocolTreasury,
-        uint256 protocolFeeUsdc
-    ) external onlyOperator returns (uint256 collectedUsdc, uint256 protocolFeeCreditedUsdc) {
-        collectedUsdc = _validateActionChargeConsumption(
-            account, chargeUsdc, actionReserveConsumedUsdc, actionCommittedMarginConsumedUsdc
+        uint256 protocolFeeAssets
+    ) external onlyOperator returns (uint256 collectedAssets, uint256 protocolFeeCreditedAssets) {
+        collectedAssets = _validateActionChargeConsumption(
+            account, chargeAssets, actionReserveConsumedAssets, actionCommittedMarginConsumedAssets
         );
-        if (collectedUsdc == 0) {
+        if (collectedAssets == 0) {
             return (0, 0);
         }
 
-        if (actionReserveConsumedUsdc > 0) {
-            reservedSettlementUsdc[account] -= actionReserveConsumedUsdc;
+        if (actionReserveConsumedAssets > 0) {
+            reservedSettlementAssets[account] -= actionReserveConsumedAssets;
             emit MarginUnlocked(
-                account, IMarginClearinghouse.MarginBucket.ReservedSettlement, actionReserveConsumedUsdc
+                account, IMarginClearinghouse.MarginBucket.ReservedSettlement, actionReserveConsumedAssets
             );
         }
-        if (actionCommittedMarginConsumedUsdc > 0) {
-            uint256 consumedCommittedMarginUsdc =
-                _consumeAccountOrderReservations(account, actionCommittedMarginConsumedUsdc, true);
-            if (consumedCommittedMarginUsdc != actionCommittedMarginConsumedUsdc) {
+        if (actionCommittedMarginConsumedAssets > 0) {
+            uint256 consumedCommittedMarginAssets =
+                _consumeAccountOrderReservations(account, actionCommittedMarginConsumedAssets, true);
+            if (consumedCommittedMarginAssets != actionCommittedMarginConsumedAssets) {
                 revert MarginClearinghouse__IncompleteReservationCoverage();
             }
         }
 
-        protocolFeeCreditedUsdc =
-            _routeSettlementDebit(account, collectedUsdc, recipient, protocolTreasury, protocolFeeUsdc);
+        protocolFeeCreditedAssets =
+            _routeSettlementDebit(account, collectedAssets, recipient, protocolTreasury, protocolFeeAssets);
     }
 
     function _validateActionChargeConsumption(
         address account,
-        uint256 chargeUsdc,
-        uint256 actionReserveConsumedUsdc,
-        uint256 actionCommittedMarginConsumedUsdc
-    ) private view returns (uint256 collectedUsdc) {
-        uint256 actionReserveAvailableUsdc = _spendableActionReserveUsdc(account);
-        uint256 freeSettlementAvailableUsdc = getFreeBuyingPowerUsdc(account);
-        uint256 eligibleUsdc =
-            actionReserveAvailableUsdc + freeSettlementAvailableUsdc + committedOrderMarginUsdc[account];
-        collectedUsdc = chargeUsdc < eligibleUsdc ? chargeUsdc : eligibleUsdc;
+        uint256 chargeAssets,
+        uint256 actionReserveConsumedAssets,
+        uint256 actionCommittedMarginConsumedAssets
+    ) private view returns (uint256 collectedAssets) {
+        uint256 actionReserveAvailableAssets = _spendableActionReserveAssets(account);
+        uint256 freeSettlementAvailableAssets = getFreeBuyingPowerAssets(account);
+        uint256 eligibleAssets =
+            actionReserveAvailableAssets + freeSettlementAvailableAssets + committedOrderMarginAssets[account];
+        collectedAssets = chargeAssets < eligibleAssets ? chargeAssets : eligibleAssets;
 
-        uint256 expectedActionReserveConsumedUsdc =
-            collectedUsdc < actionReserveAvailableUsdc ? collectedUsdc : actionReserveAvailableUsdc;
-        uint256 chargeAfterReserveUsdc = collectedUsdc - expectedActionReserveConsumedUsdc;
-        uint256 expectedCommittedMarginConsumedUsdc = chargeAfterReserveUsdc > freeSettlementAvailableUsdc
-            ? chargeAfterReserveUsdc - freeSettlementAvailableUsdc
+        uint256 expectedActionReserveConsumedAssets =
+            collectedAssets < actionReserveAvailableAssets ? collectedAssets : actionReserveAvailableAssets;
+        uint256 chargeAfterReserveAssets = collectedAssets - expectedActionReserveConsumedAssets;
+        uint256 expectedCommittedMarginConsumedAssets = chargeAfterReserveAssets > freeSettlementAvailableAssets
+            ? chargeAfterReserveAssets - freeSettlementAvailableAssets
             : 0;
         if (
-            actionReserveConsumedUsdc != expectedActionReserveConsumedUsdc
-                || actionCommittedMarginConsumedUsdc != expectedCommittedMarginConsumedUsdc
+            actionReserveConsumedAssets != expectedActionReserveConsumedAssets
+                || actionCommittedMarginConsumedAssets != expectedCommittedMarginConsumedAssets
         ) {
             revert MarginClearinghouse__ActionReserveMismatch();
         }
     }
 
-    function _spendableActionReserveUsdc(
+    function _spendableActionReserveAssets(
         address account
     ) private view returns (uint256) {
-        uint256 actionReserveBalanceUsdc = reservedSettlementUsdc[account];
-        uint256 protectedActionReserveUsdc = totalBountyReservationsUsdc[account] + vpiRebateReserveBalances[account];
-        if (actionReserveBalanceUsdc < protectedActionReserveUsdc) {
+        uint256 actionReserveBalanceAssets = reservedSettlementAssets[account];
+        uint256 protectedActionReserveAssets =
+            totalBountyReservationsAssets[account] + vpiRebateReserveBalances[account];
+        if (actionReserveBalanceAssets < protectedActionReserveAssets) {
             revert MarginClearinghouse__ActionReserveMismatch();
         }
-        return actionReserveBalanceUsdc - protectedActionReserveUsdc;
+        return actionReserveBalanceAssets - protectedActionReserveAssets;
     }
 
     /// @notice Releases liquidation reserve back to free settlement without debiting custody.
     function releaseLiquidationReserve(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyOperator {
-        _unlockMargin(account, IMarginClearinghouse.MarginBucket.LiquidationReserve, amountUsdc);
+        _unlockMargin(account, IMarginClearinghouse.MarginBucket.LiquidationReserve, amountAssets);
     }
 
     /// @notice Reclassifies PnL pledge as liquidation reserve; total locked settlement is unchanged.
     function reclassifyPnlPledgeToLiquidationReserve(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyOperator {
         _reclassifyMargin(
             account,
             IMarginClearinghouse.MarginBucket.Position,
             IMarginClearinghouse.MarginBucket.LiquidationReserve,
-            amountUsdc
+            amountAssets
         );
     }
 
@@ -1005,91 +1010,94 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      debit; zero is a no-op. This accounting mutation does not transfer tokens, alter locked buckets, or
     ///      checkpoint carry. A debit larger than free settlement reverts.
     /// @param account Account to settle
-    /// @param amount Signed delta in six-decimal USDC units; positive credits and negative debits
-    function settleUsdc(
+    /// @param amount Signed delta in six-decimal settlement token units; positive credits and negative debits
+    function settleAssets(
         address account,
         int256 amount
     ) external onlyOperator {
         if (amount > 0) {
-            _creditSettlementUsdc(account, uint256(amount));
+            _creditSettlementAssets(account, uint256(amount));
         } else if (amount < 0) {
-            _debitSettlementUsdc(account, uint256(-amount));
+            _debitSettlementAssets(account, uint256(-amount));
         }
     }
 
     /// @notice Credits settlement already transferred into custody and classifies it as PnL pledge.
     function creditPnlPledge(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external onlyOperator {
-        _creditPnlPledge(account, amountUsdc);
+        _creditPnlPledge(account, amountAssets);
     }
 
     function _creditPnlPledge(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
-        if (amountUsdc == 0) {
+        if (amountAssets == 0) {
             return;
         }
 
-        _creditSettlementUsdc(account, amountUsdc);
-        _lockMargin(account, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
+        _creditSettlementAssets(account, amountAssets);
+        _lockMargin(account, IMarginClearinghouse.MarginBucket.Position, amountAssets);
     }
 
     /// @notice Applies an open/increase cost, updates position margin, and routes the collected settlement debit.
-    /// @dev Callable only by the engine or its reported settlement sidecar. Positive `tradeCostUsdc` debits internal
+    /// @dev Callable only by the engine or its reported settlement sidecar. Positive `tradeCostAssets` debits internal
     ///      settlement and transfers the non-fee portion to `recipient`; a negative value credits a rebate internally.
     ///      Any protocol fee is capped by the cash debit and credited internally to `protocolFeeAccount`, with no token
     ///      transfer for that portion. The function does not checkpoint carry.
     /// @param account Account whose settlement and position-margin bucket are mutated
-    /// @param marginDeltaUsdc Margin supplied with the order, in six-decimal USDC units
-    /// @param tradeCostUsdc Signed six-decimal USDC cost; positive is a debit and negative is a rebate
+    /// @param marginDeltaAssets Margin supplied with the order, in six-decimal settlement token units
+    /// @param tradeCostAssets Signed six-decimal settlement token cost; positive is a debit and negative is a rebate
     /// @param recipient External recipient of the collected debit after any internal protocol-fee credit
     /// @param protocolFeeAccount Clearinghouse account credited with the protocol-fee portion; zero disables the credit
-    /// @param protocolFeeUsdc Requested protocol-fee portion in six-decimal USDC units
-    /// @return netMarginChangeUsdc Nonnegative new PnL pledge left after this action's positive cost, in USDC
-    /// @return protocolFeeCreditedUsdc Amount of the debit credited internally to `protocolFeeAccount`
+    /// @param protocolFeeAssets Requested protocol-fee portion in six-decimal settlement token units
+    /// @return netMarginChangeAssets Nonnegative new PnL pledge left after this action's positive cost, in settlement token
+    /// @return protocolFeeCreditedAssets Amount of the debit credited internally to `protocolFeeAccount`
     function applyOpenCost(
         address account,
-        uint256 marginDeltaUsdc,
-        int256 tradeCostUsdc,
+        uint256 marginDeltaAssets,
+        int256 tradeCostAssets,
         address recipient,
         address protocolFeeAccount,
-        uint256 protocolFeeUsdc
-    ) external onlyOperator returns (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc) {
-        return _applyOpenCost(account, marginDeltaUsdc, tradeCostUsdc, recipient, protocolFeeAccount, protocolFeeUsdc);
+        uint256 protocolFeeAssets
+    ) external onlyOperator returns (int256 netMarginChangeAssets, uint256 protocolFeeCreditedAssets) {
+        return
+            _applyOpenCost(
+                account, marginDeltaAssets, tradeCostAssets, recipient, protocolFeeAccount, protocolFeeAssets
+            );
     }
 
     function _applyOpenCost(
         address account,
-        uint256 marginDeltaUsdc,
-        int256 tradeCostUsdc,
+        uint256 marginDeltaAssets,
+        int256 tradeCostAssets,
         address recipient,
         address protocolFeeAccount,
-        uint256 protocolFeeUsdc
-    ) internal returns (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc) {
+        uint256 protocolFeeAssets
+    ) internal returns (int256 netMarginChangeAssets, uint256 protocolFeeCreditedAssets) {
         MarginClearinghouseAccountingLib.OpenCostPlan memory plan =
             MarginClearinghouseAccountingLib.planOpenCostApplication(
-                _buildAccountUsdcBuckets(account), marginDeltaUsdc, tradeCostUsdc
+                _buildAccountAssetBuckets(account), marginDeltaAssets, tradeCostAssets
             );
 
         if (plan.insufficientFreeEquity) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
 
-        netMarginChangeUsdc = plan.netMarginChangeUsdc;
-        if (plan.settlementCreditUsdc > 0) {
-            _creditSettlementUsdc(account, plan.settlementCreditUsdc);
+        netMarginChangeAssets = plan.netMarginChangeAssets;
+        if (plan.settlementCreditAssets > 0) {
+            _creditSettlementAssets(account, plan.settlementCreditAssets);
         }
 
-        if (plan.positionMarginLockedUsdc > 0) {
-            _lockMargin(account, IMarginClearinghouse.MarginBucket.Position, plan.positionMarginLockedUsdc);
+        if (plan.positionMarginLockedAssets > 0) {
+            _lockMargin(account, IMarginClearinghouse.MarginBucket.Position, plan.positionMarginLockedAssets);
         }
 
-        if (plan.settlementDebitUsdc > 0) {
-            protocolFeeCreditedUsdc = _routeSettlementDebit(
-                account, plan.settlementDebitUsdc, recipient, protocolFeeAccount, protocolFeeUsdc
+        if (plan.settlementDebitAssets > 0) {
+            protocolFeeCreditedAssets = _routeSettlementDebit(
+                account, plan.settlementDebitAssets, recipient, protocolFeeAccount, protocolFeeAssets
             );
         }
     }
@@ -1099,108 +1107,109 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      stored buckets. Other locked buckets and trader claims remain protected; the caller retains uncovered
     ///      carry until subsequent collection or terminal recovery/waiver.
     /// @param account Account paying the loss
-    /// @param lossUsdc Loss to collect in six-decimal USDC units
+    /// @param lossAssets Loss to collect in six-decimal settlement token units
     /// @param recipient External recipient of the settlement tokens collected
-    /// @return marginConsumedUsdc Active position margin consumed in six-decimal USDC units
-    /// @return freeSettlementConsumedUsdc Free settlement consumed in six-decimal USDC units
-    /// @return uncoveredUsdc Requested loss left uncovered in six-decimal USDC units
+    /// @return marginConsumedAssets Active position margin consumed in six-decimal settlement token units
+    /// @return freeSettlementConsumedAssets Free settlement consumed in six-decimal settlement token units
+    /// @return uncoveredAssets Requested loss left uncovered in six-decimal settlement token units
     function consumeSettlementLoss(
         address account,
-        uint256 lossUsdc,
+        uint256 lossAssets,
         address recipient
     )
         external
         onlyOperator
-        returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc)
+        returns (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets)
     {
-        if (lossUsdc == 0) {
+        if (lossAssets == 0) {
             return (0, 0, 0);
         }
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
-            _planCarryLossConsumption(account, lossUsdc);
-        freeSettlementConsumedUsdc = consumption.freeSettlementConsumedUsdc;
-        marginConsumedUsdc = consumption.activeMarginConsumedUsdc;
-        uncoveredUsdc = consumption.uncoveredUsdc;
+            _planCarryLossConsumption(account, lossAssets);
+        freeSettlementConsumedAssets = consumption.freeSettlementConsumedAssets;
+        marginConsumedAssets = consumption.activeMarginConsumedAssets;
+        uncoveredAssets = consumption.uncoveredAssets;
         MarginClearinghouseAccountingLib.BucketMutation memory mutation =
             MarginClearinghouseAccountingLib.applyCarryLossMutation(consumption);
 
-        if (mutation.positionMarginUnlockedUsdc > 0) {
+        if (mutation.positionMarginUnlockedAssets > 0) {
             _consumeLockedMargin(
-                account, IMarginClearinghouse.MarginBucket.Position, mutation.positionMarginUnlockedUsdc
+                account, IMarginClearinghouse.MarginBucket.Position, mutation.positionMarginUnlockedAssets
             );
         }
 
-        uint256 totalConsumedUsdc = mutation.settlementDebitUsdc;
-        if (totalConsumedUsdc == 0) {
-            return (marginConsumedUsdc, freeSettlementConsumedUsdc, uncoveredUsdc);
+        uint256 totalConsumedAssets = mutation.settlementDebitAssets;
+        if (totalConsumedAssets == 0) {
+            return (marginConsumedAssets, freeSettlementConsumedAssets, uncoveredAssets);
         }
 
-        settlementBalances[account] -= totalConsumedUsdc;
-        IERC20(settlementAsset).safeTransfer(recipient, totalConsumedUsdc);
-        emit AssetSeized(account, settlementAsset, totalConsumedUsdc, recipient);
+        settlementBalances[account] -= totalConsumedAssets;
+        IERC20(settlementAsset).safeTransfer(recipient, totalConsumedAssets);
+        emit AssetSeized(account, settlementAsset, totalConsumedAssets, recipient);
     }
 
     /// @notice Collects position price loss from the dedicated PnL pledge and no other settlement source.
     function consumePnlPledgeLoss(
         address account,
-        uint256 priceLossUsdc,
+        uint256 priceLossAssets,
         address recipient
-    ) external onlyOperator returns (uint256 consumedUsdc, uint256 shortfallUsdc) {
-        return _consumePnlPledgeLoss(account, priceLossUsdc, 0, recipient);
+    ) external onlyOperator returns (uint256 consumedAssets, uint256 shortfallAssets) {
+        return _consumePnlPledgeLoss(account, priceLossAssets, 0, recipient);
     }
 
     function _consumePnlPledgeLoss(
         address account,
-        uint256 priceLossUsdc,
-        uint256 protectedPnlPledgeUsdc,
+        uint256 priceLossAssets,
+        uint256 protectedPnlPledgeAssets,
         address recipient
-    ) internal returns (uint256 consumedUsdc, uint256 shortfallUsdc) {
-        uint256 pledgeUsdc = positionMarginUsdc[account];
-        uint256 consumablePledgeUsdc = pledgeUsdc > protectedPnlPledgeUsdc ? pledgeUsdc - protectedPnlPledgeUsdc : 0;
-        consumedUsdc = priceLossUsdc < consumablePledgeUsdc ? priceLossUsdc : consumablePledgeUsdc;
-        shortfallUsdc = priceLossUsdc - consumedUsdc;
-        if (consumedUsdc == 0) {
-            return (0, shortfallUsdc);
+    ) internal returns (uint256 consumedAssets, uint256 shortfallAssets) {
+        uint256 pledgeAssets = positionMarginAssets[account];
+        uint256 consumablePledgeAssets =
+            pledgeAssets > protectedPnlPledgeAssets ? pledgeAssets - protectedPnlPledgeAssets : 0;
+        consumedAssets = priceLossAssets < consumablePledgeAssets ? priceLossAssets : consumablePledgeAssets;
+        shortfallAssets = priceLossAssets - consumedAssets;
+        if (consumedAssets == 0) {
+            return (0, shortfallAssets);
         }
         if (recipient == address(0)) {
             revert MarginClearinghouse__ZeroAddress();
         }
-        _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.Position, consumedUsdc);
-        settlementBalances[account] -= consumedUsdc;
-        IERC20(settlementAsset).safeTransfer(recipient, consumedUsdc);
-        emit AssetSeized(account, settlementAsset, consumedUsdc, recipient);
+        _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.Position, consumedAssets);
+        settlementBalances[account] -= consumedAssets;
+        IERC20(settlementAsset).safeTransfer(recipient, consumedAssets);
+        emit AssetSeized(account, settlementAsset, consumedAssets, recipient);
     }
 
     /// @notice Applies an engine-planned isolated full-liquidation settlement.
     /// @dev The pool transfer contains price PnL collected from pledge plus the LP fee collected from liquidation
     ///      reserve. Keeper and protocol allocations also consume liquidation reserve. Every other bucket is protected.
     /// @param account Liquidated account
-    /// @param plan Liquidation settlement plan whose amounts use six-decimal USDC units
-    /// @param recipient External recipient of `plan.settlementSeizedUsdc`; required when that amount is nonzero
+    /// @param plan Liquidation settlement plan whose amounts use six-decimal settlement token units
+    /// @param recipient External recipient of `plan.settlementSeizedAssets`; required when that amount is nonzero
     /// @param keeper Clearinghouse account credited with the bounty; required when the bounty is nonzero
-    /// @param keeperBountyUsdc Bounty debited from `account` and credited to `keeper`, in six-decimal USDC units
+    /// @param keeperBountyAssets Bounty debited from `account` and credited to `keeper`, in six-decimal settlement token units
     /// @param protocolFeeAccount Clearinghouse account credited with the liquidation protocol fee
-    /// @param protocolFeeUsdc Protocol fee debited from `account` and credited internally, in six-decimal USDC units
-    /// @param lpLiquidationFeeUsdc LP fee included in `plan.settlementSeizedUsdc`
-    /// @return seizedUsdc Amount transferred to `recipient` in six-decimal USDC units
+    /// @param protocolFeeAssets Protocol fee debited from `account` and credited internally, in six-decimal settlement token units
+    /// @param lpLiquidationFeeAssets LP fee included in `plan.settlementSeizedAssets`
+    /// @return seizedAssets Amount transferred to `recipient` in six-decimal settlement token units
     function applyLiquidationSettlementPlan(
         address account,
         IMarginClearinghouse.LiquidationSettlementPlan calldata plan,
         address recipient,
         address keeper,
-        uint256 keeperBountyUsdc,
+        uint256 keeperBountyAssets,
         address protocolFeeAccount,
-        uint256 protocolFeeUsdc,
-        uint256 lpLiquidationFeeUsdc
-    ) external onlyOperator returns (uint256 seizedUsdc) {
+        uint256 protocolFeeAssets,
+        uint256 lpLiquidationFeeAssets
+    ) external onlyOperator returns (uint256 seizedAssets) {
         LiquidationSettlementExecution memory execution;
         execution.recipient = recipient;
         execution.keeper = keeper;
-        execution.keeperBountyUsdc = keeperBountyUsdc;
+        execution.keeperBountyAssets = keeperBountyAssets;
         execution.protocolFeeAccount = protocolFeeAccount;
-        execution.protocolFeeUsdc = protocolFeeUsdc;
-        execution.lpLiquidationFeeUsdc = lpLiquidationFeeUsdc;
+        execution.protocolFeeAssets = protocolFeeAssets;
+        execution.lpLiquidationFeeAssets = lpLiquidationFeeAssets;
         return _applyLiquidationSettlementPlan(account, plan, execution);
     }
 
@@ -1208,120 +1217,120 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address account,
         IMarginClearinghouse.LiquidationSettlementPlan calldata plan,
         LiquidationSettlementExecution memory execution
-    ) internal returns (uint256 seizedUsdc) {
-        seizedUsdc = plan.settlementSeizedUsdc;
-        uint256 pledgeBeforeUsdc = positionMarginUsdc[account];
-        if (seizedUsdc < execution.lpLiquidationFeeUsdc) {
+    ) internal returns (uint256 seizedAssets) {
+        seizedAssets = plan.settlementSeizedAssets;
+        uint256 pledgeBeforeAssets = positionMarginAssets[account];
+        if (seizedAssets < execution.lpLiquidationFeeAssets) {
             revert MarginClearinghouse__InvalidMarginBucket();
         }
-        uint256 priceSeizureUsdc = seizedUsdc - execution.lpLiquidationFeeUsdc;
+        uint256 priceSeizureAssets = seizedAssets - execution.lpLiquidationFeeAssets;
         if (
-            priceSeizureUsdc > pledgeBeforeUsdc || plan.positionMarginUnlockedUsdc != pledgeBeforeUsdc
-                || plan.otherLockedMarginUnlockedUsdc != 0
+            priceSeizureAssets > pledgeBeforeAssets || plan.positionMarginUnlockedAssets != pledgeBeforeAssets
+                || plan.otherLockedMarginUnlockedAssets != 0
         ) {
             revert MarginClearinghouse__InvalidMarginBucket();
         }
 
-        uint256 liquidationChargeUsdc =
-            execution.keeperBountyUsdc + execution.protocolFeeUsdc + execution.lpLiquidationFeeUsdc;
-        if (liquidationReserveBalances[account] < liquidationChargeUsdc) {
+        uint256 liquidationChargeAssets =
+            execution.keeperBountyAssets + execution.protocolFeeAssets + execution.lpLiquidationFeeAssets;
+        if (liquidationReserveBalances[account] < liquidationChargeAssets) {
             revert MarginClearinghouse__InsufficientBucketMargin();
         }
-        if (liquidationChargeUsdc > 0) {
-            liquidationReserveBalances[account] -= liquidationChargeUsdc;
-            emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.LiquidationReserve, liquidationChargeUsdc);
+        if (liquidationChargeAssets > 0) {
+            liquidationReserveBalances[account] -= liquidationChargeAssets;
+            emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.LiquidationReserve, liquidationChargeAssets);
         }
 
-        if (plan.positionMarginUnlockedUsdc > 0) {
-            _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.Position, plan.positionMarginUnlockedUsdc);
+        if (plan.positionMarginUnlockedAssets > 0) {
+            _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.Position, plan.positionMarginUnlockedAssets);
         }
-        uint256 settlementDebitUsdc = priceSeizureUsdc + liquidationChargeUsdc;
-        if (settlementDebitUsdc > 0) {
-            if (settlementBalances[account] < settlementDebitUsdc) {
+        uint256 settlementDebitAssets = priceSeizureAssets + liquidationChargeAssets;
+        if (settlementDebitAssets > 0) {
+            if (settlementBalances[account] < settlementDebitAssets) {
                 revert MarginClearinghouse__InsufficientAssetToSeize();
             }
-            settlementBalances[account] -= settlementDebitUsdc;
-            if (settlementBalances[account] < _totalLockedMarginUsdc(account)) {
+            settlementBalances[account] -= settlementDebitAssets;
+            if (settlementBalances[account] < _totalLockedMarginAssets(account)) {
                 revert MarginClearinghouse__InsufficientAssetToSeize();
             }
         }
-        if (seizedUsdc > 0) {
+        if (seizedAssets > 0) {
             if (execution.recipient == address(0)) {
                 revert MarginClearinghouse__ZeroAddress();
             }
-            IERC20(settlementAsset).safeTransfer(execution.recipient, plan.settlementSeizedUsdc);
-            emit AssetSeized(account, settlementAsset, plan.settlementSeizedUsdc, execution.recipient);
+            IERC20(settlementAsset).safeTransfer(execution.recipient, plan.settlementSeizedAssets);
+            emit AssetSeized(account, settlementAsset, plan.settlementSeizedAssets, execution.recipient);
         }
-        if (execution.keeperBountyUsdc > 0) {
+        if (execution.keeperBountyAssets > 0) {
             if (execution.keeper == address(0)) {
                 revert MarginClearinghouse__ZeroAddress();
             }
-            settlementBalances[execution.keeper] += execution.keeperBountyUsdc;
-            emit ReservedSettlementTransferred(account, execution.keeper, execution.keeperBountyUsdc);
+            settlementBalances[execution.keeper] += execution.keeperBountyAssets;
+            emit ReservedSettlementTransferred(account, execution.keeper, execution.keeperBountyAssets);
         }
-        if (execution.protocolFeeUsdc > 0) {
+        if (execution.protocolFeeAssets > 0) {
             if (execution.protocolFeeAccount == address(0)) {
                 revert MarginClearinghouse__ZeroAddress();
             }
-            settlementBalances[execution.protocolFeeAccount] += execution.protocolFeeUsdc;
-            emit AssetSeized(account, settlementAsset, execution.protocolFeeUsdc, execution.protocolFeeAccount);
+            settlementBalances[execution.protocolFeeAccount] += execution.protocolFeeAssets;
+            emit AssetSeized(account, settlementAsset, execution.protocolFeeAssets, execution.protocolFeeAccount);
         }
 
-        uint256 releasedLiquidationReserveUsdc = liquidationReserveBalances[account];
-        if (releasedLiquidationReserveUsdc > 0) {
+        uint256 releasedLiquidationReserveAssets = liquidationReserveBalances[account];
+        if (releasedLiquidationReserveAssets > 0) {
             liquidationReserveBalances[account] = 0;
             emit MarginUnlocked(
-                account, IMarginClearinghouse.MarginBucket.LiquidationReserve, releasedLiquidationReserveUsdc
+                account, IMarginClearinghouse.MarginBucket.LiquidationReserve, releasedLiquidationReserveAssets
             );
         }
     }
 
-    function _buildAccountUsdcBuckets(
+    function _buildAccountAssetBuckets(
         address account
-    ) internal view returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
-        return MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(
+    ) internal view returns (IMarginClearinghouse.AccountAssetBuckets memory buckets) {
+        return MarginClearinghouseAccountingLib.buildIsolatedAccountAssetBuckets(
             settlementBalances[account],
-            positionMarginUsdc[account],
+            positionMarginAssets[account],
             liquidationReserveBalances[account],
-            committedOrderMarginUsdc[account],
-            reservedSettlementUsdc[account]
+            committedOrderMarginAssets[account],
+            reservedSettlementAssets[account]
         );
     }
 
     function _planCarryLossConsumption(
         address account,
-        uint256 lossUsdc
+        uint256 lossAssets
     ) internal view returns (MarginClearinghouseAccountingLib.SettlementConsumption memory consumption) {
-        return MarginClearinghouseAccountingLib.planCarryLossConsumption(_buildAccountUsdcBuckets(account), lossUsdc);
+        return MarginClearinghouseAccountingLib.planCarryLossConsumption(_buildAccountAssetBuckets(account), lossAssets);
     }
 
     function _routeSettlementDebit(
         address account,
-        uint256 amountUsdc,
+        uint256 amountAssets,
         address recipient,
         address protocolFeeAccount,
-        uint256 protocolFeeUsdc
-    ) internal returns (uint256 protocolFeeCreditedUsdc) {
-        settlementBalances[account] -= amountUsdc;
+        uint256 protocolFeeAssets
+    ) internal returns (uint256 protocolFeeCreditedAssets) {
+        settlementBalances[account] -= amountAssets;
 
-        if (protocolFeeAccount != address(0) && protocolFeeUsdc > 0) {
-            protocolFeeCreditedUsdc = protocolFeeUsdc < amountUsdc ? protocolFeeUsdc : amountUsdc;
-            settlementBalances[protocolFeeAccount] += protocolFeeCreditedUsdc;
-            emit AssetSeized(account, settlementAsset, protocolFeeCreditedUsdc, protocolFeeAccount);
+        if (protocolFeeAccount != address(0) && protocolFeeAssets > 0) {
+            protocolFeeCreditedAssets = protocolFeeAssets < amountAssets ? protocolFeeAssets : amountAssets;
+            settlementBalances[protocolFeeAccount] += protocolFeeCreditedAssets;
+            emit AssetSeized(account, settlementAsset, protocolFeeCreditedAssets, protocolFeeAccount);
         }
 
-        uint256 recipientTransferUsdc = amountUsdc - protocolFeeCreditedUsdc;
-        if (recipientTransferUsdc > 0) {
-            IERC20(settlementAsset).safeTransfer(recipient, recipientTransferUsdc);
-            emit AssetSeized(account, settlementAsset, recipientTransferUsdc, recipient);
+        uint256 recipientTransferAssets = amountAssets - protocolFeeCreditedAssets;
+        if (recipientTransferAssets > 0) {
+            IERC20(settlementAsset).safeTransfer(recipient, recipientTransferAssets);
+            emit AssetSeized(account, settlementAsset, recipientTransferAssets, recipient);
         }
     }
 
-    function _creditSettlementUsdc(
+    function _creditSettlementAssets(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
-        settlementBalances[account] += amountUsdc;
+        settlementBalances[account] += amountAssets;
     }
 
     function _checkpointCarryBeforeMarginChange(
@@ -1386,60 +1395,60 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         }
     }
 
-    function _debitSettlementUsdc(
+    function _debitSettlementAssets(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
-        if (settlementBalances[account] < amountUsdc) {
-            revert MarginClearinghouse__InsufficientUsdcForSettlement();
+        if (settlementBalances[account] < amountAssets) {
+            revert MarginClearinghouse__InsufficientAssetsForSettlement();
         }
-        if (getFreeBuyingPowerUsdc(account) < amountUsdc) {
+        if (getFreeBuyingPowerAssets(account) < amountAssets) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        settlementBalances[account] -= amountUsdc;
+        settlementBalances[account] -= amountAssets;
     }
 
     function _lockMargin(
         address account,
         IMarginClearinghouse.MarginBucket bucket,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
-        if (getFreeBuyingPowerUsdc(account) < amountUsdc) {
+        if (getFreeBuyingPowerAssets(account) < amountAssets) {
             revert MarginClearinghouse__InsufficientFreeEquity();
         }
-        _setBucketStorage(bucket, account, _bucketStorage(bucket, account) + amountUsdc);
-        emit MarginLocked(account, bucket, amountUsdc);
+        _setBucketStorage(bucket, account, _bucketStorage(bucket, account) + amountAssets);
+        emit MarginLocked(account, bucket, amountAssets);
     }
 
     function _unlockMargin(
         address account,
         IMarginClearinghouse.MarginBucket bucket,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
-        _consumeLockedMargin(account, bucket, amountUsdc);
+        _consumeLockedMargin(account, bucket, amountAssets);
     }
 
     function _reclassifyMargin(
         address account,
         IMarginClearinghouse.MarginBucket from,
         IMarginClearinghouse.MarginBucket to,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
-        if (amountUsdc == 0) {
+        if (amountAssets == 0) {
             return;
         }
-        _consumeLockedMargin(account, from, amountUsdc);
-        _setBucketStorage(to, account, _bucketStorage(to, account) + amountUsdc);
-        emit MarginLocked(account, to, amountUsdc);
+        _consumeLockedMargin(account, from, amountAssets);
+        _setBucketStorage(to, account, _bucketStorage(to, account) + amountAssets);
+        emit MarginLocked(account, to, amountAssets);
     }
 
     function _consumeReservationBucket(
         address account,
         IMarginClearinghouse.ReservationBucket bucket,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
         if (bucket == IMarginClearinghouse.ReservationBucket.CommittedOrder) {
-            _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
+            _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.CommittedOrder, amountAssets);
         } else {
             revert MarginClearinghouse__InvalidMarginBucket();
         }
@@ -1467,7 +1476,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         reservation.previousOrderId = 0;
         reservation.nextOrderId = 0;
         reservation.status = terminalStatus;
-        reservation.remainingAmountUsdc = 0;
+        reservation.remainingAmountAssets = 0;
         reservationQueues[reservation.account].count -= 1;
     }
 
@@ -1505,34 +1514,34 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address account,
         IMarginClearinghouse.BountyKind kind,
         uint64 id,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) external {
         _requireBountyOwner(kind);
-        _recordBountyReservation(account, kind, id, amountUsdc);
+        _recordBountyReservation(account, kind, id, amountAssets);
     }
 
     function _recordBountyReservation(
         address account,
         IMarginClearinghouse.BountyKind kind,
         uint64 id,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) private {
         IMarginClearinghouse.BountyReservation storage reservation = bountyReservations[kind][id];
         if (account == address(0) || id == 0 || reservation.state != IMarginClearinghouse.BountyReservationState.None) {
             revert MarginClearinghouse__InvalidBountyReservation();
         }
         if (
-            vpiRebateReserveBalances[account] + totalBountyReservationsUsdc[account] + amountUsdc
-                > reservedSettlementUsdc[account]
+            vpiRebateReserveBalances[account] + totalBountyReservationsAssets[account] + amountAssets
+                > reservedSettlementAssets[account]
         ) {
             revert MarginClearinghouse__ActionReserveMismatch();
         }
         reservation.account = account;
-        reservation.amountUsdc = _toUint96(amountUsdc);
+        reservation.amountAssets = _toUint96(amountAssets);
         reservation.state = IMarginClearinghouse.BountyReservationState.Active;
-        reservation.freeFundedUsdc = _toUint96(amountUsdc);
-        totalBountyReservationsUsdc[account] += amountUsdc;
-        emit BountyReservationUpdated(kind, id, account, amountUsdc);
+        reservation.freeFundedAssets = _toUint96(amountAssets);
+        totalBountyReservationsAssets[account] += amountAssets;
+        emit BountyReservationUpdated(kind, id, account, amountAssets);
     }
 
     event LedgerInvariantViolation(address indexed account, uint64 indexed orderId);
@@ -1540,7 +1549,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     function recoverExpiredBounty(
         address account,
         uint64 orderId,
-        uint256 expectedFreeUsdc
+        uint256 expectedFreeAssets
     ) external returns (IMarginClearinghouse.BountyRecovery memory result) {
         _requireBountyOwner(IMarginClearinghouse.BountyKind.Order);
         IMarginClearinghouse.BountyReservation storage reservation =
@@ -1553,23 +1562,23 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             result.discrepancy = 2;
             return result;
         }
-        uint256 amount = reservation.amountUsdc;
+        uint256 amount = reservation.amountAssets;
         if (
-            reservation.freeFundedUsdc != amount || reservation.freeFundedUsdc != expectedFreeUsdc
-                || totalBountyReservationsUsdc[account] < amount
-                || vpiRebateReserveBalances[account] + totalBountyReservationsUsdc[account]
-                    > reservedSettlementUsdc[account]
-                || getAccountUsdcBuckets(account).totalLockedMarginUsdc > settlementBalances[account]
+            reservation.freeFundedAssets != amount || reservation.freeFundedAssets != expectedFreeAssets
+                || totalBountyReservationsAssets[account] < amount
+                || vpiRebateReserveBalances[account] + totalBountyReservationsAssets[account]
+                    > reservedSettlementAssets[account]
+                || getAccountAssetBuckets(account).totalLockedMarginAssets > settlementBalances[account]
         ) {
             reservation.state = IMarginClearinghouse.BountyReservationState.Quarantined;
             result.discrepancy = 4;
             emit LedgerInvariantViolation(account, orderId);
             return result;
         }
-        result.freeUsdc = reservation.freeFundedUsdc;
+        result.freeAssets = reservation.freeFundedAssets;
         result.discrepancy = 3;
-        totalBountyReservationsUsdc[account] -= amount;
-        reservation.amountUsdc = 0;
+        totalBountyReservationsAssets[account] -= amount;
+        reservation.amountAssets = 0;
         reservation.state = IMarginClearinghouse.BountyReservationState.Settled;
         emit BountyReservationUpdated(IMarginClearinghouse.BountyKind.Order, orderId, account, 0);
     }
@@ -1578,19 +1587,19 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address account,
         IMarginClearinghouse.BountyKind kind,
         uint64 id,
-        uint256 entitlementUsdc
+        uint256 entitlementAssets
     ) external view {
         IMarginClearinghouse.BountyReservation storage reservation = bountyReservations[kind][id];
         if (
             reservation.account != account || reservation.state != IMarginClearinghouse.BountyReservationState.Active
-                || reservation.amountUsdc != entitlementUsdc || reservation.freeFundedUsdc != entitlementUsdc
-                || totalBountyReservationsUsdc[account] < entitlementUsdc
+                || reservation.amountAssets != entitlementAssets || reservation.freeFundedAssets != entitlementAssets
+                || totalBountyReservationsAssets[account] < entitlementAssets
         ) {
             revert MarginClearinghouse__InvalidBountyReservation();
         }
-        _spendableActionReserveUsdc(account);
-        if (getAccountUsdcBuckets(account).totalLockedMarginUsdc > settlementBalances[account]) {
-            revert MarginClearinghouse__InsufficientUsdcForSettlement();
+        _spendableActionReserveAssets(account);
+        if (getAccountAssetBuckets(account).totalLockedMarginAssets > settlementBalances[account]) {
+            revert MarginClearinghouse__InsufficientAssetsForSettlement();
         }
     }
 
@@ -1601,7 +1610,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address account,
         IMarginClearinghouse.BountyKind kind,
         uint64 id
-    ) external returns (uint256 amountUsdc) {
+    ) external returns (uint256 amountAssets) {
         _requireBountyOwner(kind);
         IMarginClearinghouse.BountyReservation storage reservation = bountyReservations[kind][id];
         if (reservation.account != address(0) && reservation.account != account) {
@@ -1610,14 +1619,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         if (reservation.state != IMarginClearinghouse.BountyReservationState.Active) {
             return 0;
         }
-        amountUsdc = reservation.amountUsdc;
-        if (totalBountyReservationsUsdc[account] < amountUsdc) {
+        amountAssets = reservation.amountAssets;
+        if (totalBountyReservationsAssets[account] < amountAssets) {
             revert MarginClearinghouse__InvalidBountyReservation();
         }
-        reservation.amountUsdc = 0;
+        reservation.amountAssets = 0;
         reservation.state = IMarginClearinghouse.BountyReservationState.Settled;
-        totalBountyReservationsUsdc[account] -= amountUsdc;
-        if (amountUsdc != 0) {
+        totalBountyReservationsAssets[account] -= amountAssets;
+        if (amountAssets != 0) {
             emit BountyReservationUpdated(kind, id, account, 0);
         }
     }
@@ -1646,14 +1655,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @dev Reverts if a generic action-reserve decrease would consume negative-VPI backing or a queued bounty.
     function _requireActionReserveDecreaseAboveProtectedFloor(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal view {
-        uint256 currentReserveUsdc = reservedSettlementUsdc[account];
-        if (amountUsdc > currentReserveUsdc) {
+        uint256 currentReserveAssets = reservedSettlementAssets[account];
+        if (amountAssets > currentReserveAssets) {
             revert MarginClearinghouse__InsufficientBucketMargin();
         }
-        uint256 protectedFloorUsdc = vpiRebateReserveBalances[account] + totalBountyReservationsUsdc[account];
-        if (currentReserveUsdc - amountUsdc < protectedFloorUsdc) {
+        uint256 protectedFloorAssets = vpiRebateReserveBalances[account] + totalBountyReservationsAssets[account];
+        if (currentReserveAssets - amountAssets < protectedFloorAssets) {
             revert MarginClearinghouse__ActionReserveMismatch();
         }
     }
@@ -1661,17 +1670,17 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     function _consumeLockedMargin(
         address account,
         IMarginClearinghouse.MarginBucket bucket,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
-        if (amountUsdc == 0) {
+        if (amountAssets == 0) {
             return;
         }
         uint256 currentBucket = _bucketStorage(bucket, account);
-        if (currentBucket < amountUsdc) {
+        if (currentBucket < amountAssets) {
             revert MarginClearinghouse__InsufficientBucketMargin();
         }
-        _setBucketStorage(bucket, account, currentBucket - amountUsdc);
-        emit MarginUnlocked(account, bucket, amountUsdc);
+        _setBucketStorage(bucket, account, currentBucket - amountAssets);
+        emit MarginUnlocked(account, bucket, amountAssets);
     }
 
     function _bucketStorage(
@@ -1679,13 +1688,13 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address account
     ) internal view returns (uint256 bucketValue) {
         if (bucket == IMarginClearinghouse.MarginBucket.Position) {
-            return positionMarginUsdc[account];
+            return positionMarginAssets[account];
         }
         if (bucket == IMarginClearinghouse.MarginBucket.CommittedOrder) {
-            return committedOrderMarginUsdc[account];
+            return committedOrderMarginAssets[account];
         }
         if (bucket == IMarginClearinghouse.MarginBucket.ReservedSettlement) {
-            return reservedSettlementUsdc[account];
+            return reservedSettlementAssets[account];
         }
         if (bucket == IMarginClearinghouse.MarginBucket.LiquidationReserve) {
             return liquidationReserveBalances[account];
@@ -1696,26 +1705,26 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     function _setBucketStorage(
         IMarginClearinghouse.MarginBucket bucket,
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
         if (bucket == IMarginClearinghouse.MarginBucket.Position) {
-            positionMarginUsdc[account] = amountUsdc;
+            positionMarginAssets[account] = amountAssets;
         } else if (bucket == IMarginClearinghouse.MarginBucket.CommittedOrder) {
-            committedOrderMarginUsdc[account] = amountUsdc;
+            committedOrderMarginAssets[account] = amountAssets;
         } else if (bucket == IMarginClearinghouse.MarginBucket.ReservedSettlement) {
-            reservedSettlementUsdc[account] = amountUsdc;
+            reservedSettlementAssets[account] = amountAssets;
         } else if (bucket == IMarginClearinghouse.MarginBucket.LiquidationReserve) {
-            liquidationReserveBalances[account] = amountUsdc;
+            liquidationReserveBalances[account] = amountAssets;
         } else {
             revert MarginClearinghouse__InvalidMarginBucket();
         }
     }
 
-    function _totalLockedMarginUsdc(
+    function _totalLockedMarginAssets(
         address account
     ) internal view returns (uint256) {
-        return positionMarginUsdc[account] + liquidationReserveBalances[account] + committedOrderMarginUsdc[account]
-            + reservedSettlementUsdc[account];
+        return positionMarginAssets[account] + liquidationReserveBalances[account] + committedOrderMarginAssets[account]
+            + reservedSettlementAssets[account];
     }
 
     /// @notice Moves already-reserved settlement value between two internal clearinghouse accounts.
@@ -1725,7 +1734,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ///      margin and settlement balance.
     /// @param account Source account whose reserved settlement and balance are debited
     /// @param recipient Destination account receiving an internal settlement credit
-    /// @param amount Amount to move in six-decimal USDC units
+    /// @param amount Amount to move in six-decimal settlement token units
     function transferReservedSettlement(
         address account,
         address recipient,
@@ -1745,12 +1754,12 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         if (amount == 0) {
             return;
         }
-        if (reservedSettlementUsdc[account] < amount || settlementBalances[account] < amount) {
+        if (reservedSettlementAssets[account] < amount || settlementBalances[account] < amount) {
             revert MarginClearinghouse__InsufficientAssetToSeize();
         }
         _requireActionReserveDecreaseAboveProtectedFloor(account, amount);
 
-        reservedSettlementUsdc[account] -= amount;
+        reservedSettlementAssets[account] -= amount;
         settlementBalances[account] -= amount;
         settlementBalances[recipient] += amount;
 
@@ -1758,41 +1767,41 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit ReservedSettlementTransferred(account, recipient, amount);
     }
 
-    /// @notice Returns an account's internal settlement USDC balance.
+    /// @notice Returns an account's internal settlement settlement token balance.
     /// @dev Does not include unrealized PnL or apply engine withdrawal guards.
     /// @param account Account to inspect
-    /// @return Account balance in six-decimal USDC units
-    function balanceUsdc(
+    /// @return Account balance in six-decimal settlement token units
+    function balanceAssets(
         address account
     ) external view returns (uint256) {
         return settlementBalances[account];
     }
 
-    /// @notice Returns the total locked USDC margin across all buckets for an account.
+    /// @notice Returns the total locked settlement token margin across all buckets for an account.
     /// @param account Account to inspect
-    /// @return Sum of position, liquidation-reserve, committed-order, and reserved-settlement margin in USDC units
-    function lockedMarginUsdc(
+    /// @return Sum of position, liquidation-reserve, committed-order, and reserved-settlement margin in settlement token units
+    function lockedMarginAssets(
         address account
     ) external view returns (uint256) {
-        return _totalLockedMarginUsdc(account);
+        return _totalLockedMarginAssets(account);
     }
 
     /// @notice Returns the typed locked-margin buckets for an account.
-    /// @dev Every field uses six-decimal USDC units. The total includes liquidation reserve, which has no separate
+    /// @dev Every field uses six-decimal settlement token units. The total includes liquidation reserve, which has no separate
     ///      field in this legacy struct; use `getPnlIsolationBuckets` for the complete typed breakdown.
     /// @param account Account to inspect
     /// @return buckets Position, committed-order, reserved-settlement, and total locked amounts
     function getLockedMarginBuckets(
         address account
     ) external view returns (IMarginClearinghouse.LockedMarginBuckets memory buckets) {
-        buckets.positionMarginUsdc = positionMarginUsdc[account];
-        buckets.committedOrderMarginUsdc = committedOrderMarginUsdc[account];
-        buckets.reservedSettlementUsdc = reservedSettlementUsdc[account];
-        buckets.totalLockedMarginUsdc = _totalLockedMarginUsdc(account);
+        buckets.positionMarginAssets = positionMarginAssets[account];
+        buckets.committedOrderMarginAssets = committedOrderMarginAssets[account];
+        buckets.reservedSettlementAssets = reservedSettlementAssets[account];
+        buckets.totalLockedMarginAssets = _totalLockedMarginAssets(account);
     }
 
     /// @notice Returns the reservation record for a specific order id.
-    /// @dev Amount fields use six-decimal USDC units but are stored as `uint96`. An unused id returns the default record.
+    /// @dev Amount fields use six-decimal settlement token units but are stored as `uint96`. An unused id returns the default record.
     /// @param orderId Order reservation id to inspect
     /// @return reservation Account, bucket, status, original amount, and remaining amount
     function getOrderReservation(
@@ -1802,13 +1811,13 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Returns the aggregate active reservation summary for an account.
-    /// @dev The margin amount uses six-decimal USDC units and equals the sum of active reservation remainders.
+    /// @dev The margin amount uses six-decimal settlement token units and equals the sum of active reservation remainders.
     /// @param account Account to inspect
     /// @return summary Aggregate remaining committed-order margin and number of active reservations
     function getAccountReservationSummary(
         address account
     ) external view returns (IMarginClearinghouse.AccountReservationSummary memory summary) {
-        summary.activeCommittedOrderMarginUsdc = activeCommittedOrderReservationUsdc[account];
+        summary.activeCommittedOrderMarginAssets = activeCommittedOrderReservationAssets[account];
         summary.activeReservationCount = reservationQueues[account].count;
     }
 

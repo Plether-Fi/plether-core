@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../utils/MockSettlementToken.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
 import {RecordedOrderReceipts} from "../utils/RecordedOrderReceipts.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -13,6 +14,7 @@ import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "@plether/perps/CfdEngineProtocolLens.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
@@ -39,46 +41,44 @@ import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.s
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
-import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 abstract contract BasePerpTest is RecordedOrderReceipts {
 
     struct CloseParitySnapshot {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot protocol;
-        uint256 settlementUsdc;
-        uint256 traderClaimBalanceUsdc;
+        uint256 settlementAssets;
+        uint256 traderClaimBalanceAssets;
     }
 
     struct CloseParityObserved {
-        uint256 immediatePayoutUsdc;
-        uint256 traderClaimBalanceUsdc;
+        uint256 immediatePayoutAssets;
+        uint256 traderClaimBalanceAssets;
         uint256 remainingSize;
         uint256 remainingMargin;
         bool degradedMode;
-        uint256 effectiveAssetsAfterUsdc;
-        uint256 maxLiabilityAfterUsdc;
+        uint256 effectiveAssetsAfterAssets;
+        uint256 maxLiabilityAfterAssets;
     }
 
     struct LiquidationParitySnapshot {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot protocol;
-        uint256 settlementUsdc;
-        uint256 traderClaimBalanceUsdc;
-        uint256 keeperSettlementUsdc;
-        uint256 protocolTreasurySettlementUsdc;
+        uint256 settlementAssets;
+        uint256 traderClaimBalanceAssets;
+        uint256 keeperSettlementAssets;
+        uint256 protocolTreasurySettlementAssets;
     }
 
     struct LiquidationParityObserved {
-        uint256 immediatePayoutUsdc;
-        uint256 traderClaimBalanceUsdc;
-        uint256 keeperSettlementUsdc;
-        uint256 protocolLiquidationFeeUsdc;
+        uint256 immediatePayoutAssets;
+        uint256 traderClaimBalanceAssets;
+        uint256 keeperSettlementAssets;
+        uint256 protocolLiquidationFeeAssets;
         uint256 remainingSize;
         bool degradedMode;
-        uint256 effectiveAssetsAfterUsdc;
-        uint256 maxLiabilityAfterUsdc;
+        uint256 effectiveAssetsAfterAssets;
+        uint256 maxLiabilityAfterAssets;
     }
 
     struct WithdrawParityState {
@@ -88,7 +88,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         bytes4 withdrawSelector;
     }
 
-    MockUSDC usdc;
+    MockSettlementToken settlementToken;
     CfdEngine engine;
     TerminalNavBookV2 terminalNavBook;
     CfdEngineAdmin engineAdmin;
@@ -112,7 +112,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     uint256 constant SETUP_TIMESTAMP = 1_709_532_000;
     uint256 constant CAP_PRICE = 2e8;
     uint256 constant FROZEN_CLOSE_SPREAD_BPS = 50;
-    uint256 internal constant TEST_MAX_SENIOR_EXPOSURE_USDC = type(uint256).max - 1;
+    uint256 internal constant TEST_MAX_SENIOR_EXPOSURE_ASSETS = type(uint256).max - 1;
     uint256 internal constant TEST_MAX_SENIOR_SHARE_BPS = 9999;
     bytes32 internal constant BASE_PYTH_FEED_A = bytes32(uint256(1));
     bytes32 internal constant BASE_PYTH_FEED_B = bytes32(uint256(2));
@@ -121,8 +121,8 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     receive() external payable {}
 
     function setUp() public virtual {
-        usdc = new MockUSDC();
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        settlementToken = new MockSettlementToken();
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
 
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
@@ -132,17 +132,17 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
         housePoolRedemptionMathSidecar = new HousePoolRedemptionMathSidecar();
-        pool = new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
+        pool = new HousePool(address(settlementToken), address(engine), address(housePoolRedemptionMathSidecar));
         baseMockPyth = new MockPyth();
         baseMockPyth.setSynchronizeLegacyUniquePrices(true);
         bytes32[] memory baseFeedIds = _basePythFeedIds();
         baseMockPyth.setAllPrices(baseFeedIds, int64(100_000_000), int32(-8), SETUP_TIMESTAMP);
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
 
         pool.setSeniorVault(address(seniorVault));
@@ -167,15 +167,15 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
 
         uint256 juniorSeed = _initialJuniorSeedDeposit();
         if (juniorSeed > 0) {
-            usdc.mint(address(this), juniorSeed);
-            usdc.approve(address(pool), juniorSeed);
+            settlementToken.mint(address(this), juniorSeed);
+            settlementToken.approve(address(pool), juniorSeed);
             pool.initializeSeedPosition(false, juniorSeed, _juniorSeedReceiver());
         }
 
         uint256 seniorSeed = _initialSeniorSeedDeposit();
         if (seniorSeed > 0) {
-            usdc.mint(address(this), seniorSeed);
-            usdc.approve(address(pool), seniorSeed);
+            settlementToken.mint(address(this), seniorSeed);
+            settlementToken.approve(address(pool), seniorSeed);
             pool.initializeSeedPosition(true, seniorSeed, _seniorSeedReceiver());
         }
 
@@ -198,7 +198,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         clearinghouse.setEngine(address(engine));
 
         IHousePool.PoolConfig memory config = _currentPoolConfig();
-        config.maxSeniorExposureUsdc = TEST_MAX_SENIOR_EXPOSURE_USDC;
+        config.maxSeniorExposureAssets = TEST_MAX_SENIOR_EXPOSURE_ASSETS;
         config.maxSeniorShareBps = TEST_MAX_SENIOR_SHARE_BPS;
         pool.proposePoolConfig(config);
         vm.warp(pool.poolConfigActivationTime());
@@ -210,15 +210,15 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     function _bootstrapSeededLifecycle() internal {
         uint256 juniorSeed = _initialJuniorSeedDeposit();
         if (juniorSeed > 0 && !pool.hasSeedLifecycleStarted()) {
-            usdc.mint(address(this), juniorSeed);
-            usdc.approve(address(pool), juniorSeed);
+            settlementToken.mint(address(this), juniorSeed);
+            settlementToken.approve(address(pool), juniorSeed);
             pool.initializeSeedPosition(false, juniorSeed, _juniorSeedReceiver());
         }
 
         uint256 seniorSeed = _initialSeniorSeedDeposit();
         if (seniorSeed > 0 && !pool.isSeedLifecycleComplete()) {
-            usdc.mint(address(this), seniorSeed);
-            usdc.approve(address(pool), seniorSeed);
+            settlementToken.mint(address(this), seniorSeed);
+            settlementToken.approve(address(pool), seniorSeed);
             pool.initializeSeedPosition(true, seniorSeed, _seniorSeedReceiver());
         }
 
@@ -237,7 +237,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -358,9 +358,9 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         address lp,
         uint256 amount
     ) internal returns (uint256 shares) {
-        usdc.mint(lp, amount);
+        settlementToken.mint(lp, amount);
         vm.startPrank(lp);
-        usdc.approve(address(vault), amount);
+        settlementToken.approve(address(vault), amount);
         uint256 requestId = vault.requestDeposit(amount, lp, lp);
         vm.stopPrank();
 
@@ -399,9 +399,9 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         uint256 amount
     ) internal {
         address account = trader;
-        usdc.mint(trader, amount);
+        settlementToken.mint(trader, amount);
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), amount);
+        settlementToken.approve(address(clearinghouse), amount);
         clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
@@ -412,17 +412,17 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
             juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
-            maxSeniorExposureUsdc: pool.maxSeniorExposureUsdc(),
+            maxSeniorExposureAssets: pool.maxSeniorExposureAssets(),
             maxSeniorShareBps: pool.maxSeniorShareBps()
         });
     }
 
     function _setSeniorCapacity(
-        uint256 maxSeniorExposureUsdc,
+        uint256 maxSeniorExposureAssets,
         uint256 maxSeniorShareBps
     ) internal {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
-        config.maxSeniorExposureUsdc = maxSeniorExposureUsdc;
+        config.maxSeniorExposureAssets = maxSeniorExposureAssets;
         config.maxSeniorShareBps = maxSeniorShareBps;
         pool.proposePoolConfig(config);
         vm.warp(pool.poolConfigActivationTime());
@@ -524,8 +524,8 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         address account
     ) internal view returns (CloseParitySnapshot memory snapshot) {
         snapshot.protocol = engineProtocolLens.getProtocolAccountingSnapshot();
-        snapshot.settlementUsdc = clearinghouse.balanceUsdc(account);
-        snapshot.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
+        snapshot.settlementAssets = clearinghouse.balanceAssets(account);
+        snapshot.traderClaimBalanceAssets = engine.traderClaimBalanceAssets(account);
     }
 
     function _observeCloseParity(
@@ -535,13 +535,13 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         (observed.remainingSize, observed.remainingMargin,,,,,) = engine.positions(account);
-        uint256 settlementAfter = clearinghouse.balanceUsdc(account);
-        observed.immediatePayoutUsdc =
-            settlementAfter > beforeSnapshot.settlementUsdc ? settlementAfter - beforeSnapshot.settlementUsdc : 0;
-        observed.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
+        uint256 settlementAfter = clearinghouse.balanceAssets(account);
+        observed.immediatePayoutAssets =
+            settlementAfter > beforeSnapshot.settlementAssets ? settlementAfter - beforeSnapshot.settlementAssets : 0;
+        observed.traderClaimBalanceAssets = engine.traderClaimBalanceAssets(account);
         observed.degradedMode = engine.degradedMode();
-        observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
-        observed.maxLiabilityAfterUsdc = afterSnapshot.maxLiabilityUsdc;
+        observed.effectiveAssetsAfterAssets = afterSnapshot.effectiveSolvencyAssets;
+        observed.maxLiabilityAfterAssets = afterSnapshot.maxLiabilityAssets;
         _assertTerminalCurveMatchesEngine(account);
         _assertTerminalNavSnapshotMatchesBook();
     }
@@ -552,14 +552,14 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         bool degradedModeBefore
     ) internal pure {
         assertApproxEqAbs(
-            observed.immediatePayoutUsdc,
-            preview.immediatePayoutUsdc,
+            observed.immediatePayoutAssets,
+            preview.immediatePayoutAssets,
             40_000_000,
             "Immediate payout should stay close to close preview"
         );
         assertApproxEqAbs(
-            observed.traderClaimBalanceUsdc,
-            preview.traderClaimBalanceUsdc,
+            observed.traderClaimBalanceAssets,
+            preview.traderClaimBalanceAssets,
             40_000_000,
             "Trader claim should stay close to close preview"
         );
@@ -571,13 +571,13 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
             "Latched degraded mode should match close preview transition semantics"
         );
         assertEq(
-            observed.effectiveAssetsAfterUsdc,
-            preview.effectiveAssetsAfterUsdc,
+            observed.effectiveAssetsAfterAssets,
+            preview.effectiveAssetsAfterAssets,
             "Effective assets after close should match preview"
         );
         assertEq(
-            observed.maxLiabilityAfterUsdc,
-            preview.maxLiabilityAfterUsdc,
+            observed.maxLiabilityAfterAssets,
+            preview.maxLiabilityAfterAssets,
             "Max liability after close should match preview"
         );
     }
@@ -590,42 +590,48 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         assertEq(uint8(actual.invalidReason), uint8(expected.invalidReason), "Close invalid reason should match");
         assertEq(actual.executionPrice, expected.executionPrice, "Close execution price should match");
         assertEq(actual.sizeDelta, expected.sizeDelta, "Close size delta should match");
-        assertEq(actual.realizedPnlUsdc, expected.realizedPnlUsdc, "Close realized pnl should match");
-        assertEq(actual.vpiDeltaUsdc, expected.vpiDeltaUsdc, "Close VPI delta should match");
-        assertEq(actual.vpiUsdc, expected.vpiUsdc, "Close VPI should match");
-        assertEq(actual.executionFeeUsdc, expected.executionFeeUsdc, "Close execution fee should match");
-        assertEq(actual.frozenSpreadUsdc, expected.frozenSpreadUsdc, "Close assessed frozen spread should match");
-        assertEq(actual.frozenSpreadPaidUsdc, expected.frozenSpreadPaidUsdc, "Close paid frozen spread should match");
+        assertEq(actual.realizedPnlAssets, expected.realizedPnlAssets, "Close realized pnl should match");
+        assertEq(actual.vpiDeltaAssets, expected.vpiDeltaAssets, "Close VPI delta should match");
+        assertEq(actual.vpiAssets, expected.vpiAssets, "Close VPI should match");
+        assertEq(actual.executionFeeAssets, expected.executionFeeAssets, "Close execution fee should match");
+        assertEq(actual.frozenSpreadAssets, expected.frozenSpreadAssets, "Close assessed frozen spread should match");
         assertEq(
-            actual.frozenSpreadWaivedUsdc, expected.frozenSpreadWaivedUsdc, "Close waived frozen spread should match"
+            actual.frozenSpreadPaidAssets, expected.frozenSpreadPaidAssets, "Close paid frozen spread should match"
         );
-        assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Close fresh payout should match");
         assertEq(
-            actual.existingTraderClaimConsumedUsdc,
-            expected.existingTraderClaimConsumedUsdc,
+            actual.frozenSpreadWaivedAssets,
+            expected.frozenSpreadWaivedAssets,
+            "Close waived frozen spread should match"
+        );
+        assertEq(actual.freshTraderPayoutAssets, expected.freshTraderPayoutAssets, "Close fresh payout should match");
+        assertEq(
+            actual.existingTraderClaimConsumedAssets,
+            expected.existingTraderClaimConsumedAssets,
             "Close trader claim consumption should match"
         );
         assertEq(
-            actual.existingTraderClaimRemainingUsdc,
-            expected.existingTraderClaimRemainingUsdc,
+            actual.existingTraderClaimRemainingAssets,
+            expected.existingTraderClaimRemainingAssets,
             "Close trader claim remainder should match"
         );
-        assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
-        assertEq(actual.payoutToPnlPledgeUsdc, expected.payoutToPnlPledgeUsdc, "Close pledged payout should match");
+        assertEq(actual.immediatePayoutAssets, expected.immediatePayoutAssets, "Close immediate payout should match");
+        assertEq(actual.payoutToPnlPledgeAssets, expected.payoutToPnlPledgeAssets, "Close pledged payout should match");
         assertEq(
-            actual.payoutToFreeSettlementUsdc, expected.payoutToFreeSettlementUsdc, "Close free payout should match"
+            actual.payoutToFreeSettlementAssets, expected.payoutToFreeSettlementAssets, "Close free payout should match"
         );
-        assertEq(actual.deferredPayoutUsdc, expected.deferredPayoutUsdc, "Close deferred payout should match");
-        assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Close trader claim should match");
-        assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
+        assertEq(actual.deferredPayoutAssets, expected.deferredPayoutAssets, "Close deferred payout should match");
+        assertEq(actual.traderClaimBalanceAssets, expected.traderClaimBalanceAssets, "Close trader claim should match");
+        assertEq(actual.seizedCollateralAssets, expected.seizedCollateralAssets, "Close seized collateral should match");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");
         assertEq(actual.remainingMargin, expected.remainingMargin, "Close remaining margin should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Close degraded trigger should match");
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Close post-op degraded mode should match");
         assertEq(
-            actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Close effective assets should match"
+            actual.effectiveAssetsAfterAssets,
+            expected.effectiveAssetsAfterAssets,
+            "Close effective assets should match"
         );
-        assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Close max liability should match");
+        assertEq(actual.maxLiabilityAfterAssets, expected.maxLiabilityAfterAssets, "Close max liability should match");
     }
 
     function _captureLiquidationParitySnapshot(
@@ -633,10 +639,10 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         address keeper
     ) internal view returns (LiquidationParitySnapshot memory snapshot) {
         snapshot.protocol = engineProtocolLens.getProtocolAccountingSnapshot();
-        snapshot.settlementUsdc = clearinghouse.balanceUsdc(account);
-        snapshot.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
-        snapshot.keeperSettlementUsdc = clearinghouse.balanceUsdc(keeper);
-        snapshot.protocolTreasurySettlementUsdc = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        snapshot.settlementAssets = clearinghouse.balanceAssets(account);
+        snapshot.traderClaimBalanceAssets = engine.traderClaimBalanceAssets(account);
+        snapshot.keeperSettlementAssets = clearinghouse.balanceAssets(keeper);
+        snapshot.protocolTreasurySettlementAssets = clearinghouse.balanceAssets(engine.protocolTreasury());
     }
 
     function _observeLiquidationParity(
@@ -647,19 +653,19 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         (observed.remainingSize,,,,,,) = engine.positions(account);
-        uint256 settlementAfter = clearinghouse.balanceUsdc(account);
-        observed.immediatePayoutUsdc =
-            settlementAfter > beforeSnapshot.settlementUsdc ? settlementAfter - beforeSnapshot.settlementUsdc : 0;
-        observed.traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
-        uint256 keeperSettlementAfter = clearinghouse.balanceUsdc(keeper);
-        observed.keeperSettlementUsdc = keeperSettlementAfter > beforeSnapshot.keeperSettlementUsdc
-            ? keeperSettlementAfter - beforeSnapshot.keeperSettlementUsdc
+        uint256 settlementAfter = clearinghouse.balanceAssets(account);
+        observed.immediatePayoutAssets =
+            settlementAfter > beforeSnapshot.settlementAssets ? settlementAfter - beforeSnapshot.settlementAssets : 0;
+        observed.traderClaimBalanceAssets = engine.traderClaimBalanceAssets(account);
+        uint256 keeperSettlementAfter = clearinghouse.balanceAssets(keeper);
+        observed.keeperSettlementAssets = keeperSettlementAfter > beforeSnapshot.keeperSettlementAssets
+            ? keeperSettlementAfter - beforeSnapshot.keeperSettlementAssets
             : 0;
-        observed.protocolLiquidationFeeUsdc =
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - beforeSnapshot.protocolTreasurySettlementUsdc;
+        observed.protocolLiquidationFeeAssets =
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - beforeSnapshot.protocolTreasurySettlementAssets;
         observed.degradedMode = engine.degradedMode();
-        observed.effectiveAssetsAfterUsdc = afterSnapshot.effectiveSolvencyAssetsUsdc;
-        observed.maxLiabilityAfterUsdc = afterSnapshot.maxLiabilityUsdc;
+        observed.effectiveAssetsAfterAssets = afterSnapshot.effectiveSolvencyAssets;
+        observed.maxLiabilityAfterAssets = afterSnapshot.maxLiabilityAssets;
         _assertTerminalCurveMatchesEngine(account);
         _assertTerminalNavSnapshotMatchesBook();
     }
@@ -670,23 +676,23 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         bool degradedModeBefore
     ) internal pure {
         assertEq(
-            observed.immediatePayoutUsdc,
-            preview.immediatePayoutUsdc,
+            observed.immediatePayoutAssets,
+            preview.immediatePayoutAssets,
             "Immediate trader payout should match liquidation preview"
         );
         assertEq(
-            observed.traderClaimBalanceUsdc,
-            preview.traderClaimBalanceUsdc,
+            observed.traderClaimBalanceAssets,
+            preview.traderClaimBalanceAssets,
             "Trader claim balance should match liquidation preview"
         );
         assertEq(
-            observed.keeperSettlementUsdc,
-            preview.keeperBountyUsdc,
+            observed.keeperSettlementAssets,
+            preview.keeperBountyAssets,
             "Keeper bounty settlement should match liquidation preview"
         );
         assertEq(
-            observed.protocolLiquidationFeeUsdc,
-            preview.protocolLiquidationFeeUsdc,
+            observed.protocolLiquidationFeeAssets,
+            preview.protocolLiquidationFeeAssets,
             "Protocol treasury credit should match liquidation preview"
         );
         assertEq(observed.remainingSize, 0, "Liquidation parity helper expects the position to be fully removed");
@@ -696,13 +702,13 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
             "Latched degraded mode should match liquidation preview transition semantics"
         );
         assertEq(
-            observed.effectiveAssetsAfterUsdc,
-            preview.effectiveAssetsAfterUsdc,
+            observed.effectiveAssetsAfterAssets,
+            preview.effectiveAssetsAfterAssets,
             "Effective assets after liquidation should match preview"
         );
         assertEq(
-            observed.maxLiabilityAfterUsdc,
-            preview.maxLiabilityAfterUsdc,
+            observed.maxLiabilityAfterAssets,
+            preview.maxLiabilityAfterAssets,
             "Max liability after liquidation should match preview"
         );
     }
@@ -715,42 +721,46 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
             actual.liquidatable, expected.liquidatable, "Liquidatable flag should match canonical simulateLiquidation"
         );
         assertEq(actual.oraclePrice, expected.oraclePrice, "Liquidation oracle price should match");
-        assertEq(actual.equityUsdc, expected.equityUsdc, "Liquidation equity should match");
-        assertEq(actual.pnlUsdc, expected.pnlUsdc, "Liquidation pnl should match");
-        assertEq(actual.reachableCollateralUsdc, expected.reachableCollateralUsdc, "Reachable collateral should match");
-        assertEq(actual.liquidationChargeUsdc, expected.liquidationChargeUsdc, "Liquidation charge should match");
-        assertEq(actual.keeperBountyUsdc, expected.keeperBountyUsdc, "Keeper bounty should match");
+        assertEq(actual.equityAssets, expected.equityAssets, "Liquidation equity should match");
+        assertEq(actual.pnlAssets, expected.pnlAssets, "Liquidation pnl should match");
         assertEq(
-            actual.protocolLiquidationFeeUsdc,
-            expected.protocolLiquidationFeeUsdc,
+            actual.reachableCollateralAssets, expected.reachableCollateralAssets, "Reachable collateral should match"
+        );
+        assertEq(actual.liquidationChargeAssets, expected.liquidationChargeAssets, "Liquidation charge should match");
+        assertEq(actual.keeperBountyAssets, expected.keeperBountyAssets, "Keeper bounty should match");
+        assertEq(
+            actual.protocolLiquidationFeeAssets,
+            expected.protocolLiquidationFeeAssets,
             "Protocol liquidation fee should match"
         );
-        assertEq(actual.lpLiquidationFeeUsdc, expected.lpLiquidationFeeUsdc, "LP liquidation fee should match");
-        assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Seized collateral should match");
-        assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");
-        assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Fresh trader payout should match");
+        assertEq(actual.lpLiquidationFeeAssets, expected.lpLiquidationFeeAssets, "LP liquidation fee should match");
+        assertEq(actual.seizedCollateralAssets, expected.seizedCollateralAssets, "Seized collateral should match");
+        assertEq(actual.settlementRetainedAssets, expected.settlementRetainedAssets, "Settlement retained should match");
+        assertEq(actual.freshTraderPayoutAssets, expected.freshTraderPayoutAssets, "Fresh trader payout should match");
         assertEq(
-            actual.existingTraderClaimConsumedUsdc,
-            expected.existingTraderClaimConsumedUsdc,
+            actual.existingTraderClaimConsumedAssets,
+            expected.existingTraderClaimConsumedAssets,
             "Trader claim consumption should match"
         );
         assertEq(
-            actual.existingTraderClaimRemainingUsdc,
-            expected.existingTraderClaimRemainingUsdc,
+            actual.existingTraderClaimRemainingAssets,
+            expected.existingTraderClaimRemainingAssets,
             "Trader claim remainder should match"
         );
-        assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Immediate payout should match");
-        assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Trader claim should match");
+        assertEq(actual.immediatePayoutAssets, expected.immediatePayoutAssets, "Immediate payout should match");
+        assertEq(actual.traderClaimBalanceAssets, expected.traderClaimBalanceAssets, "Trader claim should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Degraded trigger should match");
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");
-        assertEq(actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Effective assets should match");
-        assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Max liability should match");
+        assertEq(
+            actual.effectiveAssetsAfterAssets, expected.effectiveAssetsAfterAssets, "Effective assets should match"
+        );
+        assertEq(actual.maxLiabilityAfterAssets, expected.maxLiabilityAfterAssets, "Max liability should match");
     }
 
     function _observeWithdrawParity(
         address account,
         address trader,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal returns (WithdrawParityState memory state) {
         vm.prank(address(clearinghouse));
         try engine.checkWithdraw(account) {
@@ -760,7 +770,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         }
 
         vm.prank(trader);
-        try clearinghouse.withdraw(account, amountUsdc) {
+        try clearinghouse.withdraw(account, amountAssets) {
             state.withdrawPasses = true;
         } catch (bytes memory err) {
             state.withdrawSelector = _revertSelector(err);
@@ -846,11 +856,11 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.minOpenNotionalAssets = router.minOpenNotionalAssets();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.minOpenOrderExecutionBountyAssets = router.minOpenOrderExecutionBountyAssets();
+        config.maxOpenOrderExecutionBountyAssets = router.maxOpenOrderExecutionBountyAssets();
+        config.positionProtectionTriggerBountyAssets = router.positionProtectionTriggerBountyAssets();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();
         config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
@@ -871,8 +881,9 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     function _deployEngine(
         CfdTypes.RiskParams memory riskParams_
     ) internal returns (CfdEngine deployedEngine) {
-        deployedEngine =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, riskParams_, _frozenCloseSpreadBps());
+        deployedEngine = new CfdEngine(
+            address(settlementToken), address(clearinghouse), CAP_PRICE, riskParams_, _frozenCloseSpreadBps()
+        );
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(deployedEngine));
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(deployedEngine), address(this));
@@ -925,17 +936,17 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     function _sideState(
         CfdTypes.Side side
     ) internal view returns (ICfdEngineTypes.SideState memory state) {
-        (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) = engine.sides(uint8(side));
+        (state.maxProfitAssets, state.openInterest, state.entryNotional, state.totalMargin) = engine.sides(uint8(side));
     }
 
     function _maxLiability() internal view returns (uint256) {
         ICfdEngineTypes.SideState memory long = _sideState(CfdTypes.Side.LONG);
         ICfdEngineTypes.SideState memory short = _sideState(CfdTypes.Side.SHORT);
-        return long.maxProfitUsdc > short.maxProfitUsdc ? long.maxProfitUsdc : short.maxProfitUsdc;
+        return long.maxProfitAssets > short.maxProfitAssets ? long.maxProfitAssets : short.maxProfitAssets;
     }
 
-    function _withdrawalReservedUsdc() internal view returns (uint256) {
-        return engineProtocolLens.getProtocolAccountingSnapshot().withdrawalReservedUsdc;
+    function _withdrawalReservedAssets() internal view returns (uint256) {
+        return engineProtocolLens.getProtocolAccountingSnapshot().withdrawalReservedAssets;
     }
 
     function _unrealizedTraderPnl() internal view returns (int256) {
@@ -952,38 +963,38 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         return longPnl + shortPnl;
     }
 
-    function _maintenanceMarginUsdc(
+    function _maintenanceMarginAssets(
         uint256 size,
         uint256 price
     ) internal view returns (uint256) {
         (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,,,) = engine.riskParams();
         uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
-        uint256 notionalUsdc = (size * price) / 1e20;
-        return (notionalUsdc * requiredBps) / 10_000;
+        uint256 notionalAssets = (size * price) / 1e20;
+        return (notionalAssets * requiredBps) / 10_000;
     }
 
-    function _quoteOpenOrderExecutionBountyUsdc(
+    function _quoteOpenOrderExecutionBountyAssets(
         uint256 sizeDelta
     ) internal view returns (uint256) {
         uint256 price = engine.lastMarkPrice();
         if (price == 0) {
             price = 1e8;
         }
-        uint256 notionalUsdc = (sizeDelta * price) / DecimalConstants.USDC_TO_TOKEN_SCALE;
-        uint256 executionBountyUsdc = (notionalUsdc * router.openOrderExecutionBountyBps()) / 10_000;
-        if (executionBountyUsdc < router.minOpenOrderExecutionBountyUsdc()) {
-            executionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
+        uint256 notionalAssets = (sizeDelta * price) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        uint256 executionBountyAssets = (notionalAssets * router.openOrderExecutionBountyBps()) / 10_000;
+        if (executionBountyAssets < router.minOpenOrderExecutionBountyAssets()) {
+            executionBountyAssets = router.minOpenOrderExecutionBountyAssets();
         }
-        uint256 maxExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        return executionBountyUsdc > maxExecutionBountyUsdc ? maxExecutionBountyUsdc : executionBountyUsdc;
+        uint256 maxExecutionBountyAssets = router.maxOpenOrderExecutionBountyAssets();
+        return executionBountyAssets > maxExecutionBountyAssets ? maxExecutionBountyAssets : executionBountyAssets;
     }
 
-    function _engineExecutionFeeUsdc(
+    function _engineExecutionFeeAssets(
         uint256 sizeDelta,
         uint256 price
     ) internal view returns (uint256) {
-        uint256 notionalUsdc = (sizeDelta * price) / DecimalConstants.USDC_TO_TOKEN_SCALE;
-        return (notionalUsdc * engine.executionFeeBps()) / 10_000;
+        uint256 notionalAssets = (sizeDelta * price) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        return (notionalAssets * engine.executionFeeBps()) / 10_000;
     }
 
     function _sideOpenInterest(
@@ -1007,7 +1018,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     function _sideMaxProfit(
         CfdTypes.Side side
     ) internal view returns (uint256) {
-        return _sideState(side).maxProfitUsdc;
+        return _sideState(side).maxProfitAssets;
     }
 
     function _orderRecord(
@@ -1030,13 +1041,13 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     function _remainingCommittedMargin(
         uint64 orderId
     ) internal view returns (uint256) {
-        return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
+        return clearinghouse.getOrderReservation(orderId).remainingAmountAssets;
     }
 
     function _executionBountyReserve(
         uint64 orderId
     ) internal view returns (uint256) {
-        return _orderRecord(orderId).executionBountyUsdc;
+        return _orderRecord(orderId).executionBountyAssets;
     }
 
     function _isInMarginQueue(
@@ -1045,34 +1056,34 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         return _orderRecord(orderId).inMarginQueue;
     }
 
-    function _freeSettlementUsdc(
+    function _freeSettlementAssets(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
+        return clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets;
     }
 
-    function _expectedIndexedCarryUsdc(
+    function _expectedIndexedCarryAssets(
         address account
     ) internal view returns (uint256) {
         (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
             return 0;
         }
-        (uint256 borrowBaseUsdc, uint256 startIndex,) = engine.positionCarryState(account);
-        if (borrowBaseUsdc == 0) {
+        (uint256 borrowBaseAssets, uint256 startIndex,) = engine.positionCarryState(account);
+        if (borrowBaseAssets == 0) {
             return 0;
         }
         uint256 endIndex = _currentSideCarryIndex(side);
         if (endIndex <= startIndex) {
             return 0;
         }
-        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, endIndex - startIndex);
     }
 
-    function _positionBorrowBaseUsdc(
+    function _positionBorrowBaseAssets(
         address account
-    ) internal view returns (uint256 borrowBaseUsdc) {
-        (borrowBaseUsdc,,) = engine.positionCarryState(account);
+    ) internal view returns (uint256 borrowBaseAssets) {
+        (borrowBaseAssets,,) = engine.positionCarryState(account);
     }
 
     function _lastCarryTimestamp(
@@ -1087,12 +1098,12 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         uint256 sideIndex = uint256(side);
         (,,,,, uint256 baseCarryBps,,,,) = engine.riskParams();
         uint256 grossAssets = pool.totalAssets();
-        uint256 claims = engine.totalTraderClaimBalanceUsdc();
+        uint256 claims = engine.totalTraderClaimBalanceAssets();
         index = PositionRiskAccountingLib.computeCurrentCarryIndex(
             engine.sideCarryIndex(sideIndex),
             engine.sideCarryTimestamp(sideIndex),
             vm.getBlockTimestamp(),
-            engine.sideBorrowBaseUsdc(sideIndex),
+            engine.sideBorrowBaseAssets(sideIndex),
             grossAssets > claims ? grossAssets - claims : 0,
             baseCarryBps
         );
@@ -1107,31 +1118,31 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     function _settlementBalance(
         address account
     ) internal view returns (uint256) {
-        return clearinghouse.balanceUsdc(_accountOf(account));
+        return clearinghouse.balanceAssets(_accountOf(account));
     }
 
     function _fundProtocolTreasury(
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
         address treasury = engine.protocolTreasury();
-        usdc.mint(address(clearinghouse), amountUsdc);
+        settlementToken.mint(address(clearinghouse), amountAssets);
         vm.prank(address(engine));
-        clearinghouse.settleUsdc(treasury, SafeCast.toInt256(amountUsdc));
+        clearinghouse.settleAssets(treasury, SafeCast.toInt256(amountAssets));
     }
 
     function _withdrawProtocolTreasury(
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
         address treasury = engine.protocolTreasury();
         vm.prank(treasury);
-        clearinghouse.withdraw(treasury, amountUsdc);
+        clearinghouse.withdraw(treasury, amountAssets);
     }
 
-    function _terminalReachableUsdc(
+    function _terminalReachableAssets(
         address account
     ) internal view returns (uint256) {
-        uint256 settlementBalance = clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc;
-        uint256 executionReservation = router.getAccountReservations(account).executionBountyUsdc;
+        uint256 settlementBalance = clearinghouse.getAccountAssetBuckets(account).settlementBalanceAssets;
+        uint256 executionReservation = router.getAccountReservations(account).executionBountyAssets;
         return settlementBalance > executionReservation ? settlementBalance - executionReservation : 0;
     }
 
@@ -1149,23 +1160,23 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         address account,
         address keeper
     ) internal view returns (ClaimEngineViewTypes.TraderClaimStatus memory status) {
-        uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
+        uint256 traderClaimBalanceAssets = engine.traderClaimBalanceAssets(account);
         bool anyLiquidity = pool.totalAssets() > 0;
 
-        status.traderClaimBalanceUsdc = traderClaimBalanceUsdc;
-        status.traderClaimServiceableNow = traderClaimBalanceUsdc > 0 && anyLiquidity;
+        status.traderClaimBalanceAssets = traderClaimBalanceAssets;
+        status.traderClaimServiceableNow = traderClaimBalanceAssets > 0 && anyLiquidity;
         keeper;
     }
 
     function _poolMtmAdjustment() internal view returns (uint256) {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
-        int256 delta = snapshot.terminalLpPriceDeltaUsdc;
+        int256 delta = snapshot.terminalLpPriceDeltaAssets;
         return delta < 0 ? uint256(-(delta + 1)) + 1 : 0;
     }
 
     function _terminalLpPriceDelta() internal view returns (int256) {
-        return engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit()).terminalLpPriceDeltaUsdc;
+        return engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit()).terminalLpPriceDeltaAssets;
     }
 
     /// @dev Verifies that the account-local V2 terminal curve is the exact committed image of live Engine state.
@@ -1179,27 +1190,30 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         if (size == 0) {
             assertEq(curveHash, bytes32(0), "Terminal account must not retain an orphan curve");
             assertEq(uint256(curve.lots), 0, "Closed terminal curve must clear lots");
-            assertEq(uint256(curve.entryCostUsdcAtoms), 0, "Closed terminal curve must clear entry cost");
-            assertEq(uint256(curve.effectiveCapUsdcAtoms), 0, "Closed terminal curve must clear collectible cap");
+            assertEq(uint256(curve.entryCostAssetAtoms), 0, "Closed terminal curve must clear entry cost");
+            assertEq(uint256(curve.effectiveCapAssetAtoms), 0, "Closed terminal curve must clear collectible cap");
             return;
         }
 
         assertTrue(curveHash != bytes32(0), "Live position must retain a terminal curve commitment");
         assertEq(size % CfdTypes.SIZE_QUANTUM, 0, "Live terminal position must contain whole lots");
         uint256 lots = size / CfdTypes.SIZE_QUANTUM;
-        uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
-        uint256 maximumCollectibleUsdc =
-            side == CfdTypes.Side.LONG ? lots * CAP_PRICE - entryCostUsdcAtoms : entryCostUsdcAtoms;
-        uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
-        uint256 expectedCapUsdc = candidateCapUsdc < maximumCollectibleUsdc ? candidateCapUsdc : maximumCollectibleUsdc;
+        uint256 entryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
+        uint256 maximumCollectibleAssets =
+            side == CfdTypes.Side.LONG ? lots * CAP_PRICE - entryCostAssetAtoms : entryCostAssetAtoms;
+        uint256 candidateCapAssets = clearinghouse.pnlPledgeAssets(account) + engine.traderClaimBalanceAssets(account);
+        uint256 expectedCapAssets =
+            candidateCapAssets < maximumCollectibleAssets ? candidateCapAssets : maximumCollectibleAssets;
 
         assertEq(uint256(curve.lots), lots, "Terminal curve lots must match Engine position");
         assertEq(
-            uint256(curve.entryCostUsdcAtoms), entryCostUsdcAtoms, "Terminal curve basis must match exact Engine basis"
+            uint256(curve.entryCostAssetAtoms),
+            entryCostAssetAtoms,
+            "Terminal curve basis must match exact Engine basis"
         );
         assertEq(
-            uint256(curve.effectiveCapUsdcAtoms),
-            expectedCapUsdc,
+            uint256(curve.effectiveCapAssetAtoms),
+            expectedCapAssets,
             "Terminal curve cap must match pledge, nettable claim, and collectible close escrow"
         );
         assertEq(uint8(curve.side), uint8(side), "Terminal curve side must match Engine position");
@@ -1214,17 +1228,17 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         assertEq(snapshot.markTime, engine.lastMarkTime(), "Terminal snapshot time must match Engine mark time");
         assertEq(snapshot.bookVersion, bookState.bookVersion, "Terminal snapshot version must match book version");
         assertEq(
-            snapshot.terminalLpPriceDeltaUsdc,
-            terminalNavBook.terminalLpPriceDeltaUsdcAtoms(snapshot.markPrice),
+            snapshot.terminalLpPriceDeltaAssets,
+            terminalNavBook.terminalLpPriceDeltaAssetAtoms(snapshot.markPrice),
             "Terminal snapshot delta must equal exact book evaluation"
         );
         assertEq(
-            snapshot.totalTraderClaimsUsdc,
-            engine.totalTraderClaimBalanceUsdc(),
+            snapshot.totalTraderClaimsAssets,
+            engine.totalTraderClaimBalanceAssets(),
             "Terminal snapshot claims must match Engine claims"
         );
         assertEq(
-            snapshot.maxDirectionalLiabilityUsdc,
+            snapshot.maxDirectionalLiabilityAssets,
             _maxLiability(),
             "Terminal snapshot liability must match live side state"
         );

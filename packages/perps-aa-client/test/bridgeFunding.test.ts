@@ -7,18 +7,18 @@ import {
 
 // Synthetic identities exist only in tests; deployments must supply verified live release addresses.
 const beneficiary = "0x1111111111111111111111111111111111111111" as Address;
-const usdc = "0x2222222222222222222222222222222222222222" as Address;
+const settlementToken = "0x2222222222222222222222222222222222222222" as Address;
 const clearinghouse = "0x3333333333333333333333333333333333333333" as Address;
 const destinationSpokePool = "0x4444444444444444444444444444444444444444" as Address;
 const multicallHandler = "0x5555555555555555555555555555555555555555" as Address;
 const destinationSpokePoolImplementation = "0x6666666666666666666666666666666666666666" as Address;
 const codes = {
-  [usdc]: "0x6001", [clearinghouse]: "0x6002", [destinationSpokePool]: "0x6003",
+  [settlementToken]: "0x6001", [clearinghouse]: "0x6002", [destinationSpokePool]: "0x6003",
   [multicallHandler]: "0x6004", [destinationSpokePoolImplementation]: "0x6005",
 } as const;
 const deployment: BridgeFundingDeployment = {
-  chainId: 42161, usdc, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler,
-  usdcRuntimeCodeHash: keccak256(codes[usdc]),
+  chainId: 42161, settlementToken, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler,
+  settlementTokenRuntimeCodeHash: keccak256(codes[settlementToken]),
   clearinghouseRuntimeCodeHash: keccak256(codes[clearinghouse]),
   destinationSpokePoolRuntimeCodeHash: keccak256(codes[destinationSpokePool]),
   destinationSpokePoolImplementationRuntimeCodeHash: keccak256(codes[destinationSpokePoolImplementation]),
@@ -42,7 +42,7 @@ function mockClient(options: {
     }),
     getStorageAt: vi.fn(async () => options.implementation ?? implementationWord),
     readContract: vi.fn(async ({ address, functionName }: { address: Address; functionName: string }) => {
-      if (address === clearinghouse && functionName === "settlementAsset") return options.wrongSettlementAsset ? beneficiary : usdc;
+      if (address === clearinghouse && functionName === "settlementAsset") return options.wrongSettlementAsset ? beneficiary : settlementToken;
       throw new Error(`Unexpected read: ${address} ${functionName}`);
     }),
   };
@@ -51,8 +51,8 @@ function mockClient(options: {
 
 describe("direct third-party funding calls", () => {
   it.each([12_000_000n, maxUint256])("approves and credits exactly %s to the intended beneficiary", amount => {
-    const calls = buildDepositForCalls({ usdc, clearinghouse, beneficiary, amount });
-    expect(calls.map(item => item.to)).toEqual([usdc, clearinghouse]);
+    const calls = buildDepositForCalls({ settlementToken, clearinghouse, beneficiary, amount });
+    expect(calls.map(item => item.to)).toEqual([settlementToken, clearinghouse]);
     expect(calls.every(item => item.value === 0n && Object.isFrozen(item))).toBe(true);
     expect(decodeFunctionData({ abi: erc20ApproveAbi, data: calls[0]!.data }).args).toEqual([clearinghouse, amount]);
     expect(decodeFunctionData({ abi: marginClearinghouseFundingAbi, data: calls[1]!.data })).toMatchObject({
@@ -62,13 +62,13 @@ describe("direct third-party funding calls", () => {
   });
 
   it("rejects invalid addresses, aliased token/spender, and amounts outside the exact uint256 domain", () => {
-    for (const field of ["usdc", "clearinghouse", "beneficiary"] as const) {
-      expect(() => buildDepositForCalls({ usdc, clearinghouse, beneficiary, amount: 1n, [field]: zeroAddress })).toThrow(/nonzero address/);
+    for (const field of ["settlementToken", "clearinghouse", "beneficiary"] as const) {
+      expect(() => buildDepositForCalls({ settlementToken, clearinghouse, beneficiary, amount: 1n, [field]: zeroAddress })).toThrow(/nonzero address/);
     }
     for (const amount of [0n, -1n, maxUint256 + 1n]) {
-      expect(() => buildDepositForCalls({ usdc, clearinghouse, beneficiary, amount })).toThrow(/positive uint256/);
+      expect(() => buildDepositForCalls({ settlementToken, clearinghouse, beneficiary, amount })).toThrow(/positive uint256/);
     }
-    expect(() => buildDepositForCalls({ usdc, clearinghouse: usdc, beneficiary, amount: 1n })).toThrow(/distinct/);
+    expect(() => buildDepositForCalls({ settlementToken, clearinghouse: settlementToken, beneficiary, amount: 1n })).toThrow(/distinct/);
   });
 });
 
@@ -76,7 +76,7 @@ describe("Across deployment verification against a pinned release", () => {
   it("checks all code, proxy implementation, and settlement-token reads at one block", async () => {
     const { client, spies } = mockClient();
     const result = await verifyBridgeFundingDeployment({ client, deployment });
-    expect(result).toEqual({ chainId: 42161, blockNumber: 123n, usdc, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler });
+    expect(result).toEqual({ chainId: 42161, blockNumber: 123n, settlementToken, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler });
     for (const [request] of [...spies.getCode.mock.calls, ...spies.readContract.mock.calls]) {
       expect(request).toMatchObject({ blockNumber: 123n });
     }
@@ -99,14 +99,14 @@ describe("Across deployment verification against a pinned release", () => {
     expect(spies.readContract).not.toHaveBeenCalled();
   });
 
-  it.each([usdc, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler])("fails closed on missing code at %s", async changedCode => {
+  it.each([settlementToken, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler])("fails closed on missing code at %s", async changedCode => {
     const { client, spies } = mockClient({ changedCode });
     await expect(verifyBridgeFundingDeployment({ client, deployment })).rejects.toThrow(/code mismatch/);
     expect(spies.readContract).not.toHaveBeenCalled();
     expect(spies.getStorageAt).not.toHaveBeenCalled();
   });
 
-  it.each([usdc, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler])("rejects changed runtime code at %s", async changedCode => {
+  it.each([settlementToken, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler])("rejects changed runtime code at %s", async changedCode => {
     const { client } = mockClient({ changedCode, replacementCode: "0x6099" });
     await expect(verifyBridgeFundingDeployment({ client, deployment })).rejects.toThrow(/code mismatch/);
   });

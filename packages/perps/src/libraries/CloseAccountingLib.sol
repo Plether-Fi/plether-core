@@ -7,33 +7,33 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 /// @title CloseAccountingLib
 /// @notice Calculates the proportional position state and signed economic settlement for a close.
-/// @dev USDC fields use 6 decimals, prices use 8 decimals, sizes use 18 decimals, basis points use a 10,000
+/// @dev settlement token fields use 6 decimals, prices use 8 decimals, sizes use 18 decimals, basis points use a 10,000
 ///      denominator, and `vpiFactor` uses 18-decimal WAD precision. Multiplication followed by integer division
 ///      rounds down for unsigned values and toward zero for signed values.
 library CloseAccountingLib {
 
     /// @notice Inputs needed to value a full or partial close.
     /// @param position Position before the close; its size must be nonzero.
-    /// @param positionEntryCostUsdcAtoms Exact remaining entry cost before the close, in 6-decimal USDC atoms.
+    /// @param positionEntryCostAssetAtoms Exact remaining entry cost before the close, in 6-decimal settlement token atoms.
     /// @param sizeDelta Size being closed; must be no greater than `position.size`.
     /// @param oraclePrice Execution/risk price used to calculate PnL and close notional.
     /// @param capPrice Price cap passed to bounded PnL calculation.
-    /// @param preSkewUsdc Absolute market skew immediately before the close.
-    /// @param postSkewUsdc Absolute market skew immediately after the close.
-    /// @param poolDepthUsdc Pool depth used by the VPI curve.
+    /// @param preSkewAssets Absolute market skew immediately before the close.
+    /// @param postSkewAssets Absolute market skew immediately after the close.
+    /// @param poolDepthAssets Pool depth used by the VPI curve.
     /// @param vpiFactor VPI impact factor, scaled by 1e18.
     /// @param frozenCloseSpreadBps Additional close spread in basis points when the oracle is frozen.
     /// @param oracleFrozen Whether to charge the frozen-market spread.
     /// @param executionFeeBps Execution fee rate applied to closed notional, in basis points.
     struct CloseInputs {
         CfdTypes.Position position;
-        uint256 positionEntryCostUsdcAtoms;
+        uint256 positionEntryCostAssetAtoms;
         uint256 sizeDelta;
         uint256 oraclePrice;
         uint256 capPrice;
-        uint256 preSkewUsdc;
-        uint256 postSkewUsdc;
-        uint256 poolDepthUsdc;
+        uint256 preSkewAssets;
+        uint256 postSkewAssets;
+        uint256 poolDepthAssets;
         uint256 vpiFactor;
         uint256 frozenCloseSpreadBps;
         bool oracleFrozen;
@@ -41,32 +41,32 @@ library CloseAccountingLib {
     }
 
     /// @notice Calculated position reduction and close economics, excluding carry and collateral collection.
-    /// @param realizedPnlUsdc Signed price PnL for the closed size; positive is trader profit.
-    /// @param marginToFreeUsdc Pro-rata margin assigned to the closed size and released from the position.
-    /// @param remainingMarginUsdc Canonical position margin left after releasing `marginToFreeUsdc`.
+    /// @param realizedPnlAssets Signed price PnL for the closed size; positive is trader profit.
+    /// @param marginToFreeAssets Pro-rata margin assigned to the closed size and released from the position.
+    /// @param remainingMarginAssets Canonical position margin left after releasing `marginToFreeAssets`.
     /// @param remainingSize Position size left after the close.
-    /// @param closedEntryCostUsdcAtoms Exact basis allocated to the closed lots, rounded down on a partial close.
-    /// @param remainingEntryCostUsdcAtoms Entry basis retained by the remaining position, including proration dust.
-    /// @param maxProfitReductionUsdc Exact endpoint profit envelope of the closed lots and their allocated entry basis.
-    /// @param proportionalAccrualUsdc Pro-rata lifetime VPI accrual removed with the closed size.
-    /// @param vpiDeltaUsdc VPI charged for this close after the lifetime-negative clamp; positive is a trader charge.
-    /// @param executionFeeUsdc Execution fee on closed notional.
-    /// @param frozenSpreadUsdc Additional spread on closed notional, or zero when `oracleFrozen` is false.
-    /// @param netSettlementUsdc Signed `realizedPnl - vpiDelta - executionFee - frozenSpread`; positive is owed to the
+    /// @param closedEntryCostAssetAtoms Exact basis allocated to the closed lots, rounded down on a partial close.
+    /// @param remainingEntryCostAssetAtoms Entry basis retained by the remaining position, including proration dust.
+    /// @param maxProfitReductionAssets Exact endpoint profit envelope of the closed lots and their allocated entry basis.
+    /// @param proportionalAccrualAssets Pro-rata lifetime VPI accrual removed with the closed size.
+    /// @param vpiDeltaAssets VPI charged for this close after the lifetime-negative clamp; positive is a trader charge.
+    /// @param executionFeeAssets Execution fee on closed notional.
+    /// @param frozenSpreadAssets Additional spread on closed notional, or zero when `oracleFrozen` is false.
+    /// @param netSettlementAssets Signed `realizedPnl - vpiDelta - executionFee - frozenSpread`; positive is owed to the
     ///        trader and negative is owed by the trader. Pending carry is not included.
     struct CloseState {
-        int256 realizedPnlUsdc;
-        uint256 marginToFreeUsdc;
-        uint256 remainingMarginUsdc;
+        int256 realizedPnlAssets;
+        uint256 marginToFreeAssets;
+        uint256 remainingMarginAssets;
         uint256 remainingSize;
-        uint256 closedEntryCostUsdcAtoms;
-        uint256 remainingEntryCostUsdcAtoms;
-        uint256 maxProfitReductionUsdc;
-        int256 proportionalAccrualUsdc;
-        int256 vpiDeltaUsdc;
-        uint256 executionFeeUsdc;
-        uint256 frozenSpreadUsdc;
-        int256 netSettlementUsdc;
+        uint256 closedEntryCostAssetAtoms;
+        uint256 remainingEntryCostAssetAtoms;
+        uint256 maxProfitReductionAssets;
+        int256 proportionalAccrualAssets;
+        int256 vpiDeltaAssets;
+        uint256 executionFeeAssets;
+        uint256 frozenSpreadAssets;
+        int256 netSettlementAssets;
     }
 
     /// @notice Builds the pro-rata remaining-position state and pre-carry settlement for a close.
@@ -74,8 +74,8 @@ library CloseAccountingLib {
     ///      overflow, or downstream PnL/VPI preconditions are violated. Partial-close margin and entry-basis allocation
     ///      round down, leaving division remainders on the open position. The max-profit reduction is recomputed from
     ///      the closed lots and allocated basis; signed VPI proration rounds toward zero.
-    ///      Close VPI is clamped upward so `proportionalAccrualUsdc + vpiDeltaUsdc` cannot be negative. Canonical size
-    ///      and USDC values converted to `int256` must fit its positive range; explicit casts otherwise follow
+    ///      Close VPI is clamped upward so `proportionalAccrualAssets + vpiDeltaAssets` cannot be negative. Canonical size
+    ///      and settlement token values converted to `int256` must fit its positive range; explicit casts otherwise follow
     ///      fixed-width conversion semantics.
     /// @param inputs Position, price, skew, pool-depth, fee, and frozen-market inputs.
     /// @return state Close economics excluding carry and collateral-availability settlement.
@@ -84,45 +84,46 @@ library CloseAccountingLib {
     ) internal pure returns (CloseState memory state) {
         uint256 positionLots = CfdMath.sizeToLots(inputs.position.size);
         uint256 closedLots = CfdMath.sizeToLots(inputs.sizeDelta);
-        state.closedEntryCostUsdcAtoms = inputs.sizeDelta == inputs.position.size
-            ? inputs.positionEntryCostUsdcAtoms
-            : Math.mulDiv(inputs.positionEntryCostUsdcAtoms, closedLots, positionLots);
-        state.remainingEntryCostUsdcAtoms = inputs.positionEntryCostUsdcAtoms - state.closedEntryCostUsdcAtoms;
+        state.closedEntryCostAssetAtoms = inputs.sizeDelta == inputs.position.size
+            ? inputs.positionEntryCostAssetAtoms
+            : Math.mulDiv(inputs.positionEntryCostAssetAtoms, closedLots, positionLots);
+        state.remainingEntryCostAssetAtoms = inputs.positionEntryCostAssetAtoms - state.closedEntryCostAssetAtoms;
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculateExactPnl(
-            closedLots, state.closedEntryCostUsdcAtoms, inputs.position.side, inputs.oraclePrice, inputs.capPrice
+            closedLots, state.closedEntryCostAssetAtoms, inputs.position.side, inputs.oraclePrice, inputs.capPrice
         );
-        state.realizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
+        state.realizedPnlAssets = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
 
-        state.marginToFreeUsdc = (inputs.position.margin * inputs.sizeDelta) / inputs.position.size;
-        state.remainingMarginUsdc = inputs.position.margin - state.marginToFreeUsdc;
+        state.marginToFreeAssets = (inputs.position.margin * inputs.sizeDelta) / inputs.position.size;
+        state.remainingMarginAssets = inputs.position.margin - state.marginToFreeAssets;
         state.remainingSize = inputs.position.size - inputs.sizeDelta;
-        state.maxProfitReductionUsdc = CfdMath.calculateExactMaxProfit(
-            closedLots, state.closedEntryCostUsdcAtoms, inputs.position.side, inputs.capPrice
+        state.maxProfitReductionAssets = CfdMath.calculateExactMaxProfit(
+            closedLots, state.closedEntryCostAssetAtoms, inputs.position.side, inputs.capPrice
         );
 
-        state.proportionalAccrualUsdc =
+        state.proportionalAccrualAssets =
             (inputs.position.vpiAccrued * int256(inputs.sizeDelta)) / int256(inputs.position.size);
         // With no economic depth, keep protective exits live without creating a fresh charge or rebate.
         // The lifetime clamp below still recovers any previously received negative VPI.
-        if (inputs.poolDepthUsdc != 0) {
-            state.vpiDeltaUsdc =
-                CfdMath.calculateVPI(inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.poolDepthUsdc, inputs.vpiFactor);
+        if (inputs.poolDepthAssets != 0) {
+            state.vpiDeltaAssets = CfdMath.calculateVPI(
+                inputs.preSkewAssets, inputs.postSkewAssets, inputs.poolDepthAssets, inputs.vpiFactor
+            );
         }
         // Clamp so lifetime VPI (accrued + delta) never goes negative. Prevents LP sandwich attacks
         // where an attacker opens at high depth, reduces pool depth, then closes to extract a
         // net-negative lifetime VPI rebate. This rule is identical in live and oracle-frozen markets; frozen-market
-        // stale-price risk is priced separately through frozenSpreadUsdc.
-        if (state.proportionalAccrualUsdc + state.vpiDeltaUsdc < 0) {
-            state.vpiDeltaUsdc = -state.proportionalAccrualUsdc;
+        // stale-price risk is priced separately through frozenSpreadAssets.
+        if (state.proportionalAccrualAssets + state.vpiDeltaAssets < 0) {
+            state.vpiDeltaAssets = -state.proportionalAccrualAssets;
         }
 
-        uint256 notionalUsdc = (inputs.sizeDelta * inputs.oraclePrice) / CfdMath.USDC_TO_TOKEN_SCALE;
-        state.executionFeeUsdc = (notionalUsdc * inputs.executionFeeBps) / 10_000;
+        uint256 notionalAssets = (inputs.sizeDelta * inputs.oraclePrice) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        state.executionFeeAssets = (notionalAssets * inputs.executionFeeBps) / 10_000;
         if (inputs.oracleFrozen) {
-            state.frozenSpreadUsdc = (notionalUsdc * inputs.frozenCloseSpreadBps) / 10_000;
+            state.frozenSpreadAssets = (notionalAssets * inputs.frozenCloseSpreadBps) / 10_000;
         }
-        state.netSettlementUsdc =
-            state.realizedPnlUsdc - state.vpiDeltaUsdc - int256(state.executionFeeUsdc + state.frozenSpreadUsdc);
+        state.netSettlementAssets = state.realizedPnlAssets - state.vpiDeltaAssets
+            - int256(state.executionFeeAssets + state.frozenSpreadAssets);
     }
 
 }

@@ -165,7 +165,7 @@ contract LpRequestCutoffTest is BasePerpTest {
 
         _requestBothControllersAndDirections(seniorVault);
         _requestBothControllersAndDirections(juniorVault);
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 2 * REQUEST_ASSETS);
+        assertEq(pool.reservedSeniorDepositAssets(), 2 * REQUEST_ASSETS);
 
         vm.warp(boundary - REQUEST_CUTOFF);
         pool.pauseLpEpochSettlement();
@@ -175,7 +175,7 @@ contract LpRequestCutoffTest is BasePerpTest {
         _assertOnlyOperatedControllerRemains(seniorVault, requestId);
         _assertOnlyOperatedControllerRemains(juniorVault, requestId);
         assertEq(
-            pool.reservedSeniorDepositAssetsUsdc(),
+            pool.reservedSeniorDepositAssets(),
             REQUEST_ASSETS,
             "Senior cancellation must release exactly one controller reservation"
         );
@@ -185,7 +185,7 @@ contract LpRequestCutoffTest is BasePerpTest {
 
         _assertRequestQueuesEmpty(seniorVault, requestId);
         _assertRequestQueuesEmpty(juniorVault, requestId);
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0, "final Senior cancellation must release all reservation");
+        assertEq(pool.reservedSeniorDepositAssets(), 0, "final Senior cancellation must release all reservation");
         assertEq(seniorVault.lastDepositTime(OPERATED_CONTROLLER), block.timestamp);
         assertEq(juniorVault.lastDepositTime(OPERATED_CONTROLLER), block.timestamp);
     }
@@ -209,7 +209,7 @@ contract LpRequestCutoffTest is BasePerpTest {
 
         _assertRelinkedToLaterEpoch(seniorVault, olderRequestId, laterRequestId);
         _assertRelinkedToLaterEpoch(juniorVault, olderRequestId, laterRequestId);
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), REQUEST_ASSETS);
+        assertEq(pool.reservedSeniorDepositAssets(), REQUEST_ASSETS);
     }
 
     function test_LateJuniorReplacementAndSeniorCommitmentUseCanonicalLaterEpoch() public {
@@ -234,10 +234,10 @@ contract LpRequestCutoffTest is BasePerpTest {
 
         vm.warp(pool.lpEpochStart(canonicalRequestId) - 1);
         _cancelDeposit(juniorVault, OPERATED_CONTROLLER, canonicalRequestId, true);
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), REQUEST_ASSETS);
+        assertEq(pool.reservedSeniorDepositAssets(), REQUEST_ASSETS);
         pool.pauseLpEpochSettlement();
         _cancelDeposit(seniorVault, OPERATED_CONTROLLER, canonicalRequestId, true);
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
+        assertEq(pool.reservedSeniorDepositAssets(), 0);
         assertEq(seniorVault.depositQueueHead(), 0);
         assertEq(juniorVault.depositQueueHead(), 0);
     }
@@ -308,7 +308,7 @@ contract LpRequestCutoffTest is BasePerpTest {
         vm.warp(maturity);
         for (uint256 i; i < 2; ++i) {
             TrancheVault vault = i == 0 ? seniorVault : juniorVault;
-            usdc.mint(address(vault), fundedAssets);
+            settlementToken.mint(address(vault), fundedAssets);
             vm.prank(address(pool));
             vault.fundRedeemEpoch(requestId, fundedShares, fundedAssets);
             assertEq(vault.claimableRedeemRequest(requestId, OPERATED_CONTROLLER), fundedShares);
@@ -442,8 +442,8 @@ contract LpRequestCutoffTest is BasePerpTest {
         juniorVault.transfer(OPERATED_CONTROLLER, ACTOR_SHARE_ALLOCATION);
         vm.stopPrank();
 
-        usdc.mint(DIRECT_CONTROLLER, 1000e6);
-        usdc.mint(OPERATED_CONTROLLER, 1000e6);
+        settlementToken.mint(DIRECT_CONTROLLER, 1000e6);
+        settlementToken.mint(OPERATED_CONTROLLER, 1000e6);
         _approveActor(DIRECT_CONTROLLER, false);
         _approveActor(OPERATED_CONTROLLER, true);
 
@@ -456,8 +456,8 @@ contract LpRequestCutoffTest is BasePerpTest {
         bool approveOperator
     ) internal {
         vm.startPrank(actor);
-        usdc.approve(address(seniorVault), type(uint256).max);
-        usdc.approve(address(juniorVault), type(uint256).max);
+        settlementToken.approve(address(seniorVault), type(uint256).max);
+        settlementToken.approve(address(juniorVault), type(uint256).max);
         if (approveOperator) {
             IAsyncTrancheVault(address(seniorVault)).setOperator(OPERATOR, true);
             IAsyncTrancheVault(address(juniorVault)).setOperator(OPERATOR, true);

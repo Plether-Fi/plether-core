@@ -247,7 +247,7 @@ contract AdminConfigVersionTest is Test {
             initMarginBps: 200,
             fadMarginBps: 300,
             baseCarryBps: 0,
-            minBountyUsdc: 1,
+            minBountyAssets: 1,
             bountyBps: 1,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -264,11 +264,11 @@ contract AdminConfigVersionTest is Test {
         config.orderSettlementWindow = 30;
         config.maxComponentPublishTimeDivergence = 10;
         config.adverseConfidenceMultiplierBps = 10_000;
-        config.minOpenNotionalUsdc = 1;
+        config.minOpenNotionalAssets = 1;
         config.openOrderExecutionBountyBps = 1;
-        config.minOpenOrderExecutionBountyUsdc = 1;
-        config.maxOpenOrderExecutionBountyUsdc = 1;
-        config.positionProtectionTriggerBountyUsdc = 1;
+        config.minOpenOrderExecutionBountyAssets = 1;
+        config.maxOpenOrderExecutionBountyAssets = 1;
+        config.positionProtectionTriggerBountyAssets = 1;
         config.maxPendingOrders = 1;
         config.minEngineGas = 100_000;
         config.maxPruneOrdersPerCall = 1;

@@ -34,7 +34,8 @@ contract TrancheVaultMaintenanceFeeGasDriver is TrancheVault {
 contract JuniorMaintenanceFeeGasSizeTest is BasePerpTest {
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
-    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_529;
+    // Measured after the token-neutral API rename (solc 0.8.35, via-IR, optimizer runs 200).
+    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_571;
     uint256 internal constant TRANCHE_VAULT_RUNTIME_TARGET = 24_000;
     uint256 internal constant DEFAULT_ZERO_INCREMENTAL_GAS_LIMIT = 5000;
     uint256 internal constant ACTIVE_EPOCH_SETTLEMENT_GAS_LIMIT = 1_000_000;
@@ -187,16 +188,16 @@ contract JuniorMaintenanceFeeGasSizeTest is BasePerpTest {
     function _newDriver(
         bool isSenior
     ) internal returns (TrancheVaultMaintenanceFeeGasDriver driver) {
-        driver = new TrancheVaultMaintenanceFeeGasDriver(IERC20(address(usdc)), address(pool), isSenior);
+        driver = new TrancheVaultMaintenanceFeeGasDriver(IERC20(address(settlementToken)), address(pool), isSenior);
     }
 
     function _requestJuniorDepositForGas(
         address owner,
         uint256 assets
     ) internal returns (uint256 requestId) {
-        usdc.mint(owner, assets);
+        settlementToken.mint(owner, assets);
         vm.startPrank(owner);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         requestId = juniorVault.requestDeposit(assets, owner, owner);
         vm.stopPrank();
     }

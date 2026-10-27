@@ -45,7 +45,7 @@ compiler gate, including in the otherwise faster PR test lane.
 
 ### Mixed campaign domain
 
-The mixed campaign seeds 500,000 USDC in each tranche, enables 500-bps carry, VPI and frozen spreads, and disables
+The mixed campaign seeds 500,000 USDG in each tranche, enables 500-bps carry, VPI and frozen spreads, and disables
 Junior maintenance dilution. Trading uses public `OrderRequest` objects and authenticated terminal receipts.
 Generated opens start from 17–500 lots and are clipped to a 500-lot queued-exposure cap per trader. There are at most
 five pending orders per trader, twenty globally, and two LP epochs. These are harness limits, not production limits.
@@ -132,7 +132,7 @@ or filename does not give them invariant depth; only `invariant_*` functions use
 - [BasePerpInvariantTest](BasePerpInvariantTest.sol) deploys real Engine/Router/clearinghouse components with a
   [mock HousePool](mocks/MockInvariantHousePool.sol) whose liquidity can be controlled. It does not model the tranche waterfall.
 - [BasePerpTest](../BasePerpTest.sol) supplies the real HousePool/vault stack for full-stack suites. Both fixture
-  families use mock USDC/Pyth and test-only scalar adapters in `LegacyOrderRouterHarness`; those adapters are not
+  families use mock USDG/Pyth and test-only scalar adapters in `LegacyOrderRouterHarness`; those adapters are not
   production entrypoints.
 - [handlers](handlers/) contains generated actions and expected-state updates. Some suites define their handlers
   in the property file. [MixedLpTestHarness](support/MixedLpTestHarness.sol) adds reusable LP scenarios.

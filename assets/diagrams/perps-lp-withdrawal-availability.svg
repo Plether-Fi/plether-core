@@ -79,11 +79,11 @@
 <text x="440.42500000000007" y="787.4000000000001" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="var(--_text)">Fresh mark required and available?</text>
 <text x="333.7750000000001" y="1011.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#991b1b">Blocked: stale mark</text>
 <text x="547.075" y="1011.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Build withdrawal snapshot</text>
-<text x="547.075" y="1087.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Reserved USDC</text>
+<text x="547.075" y="1087.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Reserved assets</text>
 <text x="547.075" y="1163.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">max directional liability + trader claims + supplemental reserve</text>
 <text x="410.61250000000007" y="1239.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#737373">excludes carry and VPI reserves plus protocol fees</text>
-<text x="683.5375000000001" y="1239.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Free USDC</text>
-<text x="683.5375000000001" y="1315.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">net physical assets minus reserved USDC</text>
+<text x="683.5375000000001" y="1239.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Free assets</text>
+<text x="683.5375000000001" y="1315.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">net physical assets minus reserved assets</text>
 <text x="683.5375000000001" y="1391.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">Cap by tranche priority</text>
 <text x="683.5375000000001" y="1467.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#0c4a6e">senior first, junior subordinated</text>
 <text x="683.5375000000001" y="1543.95" text-anchor="middle" dy="0.35em" font-size="13" font-weight="500" fill="#166534">Withdrawable Amount</text>

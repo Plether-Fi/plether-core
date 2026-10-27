@@ -5,6 +5,17 @@ deployment tooling. npm package versions use their own immutable
 `perps-aa-client-vX.Y.Z` tags; they do not move or replace protocol deployment
 tags. Publishing a client does not deploy a contract or enable sponsorship.
 
+The current source version is **0.4.0**, a breaking SDK for the new settlement-token
+deployment. It uses `settlementToken`, `settlementTokenRuntimeCodeHash`, and
+financial fields ending in `Assets`, with no aliases for former token-specific
+names. The archived `orderLifecycleV4Abi` is no longer exported or included in
+the built package. Historical deployments must use their matching older package.
+
+This implementation authorizes local validation and a local tarball only. Do not
+publish the package, deploy contracts, activate sponsorship, or broadcast
+transactions. The publication procedures below are for a separately authorized
+future release.
+
 ## One-time administration
 
 Before the first release, configure the Core `github-packages` environment with
@@ -36,15 +47,20 @@ exports, embedded `gitHead`, and self-contained source maps, then installs the
 tarball in a temporary consumer outside Core. The consumer runs the same fixed
 compatibility vectors as the source tests, including the changed protection
 create, replace, and protected-open encodings and the new latched-limits amendment
-action through the native sponsorship/journaling path. The immutable historical
-baseline remains a record of the prior ABI and action hashes; the reviewed current
-schema pins the new protection vectors. Solidity continues to consume the
-historical `baseline.json` fixture and independently checks its historical
-sponsorship hashes.
+action through the native sponsorship/journaling path. The reviewed
+`current-assets-v5-schema.json` pins current ABI hashes and six protection action
+vectors; the seven other action vectors and sponsorship hashes stay pinned to
+their prior values. The fixture guard rejects retired token identifiers in
+current ABIs and unreviewed export changes. Renaming intent fields changes the
+Book's `INTENT_TYPEHASH` even though request V3 and receipt/configuration V5 domains
+remain unchanged.
 
-MED-9 changes the protected-open selector and protection action calldata.
-Choose a package version higher than `0.3.0` and update the lockfile before
-merging a release of this source. The version remains `0.3.0` in this source patch.
+The historical `baseline.json` and `current-v5-schema.json` fixtures remain
+unchanged. The original V4 ABI is preserved under
+`test/compatibility/historical/orderLifecycleV4Abi.ts`, outside `src` and the
+package file allowlist. Solidity continues to consume `baseline.json` and
+independently checks its historical sponsorship hashes. These files are evidence,
+not compatibility aliases for the current SDK.
 
 The opt-in Arbitrum Sepolia fork test must also pass before approving the first
 release. Run it with an authenticated read-only RPC if the public endpoint is
@@ -54,6 +70,23 @@ unavailable; no broadcasts or real funding are involved:
 ARBITRUM_SEPOLIA_RPC_URL=https://sepolia-rollup.arbitrum.io/rpc \
   forge test --root packages/perps-aa --match-contract PletherVerifyingPaymasterForkTest -vv
 ```
+
+## Local artifact after the final Core commit
+
+Complete the source changes, version/lockfile update, and validation first. Commit
+the final Core tree before packaging so the embedded `gitHead` identifies the
+exact implementation. The pack command rejects a dirty checkout. Use the existing
+pack and independent-consumer smoke workflow with a fresh directory outside Core:
+
+```bash
+artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/perps-aa-0.4.0.XXXXXX")"
+node scripts/perps-aa-artifact.mjs pack "$artifact_dir"
+node scripts/perps-aa-artifact.mjs smoke "$artifact_dir"
+```
+
+Retain the `plether-fi-perps-aa-client-0.4.0.tgz` tarball and `release.json`
+together. The manifest records the final commit and SHA-512 integrity. This
+workflow creates and verifies a local artifact without publishing or deploying.
 
 ## Publish the merged version
 

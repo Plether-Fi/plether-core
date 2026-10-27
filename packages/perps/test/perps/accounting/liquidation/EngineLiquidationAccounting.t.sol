@@ -29,25 +29,25 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
 
         assertTrue(delta.liquidatable, "Setup must remain liquidatable");
         assertEq(
-            delta.keeperBountyUsdc, 0, "Zero reachable settlement should cap the direct margin-funded bounty at zero"
+            delta.keeperBountyAssets, 0, "Zero reachable settlement should cap the direct margin-funded bounty at zero"
         );
         assertEq(
-            delta.residualUsdc,
+            delta.residualAssets,
             18e6,
             "Exact price-risk equity should include the untouched claim and the positive price PnL"
         );
-        assertEq(delta.settlementRetainedUsdc, 0, "No settlement should remain when none is reachable");
+        assertEq(delta.settlementRetainedAssets, 0, "No settlement should remain when none is reachable");
         assertEq(
-            delta.existingTraderClaimConsumedUsdc,
+            delta.existingTraderClaimConsumedAssets,
             0,
             "Positive physical residual should not consume legacy trader claim"
         );
         assertEq(
-            delta.existingTraderClaimRemainingUsdc,
+            delta.existingTraderClaimRemainingAssets,
             10e6,
             "Legacy trader claim should remain intact on positive residual"
         );
-        assertEq(delta.freshTraderPayoutUsdc, 8e6, "Only physical residual should become a fresh trader payout");
+        assertEq(delta.freshTraderPayoutAssets, 8e6, "Only physical residual should become a fresh trader payout");
     }
 
     function test_PlanLiquidation_ConsumesExistingTraderClaimBeforeWritingOffTerminalPriceLoss() public {
@@ -57,17 +57,17 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
             harness.planLiquidation(0, 10e6, 2000e18, 99_600_000, 99_000_000);
 
         assertTrue(delta.liquidatable, "Setup must remain liquidatable");
-        assertEq(delta.keeperBountyUsdc, 0, "Zero physically reachable collateral should cap the bounty at zero");
-        assertEq(delta.residualUsdc, -2e6, "Exact residual should net the same-account claim against price loss");
+        assertEq(delta.keeperBountyAssets, 0, "Zero physically reachable collateral should cap the bounty at zero");
+        assertEq(delta.residualAssets, -2e6, "Exact residual should net the same-account claim against price loss");
         assertEq(
-            delta.existingTraderClaimConsumedUsdc,
+            delta.existingTraderClaimConsumedAssets,
             10e6,
             "Negative residual should consume legacy trader claim only as terminal shortfall netting"
         );
         assertEq(
-            delta.existingTraderClaimRemainingUsdc, 0, "No trader claim should survive a negative residual wipeout"
+            delta.existingTraderClaimRemainingAssets, 0, "No trader claim should survive a negative residual wipeout"
         );
-        assertEq(delta.priceLossWrittenOffUsdc, 2e6, "Uncollectible terminal price loss should be diagnostic");
+        assertEq(delta.priceLossWrittenOffAssets, 2e6, "Uncollectible terminal price loss should be diagnostic");
     }
 
     function test_LiquidationState_UsesFullReachableCollateralForUnderwaterChargeCap() public {
@@ -75,27 +75,27 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         LiquidationAccountingLib.LiquidationState memory state =
             harness.build(10_000e18, 100_000_000, 125e6, -145e6, 100, 1e6, 900, 5000, 0, 1e20);
 
-        assertLt(state.equityUsdc, 0, "Setup must make the account underwater");
-        assertEq(state.reachableCollateralUsdc, 125e6, "Liquidation state should use full reachable collateral");
+        assertLt(state.equityAssets, 0, "Setup must make the account underwater");
+        assertEq(state.reachableCollateralAssets, 125e6, "Liquidation state should use full reachable collateral");
         assertGt(
-            state.keeperBountyUsdc,
+            state.keeperBountyAssets,
             5e6,
             "Keeper bounty should be allowed to exceed active position margin when more collateral is reachable"
         );
         assertLe(
-            state.liquidationChargeUsdc,
-            state.reachableCollateralUsdc,
+            state.liquidationChargeAssets,
+            state.reachableCollateralAssets,
             "Total liquidation charge should still cap at reachable collateral"
         );
         assertEq(
-            state.keeperBountyUsdc,
-            state.liquidationChargeUsdc / 2,
+            state.keeperBountyAssets,
+            state.liquidationChargeAssets / 2,
             "Keeper should receive only half of the capped charge"
         );
-        assertEq(state.protocolLiquidationFeeUsdc, 0, "Protocol liquidation fee should default to zero");
+        assertEq(state.protocolLiquidationFeeAssets, 0, "Protocol liquidation fee should default to zero");
         assertEq(
-            state.lpLiquidationFeeUsdc,
-            state.liquidationChargeUsdc - state.keeperBountyUsdc - state.protocolLiquidationFeeUsdc,
+            state.lpLiquidationFeeAssets,
+            state.liquidationChargeAssets - state.keeperBountyAssets - state.protocolLiquidationFeeAssets,
             "LPs should receive the other half of the capped charge"
         );
     }
@@ -104,85 +104,89 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         LiquidationAccountingLibHarness harness = new LiquidationAccountingLibHarness();
         LiquidationAccountingLib.LiquidationState memory state = harness.build(0, 0, 9, 0, 100, 9, 10, 3333, 2222, 1);
 
-        assertEq(state.liquidationChargeUsdc, 9, "Reachable minimum charge should be collected in full");
-        assertEq(state.keeperBountyUsdc, 2, "Configured keeper share should round down");
-        assertEq(state.protocolLiquidationFeeUsdc, 1, "Configured protocol share should round down");
-        assertEq(state.lpLiquidationFeeUsdc, 6, "LP share should receive both rounding remainders");
+        assertEq(state.liquidationChargeAssets, 9, "Reachable minimum charge should be collected in full");
+        assertEq(state.keeperBountyAssets, 2, "Configured keeper share should round down");
+        assertEq(state.protocolLiquidationFeeAssets, 1, "Configured protocol share should round down");
+        assertEq(state.lpLiquidationFeeAssets, 6, "LP share should receive both rounding remainders");
         assertEq(
-            state.liquidationChargeUsdc,
-            state.keeperBountyUsdc + state.protocolLiquidationFeeUsdc + state.lpLiquidationFeeUsdc,
+            state.liquidationChargeAssets,
+            state.keeperBountyAssets + state.protocolLiquidationFeeAssets + state.lpLiquidationFeeAssets,
             "All three allocations should conserve the total charge"
         );
     }
 
     function testFuzz_PlanLiquidation_PositiveResidualPreservesTraderClaimAndUsesOnlyPhysicalReachability(
-        uint256 pnlPledgeUsdc,
-        uint256 traderClaimBalanceUsdc
+        uint256 pnlPledgeAssets,
+        uint256 traderClaimBalanceAssets
     ) public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
-        pnlPledgeUsdc = bound(pnlPledgeUsdc, 0, 5e6);
-        traderClaimBalanceUsdc = bound(traderClaimBalanceUsdc, 1, 5e6);
+        pnlPledgeAssets = bound(pnlPledgeAssets, 0, 5e6);
+        traderClaimBalanceAssets = bound(traderClaimBalanceAssets, 1, 5e6);
 
         CfdEnginePlanTypes.LiquidationDelta memory delta =
-            harness.planLiquidation(pnlPledgeUsdc, traderClaimBalanceUsdc, 2000e18, 99_600_000, 100_000_000);
+            harness.planLiquidation(pnlPledgeAssets, traderClaimBalanceAssets, 2000e18, 99_600_000, 100_000_000);
 
         assertTrue(delta.liquidatable, "Bounded exact equity should remain below maintenance");
-        assertGe(delta.residualUsdc, 0, "Positive-price fixture must have nonnegative exact residual");
+        assertGe(delta.residualAssets, 0, "Positive-price fixture must have nonnegative exact residual");
         assertEq(
-            delta.liquidationReachableCollateralUsdc,
-            pnlPledgeUsdc + traderClaimBalanceUsdc,
+            delta.liquidationReachableCollateralAssets,
+            pnlPledgeAssets + traderClaimBalanceAssets,
             "Exact liquidation price reachability must include PnL pledge plus the same-account claim"
         );
         assertEq(
-            delta.liquidationState.reachableCollateralUsdc, 0, "Keeper bounty state must use only physical reachability"
+            delta.liquidationState.reachableCollateralAssets,
+            0,
+            "Keeper bounty state must use only physical reachability"
         );
         assertEq(
-            delta.existingTraderClaimConsumedUsdc, 0, "Positive physical residual must not consume legacy trader claim"
+            delta.existingTraderClaimConsumedAssets,
+            0,
+            "Positive physical residual must not consume legacy trader claim"
         );
         assertEq(
-            delta.existingTraderClaimRemainingUsdc,
-            traderClaimBalanceUsdc,
+            delta.existingTraderClaimRemainingAssets,
+            traderClaimBalanceAssets,
             "Positive physical residual must preserve the full legacy trader claim"
         );
     }
 
     function testFuzz_PlanLiquidation_NegativeResidualNetsTraderClaimExactlyOnce(
-        uint256 pnlPledgeUsdc,
-        uint256 traderClaimBalanceUsdc
+        uint256 pnlPledgeAssets,
+        uint256 traderClaimBalanceAssets
     ) public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
-        pnlPledgeUsdc = bound(pnlPledgeUsdc, 0, 5e6);
-        traderClaimBalanceUsdc = bound(traderClaimBalanceUsdc, 1, 5e6);
+        pnlPledgeAssets = bound(pnlPledgeAssets, 0, 5e6);
+        traderClaimBalanceAssets = bound(traderClaimBalanceAssets, 1, 5e6);
 
         CfdEnginePlanTypes.LiquidationDelta memory delta =
-            harness.planLiquidation(pnlPledgeUsdc, traderClaimBalanceUsdc, 2000e18, 99_600_000, 99_000_000);
+            harness.planLiquidation(pnlPledgeAssets, traderClaimBalanceAssets, 2000e18, 99_600_000, 99_000_000);
 
-        uint256 priceLossUsdc = 12e6;
-        uint256 expectedClaimConsumedUsdc = traderClaimBalanceUsdc;
-        uint256 expectedPledgeConsumedUsdc = pnlPledgeUsdc;
-        uint256 expectedWriteOffUsdc = priceLossUsdc - expectedClaimConsumedUsdc - expectedPledgeConsumedUsdc;
+        uint256 priceLossAssets = 12e6;
+        uint256 expectedClaimConsumedAssets = traderClaimBalanceAssets;
+        uint256 expectedPledgeConsumedAssets = pnlPledgeAssets;
+        uint256 expectedWriteOffAssets = priceLossAssets - expectedClaimConsumedAssets - expectedPledgeConsumedAssets;
 
         assertTrue(delta.liquidatable, "Bounded negative exact equity should always be liquidatable");
-        assertLt(delta.residualUsdc, 0, "Negative-price fixture must have a negative exact residual");
+        assertLt(delta.residualAssets, 0, "Negative-price fixture must have a negative exact residual");
         assertEq(
-            delta.liquidationReachableCollateralUsdc,
-            pnlPledgeUsdc + traderClaimBalanceUsdc,
+            delta.liquidationReachableCollateralAssets,
+            pnlPledgeAssets + traderClaimBalanceAssets,
             "Exact liquidation price reachability must include PnL pledge plus the same-account claim"
         );
         assertEq(
-            delta.existingTraderClaimConsumedUsdc,
-            expectedClaimConsumedUsdc,
+            delta.existingTraderClaimConsumedAssets,
+            expectedClaimConsumedAssets,
             "Negative exact price risk must net the same-account claim exactly once"
         );
         assertEq(
-            delta.existingTraderClaimRemainingUsdc,
+            delta.existingTraderClaimRemainingAssets,
             0,
             "The bounded price loss must consume the complete same-account claim"
         );
-        assertEq(delta.pricePnlPledgeConsumedUsdc, expectedPledgeConsumedUsdc);
-        assertEq(delta.priceLossWrittenOffUsdc, expectedWriteOffUsdc);
+        assertEq(delta.pricePnlPledgeConsumedAssets, expectedPledgeConsumedAssets);
+        assertEq(delta.priceLossWrittenOffAssets, expectedWriteOffAssets);
     }
 
     function test_PlanLiquidation_FundedNegativeVpiCancelsInHealthAndIsRecovered() public {
@@ -194,43 +198,43 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
             harness.planLiquidationWithVpiAccrued(5e6, 0, 2000e18, 100_000_000, 99_000_000, -7e6);
 
         assertTrue(withClawback.liquidatable, "Setup must remain liquidatable");
-        assertEq(withClawback.riskState.equityUsdc, withoutClawback.riskState.equityUsdc);
+        assertEq(withClawback.riskState.equityAssets, withoutClawback.riskState.equityAssets);
         assertEq(
-            withClawback.liquidationState.equityUsdc,
-            withoutClawback.liquidationState.equityUsdc,
+            withClawback.liquidationState.equityAssets,
+            withoutClawback.liquidationState.equityAssets,
             "Dedicated backing and its matching liability must cancel exactly once"
         );
-        assertEq(withClawback.vpiRebateReserveBeforeUsdc, 7e6);
-        assertEq(withClawback.vpiRebateReserveConsumedUsdc, 7e6);
-        assertEq(withClawback.vpiRebateReserveAfterUsdc, 0);
+        assertEq(withClawback.vpiRebateReserveBeforeAssets, 7e6);
+        assertEq(withClawback.vpiRebateReserveConsumedAssets, 7e6);
+        assertEq(withClawback.vpiRebateReserveAfterAssets, 0);
         assertEq(
-            withClawback.keeperBountyUsdc,
-            withoutClawback.keeperBountyUsdc,
+            withClawback.keeperBountyAssets,
+            withoutClawback.keeperBountyAssets,
             "Underwater keeper cap should still be bounded by reachable collateral"
         );
     }
 
     function testFuzz_PlanLiquidation_FundedNegativeVpiCancelsExactlyOnce(
-        uint256 reachableUsdc,
+        uint256 reachableAssets,
         uint256 rawLots,
         uint256 oraclePrice,
-        uint256 clawbackUsdc
+        uint256 clawbackAssets
     ) public {
         CfdEnginePlanLibHarness harness = new CfdEnginePlanLibHarness();
 
-        reachableUsdc = bound(reachableUsdc, 1, 25_000_000e6);
+        reachableAssets = bound(reachableAssets, 1, 25_000_000e6);
         uint256 size = bound(rawLots, 1, 10_000) * CfdTypes.SIZE_QUANTUM;
         oraclePrice = bound(oraclePrice, 1, 2e8);
-        clawbackUsdc = bound(clawbackUsdc, 1, 50_000_000e6);
+        clawbackAssets = bound(clawbackAssets, 1, 50_000_000e6);
 
         CfdEnginePlanTypes.LiquidationDelta memory withoutClawback =
-            harness.planLiquidationWithVpiAccrued(reachableUsdc, 0, size, 1e8, oraclePrice, 0);
+            harness.planLiquidationWithVpiAccrued(reachableAssets, 0, size, 1e8, oraclePrice, 0);
         CfdEnginePlanTypes.LiquidationDelta memory withClawback =
-            harness.planLiquidationWithVpiAccrued(reachableUsdc, 0, size, 1e8, oraclePrice, -int256(clawbackUsdc));
+            harness.planLiquidationWithVpiAccrued(reachableAssets, 0, size, 1e8, oraclePrice, -int256(clawbackAssets));
 
         assertEq(
-            withClawback.riskState.equityUsdc,
-            withoutClawback.riskState.equityUsdc,
+            withClawback.riskState.equityAssets,
+            withoutClawback.riskState.equityAssets,
             "Dedicated reserve must cancel the funded VPI liability in risk"
         );
         assertEq(withClawback.liquidatable, withoutClawback.liquidatable);
@@ -239,14 +243,14 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         }
 
         assertEq(
-            withClawback.liquidationState.equityUsdc,
-            withoutClawback.liquidationState.equityUsdc,
+            withClawback.liquidationState.equityAssets,
+            withoutClawback.liquidationState.equityAssets,
             "Liquidation equity must preserve the same cancellation"
         );
-        uint256 expectedWithheldUsdc =
-            withClawback.priceGainUsdc < clawbackUsdc ? withClawback.priceGainUsdc : clawbackUsdc;
-        assertEq(withClawback.vpiRebateReserveConsumedUsdc, clawbackUsdc - expectedWithheldUsdc);
-        assertEq(withClawback.vpiRebateReserveAfterUsdc, 0);
+        uint256 expectedWithheldAssets =
+            withClawback.priceGainAssets < clawbackAssets ? withClawback.priceGainAssets : clawbackAssets;
+        assertEq(withClawback.vpiRebateReserveConsumedAssets, clawbackAssets - expectedWithheldAssets);
+        assertEq(withClawback.vpiRebateReserveAfterAssets, 0);
     }
 
     function test_PlanLiquidation_FundedNegativeVpiDoesNotFlipLiquidatable() public {
@@ -259,8 +263,8 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
 
         assertEq(withClawback.liquidatable, withoutClawback.liquidatable);
         assertEq(
-            withClawback.riskState.equityUsdc,
-            withoutClawback.riskState.equityUsdc,
+            withClawback.riskState.equityAssets,
+            withoutClawback.riskState.equityAssets,
             "A fully funded VPI liability cannot independently change liquidation health"
         );
     }
@@ -274,13 +278,15 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
             harness.planLiquidationWithUnsettledCarry(200e6, 50e6, 1000e6, 250e6 + 1, 10_000e18, 1e8, 1e8);
 
         assertFalse(fullyFunded.liquidatable, "Carry fully collectible from free settlement must not liquidate");
-        assertEq(fullyFunded.pendingCarryUsdc, 50e6, "Fixture must checkpoint the funded carry exactly");
+        assertEq(fullyFunded.pendingCarryAssets, 50e6, "Fixture must checkpoint the funded carry exactly");
         assertTrue(oneAtomUncovered.liquidatable, "One uncovered carry atom must be independently delinquent");
-        assertEq(oneAtomUncovered.pendingCarryUsdc, 250e6 + 1, "Fixture must preserve the one-atom boundary");
-        assertEq(oneAtomUncovered.realizedCarryUsdc, 250e6, "Liquidation first collects all margin and free settlement");
-        assertEq(oneAtomUncovered.actionChargeWaivedUsdc, 1, "Exactly the uncovered carry atom must be waived");
+        assertEq(oneAtomUncovered.pendingCarryAssets, 250e6 + 1, "Fixture must preserve the one-atom boundary");
         assertEq(
-            oneAtomUncovered.existingTraderClaimRemainingUsdc,
+            oneAtomUncovered.realizedCarryAssets, 250e6, "Liquidation first collects all margin and free settlement"
+        );
+        assertEq(oneAtomUncovered.actionChargeWaivedAssets, 1, "Exactly the uncovered carry atom must be waived");
+        assertEq(
+            oneAtomUncovered.existingTraderClaimRemainingAssets,
             1000e6,
             "A large same-account claim must not pay or conceal action carry"
         );
@@ -303,17 +309,17 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
-        uint256 firstCloseExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
+        uint256 firstCloseExecutionFeeAssets = _engineExecutionFeeAssets(5000e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
+        settlementToken.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeAssets - 1);
 
         _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
+        uint256 traderClaimBefore = engine.traderClaimBalanceAssets(shortAccount);
         assertGt(traderClaimBefore, 0, "Setup must create trader claim while keeping the position open");
 
-        uint256 reducedSettlement = clearinghouse.balanceUsdc(shortAccount) - 4700e6;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(shortAccount)
+        uint256 reducedSettlement = clearinghouse.balanceAssets(shortAccount) - 4700e6;
+        stdstore.target(address(clearinghouse)).sig("balanceAssets(address)").with_key(shortAccount)
             .checked_write(reducedSettlement);
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(shortAccount, 50_000_000);
@@ -326,18 +332,18 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         router.executeLiquidation(shortAccount, priceData);
 
         assertLt(
-            engine.traderClaimBalanceUsdc(shortAccount),
+            engine.traderClaimBalanceAssets(shortAccount),
             traderClaimBefore,
             "Liquidation should consume the same-account claim before writing off terminal price loss"
         );
         assertEq(
-            engine.traderClaimBalanceUsdc(shortAccount),
-            preview.traderClaimBalanceUsdc,
+            engine.traderClaimBalanceAssets(shortAccount),
+            preview.traderClaimBalanceAssets,
             "Preview should match remaining trader claim after liquidation"
         );
         assertEq(
-            clearinghouse.balanceUsdc(shortAccount),
-            preview.settlementRetainedUsdc,
+            clearinghouse.balanceAssets(shortAccount),
+            preview.settlementRetainedAssets,
             "Live settlement must match the preview total including any immediate payout"
         );
         assertEq(
@@ -382,7 +388,7 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
                 initMarginBps: ((300) * 15) / 10,
                 fadMarginBps: 500,
                 baseCarryBps: 500,
-                minBountyUsdc: 1 * 1e6,
+                minBountyAssets: 1 * 1e6,
                 bountyBps: 10,
                 keeperShareBps: 5000,
                 protocolShareBps: 0
@@ -420,10 +426,10 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         vm.prank(trader);
         clearinghouse.withdraw(account, 46_000 * 1e6);
 
-        uint256 freeEquityBefore = clearinghouse.getFreeBuyingPowerUsdc(account);
+        uint256 freeEquityBefore = clearinghouse.getFreeBuyingPowerAssets(account);
         assertTrue(freeEquityBefore > 0, "User should have free equity beyond locked margin");
 
-        uint256 poolBalanceBefore = usdc.balanceOf(address(pool));
+        uint256 poolBalanceBefore = settlementToken.balanceOf(address(pool));
 
         // Price rises to $1.10 — LONG loses $10k, equity = margin (~$1537) - $10k = negative
         vm.prank(address(router));
@@ -432,14 +438,14 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be liquidated");
 
-        uint256 freeEquityAfter = clearinghouse.getFreeBuyingPowerUsdc(account);
+        uint256 freeEquityAfter = clearinghouse.getFreeBuyingPowerAssets(account);
         assertEq(
             freeEquityAfter,
             freeEquityBefore,
             "Terminal price loss must never consume generic free settlement outside the isolated PnL pledge"
         );
 
-        uint256 poolBalanceAfter = usdc.balanceOf(address(pool));
+        uint256 poolBalanceAfter = settlementToken.balanceOf(address(pool));
         uint256 totalRecovered = poolBalanceAfter - poolBalanceBefore;
         assertTrue(totalRecovered > 0, "Pool should recover the isolated price pledge and LP charge allocation");
     }
@@ -490,7 +496,7 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         uint256 maxLiab = _sideMaxProfit(CfdTypes.Side.LONG) > _sideMaxProfit(CfdTypes.Side.SHORT)
             ? _sideMaxProfit(CfdTypes.Side.LONG)
             : _sideMaxProfit(CfdTypes.Side.SHORT);
-        assertTrue(usdc.balanceOf(address(pool)) < maxLiab, "Pool should be insolvent");
+        assertTrue(settlementToken.balanceOf(address(pool)) < maxLiab, "Pool should be insolvent");
 
         // Price rises to $1.10 — LONG loses $20k, deeply underwater
         vm.prank(address(router));
@@ -521,7 +527,7 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
                 initMarginBps: ((10) * 15) / 10,
                 fadMarginBps: 10,
                 baseCarryBps: 500,
-                minBountyUsdc: 1 * 1e6,
+                minBountyAssets: 1 * 1e6,
                 bountyBps: 100,
                 keeperShareBps: 5000,
                 protocolShareBps: 0
@@ -542,11 +548,11 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.processOrderTyped(openOrder, 1e8, poolDepth, uint64(block.timestamp));
 
-        uint256 liquidationReserveBefore = clearinghouse.liquidationReserveUsdc(account);
-        uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
+        uint256 liquidationReserveBefore = clearinghouse.liquidationReserveAssets(account);
+        uint256 withdrawableAssets = engineAccountLens.getWithdrawableAssets(account);
 
         vm.prank(trader);
-        clearinghouse.withdraw(account, withdrawableUsdc);
+        clearinghouse.withdraw(account, withdrawableAssets);
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
         vm.prank(address(router));
@@ -554,13 +560,13 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
             engine.liquidatePosition(account, 101_000_000, poolDepth, uint64(block.timestamp), address(this));
 
         assertEq(
-            preview.liquidationChargeUsdc,
+            preview.liquidationChargeAssets,
             liquidationReserveBefore,
             "Total liquidation charge should be bounded by the dedicated entry-time reserve"
         );
-        assertEq(bounty, preview.keeperBountyUsdc, "Live keeper credit should match the previewed half");
+        assertEq(bounty, preview.keeperBountyAssets, "Live keeper credit should match the previewed half");
         assertEq(
-            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
+            preview.keeperBountyAssets + preview.protocolLiquidationFeeAssets + preview.lpLiquidationFeeAssets,
             liquidationReserveBefore,
             "Keeper, protocol, and LP shares should conserve the capped charge"
         );

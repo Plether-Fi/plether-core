@@ -27,17 +27,17 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        uint256 clearinghouseBefore = clearinghouse.balanceUsdc(account);
+        uint256 clearinghouseBefore = clearinghouse.balanceAssets(account);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Profitable close should still destroy the position");
-        assertGt(engine.traderClaimBalanceUsdc(account), 0, "Unpaid profit should be recorded as trader claim");
+        assertGt(engine.traderClaimBalanceAssets(account), 0, "Unpaid profit should be recorded as trader claim");
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             clearinghouseBefore,
             "Illiquid profitable close should not immediately credit clearinghouse cash"
         );
@@ -52,22 +52,22 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
-        uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
+        uint256 traderClaim = engine.traderClaimBalanceAssets(account);
         assertGt(traderClaim, 0, "Setup should create a trader claim");
 
-        usdc.mint(address(pool), traderClaim);
-        uint256 clearinghouseBefore = clearinghouse.balanceUsdc(account);
+        settlementToken.mint(address(pool), traderClaim);
+        uint256 clearinghouseBefore = clearinghouse.balanceAssets(account);
 
         vm.prank(trader);
         engine.settleTraderClaim(account);
 
-        assertEq(engine.traderClaimBalanceUsdc(account), 0, "Claim should clear trader claim state");
+        assertEq(engine.traderClaimBalanceAssets(account), 0, "Claim should clear trader claim state");
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             clearinghouseBefore + traderClaim,
             "Claim should credit the clearinghouse balance"
         );
@@ -80,10 +80,10 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         _fundTrader(trader, 20_000e6);
         _open(trader, CfdTypes.Side.LONG, 500_000e18, 10_000e6, 1e8);
 
-        uint256 claimUsdc = 1000e6;
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(claimant)
-            .checked_write(claimUsdc);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(claimUsdc);
+        uint256 claimAssets = 1000e6;
+        stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(claimant)
+            .checked_write(claimAssets);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(claimAssets);
 
         vm.warp(block.timestamp + 30 days);
         uint256 expectedCarryIndex = _currentSideCarryIndex(CfdTypes.Side.LONG);
@@ -100,7 +100,7 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         );
         assertEq(engine.sideCarryTimestamp(sideIndex), block.timestamp, "Claim payout should advance carry timestamp");
         assertEq(
-            pool.totalAssets(), poolAssetsBefore - claimUsdc, "Setup should reduce pool assets after claim service"
+            pool.totalAssets(), poolAssetsBefore - claimAssets, "Setup should reduce pool assets after claim service"
         );
     }
 
@@ -116,8 +116,8 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        usdc.mint(address(pool), 5000e6);
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
+        settlementToken.mint(address(pool), 5000e6);
         uint256 expectedCarry = _expectedIndexedCarry(account);
         uint256 poolRawBefore = pool.rawAssets();
         uint256 poolAccountedBefore = pool.accountedAssets();
@@ -126,7 +126,7 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         engine.settleTraderClaim(account);
 
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBefore + 5000e6 - expectedCarry,
             "Trader claim settlement should realize carry before crediting settlement"
         );
@@ -152,16 +152,16 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        usdc.mint(address(pool), 5000e6);
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
+        settlementToken.mint(address(pool), 5000e6);
         uint256 expectedCarry = _expectedIndexedCarry(account);
 
         vm.prank(trader);
         engine.settleTraderClaim(account);
 
-        assertEq(engine.traderClaimBalanceUsdc(account), 0, "Claim should clear trader claim state");
+        assertEq(engine.traderClaimBalanceAssets(account), 0, "Claim should clear trader claim state");
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBefore + 5000e6 - expectedCarry,
             "Stale trader claim settlement should checkpoint indexed carry before crediting settlement"
         );
@@ -171,7 +171,7 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
             "Stale trader claim settlement should advance the carry clock after checkpointing carry"
         );
         assertEq(
-            engine.unsettledCarryUsdc(account),
+            engine.unsettledCarryAssets(account),
             0,
             "Stale trader claim settlement should not leave carry unpaid once the claim-funded settlement can satisfy it"
         );
@@ -191,7 +191,7 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
             engineProtocolLens.getProtocolAccountingSnapshot();
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
-        usdc.mint(address(pool), traderClaim);
+        settlementToken.mint(address(pool), traderClaim);
 
         vm.prank(trader);
         engine.settleTraderClaim(account);
@@ -200,15 +200,15 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
             engineProtocolLens.getProtocolAccountingSnapshot();
 
         assertEq(
-            afterSnapshot.protocolTreasuryBalanceUsdc,
-            beforeSnapshot.protocolTreasuryBalanceUsdc,
+            afterSnapshot.protocolTreasuryBalanceAssets,
+            beforeSnapshot.protocolTreasuryBalanceAssets,
             "Trader trader claim must not consume treasury fee balance"
         );
         assertEq(
-            afterSnapshot.totalTraderClaimBalanceUsdc, 0, "Claim should extinguish the trader trader claim liability"
+            afterSnapshot.totalTraderClaimBalanceAssets, 0, "Claim should extinguish the trader trader claim liability"
         );
         assertEq(
-            beforeSnapshot.withdrawalReservedUsdc - afterSnapshot.withdrawalReservedUsdc,
+            beforeSnapshot.withdrawalReservedAssets - afterSnapshot.withdrawalReservedAssets,
             traderClaim,
             "Withdrawal reserve should drop only by the trader claim amount that was actually claimed"
         );
@@ -224,12 +224,12 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
-        uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
-        usdc.mint(address(pool), traderClaim);
+        uint256 traderClaim = engine.traderClaimBalanceAssets(account);
+        settlementToken.mint(address(pool), traderClaim);
 
         vm.prank(relayer);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__NotAccountOwner.selector);
@@ -245,22 +245,22 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
-        uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
+        uint256 traderClaim = engine.traderClaimBalanceAssets(account);
         assertGt(traderClaim, 0, "Setup should create a trader claim");
 
         uint256 partialLiquidity = traderClaim / 2;
-        usdc.mint(address(pool), partialLiquidity);
+        settlementToken.mint(address(pool), partialLiquidity);
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.settleTraderClaim(account);
 
         assertEq(
-            engine.traderClaimBalanceUsdc(account),
+            engine.traderClaimBalanceAssets(account),
             traderClaim,
             "Trader claimant should remain fully queued until aggregate trader claim liabilities are fully covered"
         );
@@ -275,25 +275,25 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
-        uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
+        uint256 traderClaim = engine.traderClaimBalanceAssets(account);
         assertGt(traderClaim, 0, "Setup should create a trader claim balance");
 
         vm.startPrank(address(pool));
-        usdc.transfer(address(0xDEAD), pool.totalAssets());
+        settlementToken.transfer(address(0xDEAD), pool.totalAssets());
         vm.stopPrank();
 
         uint256 partialLiquidity = traderClaim / 2;
-        usdc.mint(address(pool), partialLiquidity);
+        settlementToken.mint(address(pool), partialLiquidity);
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
         vm.prank(trader);
         engine.settleTraderClaim(account);
 
-        assertEq(engine.traderClaimBalanceUsdc(account), traderClaim, "Head trader claim should remain fully queued");
+        assertEq(engine.traderClaimBalanceAssets(account), traderClaim, "Head trader claim should remain fully queued");
     }
 
     function test_SettleTraderClaim_RevertsWithoutLiquidityOrPayout() public {
@@ -309,12 +309,12 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         vm.startPrank(address(pool));
-        usdc.transfer(address(0xDEAD), pool.totalAssets());
+        settlementToken.transfer(address(0xDEAD), pool.totalAssets());
         vm.stopPrank();
 
         vm.prank(trader);
@@ -328,17 +328,19 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         _fundTrader(trader, 5000e6);
         _open(account, CfdTypes.Side.SHORT, 10_000e18, 5000e6, 1e8);
 
-        uint256 closeExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
+        uint256 closeExecutionFeeAssets = _engineExecutionFeeAssets(5000e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - closeExecutionFeeUsdc - 1);
+        settlementToken.transfer(address(0xDEAD), poolAssets - closeExecutionFeeAssets - 1);
 
         _close(account, CfdTypes.Side.SHORT, 5000e18, 120_000_000);
-        assertGt(engine.traderClaimBalanceUsdc(account), 0, "Setup must create a trader claim balance");
+        assertGt(engine.traderClaimBalanceAssets(account), 0, "Setup must create a trader claim balance");
 
         PerpsViewTypes.PositionView memory viewData = _publicPosition(account);
         (, uint256 positionMargin,,,,,) = engine.positions(account);
-        assertEq(viewData.marginUsdc, positionMargin, "Public position view should still expose locked position margin");
+        assertEq(
+            viewData.marginAssets, positionMargin, "Public position view should still expose locked position margin"
+        );
         assertEq(
             viewData.exists,
             true,
@@ -354,24 +356,25 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory viewData =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        uint256 settlementBufferUsdc =
-            SolvencyAccountingLib.settlementBufferTargetUsdc(viewData.maxLiabilityUsdc, engine.settlementBufferBps());
-        uint256 expectedWithdrawalReservedUsdc =
-            viewData.maxLiabilityUsdc + viewData.totalTraderClaimBalanceUsdc + settlementBufferUsdc;
-        uint256 expectedFreeUsdc = viewData.poolAssetsUsdc > expectedWithdrawalReservedUsdc
-            ? viewData.poolAssetsUsdc - expectedWithdrawalReservedUsdc
+        uint256 settlementBufferAssets = SolvencyAccountingLib.settlementBufferTargetAssets(
+            viewData.maxLiabilityAssets, engine.settlementBufferBps()
+        );
+        uint256 expectedWithdrawalReservedAssets =
+            viewData.maxLiabilityAssets + viewData.totalTraderClaimBalanceAssets + settlementBufferAssets;
+        uint256 expectedFreeAssets = viewData.poolAssets > expectedWithdrawalReservedAssets
+            ? viewData.poolAssets - expectedWithdrawalReservedAssets
             : 0;
-        assertEq(viewData.poolAssetsUsdc, pool.totalAssets());
-        assertEq(viewData.withdrawalReservedUsdc, expectedWithdrawalReservedUsdc);
-        assertEq(viewData.freeUsdc, expectedFreeUsdc);
-        assertEq(viewData.protocolTreasuryBalanceUsdc, clearinghouse.balanceUsdc(engine.protocolTreasury()));
-        assertEq(viewData.totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc());
+        assertEq(viewData.poolAssets, pool.totalAssets());
+        assertEq(viewData.withdrawalReservedAssets, expectedWithdrawalReservedAssets);
+        assertEq(viewData.freeAssets, expectedFreeAssets);
+        assertEq(viewData.protocolTreasuryBalanceAssets, clearinghouse.balanceAssets(engine.protocolTreasury()));
+        assertEq(viewData.totalTraderClaimBalanceAssets, engine.totalTraderClaimBalanceAssets());
         assertEq(viewData.degradedMode, engine.degradedMode());
         assertEq(viewData.hasLiveLiability, (_maxLiability() > 0));
     }
@@ -392,29 +395,29 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
-        uint256 setupCloseFeesUsdc =
-            _engineExecutionFeeUsdc(5000e18, 120_000_000) + _engineExecutionFeeUsdc(2500e18, 120_000_000);
+        uint256 setupCloseFeesAssets =
+            _engineExecutionFeeAssets(5000e18, 120_000_000) + _engineExecutionFeeAssets(2500e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
+        settlementToken.transfer(address(0xDEAD), poolAssets - setupCloseFeesAssets - 1);
 
         _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
+        uint256 traderClaimBefore = engine.traderClaimBalanceAssets(shortAccount);
         assertGt(traderClaimBefore, 0, "Setup must create trader claim while keeping the position open");
 
-        uint256 reducedSettlement = clearinghouse.balanceUsdc(shortAccount) - 4700e6;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(shortAccount)
+        uint256 reducedSettlement = clearinghouse.balanceAssets(shortAccount) - 4700e6;
+        stdstore.target(address(clearinghouse)).sig("balanceAssets(address)").with_key(shortAccount)
             .checked_write(reducedSettlement);
 
         ICfdEngineTypes.ClosePreview memory preview =
             engineLens.simulateClose(shortAccount, 5000e18, 80_000_000, poolDepth);
         assertGt(
-            preview.existingTraderClaimConsumedUsdc,
+            preview.existingTraderClaimConsumedAssets,
             0,
             "Close preview should net the same-account trader claim before writing off terminal price loss"
         );
         assertLt(
-            preview.existingTraderClaimRemainingUsdc,
+            preview.existingTraderClaimRemainingAssets,
             traderClaimBefore,
             "Close preview should show less trader claim remaining after loss absorption"
         );
@@ -425,13 +428,13 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         CloseParityObserved memory observed = _observeCloseParity(shortAccount, beforeSnapshot);
 
         assertEq(
-            engine.traderClaimBalanceUsdc(shortAccount),
-            observed.traderClaimBalanceUsdc,
+            engine.traderClaimBalanceAssets(shortAccount),
+            observed.traderClaimBalanceAssets,
             "Live close should leave the same trader claim remainder observed in settlement state"
         );
         assertEq(
-            preview.existingTraderClaimConsumedUsdc,
-            traderClaimBefore - preview.existingTraderClaimRemainingUsdc,
+            preview.existingTraderClaimConsumedAssets,
+            traderClaimBefore - preview.existingTraderClaimRemainingAssets,
             "Preview should expose the exact trader claim consumed before socializing bad debt"
         );
     }
@@ -452,29 +455,29 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
-        uint256 setupCloseFeesUsdc =
-            (_engineExecutionFeeUsdc(5000e18, 120_000_000) * 2) + _engineExecutionFeeUsdc(2500e18, 120_000_000);
+        uint256 setupCloseFeesAssets =
+            (_engineExecutionFeeAssets(5000e18, 120_000_000) * 2) + _engineExecutionFeeAssets(2500e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
+        settlementToken.transfer(address(0xDEAD), poolAssets - setupCloseFeesAssets - 1);
 
         _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
+        uint256 traderClaimBefore = engine.traderClaimBalanceAssets(shortAccount);
         assertGt(traderClaimBefore, 0, "Short account should accrue trader claim balance");
 
         _closeAt(shortAccount, CfdTypes.Side.SHORT, 2500e18, 120_000_000, poolDepth, refreshTime);
-        uint256 traderClaimAfterAccrual = engine.traderClaimBalanceUsdc(shortAccount);
+        uint256 traderClaimAfterAccrual = engine.traderClaimBalanceAssets(shortAccount);
         assertGe(
             traderClaimAfterAccrual, traderClaimBefore, "Additional trader claim should coalesce into the same balance"
         );
 
-        uint256 reducedSettlement = clearinghouse.balanceUsdc(shortAccount) - 4700e6;
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(shortAccount)
+        uint256 reducedSettlement = clearinghouse.balanceAssets(shortAccount) - 4700e6;
+        stdstore.target(address(clearinghouse)).sig("balanceAssets(address)").with_key(shortAccount)
             .checked_write(reducedSettlement);
 
         _closeAt(shortAccount, CfdTypes.Side.SHORT, 2500e18, 80_000_000, poolDepth, refreshTime);
         assertLe(
-            engine.traderClaimBalanceUsdc(shortAccount),
+            engine.traderClaimBalanceAssets(shortAccount),
             traderClaimAfterAccrual,
             "Consuming trader claim balance should only reduce the tracked balance"
         );
@@ -499,22 +502,22 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, refreshTime);
 
-        uint256 setupCloseFeesUsdc =
-            (_engineExecutionFeeUsdc(5000e18, 120_000_000) * 2) + _engineExecutionFeeUsdc(2500e18, 120_000_000);
+        uint256 setupCloseFeesAssets =
+            (_engineExecutionFeeAssets(5000e18, 120_000_000) * 2) + _engineExecutionFeeAssets(2500e18, 120_000_000);
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - setupCloseFeesUsdc - 1);
+        settlementToken.transfer(address(0xDEAD), poolAssets - setupCloseFeesAssets - 1);
 
         _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 shortClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
+        uint256 shortClaimBefore = engine.traderClaimBalanceAssets(shortAccount);
         assertGt(shortClaimBefore, 0, "Initial trader claim should create a tracked balance for shortAccount");
 
         _closeAt(laterAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 laterClaim = engine.traderClaimBalanceUsdc(laterAccount);
+        uint256 laterClaim = engine.traderClaimBalanceAssets(laterAccount);
         assertGt(laterClaim, 0, "Later claimant should also accrue a trader claim balance");
 
         _closeAt(shortAccount, CfdTypes.Side.SHORT, 2500e18, 120_000_000, poolDepth, refreshTime);
-        uint256 shortClaimAfter = engine.traderClaimBalanceUsdc(shortAccount);
+        uint256 shortClaimAfter = engine.traderClaimBalanceAssets(shortAccount);
 
         assertGe(shortClaimAfter, shortClaimBefore, "Coalescing should not move the account behind later claimants");
     }
@@ -548,14 +551,14 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         engine.updateMarkPrice(1e8, refreshTime);
 
         {
-            uint256 firstCloseExecutionFeeUsdc = _engineExecutionFeeUsdc(5000e18, 120_000_000);
+            uint256 firstCloseExecutionFeeAssets = _engineExecutionFeeAssets(5000e18, 120_000_000);
             uint256 poolAssets = pool.totalAssets();
             vm.prank(address(pool));
-            usdc.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeUsdc - 1);
+            settlementToken.transfer(address(0xDEAD), poolAssets - firstCloseExecutionFeeAssets - 1);
         }
 
         _closeAt(shortAccount, CfdTypes.Side.SHORT, 5000e18, 120_000_000, poolDepth, refreshTime);
-        uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(shortAccount);
+        uint256 traderClaimBefore = engine.traderClaimBalanceAssets(shortAccount);
         assertGt(
             traderClaimBefore, 1e6, "Setup must create an existing trader claim large enough to cover the fee shortfall"
         );
@@ -563,36 +566,38 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         _removePnlPledgeAndSyncTerminalCurve(shortAccount);
         if (!retainLiquidationReserve) {
             // Exhaust the physical reserve too; a claim alone must never pay action charges.
-            uint256 reserve = clearinghouse.liquidationReserveUsdc(shortAccount);
+            uint256 reserve = clearinghouse.liquidationReserveAssets(shortAccount);
             vm.startPrank(address(engine));
             clearinghouse.releaseLiquidationReserve(shortAccount, reserve);
             clearinghouse.consumeActionCharge(shortAccount, reserve, 0, 0, address(pool), address(0), 0);
             vm.stopPrank();
         }
-        uint256 expectedFee = retainLiquidationReserve ? _engineExecutionFeeUsdc(5000e18, 1e8) : 0;
+        uint256 expectedFee = retainLiquidationReserve ? _engineExecutionFeeAssets(5000e18, 1e8) : 0;
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.simulateClose(shortAccount, 5000e18, 1e8, poolDepth);
 
         assertTrue(preview.valid, "Terminal action fee shortfall should be waived rather than blocking close");
-        assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action fees from price PnL");
-        assertEq(preview.executionFeeUsdc, expectedFee, "Only released physical reserve may recover the fee");
-        assertEq(preview.existingTraderClaimConsumedUsdc, 0, "Action fees must not consume same-account trader claims");
+        assertEq(preview.realizedPnlAssets, 0, "Setup must isolate action fees from price PnL");
+        assertEq(preview.executionFeeAssets, expectedFee, "Only released physical reserve may recover the fee");
         assertEq(
-            preview.existingTraderClaimRemainingUsdc,
+            preview.existingTraderClaimConsumedAssets, 0, "Action fees must not consume same-account trader claims"
+        );
+        assertEq(
+            preview.existingTraderClaimRemainingAssets,
             traderClaimBefore,
             "Price-neutral close should preserve the entire existing trader claim"
         );
 
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         _processUnderfundedFeeClose(shortAccount, poolDepth, refreshTime);
 
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             feesBefore + expectedFee,
             "Treasury fees should come only from released reserve, never trader claims"
         );
         assertEq(
-            engine.traderClaimBalanceUsdc(shortAccount),
+            engine.traderClaimBalanceAssets(shortAccount),
             traderClaimBefore,
             "Live action-fee waiver must leave the existing trader claim untouched"
         );
@@ -609,19 +614,19 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         vm.startPrank(address(pool));
-        usdc.transfer(address(0xDEAD), pool.totalAssets());
+        settlementToken.transfer(address(0xDEAD), pool.totalAssets());
         vm.stopPrank();
 
         ClaimEngineViewTypes.TraderClaimStatus memory statusBefore = _traderClaimStatus(account, address(this));
-        assertGt(statusBefore.traderClaimBalanceUsdc, 0);
+        assertGt(statusBefore.traderClaimBalanceAssets, 0);
         assertFalse(statusBefore.traderClaimServiceableNow);
 
-        usdc.mint(address(pool), statusBefore.traderClaimBalanceUsdc);
+        settlementToken.mint(address(pool), statusBefore.traderClaimBalanceAssets);
 
         ClaimEngineViewTypes.TraderClaimStatus memory statusAfter = _traderClaimStatus(account, address(this));
         assertTrue(statusAfter.traderClaimServiceableNow);
@@ -635,12 +640,12 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
-        uint256 traderClaim = engine.traderClaimBalanceUsdc(account);
-        usdc.mint(address(pool), traderClaim);
+        uint256 traderClaim = engine.traderClaimBalanceAssets(account);
+        settlementToken.mint(address(pool), traderClaim);
 
         ClaimEngineViewTypes.TraderClaimStatus memory status = _traderClaimStatus(account, address(0xAB17));
         assertTrue(status.traderClaimServiceableNow, "Trader claim should be serviceable under partial liquidity");

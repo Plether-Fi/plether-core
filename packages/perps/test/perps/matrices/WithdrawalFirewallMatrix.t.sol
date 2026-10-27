@@ -41,11 +41,11 @@ contract WithdrawalFirewallMatrixTest is BasePerpTest {
             _open(address(0xF172), CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
             _fundTrader(LOSS_TRIGGER, 2000e6);
             _open(LOSS_TRIGGER, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
-            uint256 cash = usdc.balanceOf(address(pool));
-            usdc.burn(address(pool), cash);
+            uint256 cash = settlementToken.balanceOf(address(pool));
+            settlementToken.burn(address(pool), cash);
             _close(LOSS_TRIGGER, CfdTypes.Side.LONG, 10_000e18, 90_000_000);
             assertTrue(engine.degradedMode(), "Real unaffordable settlement must latch degraded mode");
-            usdc.mint(address(pool), cash);
+            settlementToken.mint(address(pool), cash);
         }
         // Friday 2024-10-18: 20:29:59 live, 20:30:00 FAD-only, 21:00:00 frozen.
         uint256 now_ = regime == 0 ? 1_729_283_399 : regime == 1 ? 1_729_283_400 : 1_729_285_200;
@@ -59,9 +59,9 @@ contract WithdrawalFirewallMatrixTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(now_ - ageLimit - (tooOld ? 1 : 0)));
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(ACCOUNT);
-        uint256 custodyBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 walletBefore = usdc.balanceOf(ACCOUNT);
+        uint256 settlementBefore = clearinghouse.balanceAssets(ACCOUNT);
+        uint256 custodyBefore = settlementToken.balanceOf(address(clearinghouse));
+        uint256 walletBefore = settlementToken.balanceOf(ACCOUNT);
         bytes32 curveBefore = terminalNavBook.curveHashOf(ACCOUNT);
         bool blocked = hasPosition && (degraded || tooOld);
         if (blocked) {
@@ -74,9 +74,9 @@ contract WithdrawalFirewallMatrixTest is BasePerpTest {
         vm.prank(ACCOUNT);
         clearinghouse.withdraw(ACCOUNT, 1e6);
         uint256 paid = blocked ? 0 : 1e6;
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), settlementBefore - paid);
-        assertEq(usdc.balanceOf(address(clearinghouse)), custodyBefore - paid);
-        assertEq(usdc.balanceOf(ACCOUNT), walletBefore + paid);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), settlementBefore - paid);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), custodyBefore - paid);
+        assertEq(settlementToken.balanceOf(ACCOUNT), walletBefore + paid);
         assertEq(terminalNavBook.curveHashOf(ACCOUNT), curveBefore, "Free cash withdrawal cannot change price-risk cap");
     }
 

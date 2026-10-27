@@ -1,5 +1,6 @@
 """Release export must bind every deployment and reject incomplete or changing evidence."""
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -61,6 +62,70 @@ def forge_result(records=None, status="Success"):
     return {release.SIZE_TEST_SUITE: {"test_results": {release.SIZE_TEST: {
         "status": status, "decoded_logs": [release.LOG_PREFIX + json.dumps(item) for item in records],
     }}}}
+
+
+class SettlementConfigurationTest(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(__file__).resolve().parents[1]
+        self.manifest = json.loads((self.root / "deployments/arbitrum-sepolia-perps.template.json").read_text())
+
+    def test_new_template_selects_explicit_mock_usdg_artifact(self):
+        release.validate_settlement_configuration(self.manifest)
+        identifier = release.artifact_identifier("settlementToken", self.manifest["contracts"]["settlementToken"])
+        self.assertEqual(identifier, "DeployPerpsArbitrumSepolia.s.sol:MockUSDG")
+        inventory = release.consumer_inventory(self.root, self.manifest)
+        self.assertEqual(inventory[identifier], "script/DeployPerpsArbitrumSepolia.s.sol")
+        self.assertNotIn("DeployPerpsArbitrumSepolia.s.sol:MockUSDC", inventory)
+
+    def test_export_rejects_legacy_manifest_schema(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported perps release manifest schema"):
+            release.consumer_inventory(self.root, MANIFEST)
+
+    def test_mock_cannot_advertise_signed_deposits_bridge_funding_or_gdn_eligibility(self):
+        for section, key, value in (
+            ("settlementToken", "supportsReceiveWithAuthorization", True),
+            ("settlementToken", "supportsBridgeFunding", True),
+            ("settlementToken", "decimals", 18),
+            ("settlementToken", "isMock", False),
+            ("rewards", "status", "active"),
+            ("rewards", "holdingContracts", ["marginClearinghouse", "seniorVault"]),
+        ):
+            with self.subTest(key=key):
+                manifest = copy.deepcopy(self.manifest)
+                manifest[section][key] = value
+                with self.assertRaises(ValueError):
+                    release.consumer_inventory(self.root, manifest)
+
+    def test_schema_four_requires_explicit_new_token_entry(self):
+        self.manifest["contracts"]["mockUsdc"] = self.manifest["contracts"].pop("settlementToken")
+        with self.assertRaisesRegex(ValueError, "explicit MockUSDG"):
+            release.validate_settlement_configuration(self.manifest)
+
+    def test_rewards_can_use_a_separate_controlled_payout_wallet(self):
+        self.manifest["rewards"].update(payoutAddress="0x" + "ab" * 20, payoutController="0x" + "cd" * 20)
+        release.validate_settlement_configuration(self.manifest)
+
+    def test_reward_payments_cannot_target_any_protocol_custody_address_case_insensitively(self):
+        for key in ("marginClearinghouse", "cfdEngine", "housePool", "seniorVault", "juniorVault"):
+            with self.subTest(key=key):
+                manifest = copy.deepcopy(self.manifest)
+                manifest["contracts"][key]["address"] = "0x" + "AB" * 20
+                manifest["rewards"].update(payoutAddress="0x" + "ab" * 20, payoutController="0x" + "cd" * 20)
+                with self.assertRaisesRegex(ValueError, "separate from deployed protocol"):
+                    release.validate_settlement_configuration(manifest)
+
+    def test_payout_requires_both_valid_nonzero_addresses(self):
+        for destination, controller in (
+            ("0x" + "ab" * 20, None), (None, "0x" + "cd" * 20),
+            ("0x" + "00" * 20, "0x" + "cd" * 20),
+            ("0x" + "ab" * 20, "0x" + "00" * 20),
+            ("not-an-address", "0x" + "cd" * 20),
+        ):
+            with self.subTest(destination=destination, controller=controller):
+                manifest = copy.deepcopy(self.manifest)
+                manifest["rewards"].update(payoutAddress=destination, payoutController=controller)
+                with self.assertRaisesRegex(ValueError, "both be nonzero addresses"):
+                    release.validate_settlement_configuration(manifest)
 
 
 class DeploymentSizeEvidenceTest(unittest.TestCase):
@@ -191,6 +256,7 @@ class ExportWorkflowTest(unittest.TestCase):
         with patch.object(release, "source_fingerprint", side_effect=fingerprints or [self.fingerprint] * 3), \
              patch.object(release.subprocess, "check_output", side_effect=check_output or self.check_output), \
              patch.object(release.subprocess, "run", side_effect=run or self.run_command), \
+             patch.object(release, "validate_settlement_configuration"), \
              patch.object(release, "pinned_source", side_effect=lambda _root, _revision, path: SOURCE if path == SOURCE_PATH else (self.root / path).read_bytes()), \
              patch.object(release, "keccak256", side_effect=synthetic_keccak):
             return release.export_release(self.root, self.output, self.fingerprint["sourceCommit"])
@@ -321,7 +387,10 @@ class ExportWorkflowTest(unittest.TestCase):
         path = self.root / "packages/perps/src/interfaces/IMultiple.sol"
         path.parent.mkdir(parents=True)
         path.write_text("// interface Fake {}\n/* contract Fake2 {} */\ninterface IMultiple {}\ninterface ISecondary {}\n")
-        result = release.consumer_inventory(self.root, MANIFEST)
+        # This test exercises source declaration discovery; token schema validation
+        # is covered independently with the complete real manifest above.
+        with patch.object(release, "validate_settlement_configuration"):
+            result = release.consumer_inventory(self.root, MANIFEST)
         self.assertEqual(set(result), {IDENTIFIER, "IMultiple.sol:IMultiple", "IMultiple.sol:ISecondary"})
 
     def test_existing_output_cannot_be_overwritten(self):

@@ -48,9 +48,9 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         bytes32 bookHash;
         bytes32 curveHash;
         bytes32 bucketsHash;
-        uint256 settlementBalanceUsdc;
-        uint256 poolUsdc;
-        uint256 clearinghouseUsdc;
+        uint256 settlementBalanceAssets;
+        uint256 poolAssets;
+        uint256 clearinghouseAssets;
         uint256 markPrice;
         uint64 markTime;
     }
@@ -68,7 +68,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         uint64 nonHeadOpenId = _commitOpen(BOB, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         uint64 closeId = _commitClose(ALICE, CfdTypes.Side.LONG, 20_000e18);
         uint256 nonHeadRefund = _remainingCommittedMargin(nonHeadOpenId) + _executionBountyReserve(nonHeadOpenId);
-        uint256 bobFreeBefore = _freeSettlementUsdc(BOB);
+        uint256 bobFreeBefore = _freeSettlementAssets(BOB);
         uint256 keeperBefore = _settlementBalance(KEEPER);
 
         routerAdmin.pause();
@@ -76,7 +76,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         IPerpsKeeper(address(router)).clearRiskOffOrder(nonHeadOpenId);
 
         assertEq(router.nextExecuteId(), headOpenId, "targeted cleanup must not disturb the global head");
-        assertEq(_freeSettlementUsdc(BOB) - bobFreeBefore, nonHeadRefund, "trader receives the exact refund");
+        assertEq(_freeSettlementAssets(BOB) - bobFreeBefore, nonHeadRefund, "trader receives the exact refund");
         assertEq(_settlementBalance(KEEPER), keeperBefore, "targeted cleaner receives no bounty");
         assertEq(uint256(_orderRecord(nonHeadOpenId).status), uint256(IOrderRouterAccounting.OrderStatus.Failed));
         assertEq(uint256(_orderRecord(closeId).status), uint256(IOrderRouterAccounting.OrderStatus.Pending));
@@ -95,7 +95,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     function test_RiskOffPrecedesExpiryWithoutOracleOrKeeperBounty() public {
         uint64 orderId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         uint256 expectedRefund = _remainingCommittedMargin(orderId) + _executionBountyReserve(orderId);
-        uint256 traderFreeBefore = _freeSettlementUsdc(ALICE);
+        uint256 traderFreeBefore = _freeSettlementAssets(ALICE);
         uint256 keeperBefore = _settlementBalance(KEEPER);
         uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
 
@@ -110,7 +110,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
 
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), pythCallsBefore, "risk-off cleanup must precede oracle work");
         assertEq(_settlementBalance(KEEPER), keeperBefore, "expiry bounty policy must not override risk-off refund");
-        assertEq(_freeSettlementUsdc(ALICE) - traderFreeBefore, expectedRefund, "margin and bounty return to trader");
+        assertEq(_freeSettlementAssets(ALICE) - traderFreeBefore, expectedRefund, "margin and bounty return to trader");
         assertEq(uint256(_orderRecord(orderId).status), uint256(IOrderRouterAccounting.OrderStatus.Failed));
     }
 
@@ -217,7 +217,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
 
         NoCheckpointSnapshot memory afterState = _noCheckpointSnapshot(ALICE);
         IMarginClearinghouse.PnlIsolationBuckets memory bucketsAfter = clearinghouse.getPnlIsolationBuckets(ALICE);
-        uint256 released = reservationBefore.committedMarginUsdc + reservationBefore.executionBountyUsdc;
+        uint256 released = reservationBefore.committedMarginAssets + reservationBefore.executionBountyAssets;
 
         assertEq(afterState.positionHash, beforeState.positionHash, "position state must not mutate");
         assertEq(afterState.carryHash, beforeState.carryHash, "carry state must not checkpoint");
@@ -225,21 +225,24 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         assertEq(afterState.curveHash, beforeState.curveHash, "account curve must not resynchronize");
         assertEq(afterState.markPrice, beforeState.markPrice, "cached mark price must not mutate");
         assertEq(afterState.markTime, beforeState.markTime, "cached mark time must not mutate");
-        assertEq(afterState.settlementBalanceUsdc, beforeState.settlementBalanceUsdc, "gross settlement unchanged");
-        assertEq(afterState.poolUsdc, beforeState.poolUsdc, "pool custody unchanged");
-        assertEq(afterState.clearinghouseUsdc, beforeState.clearinghouseUsdc, "clearinghouse custody unchanged");
+        assertEq(afterState.settlementBalanceAssets, beforeState.settlementBalanceAssets, "gross settlement unchanged");
+        assertEq(afterState.poolAssets, beforeState.poolAssets, "pool custody unchanged");
+        assertEq(afterState.clearinghouseAssets, beforeState.clearinghouseAssets, "clearinghouse custody unchanged");
         assertEq(_settlementBalance(KEEPER), keeperBefore, "cleaner receives no settlement");
 
-        assertEq(bucketsAfter.settlementBalanceUsdc, bucketsBefore.settlementBalanceUsdc);
-        assertEq(bucketsAfter.pnlPledgeUsdc, bucketsBefore.pnlPledgeUsdc);
-        assertEq(bucketsAfter.liquidationReserveUsdc, bucketsBefore.liquidationReserveUsdc);
-        assertEq(bucketsBefore.orderMarginUsdc - bucketsAfter.orderMarginUsdc, reservationBefore.committedMarginUsdc);
+        assertEq(bucketsAfter.settlementBalanceAssets, bucketsBefore.settlementBalanceAssets);
+        assertEq(bucketsAfter.pnlPledgeAssets, bucketsBefore.pnlPledgeAssets);
+        assertEq(bucketsAfter.liquidationReserveAssets, bucketsBefore.liquidationReserveAssets);
         assertEq(
-            bucketsBefore.actionReserveUsdc - bucketsAfter.actionReserveUsdc, reservationBefore.executionBountyUsdc
+            bucketsBefore.orderMarginAssets - bucketsAfter.orderMarginAssets, reservationBefore.committedMarginAssets
         );
-        assertEq(bucketsAfter.vpiRebateReserveUsdc, bucketsBefore.vpiRebateReserveUsdc);
-        assertEq(bucketsBefore.totalLockedUsdc - bucketsAfter.totalLockedUsdc, released);
-        assertEq(bucketsAfter.freeSettlementUsdc - bucketsBefore.freeSettlementUsdc, released);
+        assertEq(
+            bucketsBefore.actionReserveAssets - bucketsAfter.actionReserveAssets,
+            reservationBefore.executionBountyAssets
+        );
+        assertEq(bucketsAfter.vpiRebateReserveAssets, bucketsBefore.vpiRebateReserveAssets);
+        assertEq(bucketsBefore.totalLockedAssets - bucketsAfter.totalLockedAssets, released);
+        assertEq(bucketsAfter.freeSettlementAssets - bucketsBefore.freeSettlementAssets, released);
         _assertNoCheckpointLogs(logs);
 
         uint64 deferredCarryTimestamp = _lastCarryTimestamp(ALICE);
@@ -328,8 +331,8 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         assertEq(preview.riskOffCutoff, routerAdmin.riskOffOrderCutoff());
         assertLt(preview.riskOffCutoff, laterOpenId);
         assertEq(preview.refundedOrderCount, 1, "Close and post-cutoff open must not be refunded");
-        assertEq(preview.releasedCommittedMarginUsdc, 2000e6);
-        assertEq(preview.releasedBountyUsdc, pending.executionBountyUsdc);
+        assertEq(preview.releasedCommittedMarginAssets, 2000e6);
+        assertEq(preview.releasedBountyAssets, pending.executionBountyAssets);
         assertEq(_bucketsHash(ALICE), bucketsBefore, "Preview must not unlock live custody");
         assertEq(router.pendingOrderCounts(ALICE), pendingBefore, "Preview must not mutate the queue");
         router.clearRiskOffOrder(invalidOpenId);
@@ -338,14 +341,14 @@ contract OrderRouterRiskOffTest is BasePerpTest {
             keccak256(abi.encode(engineLens.previewLiquidation(ALICE, UNSAFE_LONG_PRICE))),
             "All liquidation fields must match actual cleanup followed by canonical planning"
         );
-        uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
+        uint256 keeperBefore = clearinghouse.balanceAssets(KEEPER);
         bytes[] memory update = _mockPythUpdateData(UNSAFE_LONG_PRICE);
         vm.prank(KEEPER);
         router.executeLiquidation(ALICE, update);
         assertEq(_positionSize(ALICE), 0);
-        assertEq(clearinghouse.balanceUsdc(KEEPER) - keeperBefore, preview.liquidation.keeperBountyUsdc);
-        assertEq(clearinghouse.balanceUsdc(ALICE), preview.liquidation.settlementRetainedUsdc);
-        assertEq(engine.traderClaimBalanceUsdc(ALICE), preview.liquidation.traderClaimBalanceUsdc);
+        assertEq(clearinghouse.balanceAssets(KEEPER) - keeperBefore, preview.liquidation.keeperBountyAssets);
+        assertEq(clearinghouse.balanceAssets(ALICE), preview.liquidation.settlementRetainedAssets);
+        assertEq(engine.traderClaimBalanceAssets(ALICE), preview.liquidation.traderClaimBalanceAssets);
     }
 
     function test_RouterPreviewIncludesPendingProtectionRefundInSyntheticPositionState() public {
@@ -357,14 +360,14 @@ contract OrderRouterRiskOffTest is BasePerpTest {
             executionWindowSeconds: uint32(router.maxExecutionWindowSeconds()),
             allowedExecutionModes: 1 | 2 | 4,
             expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
-            maxExecutionBountyUsdc: type(uint256).max,
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max,
+            maxExecutionBountyAssets: type(uint256).max,
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max,
             maxPostPositionSize: type(uint256).max,
-            minPostSettlementBalanceUsdc: 0,
-            minPostPositionEquityUsdc: 0,
+            minPostSettlementBalanceAssets: 0,
+            minPostPositionEquityAssets: 0,
             maxPostLeverageBps: type(uint32).max
         });
         request.side = CfdTypes.Side.LONG;
@@ -375,10 +378,10 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         params.takeProfitTriggerPrice = 90_000_000;
         params.stopLossTriggerPrice = 110_000_000;
         params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max
         });
         IPositionProtectionActions protectionActions =
             IPositionProtectionActions(address(router.positionProtectionBook()));
@@ -386,7 +389,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         (uint64 orderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(request, params);
         uint256 protectionBounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionTrigger, protectionId)
-        .amountUsdc;
+        .amountAssets;
         assertGt(protectionBounty, 0, "Fixture must exercise the protection refund");
         uint256 orderBounty = _executionBountyReserve(orderId);
         // Public protected-open commitment requires a flat account. Direct Engine setup intentionally isolates
@@ -396,10 +399,10 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         ICfdEngineLens.RouterLiquidationPreview memory preview =
             engineLens.previewRouterLiquidation(ALICE, UNSAFE_LONG_PRICE);
         assertEq(preview.refundedOrderCount, 1);
-        assertEq(preview.releasedBountyUsdc, orderBounty + protectionBounty);
-        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        assertEq(preview.releasedBountyAssets, orderBounty + protectionBounty);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
         router.clearRiskOffOrder(orderId);
-        assertEq(_freeSettlementUsdc(ALICE) - freeBefore, 2000e6 + preview.releasedBountyUsdc);
+        assertEq(_freeSettlementAssets(ALICE) - freeBefore, 2000e6 + preview.releasedBountyAssets);
         assertEq(
             keccak256(abi.encode(preview.liquidation)),
             keccak256(abi.encode(engineLens.previewLiquidation(ALICE, UNSAFE_LONG_PRICE)))
@@ -412,7 +415,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         ICfdEngineLens.RouterLiquidationPreview memory preview =
             engineLens.previewRouterLiquidation(ALICE, UNSAFE_LONG_PRICE);
         assertEq(preview.refundedOrderCount, 0);
-        assertEq(preview.releasedBountyUsdc, 0);
+        assertEq(preview.releasedBountyAssets, 0);
         assertEq(
             keccak256(abi.encode(preview.liquidation)),
             keccak256(abi.encode(engineLens.previewLiquidation(ALICE, UNSAFE_LONG_PRICE)))
@@ -427,10 +430,11 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         // Margin is exhausted by carry both before and after refund. A prior same-account price claim keeps price
         // health solvent once the refunded free settlement covers the residual carry obligation.
         bytes32 oldHash = terminalNavBook.curveHashOf(RESTORED);
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(RESTORED).checked_write(1000e6);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(1000e6);
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(RESTORED)
-            .checked_write(clearinghouse.pnlPledgeUsdc(RESTORED) + 20e6);
+        stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(RESTORED)
+            .checked_write(1000e6);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(1000e6);
+        stdstore.target(address(engine)).sig("unsettledCarryAssets(address)").with_key(RESTORED)
+            .checked_write(clearinghouse.pnlPledgeAssets(RESTORED) + 20e6);
         vm.prank(address(engine));
         terminalNavBook.syncFromEngine(RESTORED, oldHash);
     }
@@ -451,7 +455,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
             engineLens.previewRouterLiquidation(RESTORED, MARK_PRICE);
         assertFalse(routerPreview.liquidation.liquidatable, "Router preview must include carry-covering refunds");
         assertEq(routerPreview.refundedOrderCount, 1);
-        assertEq(routerPreview.releasedCommittedMarginUsdc, 49e6);
+        assertEq(routerPreview.releasedCommittedMarginAssets, 49e6);
         uint256 branch = vm.snapshotState();
 
         router.clearRiskOffOrder(invalidOpenId);
@@ -522,7 +526,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
             "Router-aware preview must predict the batch refund-and-skip result"
         );
         IOrderRouterAccounting.AccountReservationView memory reservationBefore = router.getAccountReservations(RESTORED);
-        uint256 freeBefore = _freeSettlementUsdc(RESTORED);
+        uint256 freeBefore = _freeSettlementAssets(RESTORED);
         uint256 keeperBefore = _settlementBalance(KEEPER);
         uint256 treasuryBefore = _settlementBalance(engine.protocolTreasury());
         address[] memory accounts = new address[](1);
@@ -543,8 +547,8 @@ contract OrderRouterRiskOffTest is BasePerpTest {
             "embedded refund must remain committed under delegatecall"
         );
         assertEq(
-            _freeSettlementUsdc(RESTORED) - freeBefore,
-            reservationBefore.committedMarginUsdc + reservationBefore.executionBountyUsdc,
+            _freeSettlementAssets(RESTORED) - freeBefore,
+            reservationBefore.committedMarginAssets + reservationBefore.executionBountyAssets,
             "batch skip must preserve the complete risk-off refund"
         );
         assertEq(_settlementBalance(KEEPER), keeperBefore, "solvent skip pays no liquidation bounty");
@@ -603,14 +607,15 @@ contract OrderRouterRiskOffTest is BasePerpTest {
                 uint256 size,
                 uint256 margin,
                 uint256 entryPrice,
-                uint256 maxProfitUsdc,
+                uint256 maxProfitAssets,
                 CfdTypes.Side side,
                 uint64 lastUpdateTime,
                 int256 vpiAccrued
             ) = engine.positions(account);
-            coreHash = keccak256(abi.encode(size, margin, entryPrice, maxProfitUsdc, side, lastUpdateTime, vpiAccrued));
+            coreHash =
+                keccak256(abi.encode(size, margin, entryPrice, maxProfitAssets, side, lastUpdateTime, vpiAccrued));
         }
-        return keccak256(abi.encode(coreHash, engine.positionEntryCostUsdcAtoms(account)));
+        return keccak256(abi.encode(coreHash, engine.positionEntryCostAssetAtoms(account)));
     }
 
     function _carryHash(
@@ -622,7 +627,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
                 borrowBase,
                 carryIndex,
                 carryTimestamp,
-                engine.unsettledCarryUsdc(account),
+                engine.unsettledCarryAssets(account),
                 engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)),
                 engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG)),
                 engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)),
@@ -650,9 +655,9 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         state.bookHash = _bookHash();
         state.curveHash = terminalNavBook.curveHashOf(account);
         state.bucketsHash = _bucketsHash(account);
-        state.settlementBalanceUsdc = clearinghouse.balanceUsdc(account);
-        state.poolUsdc = usdc.balanceOf(address(pool));
-        state.clearinghouseUsdc = usdc.balanceOf(address(clearinghouse));
+        state.settlementBalanceAssets = clearinghouse.balanceAssets(account);
+        state.poolAssets = settlementToken.balanceOf(address(pool));
+        state.clearinghouseAssets = settlementToken.balanceOf(address(clearinghouse));
         state.markPrice = engine.lastMarkPrice();
         state.markTime = engine.lastMarkTime();
     }
@@ -687,9 +692,9 @@ contract OrderRouterRiskOffTest is BasePerpTest {
                 router.getAccountReservations(account),
                 router.accountHeadOrderId(account),
                 router.pendingOrderCounts(account),
-                clearinghouse.balanceUsdc(KEEPER),
-                clearinghouse.balanceUsdc(engine.protocolTreasury()),
-                usdc.balanceOf(address(pool))
+                clearinghouse.balanceAssets(KEEPER),
+                clearinghouse.balanceAssets(engine.protocolTreasury()),
+                settlementToken.balanceOf(address(pool))
             )
         );
     }
@@ -707,7 +712,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
             }
             uint256 index = uint256(logs[i].topics[1]);
             address eventAccount = address(uint160(uint256(logs[i].topics[2])));
-            (IOrderRouterErrors.LiquidationBatchResult result, uint256 keeperBountyUsdc, bytes4 errorSelector) =
+            (IOrderRouterErrors.LiquidationBatchResult result, uint256 keeperBountyAssets, bytes4 errorSelector) =
                 abi.decode(logs[i].data, (IOrderRouterErrors.LiquidationBatchResult, uint256, bytes4));
             if (index == 0 && eventAccount == account) {
                 assertEq(
@@ -715,7 +720,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
                     uint256(IOrderRouterErrors.LiquidationBatchResult.SkippedSolvent),
                     "restored solvency must use the canonical batch classification"
                 );
-                assertEq(keeperBountyUsdc, 0, "restored-solvency sentinel must not report a bounty");
+                assertEq(keeperBountyAssets, 0, "restored-solvency sentinel must not report a bounty");
                 assertEq(errorSelector, bytes4(0), "sentinel classification must not report a revert selector");
                 return;
             }

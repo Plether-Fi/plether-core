@@ -12,7 +12,7 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 /// @title CfdEnginePlanner
 /// @notice Stateless external wrapper around the deterministic CFD engine planning library.
 /// @dev The planner performs no storage reads, authorization, oracle verification, or input authentication. Callers
-///      must supply canonical, internally consistent snapshots and orders. Unless stated otherwise, USDC amounts use
+///      must supply canonical, internally consistent snapshots and orders. Unless stated otherwise, settlement token amounts use
 ///      6 decimals, prices use 8 decimals, sizes use 18 decimals, and timestamps are Unix seconds.
 contract CfdEnginePlanner is ICfdEnginePlanner {
 
@@ -40,34 +40,34 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         uint256 storedIndex,
         uint64 previousTimestamp,
         uint256 currentTimestamp,
-        uint256 borrowBaseUsdc,
-        uint256 poolAssetsUsdc,
+        uint256 borrowBaseAssets,
+        uint256 poolAssets,
         uint256 baseCarryBps
     ) external pure returns (uint256 index) {
         return PositionRiskAccountingLib.computeCurrentCarryIndex(
-            storedIndex, previousTimestamp, currentTimestamp, borrowBaseUsdc, poolAssetsUsdc, baseCarryBps
+            storedIndex, previousTimestamp, currentTimestamp, borrowBaseAssets, poolAssets, baseCarryBps
         );
     }
 
     /// @inheritdoc ICfdEnginePlanner
-    function computeIndexedCarryUsdc(
-        uint256 borrowBaseUsdc,
+    function computeIndexedCarryAssets(
+        uint256 borrowBaseAssets,
         uint256 carryIndexDelta
-    ) external pure returns (uint256 carryUsdc) {
-        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, carryIndexDelta);
+    ) external pure returns (uint256 carryAssets) {
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, carryIndexDelta);
     }
 
     /// @inheritdoc ICfdEnginePlanner
     function isExactPriceRiskLiquidatable(
         CfdTypes.Position memory pos,
-        uint256 entryCostUsdcAtoms,
+        uint256 entryCostAssetAtoms,
         uint256 price,
         uint256 capPrice,
-        uint256 priceCollateralUsdc,
+        uint256 priceCollateralAssets,
         uint256 requiredBps
     ) external pure returns (bool liquidatable) {
         return PositionRiskAccountingLib.buildExactPriceRiskState(
-            pos, entryCostUsdcAtoms, price, capPrice, priceCollateralUsdc, requiredBps
+            pos, entryCostAssetAtoms, price, capPrice, priceCollateralAssets, requiredBps
         )
         .liquidatable;
     }

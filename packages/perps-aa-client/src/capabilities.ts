@@ -3,7 +3,7 @@ import type { Address } from "viem";
 import type { PerpsActionKind } from "./types.js";
 
 export interface WalletCapabilities {
-  /** EIP-712 signing is needed only when USDC starts in the owner EOA. */
+  /** Token EIP-712 signing is needed only for the authorized owner-wallet deposit route. */
   readonly canSignTypedData: boolean;
 }
 
@@ -19,6 +19,7 @@ export interface SponsorCapabilities {
 }
 
 export interface TokenCapabilities {
+  /** Read from verified deployment metadata; false for MockUSDG. */
   readonly supportsReceiveWithAuthorization: boolean;
 }
 
@@ -33,6 +34,7 @@ export interface PerpsCapabilities {
   readonly ownerWalletRemainsConnected: true;
   /** Protocol state is keyed by the smart account because contracts use msg.sender. */
   readonly smartAccountIsCanonicalTrader: true;
+  /** Owner-wallet EIP-3009 route only; does not gate deposits from the smart account's existing balance. */
   readonly firstDeposit: ActionCapability;
   readonly placeOrder: ActionCapability;
   readonly cancelOrder: ActionCapability;
@@ -72,8 +74,8 @@ export function derivePerpsCapabilities(input: {
         reason: !batch
           ? "The selected smart account cannot atomically batch the deposit."
           : !input.wallet.canSignTypedData
-            ? "The connected wallet cannot sign the USDC EIP-3009 authorization."
-            : "Configured USDC does not support receiveWithAuthorization.",
+            ? "The connected wallet cannot sign the settlement token's EIP-3009 authorization."
+            : "The configured settlement token does not support receiveWithAuthorization.",
       }),
       ...(firstDepositSupported && !sponsorship("deposit") && {
         reason: "Gas sponsorship is currently unavailable for deposits.",

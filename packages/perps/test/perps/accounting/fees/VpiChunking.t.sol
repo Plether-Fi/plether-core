@@ -22,11 +22,11 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 
 import {Test} from "forge-std/Test.sol";
 
-import {VpiMockUSDC6} from "../../shared/CfdEngineTestBase.sol";
+import {VpiMockSettlementToken6} from "../../shared/CfdEngineTestBase.sol";
 
 contract VpiChunkingTest is Test {
 
-    VpiMockUSDC6 usdc;
+    VpiMockSettlementToken6 settlementToken;
     CfdEngine engine;
     HousePool pool;
     TrancheVault juniorVault;
@@ -47,7 +47,7 @@ contract VpiChunkingTest is Test {
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
             juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
-            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorExposureAssets: type(uint256).max - 1,
             maxSeniorShareBps: 9999
         });
         pool.proposePoolConfig(config);
@@ -56,7 +56,7 @@ contract VpiChunkingTest is Test {
     }
 
     function setUp() public {
-        usdc = new VpiMockUSDC6();
+        settlementToken = new VpiMockSettlementToken6();
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 0.001e18,
@@ -65,25 +65,27 @@ contract VpiChunkingTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
-        engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, params, 50);
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
+        engine = new CfdEngine(address(settlementToken), address(clearinghouse), CAP_PRICE, params, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
         TerminalNavBookV2 terminalBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
-        TrancheVault seniorVault =
-            new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "seniorUSDC", 0, address(0));
-        juniorVault =
-            new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "juniorUSDC", 0, address(0));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        TrancheVault seniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), true, "Senior LP", "seniorAssets", 0, address(0)
+        );
+        juniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), false, "Junior LP", "juniorAssets", 0, address(0)
+        );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));
@@ -93,14 +95,14 @@ contract VpiChunkingTest is Test {
         _configureBroadSeniorCapacity();
         vm.warp(1_709_532_000);
 
-        usdc.mint(address(this), 2000e6);
-        usdc.approve(address(pool), 2000e6);
+        settlementToken.mint(address(this), 2000e6);
+        settlementToken.approve(address(pool), 2000e6);
         pool.initializeSeedPosition(false, 1000e6, address(this));
         pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
 
-        usdc.mint(address(this), 10_000_000 * 1e6);
-        usdc.approve(address(juniorVault), type(uint256).max);
+        settlementToken.mint(address(this), 10_000_000 * 1e6);
+        settlementToken.approve(address(juniorVault), type(uint256).max);
         uint256 requestId = juniorVault.requestDeposit(5_000_000 * 1e6, address(this), address(this));
         vm.warp(pool.lpEpochStart(requestId));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -114,9 +116,9 @@ contract VpiChunkingTest is Test {
         uint256 amount
     ) internal {
         address user = account;
-        usdc.mint(user, amount);
+        settlementToken.mint(user, amount);
         vm.startPrank(user);
-        usdc.approve(address(clearinghouse), amount);
+        settlementToken.approve(address(clearinghouse), amount);
         clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
@@ -201,14 +203,14 @@ contract VpiChunkingTest is Test {
 
         (uint256 mmSize,,,,,,) = engine.positions(mmAccount);
         _close(mmAccount, CfdTypes.Side.LONG, mmSize, 1e8, DEPTH);
-        uint256 mmUsdcAfter = clearinghouse.balanceUsdc(mmAccount);
+        uint256 mmAssetsAfter = clearinghouse.balanceAssets(mmAccount);
 
         uint256 totalDeposited = 500_000 * 1e6;
         uint256 approxExecFees = (500_000 * 1e6 * 4 / 10_000) * 2;
         uint256 breakeven = totalDeposited - approxExecFees;
 
         assertLe(
-            mmUsdcAfter,
+            mmAssetsAfter,
             breakeven,
             "Round-trip skew healing should not create positive net VPI beyond the trader's fee-adjusted breakeven"
         );
@@ -224,9 +226,9 @@ contract VpiChunkingTest is Test {
         _deposit(aliceAccount, 500_000 * 1e6);
         _open(aliceAccount, CfdTypes.Side.LONG, 400_000 * 1e18, 100_000 * 1e6, 1e8, DEPTH);
 
-        uint256 aliceBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 aliceBefore = clearinghouse.balanceAssets(aliceAccount);
         _close(aliceAccount, CfdTypes.Side.LONG, 400_000 * 1e18, 1e8, DEPTH);
-        uint256 aliceAfter = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 aliceAfter = clearinghouse.balanceAssets(aliceAccount);
         int256 aliceNet = int256(aliceAfter) - int256(aliceBefore);
 
         _close(skewerAccount, CfdTypes.Side.SHORT, 500_000 * 1e18, 1e8, DEPTH);
@@ -236,10 +238,10 @@ contract VpiChunkingTest is Test {
         _deposit(bobAccount, 500_000 * 1e6);
         _open(bobAccount, CfdTypes.Side.LONG, 400_000 * 1e18, 100_000 * 1e6, 1e8, DEPTH);
 
-        uint256 bobBefore = clearinghouse.balanceUsdc(bobAccount);
+        uint256 bobBefore = clearinghouse.balanceAssets(bobAccount);
         _close(bobAccount, CfdTypes.Side.LONG, 200_000 * 1e18, 1e8, DEPTH);
         _close(bobAccount, CfdTypes.Side.LONG, 200_000 * 1e18, 1e8, DEPTH);
-        uint256 bobAfter = clearinghouse.balanceUsdc(bobAccount);
+        uint256 bobAfter = clearinghouse.balanceAssets(bobAccount);
         int256 bobNet = int256(bobAfter) - int256(bobBefore);
 
         int256 diff = aliceNet > bobNet ? aliceNet - bobNet : bobNet - aliceNet;

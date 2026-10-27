@@ -23,7 +23,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     address private constant ACCOUNT = address(0xA11CE);
     address private constant OTHER_ACCOUNT = address(0xB0B);
     address private constant EXECUTOR = address(0xE7EC);
-    uint256 private constant EXECUTION_BOUNTY_USDC = 1e6;
+    uint256 private constant EXECUTION_BOUNTY_ASSETS = 1e6;
     address private constant POLICY_EVALUATOR = address(0xE0A1);
     address private constant EXECUTION_SIDECAR = address(0xEEC1);
     address private constant ORACLE = address(0x0ACE);
@@ -55,7 +55,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
 
     function test_RegisterRejectsUnsetTerminalNavBookButPreservesExactReplay() public {
         OrderV3Types.OrderRequest memory original = _request(bytes32("bound"));
-        book.registerPending(ACCOUNT, 1, original, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 1, original, EXECUTION_BOUNTY_ASSETS);
 
         vm.mockCall(ENGINE, abi.encodeWithSignature("terminalNavBook()"), abi.encode(address(0)));
         (uint64 orderId,, bool replayed) = book.registerPending(ACCOUNT, 99, original, type(uint256).max);
@@ -64,7 +64,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
 
         OrderV3Types.OrderRequest memory fresh = _request(bytes32("unbound"));
         vm.expectRevert(IOrderRouterErrors.OrderRouter__TerminalNavBookUnavailable.selector);
-        book.registerPending(ACCOUNT, 2, fresh, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 2, fresh, EXECUTION_BOUNTY_ASSETS);
     }
 
     function testFuzz_CompactCommitmentRoundTripsWithoutNarrowingBalances(
@@ -75,17 +75,17 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     ) public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("compact-commitment"));
-        request.bounds.maxExecutionBountyUsdc = type(uint96).max;
-        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
-        request.bounds.maxActionChargeUsdc = type(uint256).max;
+        request.bounds.maxExecutionBountyAssets = type(uint96).max;
+        request.bounds.maxGrossAccountDebitAssets = type(uint256).max;
+        request.bounds.maxActionChargeAssets = type(uint256).max;
         book.registerPending(ACCOUNT, 1, request, freeBounty);
         CfdEnginePlanTypes.CloseCommitment memory effects;
-        effects.carryCollectedUsdc = carry;
-        effects.carryOutstandingUsdc = outstanding;
-        effects.bountyFromFreeUsdc = freeBounty;
-        effects.settlementAfterUsdc = (uint256(1) << 200) + cash;
-        effects.settlementBeforeUsdc = effects.settlementAfterUsdc + carry;
-        effects.freeSettlementAfterUsdc = cash;
+        effects.carryCollectedAssets = carry;
+        effects.carryOutstandingAssets = outstanding;
+        effects.bountyFromFreeAssets = freeBounty;
+        effects.settlementAfterAssets = (uint256(1) << 200) + cash;
+        effects.settlementBeforeAssets = effects.settlementAfterAssets + carry;
+        effects.freeSettlementAfterAssets = cash;
         book.recordCommitment(1, effects);
         OrderV3Types.PendingIntent memory pending = book.pendingIntent(1);
         assertEq(keccak256(abi.encode(pending.commitment)), keccak256(abi.encode(effects)));
@@ -94,51 +94,51 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function test_CompactCommitmentRejectsInconsistentReconstruction() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("invalid-commitment"));
-        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_ASSETS);
         CfdEnginePlanTypes.CloseCommitment memory effects;
-        effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
-        effects.carryCollectedUsdc = 1;
+        effects.bountyFromFreeAssets = EXECUTION_BOUNTY_ASSETS;
+        effects.carryCollectedAssets = 1;
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
         book.recordCommitment(1, effects);
-        effects.settlementBeforeUsdc = 1;
-        effects.bountyFromFreeUsdc -= 1;
+        effects.settlementBeforeAssets = 1;
+        effects.bountyFromFreeAssets -= 1;
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
         book.recordCommitment(1, effects);
     }
 
     function test_CommitmentBountyMustMatchPendingEntitlement() public {
         OrderV3Types.OrderRequest memory request = _request(bytes32("bounty-domain"));
-        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_ASSETS);
         CfdEnginePlanTypes.CloseCommitment memory effects;
-        effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC - 1;
+        effects.bountyFromFreeAssets = EXECUTION_BOUNTY_ASSETS - 1;
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
         book.recordCommitment(1, effects);
-        effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
+        effects.bountyFromFreeAssets = EXECUTION_BOUNTY_ASSETS;
         book.recordCommitment(1, effects);
-        assertEq(book.pendingIntent(1).commitment.bountyFromFreeUsdc, EXECUTION_BOUNTY_USDC);
+        assertEq(book.pendingIntent(1).commitment.bountyFromFreeAssets, EXECUTION_BOUNTY_ASSETS);
     }
 
     function test_FundingValidatorRejectsWrongFreeAmount() public {
         OrderV3Types.OrderRequest memory request = _request(bytes32("free-funding"));
-        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_ASSETS);
         CfdEnginePlanTypes.CloseCommitment memory effects;
-        effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
+        effects.bountyFromFreeAssets = EXECUTION_BOUNTY_ASSETS;
         book.recordCommitment(1, effects);
         IMarginClearinghouse.BountyReservation memory reservation = IMarginClearinghouse.BountyReservation(
             ACCOUNT,
-            uint96(EXECUTION_BOUNTY_USDC),
+            uint96(EXECUTION_BOUNTY_ASSETS),
             IMarginClearinghouse.BountyReservationState.Active,
-            uint96(EXECUTION_BOUNTY_USDC)
+            uint96(EXECUTION_BOUNTY_ASSETS)
         );
         vm.mockCall(
             CLEARINGHOUSE, abi.encodeWithSelector(IMarginClearinghouse.validateBountyReservation.selector), bytes("")
         );
         _mockReservation(reservation);
         book.validateBountyFunding(1);
-        reservation.freeFundedUsdc -= 1;
+        reservation.freeFundedAssets -= 1;
         _mockReservation(reservation);
         _expectFundingMismatch();
-        reservation.freeFundedUsdc += 2;
+        reservation.freeFundedAssets += 2;
         _mockReservation(reservation);
         _expectFundingMismatch();
     }
@@ -172,9 +172,9 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         receipt.bountyRecipient = EXECUTOR;
         _expectInvalidTerminal(receipt);
         receipt.bountyRecipient = address(0);
-        receipt.bounty.bountyPaidUsdc = 1;
+        receipt.bounty.bountyPaidAssets = 1;
         _expectInvalidTerminal(receipt);
-        receipt.bounty.bountyPaidUsdc = 0;
+        receipt.bounty.bountyPaidAssets = 0;
         book.finalize(receipt);
         assertTrue(book.verifyReceipt(receipt, uint64(block.timestamp)));
     }
@@ -199,7 +199,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function _zeroBounty(
         OrderV3Types.OrderReceipt memory receipt
     ) private pure {
-        receipt.bountyUsdc = 0;
+        receipt.bountyAssets = 0;
         delete receipt.bounty;
         receipt.bountyRecipient = address(0);
         receipt.bountyDisposition = OrderV3Types.BountyDisposition.None;
@@ -215,40 +215,40 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function test_MismatchRecoveryUsesExactIndependentFundingAfterEntitlementCorruption() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("corrupt-reported-entitlement"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_ASSETS);
         CfdEnginePlanTypes.CloseCommitment memory effects;
-        effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
+        effects.bountyFromFreeAssets = EXECUTION_BOUNTY_ASSETS;
         book.recordCommitment(1, effects);
         vm.record();
         book.pendingIntent(1);
         (bytes32[] memory reads,) = vm.accesses(address(book));
         uint256 corrupted;
         for (uint256 i; i < reads.length; ++i) {
-            if (vm.load(address(book), reads[i]) == bytes32(EXECUTION_BOUNTY_USDC)) {
-                vm.store(address(book), reads[i], bytes32(EXECUTION_BOUNTY_USDC + 1));
-                if (book.pendingIntent(1).executionBountyUsdc == EXECUTION_BOUNTY_USDC + 1) {
+            if (vm.load(address(book), reads[i]) == bytes32(EXECUTION_BOUNTY_ASSETS)) {
+                vm.store(address(book), reads[i], bytes32(EXECUTION_BOUNTY_ASSETS + 1));
+                if (book.pendingIntent(1).executionBountyAssets == EXECUTION_BOUNTY_ASSETS + 1) {
                     ++corrupted;
                     break;
                 }
-                vm.store(address(book), reads[i], bytes32(EXECUTION_BOUNTY_USDC));
+                vm.store(address(book), reads[i], bytes32(EXECUTION_BOUNTY_ASSETS));
             }
         }
         assertEq(corrupted, 1, "fault changes only the standalone reported entitlement word");
-        assertEq(book.pendingIntent(1).commitment.bountyFromFreeUsdc, effects.bountyFromFreeUsdc);
+        assertEq(book.pendingIntent(1).commitment.bountyFromFreeAssets, effects.bountyFromFreeAssets);
         vm.warp(uint256(book.orderTiming(1).executionDeadline) + 1);
         OrderV3Types.OrderReceipt memory receipt = _riskOffReceipt(1, request, intentHash);
         receipt.reason = OrderV3Types.TerminalReason.ExpiredReservationMismatch;
         receipt.commitment = effects;
-        receipt.bounty.bountyEntitlementUsdc = EXECUTION_BOUNTY_USDC + 1;
+        receipt.bounty.bountyEntitlementAssets = EXECUTION_BOUNTY_ASSETS + 1;
         receipt.bounty.discrepancy = OrderV3Types.ReservationDiscrepancy.Amount;
-        receipt.bountyUsdc = EXECUTION_BOUNTY_USDC - 1;
-        receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
+        receipt.bountyAssets = EXECUTION_BOUNTY_ASSETS - 1;
+        receipt.bounty.bountyRefundedAssets = receipt.bountyAssets;
         vm.expectRevert(
             abi.encodeWithSelector(IOrderLifecycleBook.OrderLifecycleBook__ReceiptIdentityMismatch.selector, uint64(1))
         );
         book.finalize(receipt);
-        receipt.bountyUsdc = EXECUTION_BOUNTY_USDC;
-        receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
+        receipt.bountyAssets = EXECUTION_BOUNTY_ASSETS;
+        receipt.bounty.bountyRefundedAssets = receipt.bountyAssets;
         book.finalize(receipt);
         assertTrue(book.verifyReceipt(receipt, uint64(block.timestamp)));
     }
@@ -269,14 +269,14 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
             executionWindowSeconds: type(uint32).max,
             allowedExecutionModes: type(uint8).max,
             expectedConfigHash: bytes32(type(uint256).max),
-            maxExecutionBountyUsdc: type(uint256).max,
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max,
+            maxExecutionBountyAssets: type(uint256).max,
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max,
             maxPostPositionSize: type(uint256).max,
-            minPostSettlementBalanceUsdc: type(uint256).max,
-            minPostPositionEquityUsdc: type(uint256).max,
+            minPostSettlementBalanceAssets: type(uint256).max,
+            minPostPositionEquityAssets: type(uint256).max,
             maxPostLeverageBps: type(uint32).max
         });
         _roundTripBounds(bounds, 2);
@@ -315,7 +315,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         assertEq(
             book.INTENT_TYPEHASH(),
             keccak256(
-                "PletherOrderIntentV3(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint64 submitBy,uint32 executionWindowSeconds,uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyUsdc,uint256 maxExecutionNotionalUsdc,uint256 maxGrossAccountDebitUsdc,uint256 maxActionChargeUsdc,uint256 maxExplicitFeesUsdc,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceUsdc,uint256 minPostPositionEquityUsdc,uint32 maxPostLeverageBps)"
+                "PletherOrderIntentV3(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint64 submitBy,uint32 executionWindowSeconds,uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyAssets,uint256 maxExecutionNotionalAssets,uint256 maxGrossAccountDebitAssets,uint256 maxActionChargeAssets,uint256 maxExplicitFeesAssets,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceAssets,uint256 minPostPositionEquityAssets,uint32 maxPostLeverageBps)"
             )
         );
         assertEq(
@@ -394,7 +394,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         OrderV3Types.OrderRequest memory request = _request(bytes32("client-1"));
 
         (uint64 orderId, bytes32 intentHash, bool replayed) =
-            book.registerPending(ACCOUNT, 17, request, EXECUTION_BOUNTY_USDC);
+            book.registerPending(ACCOUNT, 17, request, EXECUTION_BOUNTY_ASSETS);
 
         assertEq(orderId, 17);
         assertFalse(replayed);
@@ -408,7 +408,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         assertEq(pending.account, ACCOUNT);
         assertEq(pending.clientOrderId, request.clientOrderId);
         assertEq(pending.intentHash, intentHash);
-        assertEq(pending.executionBountyUsdc, EXECUTION_BOUNTY_USDC);
+        assertEq(pending.executionBountyAssets, EXECUTION_BOUNTY_ASSETS);
         _assertBoundsEq(pending.bounds, request.bounds);
         _assertBoundsEq(book.pendingPolicy(17), request.bounds);
 
@@ -422,7 +422,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         OrderV3Types.OrderRequest memory request =
             _request(OrderV3Types.protocolClientOrderId(keccak256("protection-attempt")));
         request.bounds.expectedConfigHash = bytes32(0);
-        book.registerPending(ACCOUNT, 71, request, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 71, request, EXECUTION_BOUNTY_ASSETS);
 
         vm.prank(address(0xBAD));
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__Unauthorized.selector);
@@ -444,7 +444,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         book.registerProtectionAttempt(404);
 
         OrderV3Types.OrderRequest memory publicRequest = _request(bytes32("public-order"));
-        book.registerPending(ACCOUNT, 72, publicRequest, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 72, publicRequest, EXECUTION_BOUNTY_ASSETS);
         vm.expectRevert(
             abi.encodeWithSelector(IOrderLifecycleBook.OrderLifecycleBook__InvalidProtectionAttempt.selector, 72)
         );
@@ -461,7 +461,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
                 IOrderLifecycleBook.OrderLifecycleBook__ClientIdDomainMismatch.selector, protocolClientOrderId, false
             )
         );
-        book.registerPending(ACCOUNT, 20, publicRequest, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 20, publicRequest, EXECUTION_BOUNTY_ASSETS);
         assertEq(book.clientIntent(ACCOUNT, protocolClientOrderId).orderId, 0);
         assertEq(book.pendingIntent(20).account, address(0));
 
@@ -473,13 +473,13 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
                 IOrderLifecycleBook.OrderLifecycleBook__ClientIdDomainMismatch.selector, publicClientOrderId, true
             )
         );
-        book.registerPending(ACCOUNT, 21, protocolRequest, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 21, protocolRequest, EXECUTION_BOUNTY_ASSETS);
         assertEq(book.clientIntent(ACCOUNT, publicClientOrderId).orderId, 0);
         assertEq(book.pendingIntent(21).account, address(0));
 
         protocolRequest.clientOrderId = protocolClientOrderId;
         (uint64 registeredOrderId,, bool replayed) =
-            book.registerPending(ACCOUNT, 21, protocolRequest, EXECUTION_BOUNTY_USDC);
+            book.registerPending(ACCOUNT, 21, protocolRequest, EXECUTION_BOUNTY_ASSETS);
         assertEq(registeredOrderId, 21);
         assertFalse(replayed);
 
@@ -488,7 +488,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         assertTrue(replayed, "domain enforcement must not alter exact-replay semantics");
 
         publicRequest.clientOrderId = publicClientOrderId;
-        (registeredOrderId,, replayed) = book.registerPending(OTHER_ACCOUNT, 22, publicRequest, EXECUTION_BOUNTY_USDC);
+        (registeredOrderId,, replayed) = book.registerPending(OTHER_ACCOUNT, 22, publicRequest, EXECUTION_BOUNTY_ASSETS);
         assertEq(registeredOrderId, 22);
         assertFalse(replayed);
     }
@@ -514,14 +514,14 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
             bounds.executionWindowSeconds,
             bounds.allowedExecutionModes,
             bounds.expectedConfigHash,
-            bounds.maxExecutionBountyUsdc,
-            bounds.maxExecutionNotionalUsdc,
-            bounds.maxGrossAccountDebitUsdc,
-            bounds.maxActionChargeUsdc,
-            bounds.maxExplicitFeesUsdc,
+            bounds.maxExecutionBountyAssets,
+            bounds.maxExecutionNotionalAssets,
+            bounds.maxGrossAccountDebitAssets,
+            bounds.maxActionChargeAssets,
+            bounds.maxExplicitFeesAssets,
             bounds.maxPostPositionSize,
-            bounds.minPostSettlementBalanceUsdc,
-            bounds.minPostPositionEquityUsdc,
+            bounds.minPostSettlementBalanceAssets,
+            bounds.minPostPositionEquityAssets,
             bounds.maxPostLeverageBps
         );
 
@@ -533,7 +533,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         OrderV3Types.OrderRequest memory request = _request(bytes32("observable-preimage"));
 
         _startRecordingLogs();
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 18, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 18, request, EXECUTION_BOUNTY_ASSETS);
         Vm.Log[] memory logs = _takeRecordedLogs();
 
         Vm.Log memory registrationLog;
@@ -556,14 +556,14 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         assertEq(registrationLog.topics[3], request.clientOrderId, "event client id must match");
         assertEq(
             registrationLog.data,
-            abi.encode(intentHash, EXECUTION_BOUNTY_USDC, request, book.orderTiming(18)),
+            abi.encode(intentHash, EXECUTION_BOUNTY_ASSETS, request, book.orderTiming(18)),
             "event data must contain the exact complete request preimage"
         );
 
         (bytes32 emittedIntentHash, uint256 emittedBounty, OrderV3Types.OrderRequest memory emittedRequest) =
             abi.decode(registrationLog.data, (bytes32, uint256, OrderV3Types.OrderRequest));
         assertEq(emittedIntentHash, book.hashOrderRequest(ACCOUNT, emittedRequest));
-        assertEq(emittedBounty, EXECUTION_BOUNTY_USDC);
+        assertEq(emittedBounty, EXECUTION_BOUNTY_ASSETS);
         assertEq(
             keccak256(abi.encode(emittedRequest)), keccak256(abi.encode(request)), "decoded request must be lossless"
         );
@@ -572,7 +572,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function test_ResolveAndRegisterExactReplayAreNoOpsEvenAfterTerminal() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("retry-safe"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 8, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 8, request, EXECUTION_BOUNTY_ASSETS);
 
         (OrderV3Types.ClientIntentResolution resolution, uint64 resolvedOrderId, bytes32 resolvedHash) =
             book.resolveClientIntent(ACCOUNT, request);
@@ -582,7 +582,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
 
         bool replayed;
         (resolvedOrderId, resolvedHash, replayed) =
-            book.registerPending(ACCOUNT, 99, request, EXECUTION_BOUNTY_USDC + 1);
+            book.registerPending(ACCOUNT, 99, request, EXECUTION_BOUNTY_ASSETS + 1);
         assertEq(resolvedOrderId, 8);
         assertEq(resolvedHash, intentHash);
         assertTrue(replayed);
@@ -599,9 +599,9 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function test_ConflictIsObservableAndRegistrationReverts() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory original = _request(bytes32("same-client"));
-        (, bytes32 originalHash,) = book.registerPending(ACCOUNT, 4, original, EXECUTION_BOUNTY_USDC);
+        (, bytes32 originalHash,) = book.registerPending(ACCOUNT, 4, original, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderRequest memory conflicting = original;
-        conflicting.bounds.maxExplicitFeesUsdc += 1;
+        conflicting.bounds.maxExplicitFeesAssets += 1;
 
         (OrderV3Types.ClientIntentResolution resolution, uint64 resolvedOrderId, bytes32 conflictingHash) =
             book.resolveClientIntent(ACCOUNT, conflicting);
@@ -618,14 +618,14 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
                 conflictingHash
             )
         );
-        book.registerPending(ACCOUNT, 5, conflicting, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 5, conflicting, EXECUTION_BOUNTY_ASSETS);
     }
 
     function test_ClientIdsAreNamespacedByAccountAndHashCommitsToAccount() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("shared-client"));
-        (, bytes32 firstHash,) = book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
-        (, bytes32 secondHash,) = book.registerPending(OTHER_ACCOUNT, 2, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 firstHash,) = book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_ASSETS);
+        (, bytes32 secondHash,) = book.registerPending(OTHER_ACCOUNT, 2, request, EXECUTION_BOUNTY_ASSETS);
 
         assertTrue(firstHash != secondHash);
         assertEq(book.clientIntent(ACCOUNT, request.clientOrderId).orderId, 1);
@@ -638,40 +638,40 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
 
         vm.prank(address(0xBAD));
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__Unauthorized.selector);
-        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_ASSETS);
 
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__ZeroAccount.selector);
-        book.registerPending(address(0), 1, request, EXECUTION_BOUNTY_USDC);
+        book.registerPending(address(0), 1, request, EXECUTION_BOUNTY_ASSETS);
 
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__ZeroOrderId.selector);
-        book.registerPending(ACCOUNT, 0, request, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 0, request, EXECUTION_BOUNTY_ASSETS);
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound.selector,
-                request.bounds.maxExecutionBountyUsdc + 1,
-                request.bounds.maxExecutionBountyUsdc
+                request.bounds.maxExecutionBountyAssets + 1,
+                request.bounds.maxExecutionBountyAssets
             )
         );
-        book.registerPending(ACCOUNT, 1, request, request.bounds.maxExecutionBountyUsdc + 1);
+        book.registerPending(ACCOUNT, 1, request, request.bounds.maxExecutionBountyAssets + 1);
 
         request.clientOrderId = bytes32(0);
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__ZeroClientOrderId.selector);
-        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_ASSETS);
 
         OrderV3Types.OrderRequest memory first = _request(bytes32("first"));
-        (, bytes32 firstHash,) = book.registerPending(ACCOUNT, 11, first, EXECUTION_BOUNTY_USDC);
+        (, bytes32 firstHash,) = book.registerPending(ACCOUNT, 11, first, EXECUTION_BOUNTY_ASSETS);
         book.finalize(_executedReceipt(11, ACCOUNT, first, firstHash));
 
         OrderV3Types.OrderRequest memory second = _request(bytes32("second"));
         vm.expectRevert(abi.encodeWithSelector(IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed.selector, 11));
-        book.registerPending(ACCOUNT, 11, second, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 11, second, EXECUTION_BOUNTY_ASSETS);
     }
 
     function test_TerminalSummaryAuthenticatesReceiptAndRejectsWrongDomainOrTime() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("verify"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 21, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 21, request, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderReceipt memory receipt = _executedReceipt(21, ACCOUNT, request, intentHash);
         assertFalse(book.verifyReceipt(receipt, uint64(block.timestamp)));
         book.finalize(receipt);
@@ -682,7 +682,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         assertFalse(book.verifyReceipt(receipt, terminalTime));
         vm.chainId(block.chainid - 1);
         OrderLifecycleBook other = new OrderLifecycleBook(address(this), ENGINE, CLEARINGHOUSE, HOUSE_POOL);
-        (, bytes32 otherHash,) = other.registerPending(ACCOUNT, 21, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 otherHash,) = other.registerPending(ACCOUNT, 21, request, EXECUTION_BOUNTY_ASSETS);
         assertFalse(other.verifyReceipt(receipt, terminalTime));
         other.finalize(_executedReceipt(21, ACCOUNT, request, otherHash));
         // Identical authorized preimages can exist in both books, but their domain hashes must differ.
@@ -699,18 +699,18 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     ) public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("history"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 21, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 21, request, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderReceipt memory original = _executedReceipt(21, ACCOUNT, request, intentHash);
         book.finalize(original);
         uint64 terminalTime = uint64(block.timestamp);
         OrderV3Types.OrderReceipt memory changed = abi.decode(abi.encode(original), (OrderV3Types.OrderReceipt));
-        changed.economics.postSettlementBalanceUsdc ^= value | 1;
+        changed.economics.postSettlementBalanceAssets ^= value | 1;
         assertFalse(book.verifyReceipt(changed, terminalTime));
         changed = abi.decode(abi.encode(original), (OrderV3Types.OrderReceipt));
-        changed.commitment.carryCollectedUsdc ^= value | 1;
+        changed.commitment.carryCollectedAssets ^= value | 1;
         assertFalse(book.verifyReceipt(changed, terminalTime));
         changed = abi.decode(abi.encode(original), (OrderV3Types.OrderReceipt));
-        changed.bounty.bountyRefundedUsdc ^= value | 1;
+        changed.bounty.bountyRefundedAssets ^= value | 1;
         assertFalse(book.verifyReceipt(changed, terminalTime));
         changed = abi.decode(abi.encode(original), (OrderV3Types.OrderReceipt));
         changed.failure.revertDataHash = bytes32(value | 1);
@@ -749,7 +749,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
 
     function test_ReceiptCannotRewriteCommitTiming() public {
         OrderV3Types.OrderRequest memory request = _request(bytes32("timing-auth"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 20, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 20, request, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderReceipt memory receipt = _executedReceipt(20, ACCOUNT, request, intentHash);
         receipt.timing.executionDeadline++;
         vm.expectPartialRevert(IOrderLifecycleBook.OrderLifecycleBook__ReceiptIdentityMismatch.selector);
@@ -760,14 +760,14 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         OrderV3Types.OrderRequest memory request = _request(bytes32("clock-overflow"));
         vm.warp(type(uint64).max - 10);
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__TerminalClockOverflow.selector);
-        book.registerPending(ACCOUNT, 20, request, EXECUTION_BOUNTY_USDC);
+        book.registerPending(ACCOUNT, 20, request, EXECUTION_BOUNTY_ASSETS);
         assertEq(book.clientIntent(ACCOUNT, request.clientOrderId).orderId, 0);
     }
 
     function test_FinalizeExecutedDeletesPendingAndStoresVerifiableCompactOutcome() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("execute"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 21, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 21, request, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderReceipt memory receipt = _executedReceipt(21, ACCOUNT, request, intentHash);
 
         vm.roll(987_654);
@@ -809,7 +809,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         assertEq(terminalOutcome.executor, EXECUTOR);
         assertEq(terminalOutcome.bountyRecipient, EXECUTOR);
         assertEq(terminalOutcome.executionPrice, receipt.executionPrice);
-        assertEq(terminalOutcome.bountyUsdc, receipt.bountyUsdc);
+        assertEq(terminalOutcome.bountyAssets, receipt.bountyAssets);
         assertEq(terminalOutcome.observedConfigHash, receipt.observedConfigHash);
         assertEq(terminalOutcome.receiptHash, expectedHash);
     }
@@ -817,7 +817,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function test_FinalizeFailedPersistsTypedFailureEvidence() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("constraint-fail"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 31, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 31, request, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderReceipt memory receipt = _failedReceipt(31, ACCOUNT, request, intentHash);
 
         bytes32 receiptHash = book.finalize(receipt);
@@ -838,7 +838,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function test_RiskOffReceiptRefundsExactStoredBountyToAccount() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("risk-off"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 35, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 35, request, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderReceipt memory receipt = _failedReceipt(35, ACCOUNT, request, intentHash);
         receipt.reason = OrderV3Types.TerminalReason.RiskOff;
         receipt.executionMode = OrderV3Types.ExecutionMode.None;
@@ -846,8 +846,8 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         receipt.executionPrice = 0;
         receipt.oraclePublishTime = 0;
         receipt.bountyDisposition = OrderV3Types.BountyDisposition.RefundedToAccount;
-        receipt.bounty.bountyPaidUsdc = 0;
-        receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
+        receipt.bounty.bountyPaidAssets = 0;
+        receipt.bounty.bountyRefundedAssets = receipt.bountyAssets;
         receipt.bountyRecipient = ACCOUNT;
         delete receipt.failure;
 
@@ -856,13 +856,13 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         assertEq(uint8(terminalOutcome.reason), uint8(OrderV3Types.TerminalReason.RiskOff));
         assertEq(uint8(terminalOutcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.RefundedToAccount));
         assertEq(terminalOutcome.bountyRecipient, ACCOUNT);
-        assertEq(terminalOutcome.bountyUsdc, EXECUTION_BOUNTY_USDC);
+        assertEq(terminalOutcome.bountyAssets, EXECUTION_BOUNTY_ASSETS);
     }
 
     function test_FinalizeRejectsForgedReasonSpecificEvidence() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("semantic-guards"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 39, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 39, request, EXECUTION_BOUNTY_ASSETS);
 
         OrderV3Types.OrderReceipt memory receipt = _executedReceipt(39, ACCOUNT, request, intentHash);
         receipt.priceReachedEngine = false;
@@ -892,7 +892,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function test_FinalizeExecutionModeDisallowedPersistsTypedEvidence() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("mode-disallowed"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 42, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 42, request, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderReceipt memory receipt = _failedReceipt(42, ACCOUNT, request, intentHash);
         receipt.reason = OrderV3Types.TerminalReason.ExecutionModeDisallowed;
         receipt.executionMode = OrderV3Types.ExecutionMode.Frozen;
@@ -932,7 +932,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function test_FinalizeRejectsUncoveredTerminalForgeryVariants() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("terminal-forgeries"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 60, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 60, request, EXECUTION_BOUNTY_ASSETS);
 
         OrderV3Types.OrderReceipt memory receipt = _executedReceipt(60, ACCOUNT, request, intentHash);
         receipt.executor = address(0);
@@ -982,7 +982,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         OrderV3Types.OrderRequest memory request = _request(bytes32("zero-bounty-recipient"));
         (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 61, request, 0);
         OrderV3Types.OrderReceipt memory receipt = _executedReceipt(61, ACCOUNT, request, intentHash);
-        receipt.bountyUsdc = 0;
+        receipt.bountyAssets = 0;
         delete receipt.bounty;
         receipt.bountyDisposition = OrderV3Types.BountyDisposition.None;
         receipt.bountyRecipient = OTHER_ACCOUNT;
@@ -993,7 +993,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function test_FinalizeRejectsTerminalClockOverflow() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("clock-overflow"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 62, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 62, request, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderReceipt memory receipt = _executedReceipt(62, ACCOUNT, request, intentHash);
         vm.roll(uint256(type(uint64).max) + 1);
 
@@ -1006,7 +1006,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         OrderV3Types.OrderRequest memory request = _request(bytes32("zero-bounty"));
         (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 40, request, 0);
         OrderV3Types.OrderReceipt memory receipt = _executedReceipt(40, ACCOUNT, request, intentHash);
-        receipt.bountyUsdc = 0;
+        receipt.bountyAssets = 0;
         delete receipt.bounty;
         receipt.bountyRecipient = address(0);
         receipt.bountyDisposition = OrderV3Types.BountyDisposition.None;
@@ -1020,7 +1020,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function test_FinalizeRejectsUnauthorizedMissingMismatchedInvalidAndRepeatedTransitions() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("terminal-guards"));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 41, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 41, request, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderReceipt memory receipt = _executedReceipt(41, ACCOUNT, request, intentHash);
 
         vm.prank(address(0xBAD));
@@ -1040,7 +1040,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         book.finalize(mismatched);
 
         OrderV3Types.OrderReceipt memory wrongBounty = _executedReceipt(41, ACCOUNT, request, intentHash);
-        wrongBounty.bountyUsdc += 1;
+        wrongBounty.bountyAssets += 1;
         vm.expectRevert(
             abi.encodeWithSelector(IOrderLifecycleBook.OrderLifecycleBook__ReceiptIdentityMismatch.selector, 41)
         );
@@ -1063,8 +1063,8 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("hash-all-bounds"));
         bytes32 original = book.hashOrderRequest(ACCOUNT, request);
-        vm.assume(replacement != request.bounds.maxGrossAccountDebitUsdc);
-        request.bounds.maxGrossAccountDebitUsdc = replacement;
+        vm.assume(replacement != request.bounds.maxGrossAccountDebitAssets);
+        request.bounds.maxGrossAccountDebitAssets = replacement;
         assertTrue(book.hashOrderRequest(ACCOUNT, request) != original);
     }
 
@@ -1081,14 +1081,14 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
             executionWindowSeconds: uint32(uint256(uint64(block.timestamp + 60)) - block.timestamp),
             allowedExecutionModes: 3,
             expectedConfigHash: keccak256("config-v1"),
-            maxExecutionBountyUsdc: 2e6,
-            maxExecutionNotionalUsdc: 102e6,
-            maxGrossAccountDebitUsdc: 260e6,
-            maxActionChargeUsdc: 5e6,
-            maxExplicitFeesUsdc: 3e6,
+            maxExecutionBountyAssets: 2e6,
+            maxExecutionNotionalAssets: 102e6,
+            maxGrossAccountDebitAssets: 260e6,
+            maxActionChargeAssets: 5e6,
+            maxExplicitFeesAssets: 3e6,
             maxPostPositionSize: 200e18,
-            minPostSettlementBalanceUsdc: 10e6,
-            minPostPositionEquityUsdc: 3e6,
+            minPostSettlementBalanceAssets: 10e6,
+            minPostPositionEquityAssets: 3e6,
             maxPostLeverageBps: 50_000
         });
     }
@@ -1103,11 +1103,11 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         }
         OrderV3Types.OrderRequest memory request = _request(clientId);
         request.bounds = bounds;
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, orderId, request, bounds.maxExecutionBountyUsdc);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, orderId, request, bounds.maxExecutionBountyAssets);
         _assertBoundsEq(book.pendingPolicy(orderId), bounds);
         OrderV3Types.PendingIntent memory pending = book.pendingIntent(orderId);
         _assertBoundsEq(pending.bounds, bounds);
-        assertEq(pending.executionBountyUsdc, bounds.maxExecutionBountyUsdc);
+        assertEq(pending.executionBountyAssets, bounds.maxExecutionBountyAssets);
         assertEq(intentHash, book.hashOrderRequest(ACCOUNT, request));
         request.bounds = pending.bounds;
         (OrderV3Types.ClientIntentResolution resolution, uint64 replayedOrderId, bytes32 replayedHash) =
@@ -1121,7 +1121,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         OutcomeValues memory values
     ) private {
         OrderV3Types.OrderRequest memory request = _request(bytes32("packed-outcome"));
-        request.bounds.maxExecutionBountyUsdc = type(uint256).max;
+        request.bounds.maxExecutionBountyAssets = type(uint256).max;
         address account = address(type(uint160).max);
         (, bytes32 intentHash,) = book.registerPending(account, 1, request, values.bounty);
         OrderV3Types.OrderReceipt memory receipt = _executedReceipt(1, account, request, intentHash);
@@ -1129,9 +1129,9 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         receipt.executionMode = OrderV3Types.ExecutionMode(1 + values.mode % 3);
         receipt.executionPrice = values.executionPrice == 0 ? 1 : values.executionPrice;
         receipt.oraclePublishTime = values.publishTime == 0 ? 1 : values.publishTime;
-        receipt.bountyUsdc = values.bounty;
-        receipt.bounty.bountyEntitlementUsdc = values.bounty;
-        receipt.bounty.bountyPaidUsdc = values.bounty;
+        receipt.bountyAssets = values.bounty;
+        receipt.bounty.bountyEntitlementAssets = values.bounty;
+        receipt.bounty.bountyPaidAssets = values.bounty;
         receipt.bountyRecipient = values.bounty == 0 ? address(0) : receipt.executor;
         receipt.bountyDisposition =
             values.bounty == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid;
@@ -1174,7 +1174,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
             executor: receipt.executor,
             bountyRecipient: receipt.bountyRecipient,
             executionPrice: receipt.executionPrice,
-            bountyUsdc: receipt.bountyUsdc,
+            bountyAssets: receipt.bountyAssets,
             failureSelector: receipt.failure.selector,
             failureCategory: receipt.failure.category,
             failureCode: receipt.failure.code,
@@ -1209,32 +1209,32 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         receipt.priceSource = OrderV3Types.PriceSource.OracleExecution;
         receipt.executionPrice = 1e8;
         receipt.neutralMarkPrice = 1e8;
-        receipt.poolDepthUsdc = 50_000_000e6;
+        receipt.poolDepthAssets = 50_000_000e6;
         receipt.oraclePublishTime = 1_700_000_001;
         receipt.priceReachedEngine = true;
-        receipt.bountyUsdc = EXECUTION_BOUNTY_USDC;
-        receipt.bounty.bountyEntitlementUsdc = EXECUTION_BOUNTY_USDC;
-        receipt.bounty.bountyPaidUsdc = EXECUTION_BOUNTY_USDC;
+        receipt.bountyAssets = EXECUTION_BOUNTY_ASSETS;
+        receipt.bounty.bountyEntitlementAssets = EXECUTION_BOUNTY_ASSETS;
+        receipt.bounty.bountyPaidAssets = EXECUTION_BOUNTY_ASSETS;
         receipt.bountyRecipient = EXECUTOR;
         receipt.bountyDisposition = OrderV3Types.BountyDisposition.Paid;
         receipt.economics = OrderV3Types.OrderEconomics({
             close: OrderV3Types.CloseEconomics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            executionNotionalUsdc: 100e6,
-            realizedPnlUsdc: 0,
-            vpiUsdc: 50_000,
-            carryUsdc: 10_000,
-            executionFeeUsdc: 100_000,
-            frozenSpreadUsdc: 0,
-            actionChargeAssessedUsdc: 160_000,
-            actionChargeCollectedUsdc: 160_000,
-            grossAccountDebitUsdc: 251_160_000,
-            preSettlementBalanceUsdc: 1000e6,
-            postSettlementBalanceUsdc: 748_840_000,
-            preTraderClaimBalanceUsdc: 0,
-            postTraderClaimBalanceUsdc: 0,
+            executionNotionalAssets: 100e6,
+            realizedPnlAssets: 0,
+            vpiAssets: 50_000,
+            carryAssets: 10_000,
+            executionFeeAssets: 100_000,
+            frozenSpreadAssets: 0,
+            actionChargeAssessedAssets: 160_000,
+            actionChargeCollectedAssets: 160_000,
+            grossAccountDebitAssets: 251_160_000,
+            preSettlementBalanceAssets: 1000e6,
+            postSettlementBalanceAssets: 748_840_000,
+            preTraderClaimBalanceAssets: 0,
+            postTraderClaimBalanceAssets: 0,
             postPositionSize: 100e18,
-            postPositionMarginUsdc: 250e6,
-            postPositionEquityUsdc: 249_840_000,
+            postPositionMarginAssets: 250e6,
+            postPositionEquityAssets: 249_840_000,
             postLeverageBps: 4002
         });
     }
@@ -1259,12 +1259,12 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         receipt.priceSource = OrderV3Types.PriceSource.OracleExecution;
         receipt.executionPrice = 1e8;
         receipt.neutralMarkPrice = 1e8;
-        receipt.poolDepthUsdc = 50_000_000e6;
+        receipt.poolDepthAssets = 50_000_000e6;
         receipt.oraclePublishTime = 1_700_000_001;
         receipt.priceReachedEngine = false;
-        receipt.bountyUsdc = EXECUTION_BOUNTY_USDC;
-        receipt.bounty.bountyEntitlementUsdc = EXECUTION_BOUNTY_USDC;
-        receipt.bounty.bountyPaidUsdc = EXECUTION_BOUNTY_USDC;
+        receipt.bountyAssets = EXECUTION_BOUNTY_ASSETS;
+        receipt.bounty.bountyEntitlementAssets = EXECUTION_BOUNTY_ASSETS;
+        receipt.bounty.bountyPaidAssets = EXECUTION_BOUNTY_ASSETS;
         receipt.bountyRecipient = EXECUTOR;
         receipt.bountyDisposition = OrderV3Types.BountyDisposition.Paid;
         receipt.failure = OrderV3Types.FailureDetails({
@@ -1273,7 +1273,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
             code: 0,
             constraint: OrderV3Types.ConstraintKind.GrossAccountDebit,
             actual: 300e6,
-            limit: request.bounds.maxGrossAccountDebitUsdc,
+            limit: request.bounds.maxGrossAccountDebitAssets,
             revertDataHash: keccak256("typed failure data")
         });
     }
@@ -1290,8 +1290,8 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         receipt.executionPrice = 0;
         receipt.oraclePublishTime = 0;
         receipt.bountyDisposition = OrderV3Types.BountyDisposition.RefundedToAccount;
-        receipt.bounty.bountyPaidUsdc = 0;
-        receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
+        receipt.bounty.bountyPaidAssets = 0;
+        receipt.bounty.bountyRefundedAssets = receipt.bountyAssets;
         receipt.bountyRecipient = ACCOUNT;
         delete receipt.failure;
     }
@@ -1307,8 +1307,8 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         receipt.priceSource = OrderV3Types.PriceSource.Liquidation;
         receipt.priceReachedEngine = false;
         receipt.bountyDisposition = OrderV3Types.BountyDisposition.Forfeited;
-        receipt.bounty.bountyPaidUsdc = 0;
-        receipt.bounty.bountyForfeitedUsdc = receipt.bountyUsdc;
+        receipt.bounty.bountyPaidAssets = 0;
+        receipt.bounty.bountyForfeitedAssets = receipt.bountyAssets;
         receipt.bountyRecipient = PROTOCOL_TREASURY;
         delete receipt.failure;
     }
@@ -1319,7 +1319,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         uint256 limit
     ) private {
         OrderV3Types.OrderRequest memory request = _request(bytes32(uint256(orderId)));
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, orderId, request, EXECUTION_BOUNTY_USDC);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, orderId, request, EXECUTION_BOUNTY_ASSETS);
         OrderV3Types.OrderReceipt memory receipt = _failedReceipt(orderId, ACCOUNT, request, intentHash);
         receipt.failure.constraint = constraint;
         receipt.failure.actual = limit + 1;

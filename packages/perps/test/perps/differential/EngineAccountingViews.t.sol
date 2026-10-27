@@ -35,17 +35,17 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
 
         ICfdEngineTypes.AccountCollateralView memory viewData = engineAccountLens.getAccountCollateralView(account);
         (, uint256 positionMargin,,,,,) = engine.positions(account);
-        assertEq(viewData.settlementBalanceUsdc, clearinghouse.balanceUsdc(account));
-        assertEq(viewData.lockedMarginUsdc, clearinghouse.lockedMarginUsdc(account));
-        assertEq(viewData.activePositionMarginUsdc, positionMargin);
-        assertEq(viewData.otherLockedMarginUsdc, viewData.lockedMarginUsdc - positionMargin);
-        assertEq(viewData.freeSettlementUsdc, _freeSettlementUsdc(account));
-        assertEq(viewData.closeReachableUsdc, _freeSettlementUsdc(account));
-        assertEq(viewData.liquidationReachableSettlementUsdc, _terminalReachableUsdc(account));
-        assertEq(viewData.terminalPriceCollectibleCapUsdc, terminalNavBook.curveOf(account).effectiveCapUsdcAtoms);
-        assertEq(viewData.accountEquityUsdc, clearinghouse.getAccountEquityUsdc(account));
-        assertEq(viewData.freeBuyingPowerUsdc, clearinghouse.getFreeBuyingPowerUsdc(account));
-        assertEq(viewData.traderClaimBalanceUsdc, 0);
+        assertEq(viewData.settlementBalanceAssets, clearinghouse.balanceAssets(account));
+        assertEq(viewData.lockedMarginAssets, clearinghouse.lockedMarginAssets(account));
+        assertEq(viewData.activePositionMarginAssets, positionMargin);
+        assertEq(viewData.otherLockedMarginAssets, viewData.lockedMarginAssets - positionMargin);
+        assertEq(viewData.freeSettlementAssets, _freeSettlementAssets(account));
+        assertEq(viewData.closeReachableAssets, _freeSettlementAssets(account));
+        assertEq(viewData.liquidationReachableSettlementAssets, _terminalReachableAssets(account));
+        assertEq(viewData.terminalPriceCollectibleCapAssets, terminalNavBook.curveOf(account).effectiveCapAssetAtoms);
+        assertEq(viewData.accountEquityAssets, clearinghouse.getAccountEquityAssets(account));
+        assertEq(viewData.freeBuyingPowerAssets, clearinghouse.getFreeBuyingPowerAssets(account));
+        assertEq(viewData.traderClaimBalanceAssets, 0);
     }
 
     function test_GetPositionView_ReturnsLivePositionState() public {
@@ -64,8 +64,8 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
         assertEq(uint256(viewData.side), uint256(CfdTypes.Side.LONG));
         assertEq(viewData.size, 100_000 * 1e18);
         assertEq(viewData.entryPrice, 1e8);
-        assertEq(viewData.marginUsdc, positionMargin);
-        assertGt(viewData.unrealizedPnlUsdc, 0);
+        assertEq(viewData.marginAssets, positionMargin);
+        assertGt(viewData.unrealizedPnlAssets, 0);
     }
 
     function test_GetProtocolAccountingSnapshot_ReflectsCanonicalLedgerState() public {
@@ -76,7 +76,7 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
@@ -87,42 +87,43 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory housePoolSnapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
-        uint256 settlementBufferUsdc =
-            SolvencyAccountingLib.settlementBufferTargetUsdc(snapshot.maxLiabilityUsdc, engine.settlementBufferBps());
-        uint256 expectedWithdrawalReservedUsdc =
-            snapshot.maxLiabilityUsdc + snapshot.totalTraderClaimBalanceUsdc + settlementBufferUsdc;
-        uint256 expectedFreeUsdc = snapshot.poolAssetsUsdc > expectedWithdrawalReservedUsdc
-            ? snapshot.poolAssetsUsdc - expectedWithdrawalReservedUsdc
+        uint256 settlementBufferAssets = SolvencyAccountingLib.settlementBufferTargetAssets(
+            snapshot.maxLiabilityAssets, engine.settlementBufferBps()
+        );
+        uint256 expectedWithdrawalReservedAssets =
+            snapshot.maxLiabilityAssets + snapshot.totalTraderClaimBalanceAssets + settlementBufferAssets;
+        uint256 expectedFreeAssets = snapshot.poolAssets > expectedWithdrawalReservedAssets
+            ? snapshot.poolAssets - expectedWithdrawalReservedAssets
             : 0;
 
-        assertEq(snapshot.poolAssetsUsdc, pool.totalAssets());
-        assertEq(snapshot.netPhysicalAssetsUsdc, pool.totalAssets());
-        assertEq(snapshot.maxLiabilityUsdc, _maxLiability());
-        assertEq(snapshot.withdrawalReservedUsdc, expectedWithdrawalReservedUsdc);
-        assertEq(snapshot.freeUsdc, expectedFreeUsdc);
-        assertEq(snapshot.protocolTreasuryBalanceUsdc, clearinghouse.balanceUsdc(engine.protocolTreasury()));
-        assertEq(snapshot.totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc());
+        assertEq(snapshot.poolAssets, pool.totalAssets());
+        assertEq(snapshot.netPhysicalAssets, pool.totalAssets());
+        assertEq(snapshot.maxLiabilityAssets, _maxLiability());
+        assertEq(snapshot.withdrawalReservedAssets, expectedWithdrawalReservedAssets);
+        assertEq(snapshot.freeAssets, expectedFreeAssets);
+        assertEq(snapshot.protocolTreasuryBalanceAssets, clearinghouse.balanceAssets(engine.protocolTreasury()));
+        assertEq(snapshot.totalTraderClaimBalanceAssets, engine.totalTraderClaimBalanceAssets());
         assertEq(snapshot.degradedMode, engine.degradedMode());
         assertEq(snapshot.hasLiveLiability, (_maxLiability() > 0));
-        assertEq(snapshot.poolAssetsUsdc, viewData.poolAssetsUsdc);
-        assertEq(housePoolSnapshot.physicalAssetsUsdc, snapshot.poolAssetsUsdc);
-        assertEq(snapshot.maxLiabilityUsdc, viewData.maxLiabilityUsdc);
-        assertEq(snapshot.withdrawalReservedUsdc, viewData.withdrawalReservedUsdc);
-        assertEq(snapshot.freeUsdc, viewData.freeUsdc);
-        assertEq(snapshot.protocolTreasuryBalanceUsdc, viewData.protocolTreasuryBalanceUsdc);
-        assertEq(snapshot.totalTraderClaimBalanceUsdc, viewData.totalTraderClaimBalanceUsdc);
+        assertEq(snapshot.poolAssets, viewData.poolAssets);
+        assertEq(housePoolSnapshot.physicalAssets, snapshot.poolAssets);
+        assertEq(snapshot.maxLiabilityAssets, viewData.maxLiabilityAssets);
+        assertEq(snapshot.withdrawalReservedAssets, viewData.withdrawalReservedAssets);
+        assertEq(snapshot.freeAssets, viewData.freeAssets);
+        assertEq(snapshot.protocolTreasuryBalanceAssets, viewData.protocolTreasuryBalanceAssets);
+        assertEq(snapshot.totalTraderClaimBalanceAssets, viewData.totalTraderClaimBalanceAssets);
         assertEq(snapshot.degradedMode, viewData.degradedMode);
         assertEq(snapshot.hasLiveLiability, viewData.hasLiveLiability);
-        assertEq(snapshot.netPhysicalAssetsUsdc, housePoolSnapshot.netPhysicalAssetsUsdc);
-        assertEq(snapshot.maxLiabilityUsdc, housePoolSnapshot.maxLiabilityUsdc);
-        assertEq(snapshot.totalTraderClaimBalanceUsdc, housePoolSnapshot.traderClaimBalanceUsdc);
+        assertEq(snapshot.netPhysicalAssets, housePoolSnapshot.netPhysicalAssets);
+        assertEq(snapshot.maxLiabilityAssets, housePoolSnapshot.maxLiabilityAssets);
+        assertEq(snapshot.totalTraderClaimBalanceAssets, housePoolSnapshot.traderClaimBalanceAssets);
     }
 
     function test_ProtocolAccountingSnapshot_IgnoresUnaccountedPoolDonationUntilAccounted() public {
         _fundJunior(address(0xB0B), 500_000e6);
         uint256 accountedBefore = pool.totalAssets();
 
-        usdc.mint(address(pool), 100_000e6);
+        settlementToken.mint(address(pool), 100_000e6);
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory beforeAccount =
             engineProtocolLens.getProtocolAccountingSnapshot();
@@ -133,9 +134,9 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
         assertEq(
             pool.totalAssets(), accountedBefore, "Canonical pool assets should ignore the donation until accounted"
         );
-        assertEq(beforeAccount.poolAssetsUsdc, accountedBefore, "Protocol snapshot should follow canonical assets");
+        assertEq(beforeAccount.poolAssets, accountedBefore, "Protocol snapshot should follow canonical assets");
         assertEq(
-            houseBefore.netPhysicalAssetsUsdc, accountedBefore, "HousePool snapshot should ignore unaccounted donations"
+            houseBefore.netPhysicalAssets, accountedBefore, "HousePool snapshot should ignore unaccounted donations"
         );
 
         pool.accountExcess();
@@ -149,12 +150,10 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
             pool.totalAssets(), accountedBefore + 100_000e6, "Explicit accounting should raise canonical pool assets"
         );
         assertEq(
-            afterAccount.poolAssetsUsdc,
-            accountedBefore + 100_000e6,
-            "Protocol snapshot should reflect explicit accounting"
+            afterAccount.poolAssets, accountedBefore + 100_000e6, "Protocol snapshot should reflect explicit accounting"
         );
         assertEq(
-            houseAfter.netPhysicalAssetsUsdc,
+            houseAfter.netPhysicalAssets,
             accountedBefore + 100_000e6,
             "HousePool snapshot should reflect explicit accounting"
         );
@@ -173,16 +172,16 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
 
         AccountLensViewTypes.AccountLedgerView memory ledgerView = engineAccountLens.getAccountLedgerView(account);
         (, uint256 positionMargin,,,,,) = engine.positions(account);
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+        IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
 
-        assertEq(ledgerView.settlementBalanceUsdc, buckets.settlementBalanceUsdc);
-        assertEq(ledgerView.freeSettlementUsdc, buckets.freeSettlementUsdc);
-        assertEq(ledgerView.activePositionMarginUsdc, buckets.activePositionMarginUsdc);
-        assertEq(ledgerView.otherLockedMarginUsdc, buckets.otherLockedMarginUsdc);
-        assertEq(ledgerView.executionBountyReserveUsdc, reservation.executionBountyUsdc);
-        assertEq(ledgerView.committedMarginUsdc, reservation.committedMarginUsdc);
-        assertEq(ledgerView.traderClaimBalanceUsdc, engine.traderClaimBalanceUsdc(account));
+        assertEq(ledgerView.settlementBalanceAssets, buckets.settlementBalanceAssets);
+        assertEq(ledgerView.freeSettlementAssets, buckets.freeSettlementAssets);
+        assertEq(ledgerView.activePositionMarginAssets, buckets.activePositionMarginAssets);
+        assertEq(ledgerView.otherLockedMarginAssets, buckets.otherLockedMarginAssets);
+        assertEq(ledgerView.executionBountyReserveAssets, reservation.executionBountyAssets);
+        assertEq(ledgerView.committedMarginAssets, reservation.committedMarginAssets);
+        assertEq(ledgerView.traderClaimBalanceAssets, engine.traderClaimBalanceAssets(account));
         assertEq(ledgerView.pendingOrderCount, router.pendingOrderCounts(account));
     }
 
@@ -203,23 +202,23 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
         IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
 
-        assertEq(snapshot.settlementBalanceUsdc, collateralView.settlementBalanceUsdc);
-        assertEq(snapshot.freeSettlementUsdc, collateralView.freeSettlementUsdc);
-        assertEq(snapshot.activePositionMarginUsdc, collateralView.activePositionMarginUsdc);
-        assertEq(snapshot.otherLockedMarginUsdc, collateralView.otherLockedMarginUsdc);
-        assertEq(snapshot.positionMarginBucketUsdc, lockedBuckets.positionMarginUsdc);
-        assertEq(snapshot.committedOrderMarginBucketUsdc, lockedBuckets.committedOrderMarginUsdc);
-        assertEq(snapshot.reservedSettlementBucketUsdc, lockedBuckets.reservedSettlementUsdc);
-        assertEq(snapshot.executionBountyReserveUsdc, reservation.executionBountyUsdc);
-        assertEq(snapshot.committedMarginUsdc, reservation.committedMarginUsdc);
-        assertEq(snapshot.traderClaimBalanceUsdc, collateralView.traderClaimBalanceUsdc);
+        assertEq(snapshot.settlementBalanceAssets, collateralView.settlementBalanceAssets);
+        assertEq(snapshot.freeSettlementAssets, collateralView.freeSettlementAssets);
+        assertEq(snapshot.activePositionMarginAssets, collateralView.activePositionMarginAssets);
+        assertEq(snapshot.otherLockedMarginAssets, collateralView.otherLockedMarginAssets);
+        assertEq(snapshot.positionMarginBucketAssets, lockedBuckets.positionMarginAssets);
+        assertEq(snapshot.committedOrderMarginBucketAssets, lockedBuckets.committedOrderMarginAssets);
+        assertEq(snapshot.reservedSettlementBucketAssets, lockedBuckets.reservedSettlementAssets);
+        assertEq(snapshot.executionBountyReserveAssets, reservation.executionBountyAssets);
+        assertEq(snapshot.committedMarginAssets, reservation.committedMarginAssets);
+        assertEq(snapshot.traderClaimBalanceAssets, collateralView.traderClaimBalanceAssets);
         assertEq(snapshot.pendingOrderCount, reservation.pendingOrderCount);
-        assertEq(snapshot.closeReachableUsdc, collateralView.closeReachableUsdc);
-        assertEq(snapshot.liquidationReachableSettlementUsdc, collateralView.liquidationReachableSettlementUsdc);
-        assertEq(snapshot.terminalPriceCollectibleCapUsdc, collateralView.terminalPriceCollectibleCapUsdc);
-        assertEq(snapshot.terminalPriceCollectibleCapUsdc, terminalNavBook.curveOf(account).effectiveCapUsdcAtoms);
-        assertEq(snapshot.accountEquityUsdc, collateralView.accountEquityUsdc);
-        assertEq(snapshot.freeBuyingPowerUsdc, collateralView.freeBuyingPowerUsdc);
+        assertEq(snapshot.closeReachableAssets, collateralView.closeReachableAssets);
+        assertEq(snapshot.liquidationReachableSettlementAssets, collateralView.liquidationReachableSettlementAssets);
+        assertEq(snapshot.terminalPriceCollectibleCapAssets, collateralView.terminalPriceCollectibleCapAssets);
+        assertEq(snapshot.terminalPriceCollectibleCapAssets, terminalNavBook.curveOf(account).effectiveCapAssetAtoms);
+        assertEq(snapshot.accountEquityAssets, collateralView.accountEquityAssets);
+        assertEq(snapshot.freeBuyingPowerAssets, collateralView.freeBuyingPowerAssets);
         assertTrue(snapshot.hasPosition);
         assertEq(uint256(snapshot.side), uint256(sideStored));
         assertEq(snapshot.size, sizeStored);
@@ -239,22 +238,22 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
         ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
 
         assertEq(
-            snapshot.physicalAssetsUsdc, pool.totalAssets(), "Snapshot physical assets must match canonical pool assets"
+            snapshot.physicalAssets, pool.totalAssets(), "Snapshot physical assets must match canonical pool assets"
         );
         assertEq(
-            snapshot.netPhysicalAssetsUsdc,
+            snapshot.netPhysicalAssets,
             pool.totalAssets(),
             "Treasury is already outside pool custody and must not be subtracted"
         );
-        assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "Snapshot liability must match accessor");
+        assertEq(snapshot.maxLiabilityAssets, _maxLiability(), "Snapshot liability must match accessor");
         assertEq(
-            snapshot.supplementalReservedUsdc,
-            SolvencyAccountingLib.settlementBufferTargetUsdc(_maxLiability(), engine.settlementBufferBps()),
+            snapshot.supplementalReservedAssets,
+            SolvencyAccountingLib.settlementBufferTargetAssets(_maxLiability(), engine.settlementBufferBps()),
             "Snapshot supplemental reserve must match the configured settlement buffer"
         );
         assertEq(
-            snapshot.terminalLpPriceDeltaUsdc,
-            terminalSnapshot.terminalLpPriceDeltaUsdc,
+            snapshot.terminalLpPriceDeltaAssets,
+            terminalSnapshot.terminalLpPriceDeltaAssets,
             "Snapshot terminal LP price delta must match engine"
         );
         assertEq(
@@ -263,7 +262,9 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
             "Snapshot terminal NAV book version must match engine"
         );
         assertEq(
-            snapshot.traderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc(), "Snapshot payout must match storage"
+            snapshot.traderClaimBalanceAssets,
+            engine.totalTraderClaimBalanceAssets(),
+            "Snapshot payout must match storage"
         );
         assertTrue(snapshot.markFreshnessRequired, "Open directional liability should require fresh marks");
         assertEq(

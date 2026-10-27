@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MockInvariantHousePool} from "../mocks/MockInvariantHousePool.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineProtocolLens} from "@plether/perps/CfdEngineProtocolLens.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 /// @notice Persistent claim and withdrawal-reserve model for funded whole-position trades at a fixed timestamp.
@@ -18,7 +18,7 @@ import {Test} from "forge-std/Test.sol";
 contract PerpClaimModelHandler is Test {
 
     uint256 internal constant PRICE_MOVE = 0.5e8;
-    uint256 internal constant MARGIN_USDC = 20_000e6;
+    uint256 internal constant MARGIN_ASSETS = 20_000e6;
     uint256 internal constant CAP_PRICE = 2e8;
 
     struct CloseAmounts {
@@ -33,7 +33,7 @@ contract PerpClaimModelHandler is Test {
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
     MockInvariantHousePool public immutable pool;
-    MockUSDC public immutable usdc;
+    MockSettlementToken public immutable settlementToken;
     address public immutable router;
     uint256 public immutable feeBps;
     uint256 public immutable bufferBps;
@@ -44,7 +44,7 @@ contract PerpClaimModelHandler is Test {
     mapping(address => bool) public expectedOpen;
     mapping(address => CfdTypes.Side) public expectedSide;
     mapping(address => uint256) public expectedLots;
-    mapping(address => uint256) public expectedEntryCostUsdc;
+    mapping(address => uint256) public expectedEntryCostAssets;
     uint256 public expectedTotalClaims;
     uint256 public attempts;
     uint256 public skipped;
@@ -52,7 +52,7 @@ contract PerpClaimModelHandler is Test {
     uint256 public deferredCloses;
     uint256 public immediateCloses;
     uint256 public lossCloses;
-    uint256 public claimConsumptionUsdc;
+    uint256 public claimConsumptionAssets;
     uint256 public successfulSettlements;
     uint256 public livePositionSettlements;
     uint256 public expectedRejections;
@@ -69,13 +69,13 @@ contract PerpClaimModelHandler is Test {
         CfdEngine engine_,
         MarginClearinghouse clearinghouse_,
         MockInvariantHousePool pool_,
-        MockUSDC usdc_,
+        MockSettlementToken settlementToken_,
         address router_
     ) {
         engine = engine_;
         clearinghouse = clearinghouse_;
         pool = pool_;
-        usdc = usdc_;
+        settlementToken = settlementToken_;
         router = router_;
         feeBps = engine_.executionFeeBps();
         bufferBps = engine_.settlementBufferBps();
@@ -123,15 +123,15 @@ contract PerpClaimModelHandler is Test {
             vm.prank(engine.owner());
             engine.clearDegradedMode();
         }
-        usdc.mint(account, 100_000e6);
+        settlementToken.mint(account, 100_000e6);
         vm.startPrank(account);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(account, 100_000e6);
         vm.stopPrank();
 
         CfdTypes.Side side = shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 poolBefore = usdc.balanceOf(address(pool));
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
+        uint256 poolBefore = settlementToken.balanceOf(address(pool));
         (bool ok, bytes memory err) = _trade(account, side, lots, entryPrice, false);
         if (!ok) {
             _unexpected(err);
@@ -140,11 +140,11 @@ contract PerpClaimModelHandler is Test {
         expectedOpen[account] = true;
         expectedSide[account] = side;
         expectedLots[account] = lots;
-        expectedEntryCostUsdc[account] = lots * entryPrice;
+        expectedEntryCostAssets[account] = lots * entryPrice;
         successfulOpens++;
         uint256 fee = lots * entryPrice * feeBps / 10_000;
-        cashMismatch = cashMismatch || clearinghouse.balanceUsdc(account) != settlementBefore - fee
-            || usdc.balanceOf(address(pool)) != poolBefore;
+        cashMismatch = cashMismatch || clearinghouse.balanceAssets(account) != settlementBefore - fee
+            || settlementToken.balanceOf(address(pool)) != poolBefore;
     }
 
     function close(
@@ -164,12 +164,12 @@ contract PerpClaimModelHandler is Test {
         amounts.lots = expectedLots[account];
         {
             bool lowerPrice = profitable == (expectedSide[account] == CfdTypes.Side.LONG);
-            uint256 entryPrice = expectedEntryCostUsdc[account] / amounts.lots;
+            uint256 entryPrice = expectedEntryCostAssets[account] / amounts.lots;
             amounts.price = lowerPrice ? entryPrice - PRICE_MOVE : entryPrice + PRICE_MOVE;
         }
         amounts.fee = amounts.lots * amounts.price * feeBps / 10_000;
         amounts.pnl = amounts.lots * PRICE_MOVE;
-        amounts.settlementBefore = clearinghouse.balanceUsdc(account);
+        amounts.settlementBefore = clearinghouse.balanceAssets(account);
 
         (bool ok, bytes memory err) = _trade(account, expectedSide[account], amounts.lots, amounts.price, true);
         if (!ok) {
@@ -178,7 +178,7 @@ contract PerpClaimModelHandler is Test {
         }
         expectedOpen[account] = false;
         delete expectedLots[account];
-        delete expectedEntryCostUsdc[account];
+        delete expectedEntryCostAssets[account];
         uint256 expectedPoolAfter = amounts.poolBefore;
         uint256 expectedSettlementAfter = amounts.settlementBefore;
         if (profitable) {
@@ -198,13 +198,13 @@ contract PerpClaimModelHandler is Test {
             uint256 consumedClaim = claim < amounts.pnl ? claim : amounts.pnl;
             expectedClaim[account] -= consumedClaim;
             expectedTotalClaims -= consumedClaim;
-            claimConsumptionUsdc += consumedClaim;
+            claimConsumptionAssets += consumedClaim;
             uint256 collectedPledge = amounts.pnl - consumedClaim;
             expectedPoolAfter += collectedPledge;
             expectedSettlementAfter -= collectedPledge + amounts.fee;
         }
-        cashMismatch = cashMismatch || usdc.balanceOf(address(pool)) != expectedPoolAfter
-            || clearinghouse.balanceUsdc(account) != expectedSettlementAfter;
+        cashMismatch = cashMismatch || settlementToken.balanceOf(address(pool)) != expectedPoolAfter
+            || clearinghouse.balanceAssets(account) != expectedSettlementAfter;
     }
 
     /// @dev Modes cover zero, own-claim-only, global-short-by-one, exact-global, and surplus liquidity.
@@ -224,8 +224,8 @@ contract PerpClaimModelHandler is Test {
                     : expectedTotalClaims + (mode == 4 ? 1e6 : 0);
         pool.setAssets(cash);
         attempts++;
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 pledgeBefore = clearinghouse.getPnlIsolationBuckets(account).pnlPledgeUsdc;
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
+        uint256 pledgeBefore = clearinghouse.getPnlIsolationBuckets(account).pnlPledgeAssets;
         vm.prank(account);
         (bool ok, bytes memory err) = address(engine).call(abi.encodeCall(engine.settleTraderClaim, (account)));
         bytes4 expectedError = claim == 0
@@ -237,9 +237,9 @@ contract PerpClaimModelHandler is Test {
             } else {
                 expectedRejections++;
             }
-            cashMismatch = cashMismatch || usdc.balanceOf(address(pool)) != cash
-                || clearinghouse.balanceUsdc(account) != settlementBefore
-                || clearinghouse.getPnlIsolationBuckets(account).pnlPledgeUsdc != pledgeBefore;
+            cashMismatch = cashMismatch || settlementToken.balanceOf(address(pool)) != cash
+                || clearinghouse.balanceAssets(account) != settlementBefore
+                || clearinghouse.getPnlIsolationBuckets(account).pnlPledgeAssets != pledgeBefore;
             return;
         }
         if (!ok) {
@@ -253,9 +253,9 @@ contract PerpClaimModelHandler is Test {
             livePositionSettlements++;
         }
         uint256 expectedPledge = pledgeBefore + (expectedOpen[account] ? claim : 0);
-        cashMismatch = cashMismatch || usdc.balanceOf(address(pool)) != cash - claim
-            || clearinghouse.balanceUsdc(account) != settlementBefore + claim
-            || clearinghouse.getPnlIsolationBuckets(account).pnlPledgeUsdc != expectedPledge;
+        cashMismatch = cashMismatch || settlementToken.balanceOf(address(pool)) != cash - claim
+            || clearinghouse.balanceAssets(account) != settlementBefore + claim
+            || clearinghouse.getPnlIsolationBuckets(account).pnlPledgeAssets != expectedPledge;
     }
 
     /// @notice Base Engine withdrawal reserve in this mock-pool domain; no tranche/epoch reserves are represented.
@@ -269,9 +269,9 @@ contract PerpClaimModelHandler is Test {
             }
             // Endpoint payoffs derive from submitted entries, not Engine side aggregates or displayed averages.
             if (expectedSide[account] == CfdTypes.Side.LONG) {
-                longLiability += expectedEntryCostUsdc[account];
+                longLiability += expectedEntryCostAssets[account];
             } else {
-                shortLiability += expectedLots[account] * CAP_PRICE - expectedEntryCostUsdc[account];
+                shortLiability += expectedLots[account] * CAP_PRICE - expectedEntryCostAssets[account];
             }
         }
         uint256 liability = longLiability > shortLiability ? longLiability : shortLiability;
@@ -282,7 +282,7 @@ contract PerpClaimModelHandler is Test {
 
     function checkWithdrawalReserveModel() public view {
         uint256 expected = expectedWithdrawalReserve();
-        uint256 actual = protocolLens.getProtocolAccountingSnapshot().withdrawalReservedUsdc;
+        uint256 actual = protocolLens.getProtocolAccountingSnapshot().withdrawalReservedAssets;
         if (actual != expected) {
             revert WithdrawalReserveMismatch(expected, actual);
         }
@@ -292,7 +292,7 @@ contract PerpClaimModelHandler is Test {
         uint256 total;
         for (uint256 i; i < accounts.length; ++i) {
             address account = accounts[i];
-            uint256 actual = engine.traderClaimBalanceUsdc(account);
+            uint256 actual = engine.traderClaimBalanceAssets(account);
             if (actual != expectedClaim[account]) {
                 revert ClaimModelMismatch(account, expectedClaim[account], actual);
             }
@@ -300,7 +300,7 @@ contract PerpClaimModelHandler is Test {
             (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
             if (
                 size != expectedLots[account] * CfdTypes.SIZE_QUANTUM
-                    || engine.positionEntryCostUsdcAtoms(account) != expectedEntryCostUsdc[account]
+                    || engine.positionEntryCostAssetAtoms(account) != expectedEntryCostAssets[account]
                     || (expectedOpen[account] && side != expectedSide[account])
             ) {
                 revert PositionModelMismatch(account);
@@ -309,7 +309,7 @@ contract PerpClaimModelHandler is Test {
         if (total != expectedTotalClaims) {
             revert ClaimTotalMismatch(expectedTotalClaims, total);
         }
-        uint256 liveTotal = engine.totalTraderClaimBalanceUsdc();
+        uint256 liveTotal = engine.totalTraderClaimBalanceAssets();
         if (expectedTotalClaims != liveTotal) {
             revert ClaimTotalMismatch(expectedTotalClaims, liveTotal);
         }
@@ -325,7 +325,7 @@ contract PerpClaimModelHandler is Test {
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: lots * CfdTypes.SIZE_QUANTUM,
-            marginDelta: isClose ? 0 : MARGIN_USDC,
+            marginDelta: isClose ? 0 : MARGIN_ASSETS,
             targetPrice: price,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),

@@ -28,18 +28,18 @@ library HousePoolSeniorCapacityLib {
         uint256 seniorPrincipal,
         uint256 seniorHighWaterMark,
         uint256 juniorPrincipal,
-        uint256 reservedSeniorDepositAssetsUsdc,
-        uint256 maxSeniorExposureUsdc,
+        uint256 reservedSeniorDepositAssets,
+        uint256 maxSeniorExposureAssets,
         uint256 maxSeniorShareBps
     ) internal pure returns (uint256) {
         uint256 exposure = protectedExposure(seniorPrincipal, seniorHighWaterMark);
-        uint256 limit = exposureLimit(juniorPrincipal, maxSeniorExposureUsdc, maxSeniorShareBps);
+        uint256 limit = exposureLimit(juniorPrincipal, maxSeniorExposureAssets, maxSeniorShareBps);
         if (exposure >= limit) {
             return 0;
         }
 
         uint256 remaining = limit - exposure;
-        return reservedSeniorDepositAssetsUsdc < remaining ? remaining - reservedSeniorDepositAssetsUsdc : 0;
+        return reservedSeniorDepositAssets < remaining ? remaining - reservedSeniorDepositAssets : 0;
     }
 
     /// @notice Returns whether active protected exposure plus all reservations fits both governed limits.
@@ -47,16 +47,16 @@ library HousePoolSeniorCapacityLib {
         uint256 seniorPrincipal,
         uint256 seniorHighWaterMark,
         uint256 juniorPrincipal,
-        uint256 reservedSeniorDepositAssetsUsdc,
-        uint256 maxSeniorExposureUsdc,
+        uint256 reservedSeniorDepositAssets,
+        uint256 maxSeniorExposureAssets,
         uint256 maxSeniorShareBps
     ) internal pure returns (bool) {
         uint256 exposure = protectedExposure(seniorPrincipal, seniorHighWaterMark);
-        if (reservedSeniorDepositAssetsUsdc > type(uint256).max - exposure) {
+        if (reservedSeniorDepositAssets > type(uint256).max - exposure) {
             return false;
         }
-        uint256 committedExposure = exposure + reservedSeniorDepositAssetsUsdc;
-        return committedExposure <= exposureLimit(juniorPrincipal, maxSeniorExposureUsdc, maxSeniorShareBps);
+        uint256 committedExposure = exposure + reservedSeniorDepositAssets;
+        return committedExposure <= exposureLimit(juniorPrincipal, maxSeniorExposureAssets, maxSeniorShareBps);
     }
 
     /// @notice Caps junior withdrawals so remaining junior capital backs active and reserved senior exposure.
@@ -65,7 +65,7 @@ library HousePoolSeniorCapacityLib {
         uint256 seniorPrincipal,
         uint256 seniorHighWaterMark,
         uint256 juniorPrincipal,
-        uint256 reservedSeniorDepositAssetsUsdc,
+        uint256 reservedSeniorDepositAssets,
         uint256 maxSeniorShareBps
     ) internal pure returns (uint256) {
         if (maxSeniorShareBps >= BPS) {
@@ -73,10 +73,10 @@ library HousePoolSeniorCapacityLib {
         }
 
         uint256 exposure = protectedExposure(seniorPrincipal, seniorHighWaterMark);
-        if (reservedSeniorDepositAssetsUsdc > type(uint256).max - exposure) {
+        if (reservedSeniorDepositAssets > type(uint256).max - exposure) {
             return 0;
         }
-        exposure += reservedSeniorDepositAssetsUsdc;
+        exposure += reservedSeniorDepositAssets;
         if (exposure == 0) {
             return juniorPrincipal;
         }
@@ -92,11 +92,11 @@ library HousePoolSeniorCapacityLib {
     /// @notice Returns the lower of the absolute exposure ceiling and the share-derived ceiling.
     function exposureLimit(
         uint256 juniorPrincipal,
-        uint256 maxSeniorExposureUsdc,
+        uint256 maxSeniorExposureAssets,
         uint256 maxSeniorShareBps
     ) internal pure returns (uint256) {
         uint256 ratioLimit = _ratioExposureLimit(juniorPrincipal, maxSeniorShareBps);
-        return maxSeniorExposureUsdc < ratioLimit ? maxSeniorExposureUsdc : ratioLimit;
+        return maxSeniorExposureAssets < ratioLimit ? maxSeniorExposureAssets : ratioLimit;
     }
 
     function _ratioExposureLimit(
