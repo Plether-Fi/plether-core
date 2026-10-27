@@ -154,6 +154,8 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         IOrderRouterAdminHost.RouterConfig memory routerConfig = _routerConfig();
         routerConfig.maxExecutionWindowSeconds = 1 hours;
         _setRouterConfig(routerConfig);
+        // The second 72-hour proposal must mature in a live market window.
+        vm.warp(block.timestamp + 1 days);
 
         ICfdEngineAdminHost.EngineRiskConfig memory riskConfig = _engineRiskConfig();
         riskConfig.settlementBufferBps = 1000;

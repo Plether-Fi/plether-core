@@ -57,7 +57,7 @@ contract WeekendArbitrageTest is RecordedOrderReceipts {
     receive() external payable {}
 
     function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
     }
 
     function _configureBroadSeniorCapacity() internal {
@@ -117,7 +117,8 @@ contract WeekendArbitrageTest is RecordedOrderReceipts {
     }
 
     function setUp() public {
-        vm.warp(1_709_100_000);
+        // Complete the 72-hour capacity proposal on Friday before the market closes.
+        vm.warp(1_709_100_000 - 1 days);
         settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);

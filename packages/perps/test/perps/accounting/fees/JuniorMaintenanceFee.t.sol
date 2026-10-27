@@ -60,7 +60,7 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
     address internal constant RECEIVER = address(0xCAFE);
     address internal constant TRADER = address(0x7A0E2);
 
-    function test_ConstructorInitializesJuniorFeeAtDeploymentTreasuryAndEmitsCheckpoint() public {
+    function test_ConstructorAcceptsMaxFeeAtDeploymentTreasuryAndEmitsCheckpoint() public {
         HousePool deploymentPool =
             new HousePool(address(settlementToken), address(engine), address(housePoolRedemptionMathSidecar));
         TrancheVault deploymentSenior = new TrancheVault(
@@ -77,18 +77,18 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         uint256 checkpointBoundary = _nextHourBoundary(block.timestamp);
         address expectedJunior = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
         vm.expectEmit(true, false, false, true, expectedJunior);
-        emit MaintenanceFeeConfigInitialized(100, engine.protocolTreasury(), checkpointBoundary);
+        emit MaintenanceFeeConfigInitialized(10_000, engine.protocolTreasury(), checkpointBoundary);
         TrancheVault deploymentJunior = new TrancheVault(
             IERC20(address(settlementToken)),
             address(deploymentPool),
             false,
             "Deployment Junior LP",
             "deploymentJuniorAssets",
-            100,
+            10_000,
             engine.protocolTreasury()
         );
 
-        assertEq(deploymentJunior.maintenanceFeeAprBps(), 100);
+        assertEq(deploymentJunior.maintenanceFeeAprBps(), 10_000);
         assertEq(deploymentJunior.maintenanceFeeRecipient(), engine.protocolTreasury());
         assertEq(deploymentJunior.maintenanceFeeCheckpointBoundary(), checkpointBoundary);
         assertEq(deploymentJunior.maintenanceFeeConfigActivationTime(), 0);
@@ -118,7 +118,7 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
 
         vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRate.selector);
         new TrancheVault(
-            IERC20(address(settlementToken)), address(deploymentPool), false, "Junior", "j", 1001, FEE_RECIPIENT
+            IERC20(address(settlementToken)), address(deploymentPool), false, "Junior", "j", 10_001, FEE_RECIPIENT
         );
 
         vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
@@ -279,7 +279,7 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
 
     function test_RateCapAndRecipientPolicy() public {
         vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRate.selector);
-        juniorVault.proposeMaintenanceFeeConfig(1001, FEE_RECIPIENT);
+        juniorVault.proposeMaintenanceFeeConfig(10_001, FEE_RECIPIENT);
 
         vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
         juniorVault.proposeMaintenanceFeeConfig(1, address(0));
@@ -293,9 +293,9 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
         juniorVault.proposeMaintenanceFeeConfig(1, address(juniorVault));
 
-        juniorVault.proposeMaintenanceFeeConfig(1000, FEE_RECIPIENT);
+        juniorVault.proposeMaintenanceFeeConfig(10_000, FEE_RECIPIENT);
         (uint256 pendingAprBps, address pendingRecipient) = juniorVault.pendingMaintenanceFeeConfig();
-        assertEq(pendingAprBps, 1000);
+        assertEq(pendingAprBps, 10_000);
         assertEq(pendingRecipient, FEE_RECIPIENT);
 
         juniorVault.proposeMaintenanceFeeConfig(100, address(settlementToken));
@@ -309,14 +309,18 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         assertEq(pendingRecipient, FEE_RECIPIENT);
     }
 
-    function test_ProposalRequiresFull48HoursAndFinalizesAtEquality() public {
+    function test_ProposalRequiresFull72HoursAndFinalizesAtEquality() public {
         uint256 proposedAt = block.timestamp;
         juniorVault.proposeMaintenanceFeeConfig(250, FEE_RECIPIENT);
         uint256 activationTime = juniorVault.maintenanceFeeConfigActivationTime();
 
-        assertEq(activationTime, proposedAt + 48 hours);
+        assertEq(activationTime, proposedAt + 72 hours);
         assertEq(juniorVault.maintenanceFeeAprBps(), 0);
 
+        vm.expectRevert(TrancheVault.TrancheVault__MaintenanceFeeTimelockNotReady.selector);
+        juniorVault.finalizeMaintenanceFeeConfig();
+
+        vm.warp(proposedAt + 48 hours);
         vm.expectRevert(TrancheVault.TrancheVault__MaintenanceFeeTimelockNotReady.selector);
         juniorVault.finalizeMaintenanceFeeConfig();
 
@@ -348,7 +352,7 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         uint256 replacementActivation = juniorVault.maintenanceFeeConfigActivationTime();
         (uint256 pendingAprBps, address pendingRecipient) = juniorVault.pendingMaintenanceFeeConfig();
 
-        assertEq(replacementActivation, block.timestamp + 48 hours);
+        assertEq(replacementActivation, block.timestamp + 72 hours);
         assertGt(replacementActivation, firstActivation);
         assertEq(pendingAprBps, 300);
         assertEq(pendingRecipient, ROTATED_FEE_RECIPIENT);
@@ -488,10 +492,11 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
     }
 
     function test_CatchUpChargesAtMostOneYearAndForgivesOlderHours() public {
-        _enableFee(juniorVault, 1000, FEE_RECIPIENT);
+        _enableFee(juniorVault, 10_000, FEE_RECIPIENT);
         uint256 startBoundary = juniorVault.maintenanceFeeCheckpointBoundary();
         vm.warp(startBoundary + HOURS_PER_YEAR * 1 hours);
         uint256 feeAtCap = juniorVault.pendingMaintenanceFeeShares();
+        assertGt(feeAtCap, juniorVault.totalSupply(), "100% nominal APR compounds to over 100% supply growth");
 
         vm.warp(block.timestamp + 137 hours);
         assertEq(juniorVault.pendingMaintenanceFeeShares(), feeAtCap, "hours beyond one year are forgiven");

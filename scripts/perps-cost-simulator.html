@@ -171,12 +171,12 @@
     <div class="field">
       <label>Keeper share <span class="val" id="v-keepershare"></span></label>
       <input type="range" id="keepershare" min="0" max="10000" step="250" value="5000" oninput="updateLiquidationShares('keepershare')">
-      <div class="hint">keeperShareBps — release value 5,000; 48h timelocked</div>
+      <div class="hint">keeperShareBps — release value 5,000; 72h timelocked</div>
     </div>
     <div class="field">
       <label>Protocol share <span class="val" id="v-protocolshare"></span></label>
       <input type="range" id="protocolshare" min="0" max="10000" step="250" value="0" oninput="updateLiquidationShares('protocolshare')">
-      <div class="hint">protocolShareBps — release value 0; 48h timelocked; keeper + protocol must be at most 10,000</div>
+      <div class="hint">protocolShareBps — release value 0; 72h timelocked; keeper + protocol must be at most 10,000</div>
     </div>
     <div class="field">
       <label>Max skew ratio <span class="val" id="v-maxskew"></span></label>

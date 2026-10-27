@@ -184,7 +184,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         config.seniorFrozenLpFeeBps = 40;
         config.juniorFrozenLpFeeBps = 90;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         pool.finalizePoolConfig();
 
         _enterFrozenWindow();
@@ -249,7 +249,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         config.seniorFrozenLpFeeBps = 25;
         config.juniorFrozenLpFeeBps = 75;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         pool.finalizePoolConfig();
         _enterFrozenWindow();
 

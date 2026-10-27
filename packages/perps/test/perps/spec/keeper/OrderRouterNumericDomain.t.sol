@@ -231,7 +231,7 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
         ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams.vpiFactor = type(uint256).max;
         engineAdmin.proposeRiskConfig(config);
-        vm.warp(block.timestamp + 48 hours);
+        vm.warp(block.timestamp + 72 hours);
         uint64 orderId = _commit(ALICE, _request(bytes32("config-pinned"), 10_000e18, 1000e6));
         vm.warp(block.timestamp + 1);
         engineAdmin.finalizeRiskConfig();

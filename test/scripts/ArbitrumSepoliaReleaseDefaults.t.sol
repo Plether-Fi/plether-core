@@ -826,8 +826,8 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(deployed.housePool.poolConfigActivationTime(), 0);
         OrderRouterAdmin routerAdmin = OrderRouterAdmin(deployed.router.admin());
         assertEq(routerAdmin.routerConfigActivationTime(), 0);
-        assertEq(deployed.housePool.TIMELOCK_DELAY(), 48 hours);
-        assertEq(routerAdmin.TIMELOCK_DELAY(), 48 hours);
+        assertEq(deployed.housePool.TIMELOCK_DELAY(), 72 hours);
+        assertEq(routerAdmin.TIMELOCK_DELAY(), 72 hours);
 
         address owner = vm.addr(0xA11CE);
         IHousePool.PoolConfig memory nextPoolConfig = IHousePool.PoolConfig({
@@ -840,7 +840,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         });
         vm.prank(owner);
         deployed.housePool.proposePoolConfig(nextPoolConfig);
-        assertEq(deployed.housePool.poolConfigActivationTime(), block.timestamp + 48 hours);
+        assertEq(deployed.housePool.poolConfigActivationTime(), block.timestamp + 72 hours);
         assertEq(deployed.housePool.maxSeniorExposureAssets(), 40_000_000e6, "proposal changed live pool config");
         vm.expectRevert(bytes("Outstanding HousePool config proposal"));
         bootstrapScript.verifyInitialReleaseConfig(deployed.housePool, deployed.router);
@@ -851,7 +851,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         nextRouterConfig.minOpenNotionalAssets = 999e6;
         vm.prank(owner);
         routerAdmin.proposeRouterConfig(nextRouterConfig);
-        assertEq(routerAdmin.routerConfigActivationTime(), block.timestamp + 48 hours);
+        assertEq(routerAdmin.routerConfigActivationTime(), block.timestamp + 72 hours);
         assertEq(deployed.router.minOpenNotionalAssets(), 1000e6, "proposal changed live Router config");
         vm.expectRevert(bytes("Outstanding Router config proposal"));
         bootstrapScript.verifyInitialReleaseConfig(deployed.housePool, deployed.router);

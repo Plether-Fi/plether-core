@@ -84,7 +84,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         IHousePool.PoolConfig memory poolConfig = _currentPoolConfig();
         poolConfig.markStalenessLimit = 300;
         pool.proposePoolConfig(poolConfig);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         pool.finalizePoolConfig();
 
         vm.warp(1150);
@@ -100,7 +100,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         IOrderRouterAdminHost.RouterConfig memory routerConfig = _routerConfig();
         routerConfig.orderExecutionStalenessLimit = 300;
         routerAdmin.proposeRouterConfig(routerConfig);
-        vm.warp(1200 + 48 hours + 1);
+        vm.warp(1200 + 72 hours + 1);
         routerAdmin.finalizeRouterConfig();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp - 10));
 
@@ -117,7 +117,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.orderExecutionStalenessLimit = 300;
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         engineAdmin.finalizeFreshnessConfig();
         routerAdmin.finalizeRouterConfig();
 

@@ -63,6 +63,8 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.SHORT, 10_000e18, 200e6, 99_700_000);
 
         _seedAuthenticatedTraderClaim(account, 10e6);
+        // Finish the second governance wait on Monday so liquidation uses a live oracle price.
+        vm.warp(block.timestamp + 1 days);
         params.maintMarginBps = 500;
         params.initMarginBps = 750;
         params.fadMarginBps = 750;

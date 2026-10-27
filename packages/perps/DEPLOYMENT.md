@@ -95,7 +95,7 @@ new dependencies; their immutable bindings cannot be repaired.
 The release wrappers initialize HousePool's `$40M/80%` Senior limits, the Oracle's `2,500`-bps adverse multiplier,
 and the Router's `$1,000` opening minimum. The deploy script checks the Oracle multiplier before creating the Router.
 These wrappers add no post-deployment configuration surface. Later economic configuration changes use the applicable
-48-hour governance paths.
+72-hour governance paths.
 
 Record and verify children as well as top-level deployments:
 
@@ -225,7 +225,7 @@ candidate inactive and its manifest separate.
 ## Bootstrap after release approval
 
 Bootstrap assumes the broadcaster owns the deployed contracts. It verifies exact release parameters and wiring;
-it does not repair mismatched components or propose initial configuration. No initial 48-hour configuration wait is
+it does not repair mismatched components or propose initial configuration. No initial 72-hour configuration wait is
 required because the release constructors set those values.
 
 The required bootstrap inputs, in addition to the private key and RPC, are:

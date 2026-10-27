@@ -15,8 +15,8 @@ import {OracleConfidencePolicyLib} from "@plether/perps/libraries/OracleConfiden
 ///      retries, mark refresh, and liquidation remain available. Only the owner may unpause.
 contract OrderRouterAdmin is Ownable2Step, Pausable {
 
-    /// @notice Delay between a configuration proposal and its earliest finalization (48 hours).
-    uint256 public constant TIMELOCK_DELAY = 48 hours;
+    /// @notice Delay between a configuration proposal and its earliest finalization (72 hours).
+    uint256 public constant TIMELOCK_DELAY = 72 hours;
     /// @notice Upper bound for live pending orders per account.
     uint256 internal constant MAX_PENDING_ORDERS_LIMIT = 32;
     /// @notice Upper bound for the fixed protection-trigger bounty (6-decimal settlement token; $1).
@@ -143,7 +143,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     }
 
     /// @notice Proposes router queue, bounty, and execution bounds behind the timelock.
-    /// @dev Owner only. A valid proposal replaces any pending router proposal and restarts its 48-hour delay.
+    /// @dev Owner only. A valid proposal replaces any pending router proposal and restarts its 72-hour delay.
     ///      Time fields are seconds, monetary fields are 6-decimal settlement token, gas fields are gas units, ratios are
     ///      basis points except where the host struct specifies otherwise, and order ids/counts are unscaled.
     /// @param config Router configuration to validate and stage.
@@ -179,7 +179,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
 
     /// @notice Proposes the router oracle address behind the timelock.
     /// @dev Owner only. The oracle must have deployed code. A valid proposal replaces any pending oracle
-    ///      proposal and restarts its independent 48-hour delay; full engine/pool wiring is checked by the router on finalization.
+    ///      proposal and restarts its independent 72-hour delay; full engine/pool wiring is checked by the router on finalization.
     /// @param config Oracle-address configuration to validate and stage.
     function proposeOracleConfig(
         IOrderRouterAdminHost.OracleConfig calldata config

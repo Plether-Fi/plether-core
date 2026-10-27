@@ -26,12 +26,12 @@ contract HousePoolAdministrationTest is HousePoolTestBase {
         // Generate some revenue
         _mintAndAccountPoolExcess(200_000 * 1e6);
 
-        vm.warp(block.timestamp + 365 days - 48 hours - 1);
+        vm.warp(block.timestamp + 365 days - 72 hours - 1);
 
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1200;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         uint256 expectedCoupon =
@@ -49,7 +49,7 @@ contract HousePoolAdministrationTest is HousePoolTestBase {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 121);
+        vm.warp(block.timestamp + 72 hours + 121);
 
         vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
@@ -61,7 +61,7 @@ contract HousePoolAdministrationTest is HousePoolTestBase {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 121);
+        vm.warp(block.timestamp + 72 hours + 121);
 
         vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
@@ -87,6 +87,8 @@ contract HousePoolAdministrationTest is HousePoolTestBase {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         _open(carol, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
+        // Let the second 72-hour proposal mature on Monday under the live mark policy.
+        vm.warp(block.timestamp + 1 days);
         config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
@@ -131,7 +133,7 @@ contract HousePoolAdministrationTest is HousePoolTestBase {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         pool.finalizePoolConfig();

@@ -66,7 +66,7 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxExecutionWindowSeconds = 300;
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(block.timestamp + 48 hours);
+        vm.warp(block.timestamp + 72 hours);
         routerAdmin.finalizeRouterConfig();
 
         address other = address(0x333);
