@@ -6,6 +6,7 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdTreasury} from "@plether/perps/CfdTreasury.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -28,9 +29,9 @@ contract EngineConfigurationTest is CfdEngineTestBase {
         vm.warp(1_000_000);
         assertEq(engine.protocolTreasuryLockedUntil(), 0);
         vm.expectEmit(true, false, false, true, address(engine));
-        emit CfdEngine.ProtocolTreasuryUpdated(treasury);
+        emit CfdTreasury.ProtocolTreasuryUpdated(treasury);
         vm.expectEmit(true, false, false, true, address(engine));
-        emit CfdEngine.ProtocolTreasuryLocked(treasury, 8_776_000);
+        emit CfdTreasury.ProtocolTreasuryLocked(treasury, 8_776_000);
         engine.setProtocolTreasury(treasury, 90 days);
         assertEq(engine.protocolTreasury(), treasury);
         assertEq(engine.protocolTreasuryLockedUntil(), 8_776_000);
@@ -85,7 +86,7 @@ contract EngineConfigurationTest is CfdEngineTestBase {
         // Snapshot time through the cheatcode so via-IR cannot recompute it after vm.warp.
         uint256 expiry = vm.getBlockTimestamp() + 90 days;
         vm.expectEmit(true, false, false, true, address(engine));
-        emit CfdEngine.ProtocolTreasuryLocked(treasury, expiry);
+        emit CfdTreasury.ProtocolTreasuryLocked(treasury, expiry);
         engine.setProtocolTreasury(treasury, 90 days);
         assertEq(engine.protocolTreasuryLockedUntil(), expiry);
         vm.warp(expiry + 1);

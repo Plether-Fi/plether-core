@@ -78,6 +78,13 @@ configuration finalization. The versions are execution-authority inputs, not tim
 
 `CfdEngine` dependencies (`CfdEnginePlanner`, `CfdEngineSettlementSidecar`, `CfdEngineAdmin`) are deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time. The engine rejects a settlement sidecar or admin bound to another engine and rejects a no-code admin address; selecting and verifying the intended `CfdEngineAdmin` bytecode remains a deployment responsibility.
 
+The Engine constructor also creates `CfdEnginePlanningReader`, stores it as the immutable `planningReader`, and
+binds the reader's immutable `ENGINE` to itself. No separate deployment transaction or owner configuration is needed.
+The reader accepts planning calls only from that Engine and uses its configured planner and settlement sidecar.
+Its entrypoints are read-only: it has no owner, upgrade path, or settlement authority. Moving snapshot encoding into
+this reader reduces Engine runtime size; the reader's creation code is embedded in Engine initcode, so deployment
+checks must cover both contracts' EIP-170 runtime sizes and the Engine's EIP-3860 creation-input size.
+
 `TerminalNavBookV2` is also deployed separately and wired once through `setTerminalNavBook(...)` before any exposure.
 The Engine accepts only an empty book immutably bound to itself with matching `CAP_PRICE` and the canonical `1e20`
 size quantum.
@@ -125,6 +132,11 @@ effective treasury stays selected after its own lock expires. `pendingProtocolTr
 activation time, and successor lock expiry only while the proposal is pending, then returns zeros.
 `protocolTreasury()` and `protocolTreasuryLockedUntil()` resolve the effective values by timestamp; the latter
 retains the latest effective expiry after it passes.
+
+`CfdTreasury` is an inherited implementation module: treasury storage, owner checks, and events remain in the Engine.
+Before an immediate update or a new proposal, an activated successor is copied into the current record and the pending
+record is cleared. Reads still resolve activation by timestamp before that storage normalization occurs. This keeps
+mutations on the current record without introducing an activation transaction or changing either lock deadline.
 
 There is no mandatory minimum tenure, emergency override, or duration cap. An incorrect active address or
 excessively long active lock cannot be corrected before expiry. Zero duration is rejected by the immediate locking
@@ -268,7 +280,9 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
   calls. The Router remains `address(this)` and the direct-event address, Engine/HousePool see the Router as caller, and
   the Router entrypoint's `msg.sender` is preserved; the Book-trigger route authenticates keeper/refund identity through
   its trailing payload.
-- `CfdEngineSettlementSidecar` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
+- `CfdEngineSettlementSidecar` mutations accept only the immutable-bound Engine. Its read-only `buildRawSnapshot`
+  also accepts that Engine's immutable planning reader. The reader cannot invoke settlement mutations; any new
+  external sidecar function remains security-critical because the sidecar can reach engine-owned settlement hooks.
 - `TerminalNavBookV2` accepts curve mutations only from its immutable-bound Engine. It has no owner, repair, or
   migration path. Engine wiring validates the bound Engine, price cap, size quantum, and completely empty book before
   accepting it once.
@@ -752,7 +766,9 @@ execution sidecar, evaluator, and Oracle; both admin identities and monotonic ac
 settlement sidecar; protocol treasury; terminal NAV book; and HousePool mark staleness. It excludes dynamic
 market/runtime values such as price, depth, position skew, FAD/frozen mode, Router/HousePool pause state, the LP
 settlement hold, and the risk-off cutoff. It also excludes the immutable HousePool redemption-math sidecar because
-that module affects only LP redemption budgeting, not order execution. This division is intentional: identity and
+that module affects only LP redemption budgeting, not order execution. The immutable Engine planning reader is not
+hashed separately: each Engine creates and permanently binds its own reader, while the Engine identity and the
+planner and settlement-sidecar dependencies are included. This division is intentional: identity and
 finalized policy drift produces terminal `ConfigMismatch` for config-pinned external orders, while execution mode and
 economics must fit the separately pinned request bounds. The internal TP/SL close-attempt marker skips the
 hash-equality check but still records the observed digest in its terminal receipt.

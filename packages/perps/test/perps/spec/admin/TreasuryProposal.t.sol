@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdTreasury} from "@plether/perps/CfdTreasury.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
@@ -18,7 +19,7 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         vm.warp(expiry - 30 days);
 
         vm.expectEmit(true, false, false, true, address(engine));
-        emit CfdEngine.ProtocolTreasuryProposed(TREASURY_B, expiry, expiry + 60 days);
+        emit CfdTreasury.ProtocolTreasuryProposed(TREASURY_B, expiry, expiry + 60 days);
         engine.proposeProtocolTreasury(TREASURY_B, 60 days);
 
         assertEq(engine.protocolTreasury(), TREASURY_A);
@@ -32,7 +33,7 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         vm.warp(expiry - 1);
 
         vm.expectEmit(true, false, false, true, address(engine));
-        emit CfdEngine.ProtocolTreasuryProposed(TREASURY_C, expiry, expiry + 30 days);
+        emit CfdTreasury.ProtocolTreasuryProposed(TREASURY_C, expiry, expiry + 30 days);
         engine.proposeProtocolTreasury(TREASURY_C, 30 days);
 
         assertEq(engine.protocolTreasury(), TREASURY_A);
@@ -50,7 +51,7 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         vm.warp(expiry - 1);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit CfdEngine.ProtocolTreasuryProposalCancelled();
+        emit CfdTreasury.ProtocolTreasuryProposalCancelled();
         engine.cancelProtocolTreasuryProposal();
 
         _assertPending(address(0), 0, 0);

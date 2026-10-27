@@ -675,6 +675,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("MockUSDG:", address(deployed.settlementToken));
         console.log("MarginClearinghouse:", address(deployed.clearinghouse));
         console.log("CfdEngine:", address(deployed.engine));
+        console.log("CfdEnginePlanningReader:", address(deployed.engine.planningReader()));
         console.log("TerminalNavBookV2:", address(deployed.terminalNavBook));
         console.log("PositionSizeQuantum:", deployed.terminalNavBook.SIZE_QUANTUM());
         console.log("FrozenCloseSpreadBps:", deployed.engine.frozenCloseSpreadBps());

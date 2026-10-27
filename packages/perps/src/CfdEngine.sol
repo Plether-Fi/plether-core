@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdEnginePlanningReader} from "@plether/perps/CfdEnginePlanningReader.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
+import {CfdTreasury} from "@plether/perps/CfdTreasury.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "@plether/perps/interfaces/CfdEngineSettlementTypes.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
@@ -43,9 +43,12 @@ interface ICfdEnginePoolBinding {
 ///      decimals, basis-point values use a 10,000 denominator, and timestamps are Unix seconds. Legacy `settlementToken` and
 ///      `Assets` identifiers denote the configured settlement token, including MockUSDG on the new testnet stack.
 /// @custom:security-contact contact@plether.com
-contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, ReentrancyGuardTransient {
+contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdTreasury, ReentrancyGuardTransient {
 
     using SafeERC20 for IERC20;
+
+    /// @notice Fixed read-only adapter that plans from the settlement sidecar's canonical snapshots.
+    CfdEnginePlanningReader public immutable planningReader;
 
     /// @notice Engine-owned fields for an open position.
     /// @dev Active margin is deliberately excluded: the clearinghouse position-margin bucket is its source of truth.
@@ -130,15 +133,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice One-time-configured router authorized to reserve bounties and execute orders and liquidations.
     address public orderRouter;
 
-    struct TreasuryConfig {
-        // Full-slot address word avoids read-modify-write masking; inputs are always zero-extended addresses.
-        uint256 account;
-        uint256 lockedUntil;
-    }
-
-    TreasuryConfig private _currentTreasury;
-    TreasuryConfig private _pendingTreasury;
-
     /// @notice Whether a Unix day number is configured as an all-day FAD and oracle-frozen override.
     mapping(uint256 => bool) public fadDayOverrides;
     uint256[] private _fadOverrideDays;
@@ -157,23 +151,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Protected headroom required per unit of maximum directional liability, in basis points.
     /// @dev This affects open/increase admission and LP withdrawals, but not raw insolvency or terminal NAV.
     uint256 public settlementBufferBps = 25;
-
-    /// @notice Emitted when an immediate setter changes the account designated to receive future protocol fees.
-    /// @dev Scheduled activation is resolved by timestamp and emits no automatic event.
-    /// @param treasury New protocol treasury clearinghouse account.
-    event ProtocolTreasuryUpdated(address indexed treasury);
-
-    /// @notice Emitted when the owner immediately commits a treasury for a chosen duration.
-    /// @param treasury Treasury protected against replacement, including by a subsequent owner.
-    /// @param lockedUntil Unix timestamp at which treasury updates become available again.
-    event ProtocolTreasuryLocked(address indexed treasury, uint256 lockedUntil);
-
-    /// @notice Schedules or replaces the successor at the current treasury's unchanged lock expiry.
-    /// @dev Activation is resolved by timestamp; no transaction or event is required at activationTime.
-    event ProtocolTreasuryProposed(address indexed treasury, uint256 activationTime, uint256 lockedUntil);
-
-    /// @notice Cancels a pending successor without changing the current treasury or its lock expiry.
-    event ProtocolTreasuryProposalCancelled();
 
     function _sideIndex(
         CfdTypes.Side side
@@ -314,7 +291,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 _capPrice,
         CfdTypes.RiskParams memory _riskParams,
         uint256 _frozenCloseSpreadBps
-    ) Ownable(msg.sender) {
+    ) CfdTreasury() {
         if (_settlementToken == address(0) || _clearinghouse == address(0)) {
             revert CfdEngine__ZeroAddress();
         }
@@ -356,7 +333,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         CAP_PRICE = _capPrice;
         _activeRiskParams = _riskParams;
         frozenCloseSpreadBps = _frozenCloseSpreadBps;
-        _currentTreasury.account = uint160(msg.sender);
+        planningReader = new CfdEnginePlanningReader();
     }
 
     /// @notice Atomically configures the planner, settlement sidecar, and engine admin exactly once.
@@ -460,131 +437,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__RouterAlreadySet();
         }
         orderRouter = _router;
-    }
-
-    /// @notice Clearinghouse account credited with protocol fees and forfeited bounties at the current timestamp.
-    /// @dev A scheduled successor becomes active at the previous lock's expiry without a transaction.
-    function protocolTreasury() public view returns (address) {
-        return address(uint160(_activeTreasury().account));
-    }
-
-    /// @notice Lock expiry of the effective treasury; an elapsed timestamp is retained after expiry.
-    function protocolTreasuryLockedUntil() public view returns (uint256) {
-        return _activeTreasury().lockedUntil;
-    }
-
-    /// @notice Pending successor, activation timestamp, and next lock expiry; all zero once active or cancelled.
-    function pendingProtocolTreasury()
-        external
-        view
-        returns (address treasury, uint256 activationTime, uint256 lockedUntil)
-    {
-        uint256 account = _pendingTreasury.account;
-        uint256 activation = _currentTreasury.lockedUntil;
-        bool hasAccount = account != 0;
-        bool beforeActivation = block.timestamp < activation;
-        // Keep the readiness comparisons in Solidity so Forge can instrument them. All account writes are
-        // zero-extended addresses; assembly only encodes the three ABI words to keep the engine deployable.
-        assembly ("memory-safe") {
-            let pending := and(hasAccount, beforeActivation)
-            let result := mload(0x40)
-            mstore(result, mul(pending, account))
-            mstore(add(result, 0x20), mul(pending, activation))
-            mstore(add(result, 0x40), mul(pending, sload(add(_pendingTreasury.slot, 1))))
-            return(result, 0x60)
-        }
-    }
-
-    /// @notice Queues or replaces the treasury that automatically takes effect when the current lock expires.
-    /// @dev Owner-only; requires an active lock. Replacement leaves the current lock's expiry unchanged.
-    /// @param treasury Nonzero clearinghouse account for future fees after activation.
-    /// @param nextLockDuration Seconds to lock the successor from the scheduled activation time; zero leaves it unlocked.
-    function proposeProtocolTreasury(
-        address treasury,
-        uint256 nextLockDuration
-    ) external onlyOwner {
-        TreasuryConfig storage active = _activeTreasury();
-        uint256 activationTime = active.lockedUntil;
-        if (block.timestamp >= activationTime) {
-            revert CfdEngine__TreasuryNotLocked();
-        }
-        if (treasury == address(0)) {
-            revert CfdEngine__ZeroAddress();
-        }
-        _currentTreasury.account = active.account;
-        _currentTreasury.lockedUntil = activationTime;
-        uint256 lockedUntil = activationTime + nextLockDuration;
-        _pendingTreasury.account = uint160(treasury);
-        _pendingTreasury.lockedUntil = lockedUntil;
-        emit ProtocolTreasuryProposed(treasury, activationTime, lockedUntil);
-    }
-
-    /// @notice Cancels the pending successor before activation without restarting or removing the current lock.
-    function cancelProtocolTreasuryProposal() external onlyOwner {
-        if (!_hasPendingTreasury()) {
-            revert CfdEngine__NoTreasuryProposal();
-        }
-        delete _pendingTreasury.account;
-        emit ProtocolTreasuryProposalCancelled();
-    }
-
-    /// @dev A matured pending slot remains active even after its own lock expires. Only a new proposal copies
-    ///      it into the current slot before reusing the pending slot; immediate setters modify the active slot.
-    function _activeTreasury() internal view returns (TreasuryConfig storage active) {
-        active = _currentTreasury;
-        if (_pendingTreasury.account != 0 && block.timestamp >= _currentTreasury.lockedUntil) {
-            active = _pendingTreasury;
-        }
-    }
-
-    function _hasPendingTreasury() internal view returns (bool pending) {
-        return _pendingTreasury.account != 0 && block.timestamp < _currentTreasury.lockedUntil;
-    }
-
-    /// @notice Immediately updates the protocol treasury without starting a new lock.
-    /// @dev Owner-only; reverts while a treasury lock is active, even for the current address.
-    ///      Existing balances remain in their original accounts. Once unlocked, the current address is a no-op.
-    /// @param treasury Nonzero clearinghouse account that will receive future protocol fee credits.
-    function setProtocolTreasury(
-        address treasury
-    ) external onlyOwner {
-        _setProtocolTreasury(treasury);
-    }
-
-    /// @notice Immediately sets the protocol treasury and prevents further updates for lockDuration seconds.
-    /// @dev Owner-only. Can lock the current address. An active lock cannot be shortened, extended, or bypassed
-    ///      through ownership transfer. Existing balances and withdrawals are unaffected. Expiry allows updates
-    ///      at block.timestamp >= protocolTreasuryLockedUntil(). A queued successor activates at expiry.
-    /// @param treasury Nonzero clearinghouse account that will receive future protocol fee credits.
-    /// @param lockDuration Positive lock duration in seconds. Timestamp overflow reverts atomically.
-    function setProtocolTreasury(
-        address treasury,
-        uint256 lockDuration
-    ) external onlyOwner {
-        if (lockDuration == 0) {
-            revert CfdEngine__InvalidTreasuryLockDuration();
-        }
-        TreasuryConfig storage active = _setProtocolTreasury(treasury);
-        uint256 lockedUntil = block.timestamp + lockDuration;
-        active.lockedUntil = lockedUntil;
-        emit ProtocolTreasuryLocked(treasury, lockedUntil);
-    }
-
-    /// @dev Shared guard for both public setters, including same-address calls.
-    function _setProtocolTreasury(
-        address treasury
-    ) internal returns (TreasuryConfig storage active) {
-        active = _activeTreasury();
-        if (block.timestamp < active.lockedUntil) {
-            revert CfdEngine__TreasuryLocked(active.lockedUntil);
-        }
-        if (treasury == address(0)) {
-            revert CfdEngine__ZeroAddress();
-        }
-        if (uint160(treasury) != active.account) {
-            active.account = uint160(treasury);
-            emit ProtocolTreasuryUpdated(treasury);
-        }
     }
 
     /// @notice Transfers a forfeited reserved execution bounty into the protocol treasury clearinghouse account.
@@ -922,14 +774,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 poolDepthAssets,
         uint64 publishTime
     ) internal {
-        CfdEnginePlanTypes.RawSnapshot memory snap = settlementSidecar.buildRawSnapshot(order.account, poolDepthAssets);
-
         if (order.isClose) {
-            CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, currentOraclePrice);
+            CfdEnginePlanTypes.CloseDelta memory delta =
+                planningReader.planClose(order, currentOraclePrice, poolDepthAssets);
             _revertIfCloseInvalidTyped(delta.revertCode);
             _applyClose(delta, publishTime);
         } else {
-            CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, currentOraclePrice);
+            CfdEnginePlanTypes.OpenDelta memory delta =
+                planningReader.planOpen(order, currentOraclePrice, poolDepthAssets);
             _revertIfOpenInvalidTyped(delta.revertCode);
             _applyOpen(delta, publishTime);
         }
@@ -1179,8 +1031,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__NoPositionToLiquidate();
         }
 
-        CfdEnginePlanTypes.RawSnapshot memory snap = settlementSidecar.buildRawSnapshot(account, poolDepthAssets);
-        CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, currentOraclePrice);
+        CfdEnginePlanTypes.LiquidationDelta memory delta =
+            planningReader.planLiquidation(account, currentOraclePrice, poolDepthAssets);
 
         if (!delta.liquidatable) {
             revert CfdEngine__PositionIsSolvent();

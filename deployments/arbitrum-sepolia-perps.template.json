@@ -25,6 +25,7 @@
     },
     "marginClearinghouse": { "address": null, "runtimeCodeHash": null },
     "cfdEngine": { "address": null, "runtimeCodeHash": null },
+    "cfdEnginePlanningReader": { "address": null, "runtimeCodeHash": null },
     "terminalNavBookV2": { "address": null, "runtimeCodeHash": null },
     "cfdEnginePlanner": { "address": null, "runtimeCodeHash": null },
     "cfdEngineSettlementSidecar": { "address": null, "runtimeCodeHash": null },

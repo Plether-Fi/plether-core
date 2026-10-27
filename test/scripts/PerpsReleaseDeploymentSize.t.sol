@@ -88,6 +88,12 @@ contract PerpsReleaseDeploymentSizeTest is Test {
             deployment.engineArguments(address(d.settlementToken), address(d.clearinghouse))
         );
         _measure(
+            "cfdEnginePlanningReader",
+            "CfdEnginePlanningReader.sol:CfdEnginePlanningReader",
+            address(d.engine.planningReader()),
+            ""
+        );
+        _measure(
             "terminalNavBookV2",
             "TerminalNavBookV2.sol:TerminalNavBookV2",
             address(d.terminalNavBook),

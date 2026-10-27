@@ -1101,6 +1101,11 @@ rather than admitted as orders that can only fail with arithmetic errors.
 Preview and execution use the same planner for carry, exact entry basis, rebate credit, reserve funding, collateral
 health, and solvency. [Order timing](CANONICAL_ENTRYPOINTS.md#order-timing) describes admission versus execution rules.
 
+Engine open, close, and liquidation execution obtains planner deltas through its immutable `CfdEnginePlanningReader`.
+The reader forwards the settlement sidecar's canonical snapshot to the configured planner through read-only calls;
+the Engine still validates the returned deltas and applies settlement through its existing sidecar. The reader does
+not hold balances or change the accounting rules.
+
 ### Treasury fee withdrawals
 
 - protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,

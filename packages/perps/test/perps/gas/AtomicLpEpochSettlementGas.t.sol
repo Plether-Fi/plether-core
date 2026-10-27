@@ -18,6 +18,25 @@ contract AtomicLpEpochSettlementGasTest is AtomicLpEpochSettlementTestFixture {
         );
         assertLe(address(engine).code.length, EIP170_RUNTIME_CODE_LIMIT, "CfdEngine must remain EIP-170 deployable");
         assertLe(
+            address(engine.planningReader()).code.length,
+            EIP170_RUNTIME_CODE_LIMIT,
+            "planning reader must remain EIP-170 deployable"
+        );
+        assertLe(
+            address(engine.settlementSidecar()).code.length,
+            EIP170_RUNTIME_CODE_LIMIT,
+            "settlement sidecar must remain EIP-170 deployable"
+        );
+        assertLe(
+            vm.getCode("CfdEngine.sol:CfdEngine").length
+                + abi.encode(
+                    address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+                )
+                .length,
+            49_152,
+            "engine initcode including its planning reader must remain EIP-3860 deployable"
+        );
+        assertLe(
             address(pool).code.length,
             HOUSE_POOL_RUNTIME_TARGET,
             "atomic LP settlement must keep HousePool within its measured runtime target"

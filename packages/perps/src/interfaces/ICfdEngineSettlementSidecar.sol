@@ -41,6 +41,7 @@ interface ICfdEngineSettlementSidecar {
     function ENGINE() external view returns (address);
 
     /// @notice Reconstructs one canonical raw planning snapshot from the bound Engine and its dependencies.
+    /// @dev Readable only by the engine or its constructor-created immutable planning reader.
     function buildRawSnapshot(
         address account,
         uint256 poolDepthAssets

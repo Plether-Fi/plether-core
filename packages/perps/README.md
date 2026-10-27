@@ -76,12 +76,16 @@ for request, cancellation, claim and reserve rules.
 | `PletherOracle` | Validates signed basket data and applies live, historical and frozen price rules. |
 | `PositionProtectionBook` | Tracks take-profit and stop-loss protection. |
 | `CfdEngine` | Tracks positions, risk, carry, and settlement accounting. |
+| `CfdEnginePlanningReader` | Builds read-only planner requests for its constructor-bound engine. |
 | `HousePool` | Holds LP capital and manages the senior/junior waterfall. |
 | `TrancheVault` | Handles LP shares, deposit requests, and redemptions. |
 | `PerpsPublicLens` | Provides product-facing views of accounts, queues, and protocol state. |
 
 The contracts are non-upgradeable. Governance can adjust risk parameters through timelocks, and emergency
 controls can restrict trading and LP activity. See the [security model](SECURITY.md) for trust assumptions.
+
+The engine constructor creates its immutable planning reader automatically. The reader uses the engine's configured
+planner and settlement sidecar; it has no separate owner, configuration step, or settlement authority.
 
 ## Protocol treasury lock and scheduling
 
@@ -120,6 +124,9 @@ recipients are configured separately. `ProtocolTreasuryLocked` records immediate
 records cancellation. No event is emitted merely because time passes: monitors should use the effective getters.
 The lock expiry getter retains the latest effective expiry after it passes. These contracts are non-upgradeable, so
 this feature requires a new deployment and does not change existing deployments.
+
+Treasury scheduling is implemented in the engine's inherited `CfdTreasury` module. Calls, ownership, state, and events
+remain at the engine address; integrations continue to use the engine's treasury methods.
 
 ## Development
 

@@ -102,8 +102,8 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
     // Measured after the token-neutral API rename (solc 0.8.35, via-IR, optimizer runs 200).
     uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_571;
     uint256 internal constant REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT = 1200;
-    // Production runtime including configurable treasury locks and automatic successor scheduling.
-    uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 24_563;
+    // Production runtime with plain Solidity treasury scheduling and the immutable planning reader.
+    uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 23_091;
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
