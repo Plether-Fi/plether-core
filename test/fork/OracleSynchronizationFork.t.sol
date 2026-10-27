@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {ArbitrumForkSupport} from "@plether/test-utils/ArbitrumForkSupport.sol";
+
 import {BasePerpTest} from "../../packages/perps/test/perps/BasePerpTest.sol";
 import {ArbitrumSepoliaReleaseOracle} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -28,6 +30,7 @@ contract OracleSynchronizationForkTest is BasePerpTest {
         fixture = vm.readFile(vm.envString("ORACLE_SYNC_FIXTURE"));
         forkNumber = vm.parseJsonUint(fixture, ".forkBlockNumber");
         vm.createSelectFork(vm.envString("ARB_SEPOLIA_RPC_URL"), forkNumber);
+        ArbitrumForkSupport.install();
         assertEq(block.chainid, 421_614);
         assertEq(block.chainid, vm.parseJsonUint(fixture, ".chainId"));
         vm.roll(forkNumber + 1);

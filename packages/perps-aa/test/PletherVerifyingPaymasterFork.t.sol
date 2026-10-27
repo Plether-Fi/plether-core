@@ -35,7 +35,14 @@ interface ISimpleAccountV08 {
 
 contract ForkCallTarget {
 
+    error DeliberateTargetFailure();
+
     uint256 public calls;
+
+    function touchThenRevert() external {
+        calls += 1;
+        revert DeliberateTargetFailure();
+    }
 
     function touch() external {
         calls += 1;
@@ -99,6 +106,16 @@ contract PletherVerifyingPaymasterForkTest is Test {
     }
 
     function testFork_CounterfactualHandleOpsChargesDepositAndEmitsCanonicalEvent() public {
+        _exerciseCounterfactualOperation(false);
+    }
+
+    function testFork_RevertedExecutionRollsBackTargetButChargesSponsorAndConsumesNonce() public {
+        _exerciseCounterfactualOperation(true);
+    }
+
+    function _exerciseCounterfactualOperation(
+        bool targetReverts
+    ) internal {
         string memory rpcUrl = vm.envOr("ARBITRUM_SEPOLIA_RPC_URL", string(""));
         if (bytes(rpcUrl).length == 0) {
             vm.skip(true, "set ARBITRUM_SEPOLIA_RPC_URL to run the opt-in fork test");
@@ -147,7 +164,14 @@ contract PletherVerifyingPaymasterForkTest is Test {
                 abi.encodeCall(ISimpleAccountFactoryV08.createAccount, (accountOwner, accountSalt))
             ),
             callData: abi.encodeCall(
-                ISimpleAccountV08.execute, (address(callTarget), 0, abi.encodeCall(ForkCallTarget.touch, ()))
+                ISimpleAccountV08.execute,
+                (
+                    address(callTarget),
+                    0,
+                    targetReverts
+                        ? abi.encodeCall(ForkCallTarget.touchThenRevert, ())
+                        : abi.encodeCall(ForkCallTarget.touch, ())
+                )
             ),
             accountGasLimits: bytes32((uint256(ACCOUNT_VERIFICATION_GAS_LIMIT) << 128) | uint256(CALL_GAS_LIMIT)),
             preVerificationGas: 80_000,
@@ -156,14 +180,7 @@ contract PletherVerifyingPaymasterForkTest is Test {
             signature: hex""
         });
 
-        bytes32 sponsorshipDigest = paymaster.getSponsorshipHash(userOp);
-        (uint8 sponsorV, bytes32 sponsorR, bytes32 sponsorS) = vm.sign(SPONSOR_SIGNER_KEY, sponsorshipDigest);
-        userOp.paymasterAndData =
-            _paymasterAndData(paymaster, validUntil, validAfter, abi.encodePacked(sponsorR, sponsorS, sponsorV));
-
-        bytes32 userOpHash = IEntryPointV08Compatibility(ENTRY_POINT_V08).getUserOpHash(userOp);
-        (uint8 ownerV, bytes32 ownerR, bytes32 ownerS) = vm.sign(OWNER_KEY, userOpHash);
-        userOp.signature = abi.encodePacked(ownerR, ownerS, ownerV);
+        bytes32 userOpHash = _signOperation(paymaster, userOp, validUntil, validAfter);
 
         PackedUserOperation[] memory ops = new PackedUserOperation[](1);
         ops[0] = userOp;
@@ -185,15 +202,68 @@ contract PletherVerifyingPaymasterForkTest is Test {
         assertGt(sender.code.length, 0, "counterfactual account was not deployed");
         assertEq(sender.codehash, SIMPLE_ACCOUNT_PROXY_CODE_HASH);
         assertEq(ISimpleAccountV08(sender).owner(), accountOwner);
-        assertEq(callTarget.calls(), 1);
+        assertEq(callTarget.calls(), targetReverts ? 0 : 1, "failed execution rolls back target writes");
+        assertEq(entryPoint.getNonce(sender, 0), userOp.nonce + 1, "validation consumes nonce even if target reverts");
 
         (uint256 actualGasCost, uint256 actualGasUsed) =
-            _assertUserOperationEvent(logs, userOpHash, sender, address(paymaster), userOp.nonce);
+            _assertUserOperationEvent(logs, userOpHash, sender, address(paymaster), userOp.nonce, !targetReverts);
+        if (targetReverts) {
+            _assertExecutionRevertReason(logs, userOpHash, sender, userOp.nonce);
+        }
         uint256 depositAfter = paymaster.getDeposit();
         assertGt(actualGasCost, 0);
         assertGt(actualGasUsed, 0);
         assertEq(depositBefore - depositAfter, actualGasCost);
         assertEq(beneficiary.balance - beneficiaryBefore, actualGasCost);
+
+        // Remove initCode for the now-deployed account and re-sign both envelopes, keeping
+        // the used nonce. This isolates replay rejection from AA10/invalid-signature failures.
+        userOp.initCode = hex"";
+        _signOperation(paymaster, userOp, validUntil, validAfter);
+        ops[0] = userOp;
+        vm.expectRevert(abi.encodeWithSelector(IEntryPoint.FailedOp.selector, uint256(0), "AA25 invalid account nonce"));
+        entryPoint.handleOps(ops, beneficiary);
+        assertEq(paymaster.getDeposit(), depositAfter, "validation rejection cannot charge the sponsor");
+        assertEq(beneficiary.balance - beneficiaryBefore, actualGasCost);
+        assertEq(callTarget.calls(), targetReverts ? 0 : 1);
+    }
+
+    function _signOperation(
+        PletherVerifyingPaymaster paymaster,
+        PackedUserOperation memory userOp,
+        uint48 validUntil,
+        uint48 validAfter
+    ) internal returns (bytes32 userOpHash) {
+        bytes32 sponsorshipDigest = paymaster.getSponsorshipHash(userOp);
+        (uint8 sponsorV, bytes32 sponsorR, bytes32 sponsorS) = vm.sign(SPONSOR_SIGNER_KEY, sponsorshipDigest);
+        userOp.paymasterAndData =
+            _paymasterAndData(paymaster, validUntil, validAfter, abi.encodePacked(sponsorR, sponsorS, sponsorV));
+        userOpHash = IEntryPointV08Compatibility(ENTRY_POINT_V08).getUserOpHash(userOp);
+        (uint8 ownerV, bytes32 ownerR, bytes32 ownerS) = vm.sign(OWNER_KEY, userOpHash);
+        userOp.signature = abi.encodePacked(ownerR, ownerS, ownerV);
+    }
+
+    function _assertExecutionRevertReason(
+        Vm.Log[] memory logs,
+        bytes32 expectedHash,
+        address expectedSender,
+        uint256 expectedNonce
+    ) private pure {
+        bytes32 topic = keccak256("UserOperationRevertReason(bytes32,address,uint256,bytes)");
+        uint256 count;
+        for (uint256 i; i < logs.length; ++i) {
+            Vm.Log memory entry = logs[i];
+            if (
+                entry.emitter == ENTRY_POINT_V08 && entry.topics.length == 3 && entry.topics[0] == topic
+                    && entry.topics[1] == expectedHash && entry.topics[2] == bytes32(uint256(uint160(expectedSender)))
+            ) {
+                (uint256 nonce, bytes memory reason) = abi.decode(entry.data, (uint256, bytes));
+                assertEq(nonce, expectedNonce);
+                assertEq(reason, abi.encodeWithSelector(ForkCallTarget.DeliberateTargetFailure.selector));
+                ++count;
+            }
+        }
+        assertEq(count, 1, "EntryPoint records the deliberate target revert");
     }
 
     function _paymasterAndData(
@@ -220,7 +290,8 @@ contract PletherVerifyingPaymasterForkTest is Test {
         bytes32 expectedHash,
         address expectedSender,
         address expectedPaymaster,
-        uint256 expectedNonce
+        uint256 expectedNonce,
+        bool expectedSuccess
     ) private pure returns (uint256 actualGasCost, uint256 actualGasUsed) {
         for (uint256 i = 0; i < logs.length; i++) {
             Vm.Log memory entry = logs[i];
@@ -232,7 +303,7 @@ contract PletherVerifyingPaymasterForkTest is Test {
                 (uint256 nonce, bool success, uint256 gasCost, uint256 gasUsed) =
                     abi.decode(entry.data, (uint256, bool, uint256, uint256));
                 assert(nonce == expectedNonce);
-                assert(success);
+                assert(success == expectedSuccess);
                 return (gasCost, gasUsed);
             }
         }

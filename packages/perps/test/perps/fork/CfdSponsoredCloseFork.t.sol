@@ -30,6 +30,17 @@ interface ISponsoredSimpleAccount {
 
 }
 
+interface ILegacyProtectionBook {
+
+    function activePositionProtectionId(
+        address account
+    ) external view returns (uint64);
+    function cancelPositionProtection(
+        uint64 id
+    ) external;
+
+}
+
 /// @dev Requires a real RPC fork; never sends a transaction to the public network.
 contract CfdSponsoredCloseForkTest is Test {
 
@@ -86,9 +97,39 @@ contract CfdSponsoredCloseForkTest is Test {
         c[4] = ISponsoredSimpleAccount.Call(address(ROUTER), 0, abi.encodeCall(ILegacyCloseRouter.commitOrder, (r)));
     }
 
+    /// @dev The pinned account has active protection. Use its owner's public actions to
+    /// cancel that protection and withdraw released free cash before testing assistance.
+    function _prepareUnprotectedAccount() internal {
+        address book = address(ROUTER.positionProtectionBook());
+        uint64 protectionId = ILegacyProtectionBook(book).activePositionProtectionId(ACCOUNT);
+        assertGt(protectionId, 0, "pinned account has protection");
+        ISponsoredSimpleAccount.Call[] memory calls = new ISponsoredSimpleAccount.Call[](1);
+        calls[0] = ISponsoredSimpleAccount.Call(
+            book, 0, abi.encodeCall(ILegacyProtectionBook.cancelPositionProtection, (protectionId))
+        );
+        address owner = ISponsoredSimpleAccount(ACCOUNT).owner();
+        vm.prank(owner);
+        ISponsoredSimpleAccount(ACCOUNT).executeBatch(calls);
+        assertEq(ILegacyProtectionBook(book).activePositionProtectionId(ACCOUNT), 0);
+        uint256 free = ILegacyCloseClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
+        calls[0] =
+            ISponsoredSimpleAccount.Call(HOUSE, 0, abi.encodeWithSignature("withdraw(address,uint256)", ACCOUNT, free));
+        vm.prank(owner);
+        ISponsoredSimpleAccount(ACCOUNT).executeBatch(calls);
+        assertEq(ILegacyCloseClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0);
+    }
+
+    function testFork_ProtectedAccountRejectsSponsorship() public {
+        OrderV3Types.OrderRequest memory request = _request(false);
+        uint256 price = ENGINE.lastMarkPrice();
+        vm.expectRevert(bytes4(keccak256("CfdClosePreview__SponsoredAccountBusy()")));
+        lens.previewSponsoredClose(address(ENGINE), ACCOUNT, request, address(ROUTER), price, uint64(block.timestamp));
+    }
+
     function _commit(
         bool isPartial
     ) internal {
+        _prepareUnprotectedAccount();
         OrderV3Types.OrderRequest memory r = _request(isPartial);
         uint256 free = ILegacyCloseClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         require(free < 200_000, "Fork fixture no longer needs assistance");
@@ -147,6 +188,7 @@ contract CfdSponsoredCloseForkTest is Test {
     }
 
     function testFork_DeployedAccountRollsBackMintOnCommitFailure() public {
+        _prepareUnprotectedAccount();
         OrderV3Types.OrderRequest memory r = _request(false);
         uint256 free = ILegacyCloseClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         uint256 supply = IERC20(TOKEN).totalSupply();
@@ -156,7 +198,11 @@ contract CfdSponsoredCloseForkTest is Test {
             abi.encodeWithSignature("Error(string)", "commit failed")
         );
         address owner = ISponsoredSimpleAccount(ACCOUNT).owner();
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "ExecuteError(uint256,bytes)", 4, abi.encodeWithSignature("Error(string)", "commit failed")
+            )
+        );
         vm.prank(owner);
         ISponsoredSimpleAccount(ACCOUNT).executeBatch(_calls(r, 200_000 - free));
         assertEq(IERC20(TOKEN).totalSupply(), supply);

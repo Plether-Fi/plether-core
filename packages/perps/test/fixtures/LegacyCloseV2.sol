@@ -139,3 +139,41 @@ interface ILegacyCloseEngine {
     ) external view returns (uint256);
 
 }
+
+// Exact ClosePreview return tuple from the immutable v1.2.3 tag.
+interface ILegacyEngineLens {
+
+    struct ClosePreview {
+        bool valid;
+        uint8 invalidReason;
+        uint256 executionPrice;
+        uint256 sizeDelta;
+        int256 realizedPnlUsdc;
+        int256 vpiDeltaUsdc;
+        uint256 vpiUsdc;
+        uint256 executionFeeUsdc;
+        uint256 freshTraderPayoutUsdc;
+        uint256 existingTraderClaimConsumedUsdc;
+        uint256 existingTraderClaimRemainingUsdc;
+        uint256 immediatePayoutUsdc;
+        uint256 traderClaimBalanceUsdc;
+        uint256 seizedCollateralUsdc;
+        uint256 badDebtUsdc;
+        uint256 remainingSize;
+        uint256 remainingMargin;
+        bool triggersDegradedMode;
+        bool postOpDegradedMode;
+        uint256 effectiveAssetsAfterUsdc;
+        uint256 maxLiabilityAfterUsdc;
+        // Append-only fields preserve every pre-existing ABI tuple offset for legacy clients.
+        uint256 frozenSpreadUsdc;
+        uint256 frozenSpreadPaidUsdc;
+        uint256 frozenSpreadWaivedUsdc;
+    }
+    function previewClose(
+        address account,
+        uint256 size,
+        uint256 price
+    ) external view returns (ClosePreview memory);
+
+}

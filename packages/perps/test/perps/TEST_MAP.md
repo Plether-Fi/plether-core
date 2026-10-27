@@ -340,7 +340,11 @@ Additional focused suites cover:
 
 | Rule / specification | Exact test or property | Evidence method | Fixture limits | Execution lane |
 | --- | --- | --- | --- | --- |
-| [Signed live basket progression on Arbitrum Sepolia](../../ORACLE_SYNCHRONIZATION.md) | [LiveBasketWatermarkFork.t.sol](../../../../test/fork/LiveBasketWatermarkFork.t.sol)::`test_RealSignedBasketsAdvanceAndStaleDataReverts` | Pinned real Pyth and public Hermes payloads; direct stale-parser rejection, Router progression, and storage-isolation assertions | Six feeds publish at equal times; uneven-feed liveness remains a separate release gate | Fork qualification |
+| [Signed live basket progression on Arbitrum Sepolia](../../ORACLE_SYNCHRONIZATION.md) | [LiveBasketWatermarkFork.t.sol](../../../../test/fork/LiveBasketWatermarkFork.t.sol)::`test_RealSignedBasketsAdvanceAndStaleDataReverts`, `test_RealSignedUnequalTimesReuseFasterFeedAndAdvanceWatermark`, `test_RealSignedMissingAndRegressedComponentsPreserveAcceptedBasket` | Pinned real Pyth verifies unchanged signed feed proofs; exact stale/missing/regression errors, unequal-time watermark progression, faster-feed reuse, rollback and storage isolation | Subsets from three historical Hermes batches | Fork qualification |
+| [Signed LP epoch boundary](../../ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries) | [PerpsPoolEpochFork.t.sol](../../../../test/fork/PerpsPoolEpochFork.t.sol)::`test_RealSignedPreBoundaryComponentRollsBackThenFreshBasketSettlesAndClaims` | Open production V3 position forces oracle pricing; exact component-age rejection and rollback, fresh settlement, actual deposit/redeem claims and cash conservation | Authentic ticks at epoch minus four and plus eight seconds; junior tranche, mock collateral, local ArbSys shim | Fork qualification |
+| [Signed liquidation settlement](../../ACCOUNTING_SPEC.md#liquidation-settlement) | [PerpsLiquidationFork.t.sol](../../../../test/fork/PerpsLiquidationFork.t.sol)::`test_RealSignedHealthyLiquidationRevertsAndRollsBack`, `test_RealSignedLiquidationPaysKeeperAndSettlesPosition` | Real Pyth price move crosses maintenance; exact healthy rejection, known adverse price/loss/keeper charge, custody reconciliation and actual residual withdrawal | One SHORT position, September/October signed ticks, production V3 Router with mock collateral and local ArbSys shim | Fork qualification |
+| Current perps through deployed EntryPoint | [PerpsAccountAbstractionFork.t.sol](../../../../test/fork/PerpsAccountAbstractionFork.t.sol)::`testFork_SponsoredPerpsLifecycleSettlesToTheSmartAccount`, `testFork_InvalidPerpsCommitRollsBackDepositAndCanRetryWithNextNonce` | Signed counterfactual account deployment, deposit/open/close/withdraw; exact PnL/fees, account identity, authenticated receipts, sponsor gas and failed-batch rollback/retry | Deployed EntryPoint/SimpleAccount, current local paymaster and production Router; MockSettlementToken/MockPyth and local ArbSys shim; no bundler service | Fork qualification |
+| Native Arbitrum execution-block domain | [PerpsNativeArbSysFork.t.sol](../../../../test/fork/PerpsNativeArbSysFork.t.sol)::`test_ProductionBlockLibraryReadsNativeL2HeightAcrossAdjacentBlocks` | Remote eth_call executes production ExecutionBlockNumberLib against native ArbSys at adjacent L2 blocks sharing one L1 ancestor | Archive endpoint must support ephemeral code overrides; read-only probe, no full order lifecycle or broadcast | Fork qualification |
 | [Real Pyth parser errors remain distinguishable](../../SECURITY.md#oracle-and-execution-security) | [OracleSynchronizationFork.t.sol](../../../../test/fork/OracleSynchronizationFork.t.sol)::`test_RealPythAbsentUpdateRemainsRetryableAndRefundsFunding`, `test_RealPythCorruptedPayloadReportsParserFailure` | Signed fixture, deployed Pyth parser and Oracle refund boundary | Missing feed and out-of-range input share a selector; corrupted proof must remain a parser failure | Fork qualification |
 | Real account fallback | [NativeCloseFallback.t.sol](fork/NativeCloseFallback.t.sol)::`testFork_OwnerClosesSameAccountWithoutSponsorOrAssets`, `testFork_ExpiredOwnerCommitCleansWithoutOracleAndCanRetry`, `testFork_ForeignOwnerCannotCommitForAccount` | Pinned SimpleAccount v0.8 owner route preserves trading-account identity across close, expiry/retry and foreign-owner rejection | Arbitrum Sepolia block `319094449`; fresh local perps stack and MockSettlementToken/MockPyth; no public broadcast or production keeper drill | Fork qualification |
 
@@ -481,12 +485,18 @@ The fork runner recognizes three independent settings:
 | `NATIVE_CLOSE_FORK_RPC_URL` | `fork/NativeCloseFallback.t.sol` |
 
 Configured suites require their pinned chain, block, code and fixtures and may not silently skip. Unconfigured
-suites are recorded as **not run**; the wrapper exits with an error when none is configured. The current deep CI
-workflow supplies only the first two settings, so it does not qualify native-close fallback by itself.
+suites are recorded as **not run**; the wrapper exits with an error when none is configured. The deep CI workflow
+supplies all three settings from repository secrets; it qualifies native-close fallback only when that secret is configured.
 
-Root `test/fork/PerpsFork.t.sol` uses real USDG with a controllable oracle. Root `test/fork/PythRealUpdateFork.t.sol`
-and the oracle synchronization/live-basket forks exercise real Pyth with fetched signed fixtures. These root
-integrations are outside the package runner. The offline [Across fixture](../fixtures/across-direct-funding/README.md)
+Root `test/fork/PerpsFork.t.sol` uses real USDC through the token-neutral API with a controllable oracle. Root `test/fork/PythRealUpdateFork.t.sol`
+and the synchronization, live-basket, LP epoch and liquidation forks exercise real Pyth with signed fixtures. These
+root integrations are outside the package-only `make test-perps-fork` runner. Use `make test-perps-fork-all` for every
+root, package and paymaster perps fork lane, with `MAINNET_RPC_URL` and `ARB_SEPOLIA_RPC_URL` set. It fetches the fresh
+Pyth fixture (optional `PYTH_API_KEY`), enables isolated oracle scenarios, supplies archive aliases and rejects missing
+entrypoints, inherited selection filters, empty selections or skipped tests. The default artifact directory is
+`artifacts/perps/integration-forks`; `PERPS_ARTIFACT_DIR` overrides it. Each lane records effective compiler settings,
+discovered tests and results, and `summary.json` aggregates the run. Generated replay scripts restore the saved public
+`pyth-fixture.json`; direct runs can use `PERPS_PYTH_FIXTURE` instead of fetching a new update. The offline [Across fixture](../fixtures/across-direct-funding/README.md)
 validates pinned handler execution with a mock token; it does not validate a live quote or bridge fill.
 
 No single campaign models every oracle, governance, fee, insolvency and LP lifecycle combination. Keep successful

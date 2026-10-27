@@ -97,6 +97,11 @@ def main():
             test = Path("test/fork/OracleSynchronizationFork.t.sol")
             (old / test).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(root / test, old / test)
+            # Both revisions run in Forge's EVM, which lacks Arbitrum's native ArbSys.
+            # Copy the same L2-height test shim alongside the shared regression test.
+            support = Path("packages/shared/test-support/ArbitrumForkSupport.sol")
+            (old / support).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(root / support, old / support)
             config = old / "foundry.toml"
             config.write_text(config.read_text().replace(
                 'path = "script/bytecode/" }]',
