@@ -171,6 +171,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         _requireCode(deployed.settlementToken, "Settlement token has no code");
         _requireCode(address(deployed.clearinghouse), "Clearinghouse has no code");
         _requireCode(address(deployed.engine), "Engine has no code");
+        _requireCode(address(deployed.engine.planningReader()), "Engine planning reader has no code");
         _requireCode(address(deployed.terminalNavBook), "Terminal NAV book has no code");
         _requireCode(deployed.planner, "Planner has no code");
         _requireCode(address(deployed.settlementSidecar), "Settlement sidecar has no code");
@@ -225,6 +226,10 @@ contract VerifyPerpsArbitrumSepolia is Script {
         );
         require(address(deployed.engine.pool()) == address(deployed.housePool), "Engine pool mismatch");
         require(address(deployed.engine.planner()) == deployed.planner, "Engine planner mismatch");
+        require(
+            address(deployed.engine.planningReader().ENGINE()) == address(deployed.engine),
+            "Engine planning reader binding mismatch"
+        );
         require(
             address(deployed.engine.settlementSidecar()) == address(deployed.settlementSidecar),
             "Engine settlement sidecar mismatch"

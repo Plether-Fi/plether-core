@@ -81,6 +81,14 @@ class SettlementConfigurationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported perps release manifest schema"):
             release.consumer_inventory(self.root, MANIFEST)
 
+    def test_export_includes_constructor_created_engine_planning_reader(self):
+        entry = self.manifest["contracts"]["cfdEnginePlanningReader"]
+        identifier = release.artifact_identifier("cfdEnginePlanningReader", entry)
+        self.assertEqual(identifier, "CfdEnginePlanningReader.sol:CfdEnginePlanningReader")
+        inventory = release.consumer_inventory(self.root, self.manifest)
+        self.assertEqual(inventory[identifier], "packages/perps/src/CfdEnginePlanningReader.sol")
+        self.assertTrue((self.root / inventory[identifier]).is_file())
+
     def test_mock_cannot_advertise_signed_deposits_bridge_funding_or_gdn_eligibility(self):
         for section, key, value in (
             ("settlementToken", "supportsReceiveWithAuthorization", True),

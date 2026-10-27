@@ -1101,11 +1101,20 @@ rather than admitted as orders that can only fail with arithmetic errors.
 Preview and execution use the same planner for carry, exact entry basis, rebate credit, reserve funding, collateral
 health, and solvency. [Order timing](CANONICAL_ENTRYPOINTS.md#order-timing) describes admission versus execution rules.
 
+Engine open, close, and liquidation execution obtains planner deltas through its immutable `CfdEnginePlanningReader`.
+The reader forwards the settlement sidecar's canonical snapshot to the configured planner through read-only calls;
+the Engine still validates the returned deltas and applies settlement through its existing sidecar. The reader does
+not hold balances or change the accounting rules.
+
 ### Treasury fee withdrawals
 
 - protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,
 - `MarginClearinghouse.balanceAssets(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
 - rotating the treasury changes the recipient of future fees; existing balances stay with the previous account and remain withdrawable by it,
+- an optional treasury commitment activates immediately and blocks both immediate treasury setters until its expiry; it does not restrict withdrawals or move balances,
+- immediate commitments accept durations from 1 second to 90 days (7,776,000 seconds), inclusive; a pending successor accepts zero to 90 days, with zero leaving it unlocked. This cap applies to each lock's duration, not the time from proposal submission until the successor's lock expires,
+- during an active lock, the owner can propose, replace, or cancel a pending successor without changing the current expiry; at that expiry the latest pending address becomes effective automatically, with no confirmation or keeper transaction,
+- all future protocol credits use the effective `CfdEngine.protocolTreasury()` at the credit timestamp; the pending successor's optional lock starts at its scheduled activation time, even if the next interaction occurs later,
 - only cash-collected execution or liquidation fees and free-cash-funded top-ups become treasury margin,
 - uncredited fee amounts are not withdrawable protocol inventory,
 - frozen-close spread is LP-owned trading revenue and never becomes treasury margin,

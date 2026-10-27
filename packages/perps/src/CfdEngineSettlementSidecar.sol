@@ -21,6 +21,8 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 /// @dev Engine read surface used by account-action methods externalized from the bytecode-constrained host.
 interface ICfdEngineAccountActionView {
 
+    function planningReader() external view returns (address);
+
     function positions(
         address account
     )
@@ -140,7 +142,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         ENGINE = engine_;
     }
 
-    /// @notice Restricts every sidecar entrypoint to its immutable Engine host.
+    /// @notice Restricts settlement mutations to the immutable Engine host.
     modifier onlyEngine() {
         if (msg.sender != ENGINE) {
             revert CfdEngineSettlementSidecar__Unauthorized();
@@ -152,7 +154,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function buildRawSnapshot(
         address account,
         uint256 poolDepthAssets
-    ) public view onlyEngine returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
+    ) public view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
+        if (msg.sender != ENGINE && msg.sender != ICfdEngineAccountActionView(ENGINE).planningReader()) {
+            revert CfdEngineSettlementSidecar__Unauthorized();
+        }
         return _buildRawSnapshot(account, poolDepthAssets, false);
     }
 
@@ -162,7 +167,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         uint256 poolDepthAssets,
         bool closeCommit
     ) private view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
+        ICfdEngineSettlementHost host = ICfdEngineSettlementHost(ENGINE);
         ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
         (
             snap.position.size,

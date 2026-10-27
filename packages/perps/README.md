@@ -76,12 +76,59 @@ for request, cancellation, claim and reserve rules.
 | `PletherOracle` | Validates signed basket data and applies live, historical and frozen price rules. |
 | `PositionProtectionBook` | Tracks take-profit and stop-loss protection. |
 | `CfdEngine` | Tracks positions, risk, carry, and settlement accounting. |
+| `CfdEnginePlanningReader` | Builds read-only planner requests for its constructor-bound engine. |
 | `HousePool` | Holds LP capital and manages the senior/junior waterfall. |
 | `TrancheVault` | Handles LP shares, deposit requests, and redemptions. |
 | `PerpsPublicLens` | Provides product-facing views of accounts, queues, and protocol state. |
 
 The contracts are non-upgradeable. Governance can adjust risk parameters through timelocks, and emergency
 controls can restrict trading and LP activity. See the [security model](SECURITY.md) for trust assumptions.
+
+The engine constructor creates its immutable planning reader automatically. The reader uses the engine's configured
+planner and settlement sidecar; it has no separate owner, configuration step, or settlement authority.
+
+## Protocol treasury lock and scheduling
+
+The engine owner can activate a treasury immediately and lock its address for a chosen duration from 1 second to
+90 days (7,776,000 seconds), inclusive:
+
+```solidity
+engine.setProtocolTreasury(treasury, 90 days);
+uint256 expiry = engine.protocolTreasuryLockedUntil();
+```
+
+Both immediate treasury setters revert while `block.timestamp < expiry`, including calls that supply the current
+address. During that lock, the owner can schedule a successor, replace it, or cancel it:
+
+```solidity
+engine.proposeProtocolTreasury(nextTreasury, 90 days);
+engine.proposeProtocolTreasury(replacementTreasury, 30 days); // Keeps the original activation time.
+engine.cancelProtocolTreasuryProposal(); // Keeps the current treasury and its original lock.
+```
+
+At the original expiry, the latest pending treasury automatically becomes the recipient of future protocol fees.
+No confirmation or keeper transaction is required. Replacement and cancellation never reset the countdown. A
+proposal's duration sets the successor's lock, starting at that scheduled activation time; it can range from zero to
+90 days, inclusive, with zero leaving the successor unlocked. The cap applies to each lock's duration, not the total
+time from proposing a successor until its lock expires. If there is no pending proposal, the current treasury stays
+in place at expiry. Proposals require an active lock, and an already active successor cannot be cancelled.
+
+`protocolTreasury()` and `protocolTreasuryLockedUntil()` resolve the effective address and lock from the timestamp,
+even without a transaction at expiry. `pendingProtocolTreasury()` returns `(treasury, activationTime, lockedUntil)`
+before activation and zeros after activation or cancellation. The one-argument `setProtocolTreasury(treasury)` remains
+available when unlocked and starts no new lock. The constructor's initial treasury is unlocked. Ownership transfer
+does not alter the current lock or schedule.
+
+The lock applies to future protocol fee routing, not fund withdrawals: existing clearinghouse balances stay with
+their original accounts and remain withdrawable under normal clearinghouse rules. Junior-vault maintenance-fee
+recipients are configured separately. `ProtocolTreasuryLocked` records immediate commitments;
+`ProtocolTreasuryProposed` records scheduled addresses and both timestamps, and `ProtocolTreasuryProposalCancelled`
+records cancellation. No event is emitted merely because time passes: monitors should use the effective getters.
+The lock expiry getter retains the latest effective expiry after it passes. These contracts are non-upgradeable, so
+this feature requires a new deployment and does not change existing deployments.
+
+Treasury scheduling is implemented in the engine's inherited `CfdTreasury` module. Calls, ownership, state, and events
+remain at the engine address; integrations continue to use the engine's treasury methods.
 
 ## Development
 

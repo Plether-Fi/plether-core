@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdEnginePlanningReader} from "@plether/perps/CfdEnginePlanningReader.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
+import {CfdTreasury} from "@plether/perps/CfdTreasury.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "@plether/perps/interfaces/CfdEngineSettlementTypes.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
@@ -43,9 +43,12 @@ interface ICfdEnginePoolBinding {
 ///      decimals, basis-point values use a 10,000 denominator, and timestamps are Unix seconds. Legacy `settlementToken` and
 ///      `Assets` identifiers denote the configured settlement token, including MockUSDG on the new testnet stack.
 /// @custom:security-contact contact@plether.com
-contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, ReentrancyGuardTransient {
+contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdTreasury, ReentrancyGuardTransient {
 
     using SafeERC20 for IERC20;
+
+    /// @notice Fixed read-only adapter that plans from the settlement sidecar's canonical snapshots.
+    CfdEnginePlanningReader public immutable planningReader;
 
     /// @notice Engine-owned fields for an open position.
     /// @dev Active margin is deliberately excluded: the clearinghouse position-margin bucket is its source of truth.
@@ -129,8 +132,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     uint256 public totalTraderClaimBalanceAssets;
     /// @notice One-time-configured router authorized to reserve bounties and execute orders and liquidations.
     address public orderRouter;
-    /// @notice Clearinghouse account credited with protocol execution fees and forfeited bounties.
-    address public protocolTreasury;
 
     /// @notice Whether a Unix day number is configured as an all-day FAD and oracle-frozen override.
     mapping(uint256 => bool) public fadDayOverrides;
@@ -150,10 +151,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Protected headroom required per unit of maximum directional liability, in basis points.
     /// @dev This affects open/increase admission and LP withdrawals, but not raw insolvency or terminal NAV.
     uint256 public settlementBufferBps = 25;
-
-    /// @notice Emitted when the clearinghouse account designated to receive future protocol fees changes.
-    /// @param treasury New protocol treasury clearinghouse account.
-    event ProtocolTreasuryUpdated(address indexed treasury);
 
     function _sideIndex(
         CfdTypes.Side side
@@ -294,7 +291,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 _capPrice,
         CfdTypes.RiskParams memory _riskParams,
         uint256 _frozenCloseSpreadBps
-    ) Ownable(msg.sender) {
+    ) CfdTreasury() {
         if (_settlementToken == address(0) || _clearinghouse == address(0)) {
             revert CfdEngine__ZeroAddress();
         }
@@ -336,7 +333,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         CAP_PRICE = _capPrice;
         _activeRiskParams = _riskParams;
         frozenCloseSpreadBps = _frozenCloseSpreadBps;
-        protocolTreasury = msg.sender;
+        planningReader = new CfdEnginePlanningReader();
     }
 
     /// @notice Atomically configures the planner, settlement sidecar, and engine admin exactly once.
@@ -442,23 +439,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         orderRouter = _router;
     }
 
-    /// @notice Updates the clearinghouse account receiving protocol fees.
-    /// @dev Callable only by the owner. Existing balances remain in their original clearinghouse accounts;
-    ///      supplying the current treasury is a no-op.
-    /// @param treasury Nonzero clearinghouse account that will receive future protocol fee credits.
-    function setProtocolTreasury(
-        address treasury
-    ) external onlyOwner {
-        if (treasury == address(0)) {
-            revert CfdEngine__ZeroAddress();
-        }
-        if (treasury == protocolTreasury) {
-            return;
-        }
-        protocolTreasury = treasury;
-        emit ProtocolTreasuryUpdated(treasury);
-    }
-
     /// @notice Transfers a forfeited reserved execution bounty into the protocol treasury clearinghouse account.
     /// @dev Callable only by the router. This reclassifies clearinghouse balances without transferring ERC20 tokens;
     ///      a zero amount is a no-op. Emits `BountyCredited` for a nonzero transfer.
@@ -472,7 +452,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             return;
         }
 
-        address treasury = protocolTreasury;
+        address treasury = protocolTreasury();
         clearinghouse.transferReservedSettlement(sourceAccount, treasury, amountAssets);
         emit BountyCredited(sourceAccount, treasury, amountAssets);
     }
@@ -794,14 +774,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 poolDepthAssets,
         uint64 publishTime
     ) internal {
-        CfdEnginePlanTypes.RawSnapshot memory snap = settlementSidecar.buildRawSnapshot(order.account, poolDepthAssets);
-
         if (order.isClose) {
-            CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, currentOraclePrice);
+            CfdEnginePlanTypes.CloseDelta memory delta =
+                planningReader.planClose(order, currentOraclePrice, poolDepthAssets);
             _revertIfCloseInvalidTyped(delta.revertCode);
             _applyClose(delta, publishTime);
         } else {
-            CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, currentOraclePrice);
+            CfdEnginePlanTypes.OpenDelta memory delta =
+                planningReader.planOpen(order, currentOraclePrice, poolDepthAssets);
             _revertIfOpenInvalidTyped(delta.revertCode);
             _applyOpen(delta, publishTime);
         }
@@ -1051,8 +1031,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__NoPositionToLiquidate();
         }
 
-        CfdEnginePlanTypes.RawSnapshot memory snap = settlementSidecar.buildRawSnapshot(account, poolDepthAssets);
-        CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, currentOraclePrice);
+        CfdEnginePlanTypes.LiquidationDelta memory delta =
+            planningReader.planLiquidation(account, currentOraclePrice, poolDepthAssets);
 
         if (!delta.liquidatable) {
             revert CfdEngine__PositionIsSolvent();

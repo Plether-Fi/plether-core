@@ -78,6 +78,13 @@ configuration finalization. The versions are execution-authority inputs, not tim
 
 `CfdEngine` dependencies (`CfdEnginePlanner`, `CfdEngineSettlementSidecar`, `CfdEngineAdmin`) are deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time. The engine rejects a settlement sidecar or admin bound to another engine and rejects a no-code admin address; selecting and verifying the intended `CfdEngineAdmin` bytecode remains a deployment responsibility.
 
+The Engine constructor also creates `CfdEnginePlanningReader`, stores it as the immutable `planningReader`, and
+binds the reader's immutable `ENGINE` to itself. No separate deployment transaction or owner configuration is needed.
+The reader accepts planning calls only from that Engine and uses its configured planner and settlement sidecar.
+Its entrypoints are read-only: it has no owner, upgrade path, or settlement authority. Moving snapshot encoding into
+this reader reduces Engine runtime size; the reader's creation code is embedded in Engine initcode, so deployment
+checks must cover both contracts' EIP-170 runtime sizes and the Engine's EIP-3860 creation-input size.
+
 `TerminalNavBookV2` is also deployed separately and wired once through `setTerminalNavBook(...)` before any exposure.
 The Engine accepts only an empty book immutably bound to itself with matching `CAP_PRICE` and the canonical `1e20`
 size quantum.
@@ -103,6 +110,47 @@ The release-script `frozenCloseSpreadBps` default is `50` bps (0.50%). Both cons
 
 The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked updates accept the inclusive range
 `0..1,000` bps; zero disables the additional headroom without changing raw solvency or degraded-mode semantics.
+
+### Protocol treasury commitment
+
+`CfdEngine.setProtocolTreasury(address,uint256)` activates a nonzero treasury immediately and locks it for a
+caller-selected duration from 1 second to 90 days (7,776,000 seconds), inclusive. The constructor's initial treasury is
+unlocked. Both immediate treasury setters, including the legacy one-argument setter and same-address calls, reject
+updates while
+`block.timestamp < protocolTreasuryLockedUntil()`. The current lock's expiry cannot be cancelled, shortened,
+extended, or bypassed by ownership transfer. The legacy setter starts no new lock.
+
+While a lock is active, the engine owner may call `proposeProtocolTreasury(address,uint256)` to queue or replace a
+nonzero successor, or `cancelProtocolTreasuryProposal()` to remove a pending successor. Neither action changes the
+current lock's expiry. At the exact expiry, the latest pending address becomes effective automatically for all
+protocol credits and treasury views, without a confirmation or keeper transaction. With no pending proposal, the
+current treasury remains. A matured proposal cannot be cancelled or replaced retroactively. Ownership transfer
+preserves the schedule; renouncing ownership does not prevent activation.
+
+The proposal's duration determines the successor's lock from the scheduled activation timestamp, even if the next
+interaction occurs much later. A proposal accepts durations from zero to 90 days, inclusive; zero leaves its successor
+unlocked. The 90-day cap applies to each individual lock, not the total time from proposal submission until the
+successor's lock expires. The effective treasury stays selected after its own lock expires. `pendingProtocolTreasury()`
+returns the address, activation time, and successor lock expiry only while the proposal is pending, then returns zeros.
+`protocolTreasury()` and `protocolTreasuryLockedUntil()` resolve the effective values by timestamp; the latter
+retains the latest effective expiry after it passes.
+
+`CfdTreasury` is an inherited implementation module: treasury storage, owner checks, and events remain in the Engine.
+Before an immediate update or a new proposal, an activated successor is copied into the current record and the pending
+record is cleared. Reads still resolve activation by timestamp before that storage normalization occurs. This keeps
+mutations on the current record without introducing an activation transaction or changing either lock deadline.
+
+There is no mandatory minimum positive tenure or emergency override. An incorrect active address or lock duration
+cannot be corrected before expiry. The immediate locking setter and proposal method reject durations above 90 days;
+zero duration is also rejected by the immediate locking setter. Timestamp overflow reverts atomically. The commitment
+affects future protocol credits only. Existing balances remain with their original clearinghouse accounts, and normal
+withdrawal rules continue to apply to both
+old and current treasuries. It does not constrain the treasury wallet's own spending or the separately governed
+junior-vault maintenance-fee recipient. `ProtocolTreasuryLocked(treasury, lockedUntil)` records an immediate
+commitment; `ProtocolTreasuryProposed(treasury, activationTime, lockedUntil)` records the pending schedule and
+`ProtocolTreasuryProposalCancelled()` records cancellation. There is no autonomous activation event at expiry;
+monitors must resolve the effective getters. Existing non-upgradeable deployments cannot acquire this protection
+without a new deployment.
 
 ### Owner-funded recapitalization
 
@@ -188,7 +236,10 @@ The owner can act immediately to:
 - pause and unpause `HousePool` LP epoch settlement independently,
 - install or replace the common coordinator pauser on `OrderRouterAdmin` and `HousePool`,
 - rotate or disable the coordinator guardian,
-- set the protocol treasury account; existing balances remain withdrawable by their original accounts,
+- set the protocol treasury account when its optional commitment lock has expired, optionally starting a new lock;
+  existing balances remain withdrawable by their original accounts,
+- propose, replace, or cancel a pending protocol treasury during an active lock, preserving its original expiry;
+  the latest pending treasury activates automatically at that expiry,
 - initialize tranche seeds and activate trading after the lifecycle/capacity gates pass,
 - admit unaccounted pool excess, sweep that excess, or assign unowned accounted assets through the guarded bootstrap
   path; these powers do not permit withdrawal of existing claimant backing,
@@ -232,7 +283,9 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
   calls. The Router remains `address(this)` and the direct-event address, Engine/HousePool see the Router as caller, and
   the Router entrypoint's `msg.sender` is preserved; the Book-trigger route authenticates keeper/refund identity through
   its trailing payload.
-- `CfdEngineSettlementSidecar` is engine-gated, but any external function added there is automatically security-critical because it can reach engine-owned settlement hooks.
+- `CfdEngineSettlementSidecar` mutations accept only the immutable-bound Engine. Its read-only `buildRawSnapshot`
+  also accepts that Engine's immutable planning reader. The reader cannot invoke settlement mutations; any new
+  external sidecar function remains security-critical because the sidecar can reach engine-owned settlement hooks.
 - `TerminalNavBookV2` accepts curve mutations only from its immutable-bound Engine. It has no owner, repair, or
   migration path. Engine wiring validates the bound Engine, price cap, size quantum, and completely empty book before
   accepting it once.
@@ -716,7 +769,9 @@ execution sidecar, evaluator, and Oracle; both admin identities and monotonic ac
 settlement sidecar; protocol treasury; terminal NAV book; and HousePool mark staleness. It excludes dynamic
 market/runtime values such as price, depth, position skew, FAD/frozen mode, Router/HousePool pause state, the LP
 settlement hold, and the risk-off cutoff. It also excludes the immutable HousePool redemption-math sidecar because
-that module affects only LP redemption budgeting, not order execution. This division is intentional: identity and
+that module affects only LP redemption budgeting, not order execution. The immutable Engine planning reader is not
+hashed separately: each Engine creates and permanently binds its own reader, while the Engine identity and the
+planner and settlement-sidecar dependencies are included. This division is intentional: identity and
 finalized policy drift produces terminal `ConfigMismatch` for config-pinned external orders, while execution mode and
 economics must fit the separately pinned request bounds. The internal TP/SL close-attempt marker skips the
 hash-equality check but still records the observed digest in its terminal receipt.

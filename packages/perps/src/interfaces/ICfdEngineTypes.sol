@@ -65,6 +65,14 @@ interface ICfdEngineTypes {
     error CfdEngine__StillInsolvent();
     /// @notice A required dependency, token, account, or recipient address is zero.
     error CfdEngine__ZeroAddress();
+    /// @notice Immediate treasury updates are blocked until this Unix timestamp, including same-address updates.
+    error CfdEngine__TreasuryLocked(uint256 lockedUntil);
+    /// @notice Treasury locks cannot exceed 90 days; the immediate locking setter also rejects zero duration.
+    error CfdEngine__InvalidTreasuryLockDuration();
+    /// @notice A successor can only be scheduled while the current treasury is locked.
+    error CfdEngine__TreasuryNotLocked();
+    /// @notice There is no pending treasury proposal that can still be cancelled.
+    error CfdEngine__NoTreasuryProposal();
     /// @notice The requested close size is not divisible by the canonical size quantum.
     error CfdEngine__InvalidCloseSizeQuantum();
     /// @notice A partial-close commitment would start from a position below maintenance health.

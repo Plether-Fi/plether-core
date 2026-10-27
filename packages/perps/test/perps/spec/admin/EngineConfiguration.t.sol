@@ -6,6 +6,7 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdTreasury} from "@plether/perps/CfdTreasury.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -22,6 +23,169 @@ import {CfdEngineTestBase} from "../../shared/CfdEngineTestBase.sol";
 contract EngineConfigurationTest is CfdEngineTestBase {
 
     using stdStorage for StdStorage;
+
+    function test_TreasuryLock_ActivatesImmediatelyAndEmitsEvents() public {
+        address treasury = address(0xFEE90);
+        vm.warp(1_000_000);
+        assertEq(engine.protocolTreasuryLockedUntil(), 0);
+        vm.expectEmit(true, false, false, true, address(engine));
+        emit CfdTreasury.ProtocolTreasuryUpdated(treasury);
+        vm.expectEmit(true, false, false, true, address(engine));
+        emit CfdTreasury.ProtocolTreasuryLocked(treasury, 8_776_000);
+        engine.setProtocolTreasury(treasury, 90 days);
+        assertEq(engine.protocolTreasury(), treasury);
+        assertEq(engine.protocolTreasuryLockedUntil(), 8_776_000);
+    }
+
+    function test_TreasuryLock_BlocksBothSettersAndSameAddressChanges() public {
+        address treasury = engine.protocolTreasury();
+        engine.setProtocolTreasury(treasury, 90 days);
+        uint256 expiry = engine.protocolTreasuryLockedUntil();
+        vm.warp(expiry - 1);
+        bytes memory reason = abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TreasuryLocked.selector, expiry);
+        vm.expectRevert(reason);
+        engine.setProtocolTreasury(address(0xFEE91));
+        vm.expectRevert(reason);
+        engine.setProtocolTreasury(address(0xFEE91), 30 days);
+        vm.expectRevert(reason);
+        engine.setProtocolTreasury(treasury);
+        vm.expectRevert(reason);
+        engine.setProtocolTreasury(treasury, 1);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
+        engine.setProtocolTreasury(treasury, 365 days);
+        assertEq(engine.protocolTreasury(), treasury);
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry);
+    }
+
+    function test_TreasuryLock_CanRelockAtExactExpiry() public {
+        engine.setProtocolTreasury(address(0xFEE90), 90 days);
+        uint256 expiry = engine.protocolTreasuryLockedUntil();
+        vm.warp(expiry);
+        assertEq(engine.protocolTreasury(), address(0xFEE90), "Expiry does not rotate the treasury");
+        engine.setProtocolTreasury(address(0xFEE91), 30 days);
+        assertEq(engine.protocolTreasury(), address(0xFEE91));
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry + 30 days);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TreasuryLocked.selector, expiry + 30 days));
+        engine.setProtocolTreasury(address(0xFEE92));
+    }
+
+    function test_TreasuryLock_LegacySetterWorksAtExpiryAndAfterward() public {
+        engine.setProtocolTreasury(address(0xFEE90), 90 days);
+        uint256 expiry = engine.protocolTreasuryLockedUntil();
+        vm.warp(expiry);
+        engine.setProtocolTreasury(address(0xFEE91));
+        assertEq(engine.protocolTreasury(), address(0xFEE91));
+        vm.warp(expiry + 1);
+        engine.setProtocolTreasury(address(0xFEE92));
+        assertEq(engine.protocolTreasury(), address(0xFEE92));
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry, "Legacy setter does not start another lock");
+    }
+
+    function test_TreasuryLock_CurrentAddressCanBeLockedAndRelocked() public {
+        address treasury = engine.protocolTreasury();
+        // Snapshot time through the cheatcode so via-IR cannot recompute it after vm.warp.
+        uint256 expiry = vm.getBlockTimestamp() + 90 days;
+        vm.expectEmit(true, false, false, true, address(engine));
+        emit CfdTreasury.ProtocolTreasuryLocked(treasury, expiry);
+        engine.setProtocolTreasury(treasury, 90 days);
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry);
+        vm.warp(expiry + 1);
+        engine.setProtocolTreasury(treasury, 1 days);
+        assertEq(engine.protocolTreasury(), treasury);
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry + 1 + 1 days);
+    }
+
+    function test_TreasuryLock_NewOwnerCannotBypassLock() public {
+        address treasury = engine.protocolTreasury();
+        engine.setProtocolTreasury(treasury, 90 days);
+        uint256 expiry = engine.protocolTreasuryLockedUntil();
+        address nextOwner = address(0xA11CE);
+        engine.transferOwnership(nextOwner);
+        vm.startPrank(nextOwner);
+        engine.acceptOwnership();
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TreasuryLocked.selector, expiry));
+        engine.setProtocolTreasury(nextOwner);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TreasuryLocked.selector, expiry));
+        engine.setProtocolTreasury(nextOwner, 90 days);
+        assertEq(engine.protocolTreasury(), treasury);
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry);
+        vm.warp(expiry);
+        engine.setProtocolTreasury(nextOwner, 90 days);
+        vm.stopPrank();
+        assertEq(engine.protocolTreasury(), nextOwner);
+    }
+
+    function test_TreasuryLock_RejectsNonOwnerOnBothSetters() public {
+        address caller = address(0xA11CE);
+        bytes memory reason = abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", caller);
+        vm.startPrank(caller);
+        vm.expectRevert(reason);
+        engine.setProtocolTreasury(caller, 90 days);
+        vm.expectRevert(reason);
+        engine.setProtocolTreasury(caller);
+        vm.stopPrank();
+        assertEq(engine.protocolTreasuryLockedUntil(), 0);
+    }
+
+    function test_TreasuryLock_InvalidInputsLeaveStateUnchanged() public {
+        address treasury = engine.protocolTreasury();
+        vm.recordLogs();
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAddress.selector);
+        engine.setProtocolTreasury(address(0), 90 days);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAddress.selector);
+        engine.setProtocolTreasury(address(0));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
+        engine.setProtocolTreasury(address(0xFEE90), 0);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
+        engine.setProtocolTreasury(address(0xFEE90), 90 days + 1);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
+        engine.setProtocolTreasury(address(0xFEE90), type(uint256).max);
+        assertEq(engine.protocolTreasury(), treasury);
+        assertEq(engine.protocolTreasuryLockedUntil(), 0);
+        assertEq(vm.getRecordedLogs().length, 0, "Rejected durations must not emit treasury events");
+    }
+
+    function testFuzz_TreasuryLock_RejectsDurationOverNinetyDays(
+        uint256 durationSeed
+    ) public {
+        uint256 duration = bound(durationSeed, 90 days + 1, type(uint256).max);
+        address treasury = engine.protocolTreasury();
+        vm.recordLogs();
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidTreasuryLockDuration.selector);
+        engine.setProtocolTreasury(address(0xFEE90), duration);
+
+        assertEq(engine.protocolTreasury(), treasury);
+        assertEq(engine.protocolTreasuryLockedUntil(), 0);
+        (address pending, uint256 activationTime, uint256 lockedUntil) = engine.pendingProtocolTreasury();
+        assertEq(pending, address(0));
+        assertEq(activationTime, 0);
+        assertEq(lockedUntil, 0);
+        assertEq(vm.getRecordedLogs().length, 0);
+    }
+
+    function testFuzz_TreasuryLock_RejectsChangesThroughoutDuration(
+        uint64 start,
+        uint64 durationSeed,
+        uint256 elapsedSeed
+    ) public {
+        uint256 duration = bound(uint256(durationSeed), 1, 90 days);
+        vm.warp(uint256(start));
+        engine.setProtocolTreasury(address(0xFEE90), duration);
+        uint256 expiry = uint256(start) + duration;
+        vm.warp(uint256(start) + bound(elapsedSeed, 0, duration - 1));
+        bytes memory reason = abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TreasuryLocked.selector, expiry);
+        vm.expectRevert(reason);
+        engine.setProtocolTreasury(address(0xFEE91));
+        vm.expectRevert(reason);
+        engine.setProtocolTreasury(address(0xFEE91), duration);
+        assertEq(engine.protocolTreasury(), address(0xFEE90));
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry);
+        vm.warp(expiry);
+        engine.setProtocolTreasury(address(0xFEE91), duration);
+        assertEq(engine.protocolTreasury(), address(0xFEE91));
+        assertEq(engine.protocolTreasuryLockedUntil(), expiry + duration);
+    }
 
     function test_ConstructorRejectsMismatchedSettlementAsset() public {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidSettlementAsset.selector);

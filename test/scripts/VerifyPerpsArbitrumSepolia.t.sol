@@ -67,6 +67,17 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         assertEq(deployed.settlementToken.symbol(), "USDG");
         assertEq(deployed.settlementToken.decimals(), 6);
 
+        vm.mockCall(address(deployed.engine), abi.encodeWithSignature("planningReader()"), abi.encode(address(0xBAD)));
+        vm.expectRevert(bytes("Engine planning reader has no code"));
+        verifier.run();
+        vm.clearMockedCalls();
+        vm.mockCall(
+            address(deployed.engine.planningReader()), abi.encodeWithSignature("ENGINE()"), abi.encode(address(0xBAD))
+        );
+        vm.expectRevert(bytes("Engine planning reader binding mismatch"));
+        verifier.run();
+        vm.clearMockedCalls();
+
         vm.mockCall(address(deployed.settlementToken), abi.encodeWithSignature("name()"), abi.encode("Mock USDC"));
         vm.expectRevert(bytes("Settlement token name mismatch"));
         verifier.run();
@@ -193,6 +204,7 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
             assertLe(contracts[i].code.length, 24_576, "deployed runtime exceeds EIP-170");
         }
         assertLe(address(d.settlementMonitorLensSidecar).code.length, 24_576);
+        assertLe(address(d.engine.planningReader()).code.length, 24_576);
         assertLe(address(d.emergencyPauseCoordinator).code.length, 24_576);
         // These constructors embed other deployable contracts and are the limiting initcode paths.
         assertLe(
