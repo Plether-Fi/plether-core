@@ -35,7 +35,7 @@ class PerpsShardRunnerTest(unittest.TestCase):
         self.runner.parent.mkdir(parents=True)
         for name in ("run-perps-package-tests.sh", "perps-test-inventory.py", "perps-shard-weights.json",
                      "run-perps-recorded.py", "perps_forge_json.py", "run-perps-fast-tests.sh",
-                     "check-perps-pr-selection.py"):
+                     "check-perps-pr-selection.py", "run-perps-batched.py"):
             shutil.copyfile(SCRIPTS / name, self.runner.parent / name)
         # Exercise the real filename inventory, including newly added entrypoints.
         self.entrypoints = {
@@ -140,38 +140,49 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         self.assert_cleaned()
         return actual
 
-    def test_every_eligible_entrypoint_runs_once_in_one_unfiltered_execution_per_shard(self):
+    def test_full_shards_bound_compilation_and_execute_every_entrypoint_once(self):
         seen = set()
         for shard in range(4):
             with self.subTest(shard=shard):
+                before = len(self.executions())
                 result = self.run_shard(shard)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                calls = self.executions()
-                self.assertEqual(len(calls), shard + 1)
-                call = calls[-1]
-                self.assertEqual(call["args"], ["test", "--offline", "-vvv", "--root", str(self.package),
-                                                "--json", "--suppress-successful-traces"])
-                for key, value in SETTINGS.items():
-                    self.assertEqual(call["settings"][key], value)
-                for key in ("FOUNDRY_FUZZ_RUNS", "FOUNDRY_INVARIANT_RUNS", "FOUNDRY_INVARIANT_DEPTH"):
-                    self.assertNotIn(key, call["settings"])
-                assigned = {path for path in call["files"] if path.endswith(".t.sol")}
+                calls = self.executions()[before:]
+                assigned = set()
+                for call in calls:
+                    self.assertEqual(call["args"], ["test", "--offline", "--threads", "1", "-vvv",
+                                                    "--skip", "script", "--root", str(self.package.resolve()),
+                                                    "--json", "--suppress-successful-traces"])
+                    for key, value in SETTINGS.items():
+                        self.assertEqual(call["settings"][key], value)
+                    for key in ("FOUNDRY_FUZZ_RUNS", "FOUNDRY_INVARIANT_RUNS", "FOUNDRY_INVARIANT_DEPTH"):
+                        self.assertNotIn(key, call["settings"])
+                    batch = {path for path in call["files"] if path.endswith(".t.sol")}
+                    self.assertGreater(len(batch), 0)
+                    self.assertLessEqual(len(batch), 4)
+                    self.assertFalse(assigned & batch)
+                    assigned.update(batch)
+                    self.assertIn("support/Shared.sol", call["files"])
+                    self.assertFalse(Path(call["test"]).exists())
                 self.assertTrue(assigned)
                 self.assertFalse(seen & assigned)
                 self.assertFalse(assigned & self.forks)
                 seen.update(assigned)
                 for entrypoint, expected_shard in PINNED.items():
                     self.assertEqual(entrypoint in assigned, shard == expected_shard)
-                self.assertIn("support/Shared.sol", call["files"])
-                self.assertFalse(Path(call["test"]).exists())
                 evidence = self.root / f"artifacts/perps/shard-{shard}"
                 metadata = json.loads((evidence / "run.json").read_text())
                 self.assertEqual(metadata["counts"], {"passed": len(assigned), "failed": 0, "skipped": 0})
                 self.assertEqual(metadata["budgets"]["invariant"], {"runs": 32, "depth": 256})
-                coverage = json.loads((evidence / "execution-coverage.json").read_text())
-                self.assertEqual(coverage["selected"], coverage["executed"])
-                self.assertEqual(coverage["not_run"], [])
-                self.assertEqual(coverage["unexpected_results"], [])
+                self.assertEqual(metadata["status"], "passed")
+                self.assertEqual(set(metadata["completed_entrypoints"]), assigned)
+                for record in metadata["batches"]:
+                    coverage = json.loads((evidence / record["lane"] / "execution-coverage.json").read_text())
+                    self.assertEqual(coverage["selected"], coverage["executed"])
+                    self.assertEqual(coverage["not_run"], [])
+                    self.assertEqual(coverage["unexpected_results"], [])
+                    replay = (evidence / record["lane"] / "replay.sh").read_text()
+                    self.assertIn("PERPS_COMPILE_BATCH_SIZE=4 bash scripts/run-perps-package-tests.sh", replay)
                 self.assert_cleaned()
         self.assertEqual(seen, self.entrypoints - self.forks)
 
@@ -287,9 +298,10 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
                 listed = self.run_shard(shard, PERPS_SHARD_LIST_ONLY="1")
                 self.assertEqual(listed.returncode, 0, listed.stderr)
                 self.assertEqual(len(self.invocations()), count)
+                before = len(self.executions())
                 executed = self.run_shard(shard)
                 self.assertEqual(executed.returncode, 0, executed.stderr)
-                files = {p for p in self.executions()[-1]["files"] if p.endswith(".t.sol")}
+                files = {p for call in self.executions()[before:] for p in call["files"] if p.endswith(".t.sol")}
                 self.assertEqual(set(listed.stdout.splitlines()), files)
                 self.assert_cleaned()
 
@@ -307,7 +319,30 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
     def test_forge_failure_is_propagated_without_retry_and_scratch_is_cleaned(self):
         result = self.run_shard(0, SHARD_TEST_EXIT="19")
         self.assertEqual(result.returncode, 19, result.stderr)
-        self.assertEqual(len(self.executions()), 1)
+        metadata = json.loads((self.root / "artifacts/perps/shard-0/run.json").read_text())
+        self.assertEqual(metadata["status"], "failed")
+        self.assertEqual(metadata["completed_entrypoints"], [])
+        self.assertGreater(len(self.executions()), 1)
+        self.assert_cleaned()
+
+    def test_batch_size_validation_and_replay(self):
+        for value in ("0", "-1", "invalid"):
+            result = self.run_shard(0, PERPS_COMPILE_BATCH_SIZE=value)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual(self.invocations(), [])
+            self.assert_cleaned()
+        result = self.run_shard(2, PERPS_COMPILE_BATCH_SIZE="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for call in self.executions():
+            self.assertEqual(len([p for p in call["files"] if p.endswith(".t.sol")]), 1)
+        replay = (self.root / "artifacts/perps/shard-2/batch-000/replay.sh").read_text()
+        self.assertIn("PERPS_COMPILE_BATCH_SIZE=1", replay)
+        export_command = next(line for line in replay.splitlines() if line.startswith("export PERPS_ARTIFACT_DIR="))
+        artifact_root = subprocess.check_output(
+            ["bash", "-c", export_command + '\nprintf "%s" "$PERPS_ARTIFACT_DIR"'], text=True,
+            env=dict(os.environ, replay_dir=str(self.root / "artifacts/perps/shard-2/batch-000")),
+        )
+        self.assertEqual(Path(artifact_root).resolve(), (self.root / "artifacts/perps").resolve())
         self.assert_cleaned()
 
     def test_invalid_shard_requests_never_invoke_forge(self):
@@ -344,6 +379,7 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         first = self.executions()[-1]["test"]
         self.assertEqual(self.run_shard(0).returncode, 0)
         self.assertEqual(first, self.executions()[-1]["test"])
+        count = len(self.executions())
         scratch = Path(first).parent
         scratch.mkdir()
         marker = scratch / "owned-by-other-run"
@@ -351,7 +387,7 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         result = self.run_shard(0)
         self.assertEqual(result.returncode, 2)
         self.assertIn("Shard scratch already exists", result.stderr)
-        self.assertEqual(len(self.executions()), 2)
+        self.assertEqual(len(self.executions()), count)
         self.assertEqual(marker.read_text(), "keep")
 
 

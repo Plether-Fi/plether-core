@@ -479,7 +479,11 @@ PERPS_SHARD_MODE=pr FOUNDRY_PROFILE=ci FOUNDRY_FUZZ_SEED=0xdeadbeef \
 The quick/CI runners partition non-fork discovery into production via-IR gates and non-via-IR correctness tests.
 PR CI applies that partition to four physical shards with one Forge thread per run. The selection checker rejects
 missing or duplicate tests. An empty filtered partition is recorded explicitly; the unfiltered shard must be nonempty.
-Post-merge/deep shards use production via-IR throughout. The audit target and manually dispatched deep workflow
+Post-merge/deep shards use production via-IR throughout, compiling and running at most four test entrypoints per
+serial batch with one Forge thread. Shared fixtures stay at stable paths; each batch records its exact executable
+selection and results. The shard fails unless every assigned entrypoint completes successfully. Set
+`PERPS_COMPILE_BATCH_SIZE` to a positive integer to change this memory bound; replay records that setting.
+The audit target and manually dispatched deep workflow
 run seeds `0xdeadbeef`, `0x1` and `0x2`; nightly seeds derive from the workflow run ID. Environment overrides are
 captured in the effective configuration.
 

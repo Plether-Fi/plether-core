@@ -90,6 +90,8 @@ def write_replay(output, command, settings):
             return '"${PWD}"' + shlex.quote(value[len(str(ROOT)):])
         return shlex.quote(value)
     exports = "\n".join(f"export {key}={portable_setting(value)}" for key, value in replay_settings.items())
+    artifact_root = Path(os.environ.get("PERPS_ARTIFACT_DIR", str(ROOT / "artifacts/perps"))).resolve()
+    artifact_relative = os.path.relpath(artifact_root, output.resolve())
     if not wrapper:
         for key in sorted(AUTO_PERSIST_ENV):
             suffix = "fuzz" if "_FUZZ_" in key else "invariant"
@@ -100,7 +102,7 @@ def write_replay(output, command, settings):
         "# Auto-generated failure_persist_dir paths follow this artifact's corpus/ directory.\n"
         "# Restore explicit external failure_persist_dir/corpus_dir paths from corpus-locations.json if needed.\n"
         'replay_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
-        'export PERPS_ARTIFACT_DIR="$(dirname "${replay_dir}")"\n'
+        'export PERPS_ARTIFACT_DIR="$(cd "${replay_dir}"/' + shlex.quote(artifact_relative) + ' && pwd)"\n'
         + exports + "\n" + replay + "\n")
 
 
