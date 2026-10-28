@@ -96,11 +96,11 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(account, withdrawableAssets);
 
-        vm.warp(block.timestamp + 10 * 365 days);
+        vm.warp(vm.getBlockTimestamp() + 10 * 365 days);
         // A favorable price leaves exact price equity healthy even after carry consumes all available cash.
         uint256 riskPrice = 90_000_000;
         vm.prank(address(router));
-        engine.updateMarkPrice(riskPrice, uint64(block.timestamp));
+        engine.updateMarkPrice(riskPrice, uint64(vm.getBlockTimestamp()));
         uint256 pendingCarryAssets = _expectedIndexedCarryAssets(account);
         IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
         (

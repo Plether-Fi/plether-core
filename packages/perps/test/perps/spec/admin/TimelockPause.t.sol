@@ -164,7 +164,8 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     function test_AllGovernanceConfigsRequireFull72Hours() public {
-        uint256 proposedAt = block.timestamp;
+        // Preserve the proposal clock across vm.warp even under via-IR optimization.
+        uint256 proposedAt = vm.getBlockTimestamp();
         engineAdmin.proposeRiskConfig(_engineRiskConfig());
         engineAdmin.proposeCalendarConfig(_engineCalendarConfig());
         engineAdmin.proposeFreshnessConfig(_engineFreshnessConfig());
