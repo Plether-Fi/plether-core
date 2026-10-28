@@ -5,7 +5,9 @@ deployment, seeding, and activation phases. Paths to scripts, environment files,
 relative to the repository root; run commands there.
 
 The earlier oracle-synchronization candidate is recorded as deployed and inactive under
-`deployments/releases/atomic-oracle-sync-candidate/`. The new USDG release is prepared but not deployed.
+`deployments/releases/atomic-oracle-sync-candidate/`. The new
+[v2.0.0 release](../../deployments/releases/2026-10-28-perps-arbitrum-sepolia-v2.0.0/README.md) is the first with
+USDG as the settlement token and is deployed and seeded on Arbitrum Sepolia, with trading active.
 Complete the qualification gates in
 [Oracle synchronization](ORACLE_SYNCHRONIZATION.md) before considering a separate activation release. The bootstrap
 instructions below describe the later supported phases; they are not part of candidate qualification.
