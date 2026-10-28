@@ -494,6 +494,9 @@ Post-merge/deep shards use production via-IR throughout, compiling and running a
 serial batch with one Forge thread. Shared fixtures stay at stable paths; each batch records its exact executable
 selection and results. The shard fails unless every assigned entrypoint completes successfully. Set
 `PERPS_COMPILE_BATCH_SIZE` to a positive integer to change this memory bound; replay records that setting.
+`EngineCollateralReservations.t.sol` keeps withdrawal/accounting and close-bounty cases in separate concrete
+test contracts. The combined harness triggers solc 0.8.35's `Tag too large for reserved space` assembler error
+even when compiled alone. Both harnesses retain the same fixtures, test bodies and production compiler settings.
 The audit target and manually dispatched deep workflow
 run seeds `0xdeadbeef`, `0x1` and `0x2`; nightly seeds derive from the workflow run ID. Environment overrides are
 captured in the effective configuration.
