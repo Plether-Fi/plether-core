@@ -6,8 +6,10 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import unittest
 
 
@@ -33,9 +35,10 @@ class PerpsShardRunnerTest(unittest.TestCase):
         self.tests = self.package / "test"
         self.runner = self.root / "scripts/run-perps-package-tests.sh"
         self.runner.parent.mkdir(parents=True)
+        shutil.copyfile(REPO / 'Makefile', self.root / 'Makefile')
         for name in ("run-perps-package-tests.sh", "perps-test-inventory.py", "perps-shard-weights.json",
                      "run-perps-recorded.py", "perps_forge_json.py", "run-perps-fast-tests.sh",
-                     "check-perps-pr-selection.py", "run-perps-batched.py"):
+                     "check-perps-pr-selection.py", "run-perps-batched.py", "run-perps-fast-batch.sh"):
             shutil.copyfile(SCRIPTS / name, self.runner.parent / name)
         # Exercise the real filename inventory, including newly added entrypoints.
         self.entrypoints = {
@@ -51,7 +54,7 @@ class PerpsShardRunnerTest(unittest.TestCase):
         fake_bin.mkdir()
         fake_forge = fake_bin / "forge"
         fake_forge.write_text('''#!/usr/bin/env python3
-import json, os, pathlib, re, sys
+import json, os, pathlib, re, sys, time
 args = sys.argv[1:]
 if args == ['--version']:
     print('forge mocked shard fixture')
@@ -64,13 +67,16 @@ record = {'args': args, 'test': str(test), 'files': files,
 with open(os.environ['SHARD_TEST_LOG'], 'a') as out:
     out.write(json.dumps(record) + '\\n')
 if args[0] == 'config':
-    print(json.dumps({'fuzz': {'runs': 2000}, 'invariant': {'runs': 32, 'depth': 256},
+    fuzz, runs, depth = {'quick': (256, 16, 128), 'ci': (2000, 32, 256), 'audit': (20000, 256, 1000)}[os.environ['FOUNDRY_PROFILE']]
+    print(json.dumps({'fuzz': {'runs': fuzz}, 'invariant': {'runs': runs, 'depth': depth},
                       'via_ir': os.environ.get('FOUNDRY_VIA_IR') == 'true', 'cache_path': 'cache', 'test': os.environ['FOUNDRY_TEST']}))
     sys.exit(0)
 entrypoints = [p for p in files if p.endswith('.t.sol')]
 if os.environ.get('SHARD_TEST_EMPTY_ENTRYPOINT') == '1':
     entrypoints = entrypoints[1:]
 paths = [str((test / p).relative_to(package)) for p in entrypoints]
+if os.environ.get('SHARD_TEST_EXTRA_SOURCE') == '1':
+    paths.append(str((test / 'UnexpectedCached.t.sol').relative_to(package)))
 skips = [args[i + 1] for i, arg in enumerate(args[:-1]) if arg == '--skip']
 paths = [p for p in paths if not any(skip in pathlib.Path(p).name for skip in skips)]
 names = ['test_behavior']
@@ -94,6 +100,8 @@ if '--list' in args:
 if not names:
     print('No tests found in project!')
     sys.exit(0)
+if os.environ.get('SHARD_TEST_SLEEP') == '1':
+    time.sleep(60)
 print(json.dumps({p + ':Example': {'test_results': {
     name + '()': {'status': 'Success', 'duration': {'secs': 0, 'nanos': 1}} for name in tests_by_path[p]
 }} for p in paths}))
@@ -186,32 +194,45 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
                 self.assert_cleaned()
         self.assertEqual(seen, self.entrypoints - self.forks)
 
+    def batch_roots(self):
+        return sorted((self.root / "artifacts/perps/fast").glob("batch-*/pr-selection.json"))
+
     def test_pr_shards_preserve_exact_partition_codegen_budgets_and_replay(self):
         seen = set()
         for shard in range(4):
+            before = len(self.executions())
             result = self.run_shard(shard, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1")
             self.assertEqual(result.returncode, 0, result.stderr)
-            production, correctness = self.executions()[-2:]
-            self.assertEqual(production["settings"]["FOUNDRY_VIA_IR"], "true")
-            self.assertEqual(correctness["settings"]["FOUNDRY_VIA_IR"], "false")
-            for call in (production, correctness):
+            calls = self.executions()[before:]
+            assigned = set()
+            for call in calls:
                 self.assertEqual(call["args"][call["args"].index("--threads") + 1], "1")
                 self.assertEqual(call["settings"]["FOUNDRY_PROFILE"], "ci")
                 self.assertEqual(call["settings"]["FOUNDRY_FUZZ_SEED"], "0xdeadbeef")
+                batch = {p for p in call["files"] if p.endswith(".t.sol")}
+                self.assertLessEqual(len(batch), 4)
+                if '--no-match-test' in call['args']:
+                    self.assertEqual(call["settings"]["FOUNDRY_VIA_IR"], "false")
+                    self.assertFalse(assigned & batch)
+                    assigned.update(batch)
+                else:
+                    self.assertEqual(call["settings"]["FOUNDRY_VIA_IR"], "true")
                 for setting in ("FOUNDRY_FUZZ_RUNS", "FOUNDRY_INVARIANT_RUNS", "FOUNDRY_INVARIANT_DEPTH"):
                     self.assertNotIn(setting, call["settings"])
-            assigned = {p for p in production["files"] if p.endswith(".t.sol")}
-            self.assertEqual(assigned, {p for p in correctness["files"] if p.endswith(".t.sol")})
             self.assertFalse(seen & assigned)
             seen.update(assigned)
-            evidence = self.root / "artifacts/perps"
-            partition = json.loads((evidence / "pr-selection.json").read_text())
+            partition = json.loads((self.root / "artifacts/perps/pr-selection.json").read_text())
             self.assertEqual(partition["discovered"], 2 * len(assigned))
-            for field in ("missing", "unexpected", "overlap", "missing_entrypoints"):
+            self.assertEqual(partition["failed_batches"], [])
+            for field in ("missing", "unexpected", "overlap", "missing_entrypoints", "unexpected_entrypoints"):
                 self.assertEqual(partition[field], [])
-            for lane in ("production-gates", "correctness"):
-                replay = (evidence / lane / "replay.sh").read_text()
-                self.assertIn(f"PERPS_SHARD_MODE=pr bash scripts/run-perps-package-tests.sh {shard} 4", replay)
+            # Inspect only the current manifest: prior invocations may leave historical batch artifacts.
+            manifest = json.loads((self.root / "artifacts/perps/fast/run.json").read_text())
+            for batch in manifest['batches']:
+                directory = self.root / 'artifacts/perps/fast' / batch['lane']
+                for lane in ("production-gates", "correctness"):
+                    replay = (directory / lane / "replay.sh").read_text()
+                    self.assertIn(f"PERPS_SHARD_MODE=pr bash scripts/run-perps-package-tests.sh {shard} 4", replay)
             self.assert_cleaned()
         self.assertEqual(seen, self.entrypoints - self.forks)
 
@@ -224,6 +245,72 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         self.assertEqual(identities[0], identities[1])
         self.assert_cleaned()
 
+    def test_make_fast_target_batches_all_discovery_and_preserves_quick_budgets(self):
+        source = 'perps/gas/GasProfile.t.sol'
+        result = subprocess.run(['make', 'test-perps'], cwd=self.root,
+                                env=dict(self.env, SHARD_TEST_PR='1', SHARD_TEST_GAS_SOURCE=source),
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        discovered = [c for c in self.invocations() if '--list' in c['args']]
+        self.assertGreater(len(discovered), 1)
+        seen = set()
+        for call in discovered:
+            files = {p for p in call['files'] if p.endswith('.t.sol')}
+            self.assertLessEqual(len(files), 4)
+            self.assertFalse(seen & files)
+            seen.update(files)
+            self.assertEqual(call['settings']['FOUNDRY_VIA_IR'], 'false')
+            self.assertEqual(call['settings']['FOUNDRY_PROFILE'], 'quick')
+        self.assertEqual(seen, self.entrypoints - self.forks)
+        production = [c for c in self.executions() if c['settings']['FOUNDRY_VIA_IR'] == 'true']
+        self.assertEqual(len(production), 1)
+        report = json.loads((self.root / 'artifacts/perps/pr-selection.json').read_text())
+        self.assertEqual(report['status'], 'passed')
+        self.assertEqual(report['completed_entrypoints'], len(seen))
+        self.assertEqual(report['discovered'], len(seen) + 1)
+        manifest = json.loads((self.root / 'artifacts/perps/fast/run.json').read_text())
+        self.assertEqual(manifest['budgets'], {'fuzz': {'runs': 256}, 'invariant': {'runs': 16, 'depth': 128}})
+        replay = self.root / 'artifacts/perps/fast/batch-000/correctness/replay.sh'
+        command = next(line for line in replay.read_text().splitlines() if line.startswith('export PERPS_ARTIFACT_DIR='))
+        destination = subprocess.check_output(['bash', '-c', command + '\nprintf "%s" "$PERPS_ARTIFACT_DIR"'],
+                                              env=dict(os.environ, replay_dir=str(replay.parent)), text=True)
+        self.assertEqual(Path(destination).resolve(), (self.root / 'artifacts/perps').resolve())
+        self.assert_cleaned()
+
+    def test_fast_cancellation_records_interruption_and_cleans_scratch(self):
+        process = subprocess.Popen(['bash', str(self.runner), '2', '4'], cwd=self.root,
+                                   env=dict(self.env, PERPS_SHARD_MODE='pr', SHARD_TEST_SLEEP='1'),
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        active = self.root / 'artifacts/perps/fast/batch-000/correctness/run.json'
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and process.poll() is None:
+            try:
+                if active.exists() and json.loads(active.read_text())['status'] == 'running':
+                    break
+            except json.JSONDecodeError:
+                pass
+            time.sleep(0.05)
+        else:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.communicate(timeout=10)
+            self.fail('fast run never reached execution')
+        os.killpg(process.pid, signal.SIGTERM)
+        process.communicate(timeout=10)
+        self.assertNotEqual(process.returncode, 0)
+        report = json.loads((self.root / 'artifacts/perps/pr-selection.json').read_text())
+        self.assertEqual(report['status'], 'interrupted')
+        self.assertEqual(report['completed_entrypoints'], 0)
+        self.assert_cleaned()
+
+    def test_fast_rejects_unassigned_cached_entrypoints(self):
+        result = self.run_shard(2, PERPS_SHARD_MODE='pr', SHARD_TEST_EXTRA_SOURCE='1')
+        self.assertNotEqual(result.returncode, 0)
+        report = json.loads((self.root / 'artifacts/perps/pr-selection.json').read_text())
+        self.assertEqual(report['status'], 'failed')
+        self.assertTrue(report['unexpected_entrypoints'])
+        self.assertTrue(report['failed_batches'])
+        self.assert_cleaned()
+
     def test_pr_partition_allows_one_empty_lane_and_executes_every_selected_test(self):
         for only_test, empty_lane in (("test_behavior", "production-gates"),
                                       ("test_gas_budget", "correctness")):
@@ -232,14 +319,17 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
                 result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1",
                                         SHARD_TEST_ONLY_TEST=only_test)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(len(self.executions()), before + 1)
+                self.assertGreater(len(self.executions()), before)
                 evidence = self.root / "artifacts/perps"
                 partition = json.loads((evidence / "pr-selection.json").read_text())
                 self.assertGreater(partition["discovered"], 0)
                 self.assertEqual(partition["production"] + partition["correctness"], partition["discovered"])
-                metadata = json.loads((evidence / empty_lane / "run.json").read_text())
-                self.assertEqual(metadata["execution_skipped_reason"], "empty_partition")
-                self.assertEqual(list((evidence / empty_lane).glob("results.*")), [])
+                for batch in (evidence / 'fast').glob('batch-*'):
+                    if not batch.is_dir():
+                        continue
+                    metadata = json.loads((batch / empty_lane / "run.json").read_text())
+                    self.assertEqual(metadata["execution_skipped_reason"], "empty_partition")
+                    self.assertEqual(list((batch / empty_lane).glob("results.*")), [])
                 for field in ("missing", "unexpected", "overlap", "missing_entrypoints"):
                     self.assertEqual(partition[field], [])
                 self.assert_cleaned()
@@ -261,14 +351,15 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         self.assertEqual(result.returncode, 0, result.stderr)
         unfiltered = next(call for call in self.invocations() if '--list' in call['args'])
         self.assertEqual(unfiltered['settings']['FOUNDRY_VIA_IR'], 'false')
-        production, correctness = self.executions()
-        args = production['args']
+        productions = [c for c in self.executions() if c['settings']['FOUNDRY_VIA_IR'] == 'true']
+        self.assertEqual(len(productions), 1)
+        args = productions[0]['args']
         skips = {args[i + 1] for i, arg in enumerate(args[:-1]) if arg == '--skip'}
         self.assertIn('script', skips)
         self.assertFalse(any(skip in Path(required).name for skip in skips))
-        self.assertEqual(skips - {'script'}, {Path(p).name for p in assigned
-                                            if Path(p).name not in Path(required).name})
-        self.assertNotIn('--skip', correctness['args'])
+        # No optimized discovery invocation is needed, including for empty production batches.
+        self.assertTrue(all(c['settings']['FOUNDRY_VIA_IR'] == 'false'
+                            for c in self.invocations() if '--list' in c['args']))
         partition = json.loads((self.root / 'artifacts/perps/pr-selection.json').read_text())
         self.assertEqual(partition['production'], 1)
         self.assertEqual(partition['correctness'], len(assigned))
@@ -277,9 +368,10 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
     def test_pr_partition_rejects_tests_dropped_from_both_filtered_lanes(self):
         result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1", SHARD_TEST_DROP_CORRECTNESS="1")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("not an exact discovery partition", result.stderr)
-        partition = json.loads((self.root / "artifacts/perps/pr-selection.json").read_text())
-        self.assertTrue(partition["missing"])
+        self.assertIn("Discovery/result mismatch", result.stderr)
+        manifest = json.loads((self.root / "artifacts/perps/fast/run.json").read_text())
+        self.assertEqual(manifest["status"], "failed")
+        self.assertTrue(manifest['selection']['failed_batches'])
         self.assert_cleaned()
 
     def test_pr_partition_rejects_overlapping_lanes(self):
@@ -288,7 +380,7 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1", SHARD_TEST_IGNORE_FILTERS="1")
         self.assertNotEqual(result.returncode, 0)
         partition = json.loads((self.root / "artifacts/perps/pr-selection.json").read_text())
-        self.assertTrue(partition["overlap"])
+        self.assertTrue(partition["failed_batches"])
         self.assert_cleaned()
 
     def test_list_only_preserves_executed_inventory_without_running_forge(self):

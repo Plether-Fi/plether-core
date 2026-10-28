@@ -32,7 +32,7 @@ python3 "${repo_root}/scripts/perps-test-inventory.py" > "${PERPS_ARTIFACT_DIR}/
 # mkdir atomically rejects a concurrent or interrupted run with the same identity.
 scratch_codegen="${FOUNDRY_VIA_IR:-true}"
 # Both PR codegen lanes share one stable physical tree, including on replay.
-if [ "${mode}" = pr ]; then scratch_codegen=pr; fi
+if [ "${mode}" = pr ]; then scratch_codegen="pr-batch-${batch_size}"; fi
 if [ "${mode}" = full ]; then scratch_codegen="${scratch_codegen}-batch-${batch_size}"; fi
 scratch_id="$(python3 - "${FOUNDRY_PROFILE}" "${FOUNDRY_FUZZ_SEED:-0xdeadbeef}" "${shard_index}" "${scratch_codegen}" "${mode}" <<'PY'
 import hashlib, json, sys

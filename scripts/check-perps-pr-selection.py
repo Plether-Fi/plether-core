@@ -25,6 +25,7 @@ def check(directory, package, expected_file):
     unexpected = sorted((production | correctness) - expected)
     overlap = sorted(production & correctness)
     missing_entrypoints = []
+    unexpected_entrypoints = []
     if expected_file:
         config = read("production-gates/config.json")
         test_root = Path(config.get("test", "test"))
@@ -38,12 +39,15 @@ def check(directory, package, expected_file):
             if not path.is_absolute():
                 path = package / path
             actual.add(path.relative_to(test_root).as_posix())
-        missing_entrypoints = sorted(set(Path(expected_file).read_text().splitlines()) - actual)
+        assigned = set(Path(expected_file).read_text().splitlines())
+        missing_entrypoints = sorted(assigned - actual)
+        unexpected_entrypoints = sorted(actual - assigned)
     result = {"discovered": len(expected), "production": len(production),
               "correctness": len(correctness), "missing": missing, "unexpected": unexpected,
-              "overlap": overlap, "missing_entrypoints": missing_entrypoints}
+              "overlap": overlap, "missing_entrypoints": missing_entrypoints,
+              "unexpected_entrypoints": unexpected_entrypoints}
     (directory / "pr-selection.json").write_text(json.dumps(result, indent=2) + "\n")
-    if not expected or missing or unexpected or overlap or missing_entrypoints:
+    if not expected or missing or unexpected or overlap or missing_entrypoints or unexpected_entrypoints:
         raise ValueError("PR lanes are not an exact discovery partition: " + json.dumps(result))
     print("PR lane partition verified: " + json.dumps(result))
 

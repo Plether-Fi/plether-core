@@ -136,6 +136,7 @@ jobs:
           - {shard: 3, number: 4}
     env:
       FOUNDRY_FUZZ_SEED: '0xdeadbeef'
+      PERPS_COMPILE_BATCH_SIZE: '4'
       HEARTBEAT_RESOURCE_DIAGNOSTICS: '1'
     steps:
       - uses: actions/checkout@v4
