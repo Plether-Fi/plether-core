@@ -50,6 +50,8 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 printf '%s\n' "${shard_work_dir#"${package_root}/"}" > "${PERPS_ARTIFACT_DIR}/shard-${shard_index}-scratch.txt"
 shard_test_dir="${shard_work_dir}/test"
 cp -R "${package_root}/test" "${shard_test_dir}"

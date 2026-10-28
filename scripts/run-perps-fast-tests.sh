@@ -33,6 +33,8 @@ PY
     fi
     cleanup() { rm -rf -- "${scratch}"; }
     trap cleanup EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     cp -R "${package_root}/test" "${scratch}/test"
     export PERPS_EXPECTED_ENTRYPOINTS="${PERPS_ARTIFACT_DIR}/fast-entrypoints.txt"
     python3 "${repo_root}/scripts/perps-test-inventory.py" --lane correctness --format paths \

@@ -277,9 +277,9 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         self.assertEqual(Path(destination).resolve(), (self.root / 'artifacts/perps').resolve())
         self.assert_cleaned()
 
-    def test_fast_cancellation_records_interruption_and_cleans_scratch(self):
-        process = subprocess.Popen(['bash', str(self.runner), '2', '4'], cwd=self.root,
-                                   env=dict(self.env, PERPS_SHARD_MODE='pr', SHARD_TEST_SLEEP='1'),
+    def cancel_fast(self, command, environment):
+        process = subprocess.Popen(command, cwd=self.root,
+                                   env=dict(self.env, SHARD_TEST_SLEEP='1', **environment),
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
         active = self.root / 'artifacts/perps/fast/batch-000/correctness/run.json'
         deadline = time.monotonic() + 10
@@ -301,6 +301,12 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         self.assertEqual(report['status'], 'interrupted')
         self.assertEqual(report['completed_entrypoints'], 0)
         self.assert_cleaned()
+
+    def test_fast_cancellation_records_interruption_and_cleans_scratch(self):
+        self.cancel_fast(['bash', str(self.runner), '2', '4'], {'PERPS_SHARD_MODE': 'pr'})
+
+    def test_local_make_cancellation_cleans_owned_scratch(self):
+        self.cancel_fast(['make', 'test-perps'], {})
 
     def test_fast_rejects_unassigned_cached_entrypoints(self):
         result = self.run_shard(2, PERPS_SHARD_MODE='pr', SHARD_TEST_EXTRA_SOURCE='1')
