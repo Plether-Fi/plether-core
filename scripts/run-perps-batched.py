@@ -124,6 +124,8 @@ def run(lane, batch_size, fast=False):
                 if code or result["status"] != "passed":
                     metadata["selection"]["failed_batches"].append(label)
             persist()
+            print(f"[{lane}] {label} {result['status']} in "
+                  f"{time.monotonic() - batch_started:.2f}s", flush=True)
             for relative in batch:
                 (test_root / relative).unlink()
         if set(metadata["completed_entrypoints"]) != set(expected):

@@ -27,9 +27,11 @@ python3 "${repo_root}/scripts/perps-test-inventory.py" > "${PERPS_ARTIFACT_DIR}/
 # Shard callers supply expected source entrypoints; validate them across both lanes.
 expected_entrypoints="${PERPS_EXPECTED_ENTRYPOINTS:-}"
 unset PERPS_EXPECTED_ENTRYPOINTS
+discovery_started=$SECONDS
 FOUNDRY_VIA_IR=false FOUNDRY_OUT=out-ci-fast FOUNDRY_CACHE_PATH=cache-ci-fast \
     forge test --offline --threads 1 --root "${package_root}" \
     --skip script --no-match-path "${fork_path}" --list --json > "${PERPS_ARTIFACT_DIR}/all-tests.json"
+echo "[fast] batch discovery completed in $((SECONDS - discovery_started))s"
 
 # Function filters do not bound compiler memory. Exclude entrypoints without
 # production tests from via-IR compilation, using actual discovery (including
@@ -62,15 +64,15 @@ while IFS= read -r source; do
 done < "${PERPS_ARTIFACT_DIR}/production-skip-files.txt"
 
 FOUNDRY_VIA_IR=true \
-    python3 "${repo_root}/scripts/run-perps-recorded.py" --allow-empty-partition \
+    python3 "${repo_root}/scripts/run-perps-recorded.py" --allow-empty-partition --trace-failures \
     --discovery-file "${PERPS_ARTIFACT_DIR}/production-gates-discovery.json" production-gates -- \
-    forge test --offline --threads 1 -vvv --root "${package_root}" --no-match-path "${fork_path}" \
+    forge test --offline --threads 1 --root "${package_root}" --no-match-path "${fork_path}" \
     --match-test "${production_regex}" "${production_skip[@]}"
 
 FOUNDRY_VIA_IR=false FOUNDRY_OUT=out-ci-fast FOUNDRY_CACHE_PATH=cache-ci-fast \
-    python3 "${repo_root}/scripts/run-perps-recorded.py" --allow-empty-partition \
+    python3 "${repo_root}/scripts/run-perps-recorded.py" --allow-empty-partition --trace-failures \
     --discovery-file "${PERPS_ARTIFACT_DIR}/correctness-discovery.json" correctness -- \
-    forge test --offline --threads 1 -vvv --skip script --root "${package_root}" --no-match-path "${fork_path}" \
+    forge test --offline --threads 1 --skip script --root "${package_root}" --no-match-path "${fork_path}" \
     --no-match-test "${production_regex}"
 
 python3 "${repo_root}/scripts/check-perps-pr-selection.py" \

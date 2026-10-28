@@ -207,6 +207,7 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
             assigned = set()
             for call in calls:
                 self.assertEqual(call["args"][call["args"].index("--threads") + 1], "1")
+                self.assertNotIn('-vvv', call['args'])
                 self.assertEqual(call["settings"]["FOUNDRY_PROFILE"], "ci")
                 self.assertEqual(call["settings"]["FOUNDRY_FUZZ_SEED"], "0xdeadbeef")
                 batch = {p for p in call["files"] if p.endswith(".t.sol")}

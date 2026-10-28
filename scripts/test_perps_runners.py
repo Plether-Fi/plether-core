@@ -134,12 +134,14 @@ class SelectionTests(unittest.TestCase):
 class EvidenceTests(unittest.TestCase):
     def run_lane(self, status="Success", empty=False, no_skips=False, cancel=False,
                  discovery_failure=False, missing=False, missing_entrypoint=False, custom_env=None,
-                 empty_discovery=False, allow_empty=False):
+                 empty_discovery=False, allow_empty=False, trace_failures=False):
         temp = tempfile.TemporaryDirectory()
         directory = Path(temp.name)
         forge = directory / "forge"
         forge.write_text("""#!/usr/bin/env python3
 import json, os, sys, time
+with open(os.environ['MOCK_CALLS'], 'a') as calls:
+    calls.write(json.dumps(sys.argv[1:]) + '\\n')
 if sys.argv[1] == '--version':
     print('forge mocked runner fixture')
 elif sys.argv[1] == 'config':
@@ -154,13 +156,17 @@ elif '--list' in sys.argv:
     print(json.dumps({'test/Example.t.sol': {'Example': tests}}))
 else:
     assert '--suppress-successful-traces' in sys.argv
+    status = os.environ['MOCK_STATUS']
+    if '-vvv' in sys.argv and os.environ.get('MOCK_TRACE_PASSES') == '1':
+        status = 'Success'
     result = {} if os.environ['MOCK_EMPTY'] == '1' else {'test/Example.t.sol:Example': {'test_results': {
-        'test_behavior()': {'status': os.environ['MOCK_STATUS'], 'reason': 'fixture', 'duration': {'secs': 0, 'nanos': 42}}}}}
+        'test_behavior()': {'status': status, 'reason': 'fixture', 'duration': {'secs': 0, 'nanos': 42},
+                            'traces': [{'failure': 'retained'}] if '-vvv' in sys.argv else []}}}}
     print(json.dumps(result))
     print(os.environ['EXAMPLE_RPC_URL'], file=sys.stderr, flush=True)
     if os.environ['MOCK_SLEEP'] == '1':
         time.sleep(60)
-    sys.exit(1 if os.environ['MOCK_STATUS'] == 'Failure' and os.environ.get('FORGE_ALLOW_FAILURE') != '1' else 0)
+    sys.exit(1 if status == 'Failure' and os.environ.get('FORGE_ALLOW_FAILURE') != '1' else 0)
 """)
         forge.chmod(0o755)
         environment = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ["PATH"],
@@ -168,6 +174,7 @@ else:
                            MOCK_STATUS=status, MOCK_EMPTY=str(int(empty)),
                            MOCK_EMPTY_DISCOVERY=str(int(empty_discovery)),
                            MOCK_SLEEP=str(int(cancel)),
+                           MOCK_CALLS=str(directory / 'forge-calls.jsonl'),
                            MOCK_CACHE_PATH=str(directory / "cache"),
                            MOCK_DISCOVERY_FAILURE=str(int(discovery_failure)), MOCK_MISSING=str(int(missing)),
                            PERPS_REQUIRE_NO_SKIPS=str(int(no_skips)),
@@ -181,6 +188,8 @@ else:
                    "forge", "test", "--root", "packages/perps"]
         if allow_empty:
             command.insert(2, "--allow-empty-partition")
+        if trace_failures:
+            command.insert(2, "--trace-failures")
         if cancel:
             process = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True)
@@ -200,6 +209,9 @@ else:
         files = {file.name for file in output.iterdir()}
         self.last_replay = (output / "replay.sh").read_text()
         self.last_config = (output / "config.json").read_text()
+        self.last_forge_calls = [json.loads(line) for line in (directory / 'forge-calls.jsonl').read_text().splitlines()]
+        self.last_failure_trace = ((output / 'failure-traces.json').read_text()
+                                   if (output / 'failure-traces.json').exists() else None)
         temp.cleanup()
         return result, metadata, stderr, files
 
@@ -217,6 +229,33 @@ else:
         result, metadata, _, _ = self.run_lane("Failure")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(metadata["counts"]["failed"], 1)
+
+    def test_passing_fast_run_avoids_verbose_trace_collection(self):
+        result, metadata, _, files = self.run_lane(trace_failures=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        executions = [call for call in self.last_forge_calls if call[0] == 'test' and '--list' not in call]
+        self.assertEqual(len(executions), 1)
+        self.assertNotIn('-vvv', executions[0])
+        self.assertNotIn('failure-traces.json', files)
+
+    def test_fast_failure_keeps_original_failure_and_verbose_diagnostics(self):
+        result, metadata, _, files = self.run_lane('Failure', trace_failures=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(metadata['counts']['failed'], 1)
+        self.assertIn('failure-traces.json', files)
+        executions = [call for call in self.last_forge_calls if call[0] == 'test' and '--list' not in call]
+        self.assertEqual(executions[1], [*executions[0], '-vvv'])
+        trace = json.loads(self.last_failure_trace)
+        self.assertEqual(trace['test/Example.t.sol:Example']['test_results']['test_behavior()']['traces'],
+                         [{'failure': 'retained'}])
+
+    def test_passing_diagnostic_rerun_cannot_turn_initial_failure_green(self):
+        result, metadata, _, _ = self.run_lane('Failure', trace_failures=True,
+                                             custom_env={'MOCK_TRACE_PASSES': '1', 'FORGE_ALLOW_FAILURE': '1'})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(metadata['status'], 'failed')
+        self.assertEqual(metadata['counts'], {'passed': 0, 'failed': 1, 'skipped': 0})
+        self.assertEqual(metadata['failure_trace_exit_code'], 0)
 
     def test_allowed_forge_failure_still_fails_the_recorded_gate(self):
         result, metadata, _, _ = self.run_lane("Failure", custom_env={"FORGE_ALLOW_FAILURE": "1"})
@@ -335,6 +374,36 @@ else:
 
 
 class JsonEvidenceTests(unittest.TestCase):
+    def test_discarded_trace_strings_are_scanned_in_bounded_chunks(self):
+        class BoundedTraceStream(io.StringIO):
+            def read(self, size=-1):
+                if size < 0 or size > 4096:
+                    raise AssertionError("trace reader must remain bounded")
+                return super().read(size)
+
+        # Escaped quotes, backslashes and apparent nesting straddle every chunk
+        # boundary. Failure traces and the fields after a discarded trace survive.
+        for size in (1, 2, 3, 7, 4096):
+            data = {"suite": {"test_results": {
+                "pass()": {"status": "Success", "traces": [
+                    {"bytecode": "ab" * 10000, "escaped": '\\"[{}]' * 5, "end": "\\"}],
+                    "kind": {"Invariant": {"runs": 32, "calls": 8192}}},
+                "fail()": {"status": "Failure", "traces": [{"evidence": '\\"[{}]'}],
+                           "counterexample": {"sequence": [1, 2, 3]}}
+            }}}
+            output = io.StringIO()
+            with self.subTest(chunk_size=size):
+                self.assertEqual(compact(BoundedTraceStream(json.dumps(data)), output,
+                                         io.StringIO(), chunk_size=size), 1)
+                data["suite"]["test_results"]["pass()"]["traces"] = []
+                self.assertEqual(json.loads(output.getvalue()), data)
+
+    def test_truncated_discarded_trace_fails_closed(self):
+        prefix = '{"suite":{"test_results":{"pass()":{"status":"Success","traces":'
+        for value in ('[', '[{"data":"unterminated', '[{"data":"escape\\', '[{}'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                compact(io.StringIO(prefix + value), io.StringIO(), io.StringIO(), chunk_size=2)
+
     def test_streaming_compaction_preserves_failures_counters_and_escaped_strings(self):
         data = {"test/Checks.t.sol:Checks": {"duration": "3ms", "test_results": {
             "invariant_pass()": {"status": "Success", "logs": ['quotes " slash \\ and unicode µ'],

@@ -483,6 +483,13 @@ without compilation or execution. The selection checker rejects missing, duplica
 entrypoints; a successful aggregate requires every assigned file and every batch to complete. PR CI applies the
 same batching inside its four physical shards. Local `make test-perps` and `make test-perps-ci` use it for the full
 non-fork inventory. Profile budgets and seeds are unchanged.
+Fast batches collect ordinary result JSON on the primary run. If any test fails, the same batch is rerun with
+verbose tracing into `failure-traces.json`; this diagnostic rerun cannot replace the original failing result.
+Successful trace values are discarded in bounded chunks, avoiding repeated parsing of large deployment bytecode
+while retaining failure traces, counterexamples, invariant counters and all other result fields. Each batch prints
+discovery, execution/capture and total durations. Shard weights come from all 2,562 passing results in
+[CI run 40739099497](https://github.com/Plether-Fi/plether-core/actions/runs/40739099497), replacing older timings
+that assigned 79/79/4/78 files; the refreshed assignment is 60/59/61/60 files with stateful pins unchanged.
 Post-merge/deep shards use production via-IR throughout, compiling and running at most four test entrypoints per
 serial batch with one Forge thread. Shared fixtures stay at stable paths; each batch records its exact executable
 selection and results. The shard fails unless every assigned entrypoint completes successfully. Set
