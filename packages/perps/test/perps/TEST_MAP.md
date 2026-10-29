@@ -476,13 +476,38 @@ PERPS_SHARD_MODE=pr FOUNDRY_PROFILE=ci FOUNDRY_FUZZ_SEED=0xdeadbeef \
 | `ci` | 2,000 | 32 | 256 | PR and post-merge |
 | `audit` | 20,000 | 256 | 1,000 | Nightly and pre-audit |
 
-The quick/CI runners batch non-fork entrypoints before any executable discovery. Each serial batch contains at
-most four files and uses one Forge thread. Discovery compiles that batch once without via-IR, then partitions the
-executable inventory into production via-IR gates and non-via-IR correctness tests. Empty partitions are recorded
-without compilation or execution. The selection checker rejects missing, duplicate, or unexpected tests and source
-entrypoints; a successful aggregate requires every assigned file and every batch to complete. PR CI applies the
-same batching inside its four physical shards. Local `make test-perps` and `make test-perps-ci` use it for the full
-non-fork inventory. Profile budgets and seeds are unchanged.
+The quick/CI runners batch non-fork entrypoints before any executable discovery. Local `make test-perps` and
+`make test-perps-ci` use correctness batches of at most 16 files and two isolated workers. Each Forge process uses
+one thread. Discovery compiles a batch without via-IR, then partitions its executable inventory into production
+via-IR gates and non-via-IR correctness tests. Production compilation uses smaller batches of at most four files.
+PR CI retains at most four files per batch and one worker inside each of its four physical shards. Empty partitions
+are recorded without compilation or execution. The selection checker rejects missing, duplicate, or unexpected
+tests and source entrypoints; a successful aggregate requires every assigned file and every batch to complete.
+Profile budgets and seeds are unchanged.
+
+Fast batches keep stable, isolated compiler caches and artifacts below `packages/perps/.perps-test-build/`, with
+separate output paths for correctness and production compilation. Other batches cannot replace these build
+entries, so unchanged local reruns can reuse them. Deleting this ignored directory forces a cold build. Shared
+fixtures and production-source changes still invalidate affected compiler outputs normally. The build directory
+is distinct from recorded run evidence and failure corpora.
+
+Use these positive-integer settings to change local resource limits; replay records the effective settings:
+
+| Setting | Local default | PR shard default | Meaning |
+| --- | ---: | ---: | --- |
+| `PERPS_COMPILE_BATCH_SIZE` | 16 | 4 | Maximum correctness/discovery files per batch |
+| `PERPS_PRODUCTION_BATCH_SIZE` | 4 | 4 | Maximum production via-IR files per batch |
+| `PERPS_FAST_WORKERS` | 2 | 1 | Concurrent isolated fast batches |
+
+For a serial local run, use `PERPS_FAST_WORKERS=1 make test-perps`. Measure the complete command when comparing
+runtimes, and report cold and unchanged warm runs separately; an individual batch or parallel CI shard is not a
+full local-suite timing.
+
+The full local quick suite was measured on 2026-10-29 with all 2,562 tests: the previous serial runner took
+35m02s, the isolated runner with empty build caches took 15m27s, and an unchanged second invocation took 3m10s.
+Both new runs used 16-file ordinary batches, four-file production batches, two workers, fuzz runs 256 and
+invariant runs 16 at depth 128. These are observed local timings; source changes invalidate affected builds.
+
 Fast batches collect ordinary result JSON on the primary run. If any test fails, the same batch is rerun with
 verbose tracing into `failure-traces.json`; this diagnostic rerun cannot replace the original failing result.
 Successful trace values are discarded in bounded chunks, avoiding repeated parsing of large deployment bytecode
