@@ -11,6 +11,11 @@ if [ "${mode}" != full ] && [ "${mode}" != pr ]; then
     echo "PERPS_SHARD_MODE must be full or pr" >&2
     exit 2
 fi
+batch_size="${PERPS_COMPILE_BATCH_SIZE:-4}"
+if ! [[ "${batch_size}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "PERPS_COMPILE_BATCH_SIZE must be a positive integer" >&2
+    exit 2
+fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_root="${repo_root}/packages/perps"
 export FOUNDRY_PROFILE="${FOUNDRY_PROFILE:-quick}"
@@ -27,7 +32,8 @@ python3 "${repo_root}/scripts/perps-test-inventory.py" > "${PERPS_ARTIFACT_DIR}/
 # mkdir atomically rejects a concurrent or interrupted run with the same identity.
 scratch_codegen="${FOUNDRY_VIA_IR:-true}"
 # Both PR codegen lanes share one stable physical tree, including on replay.
-if [ "${mode}" = pr ]; then scratch_codegen=pr; fi
+if [ "${mode}" = pr ]; then scratch_codegen="pr-batch-${batch_size}"; fi
+if [ "${mode}" = full ]; then scratch_codegen="${scratch_codegen}-batch-${batch_size}"; fi
 scratch_id="$(python3 - "${FOUNDRY_PROFILE}" "${FOUNDRY_FUZZ_SEED:-0xdeadbeef}" "${shard_index}" "${scratch_codegen}" "${mode}" <<'PY'
 import hashlib, json, sys
 print(hashlib.sha256(json.dumps(sys.argv[1:]).encode()).hexdigest()[:20])
@@ -44,6 +50,8 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 printf '%s\n' "${shard_work_dir#"${package_root}/"}" > "${PERPS_ARTIFACT_DIR}/shard-${shard_index}-scratch.txt"
 shard_test_dir="${shard_work_dir}/test"
 cp -R "${package_root}/test" "${shard_test_dir}"
@@ -66,6 +74,7 @@ if [ "${mode}" = pr ]; then
     bash "${repo_root}/scripts/run-perps-fast-tests.sh"
     exit 0
 fi
-# A single invocation saves the complete per-test result and invariant call statistics.
-python3 "${repo_root}/scripts/run-perps-recorded.py" "shard-${shard_index}" -- \
-    forge test --offline -vvv --root "${package_root}"
+# Bound compiler memory by physically selecting a few entrypoints at a time.
+# Every test still uses the selected profile, seed and production code generation.
+export PERPS_REPLAY_COMMAND="PERPS_COMPILE_BATCH_SIZE=${batch_size} ${PERPS_REPLAY_COMMAND}"
+python3 "${repo_root}/scripts/run-perps-batched.py" "shard-${shard_index}" "${batch_size}"

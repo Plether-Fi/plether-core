@@ -449,9 +449,9 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(address(router));
-        engine.updateMarkPrice(80_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(80_000_000, uint64(vm.getBlockTimestamp()));
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
@@ -469,9 +469,9 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(address(router));
-        engine.updateMarkPrice(100_010_000, uint64(block.timestamp));
+        engine.updateMarkPrice(100_010_000, uint64(vm.getBlockTimestamp()));
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 100_010_000);
         assertTrue(preview.valid, "Carry-adjusted full close should remain executable");

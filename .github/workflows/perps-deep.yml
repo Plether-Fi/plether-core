@@ -55,6 +55,9 @@ jobs:
       FOUNDRY_VIA_IR: 'true'
       FOUNDRY_FUZZ_SEED: ${{ matrix.seed }}
       PERPS_ARTIFACT_DIR: artifacts/perps/deep
+      # Bound via-IR compilation without reducing campaign budgets or test selection.
+      PERPS_COMPILE_BATCH_SIZE: '4'
+      HEARTBEAT_RESOURCE_DIAGNOSTICS: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,7 +74,7 @@ jobs:
           python3 scripts/perps-test-inventory.py
 
       - name: Build production package
-        run: bash scripts/run-with-heartbeat.sh forge build --sizes --skip test --skip script --root packages/perps
+        run: bash scripts/run-with-heartbeat.sh forge build --threads 1 --sizes --skip test --skip script --root packages/perps
 
       - name: Run production package test shard
         run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-package-tests.sh "${{ matrix.shard_index }}" 4

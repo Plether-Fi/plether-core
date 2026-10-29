@@ -135,94 +135,6 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         engine.checkWithdraw(account);
     }
 
-    function test_ReserveCloseOrderExecutionBounty_AllowsStaleLastMarkPriceWhenStored() public {
-        IHousePool.PoolConfig memory config = _currentPoolConfig();
-        config.markStalenessLimit = 300;
-        pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 72 hours + 1);
-        pool.finalizePoolConfig();
-
-        address trader = address(0x5159);
-        address account = trader;
-        address counterparty = address(0x5160);
-        address counterpartyAccount = counterparty;
-
-        _fundTrader(trader, 10_000e6);
-        _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.LONG, 10_000e18, 1500e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
-
-        vm.warp(block.timestamp + 31);
-        uint256 reserveBeforeFresh = clearinghouse.actionReserveAssets(account);
-        vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
-        assertEq(
-            clearinghouse.actionReserveAssets(account) - reserveBeforeFresh,
-            0,
-            "fresh sidecar path must reserve the requested bounty"
-        );
-
-        vm.warp(block.timestamp + 30 days);
-        uint256 reserveBeforeStale = clearinghouse.actionReserveAssets(account);
-        vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
-        assertEq(
-            clearinghouse.actionReserveAssets(account) - reserveBeforeStale,
-            0,
-            "stale sidecar path must reserve the requested bounty"
-        );
-    }
-
-    function test_ReserveCloseOrderExecutionBounty_RevertsWhenNoStoredMarkExists() public {
-        address trader = address(0x51595);
-        address account = trader;
-        address counterparty = address(0x51596);
-        address counterpartyAccount = counterparty;
-
-        _fundTrader(trader, 10_000e6);
-        _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.LONG, 10_000e18, 1500e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
-
-        _ensureLaterOracleTime();
-        vm.prank(address(router));
-        engine.updateMarkPrice(0, uint64(vm.getBlockTimestamp()));
-        vm.prank(address(router));
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
-    }
-
-    function test_ReserveCloseOrderExecutionBounty_ExcludesQueuedReservationsFromGenericReachability() public {
-        address trader = address(0x5161);
-        address account = trader;
-        address counterparty = address(0x5162);
-        address counterpartyAccount = counterparty;
-
-        _fundTrader(trader, 10_000e6);
-        _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.LONG, 10_000e18, 2000e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
-
-        vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
-
-        IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
-        assertEq(
-            buckets.otherLockedMarginAssets,
-            4000e6 + _executionBountyReserve(1) + clearinghouse.liquidationReserveAssets(account),
-            "Other locked value must include queued margin, execution bounty, and the dedicated liquidation reserve"
-        );
-        assertEq(
-            buckets.freeSettlementAssets + buckets.activePositionMarginAssets,
-            buckets.settlementBalanceAssets - buckets.otherLockedMarginAssets,
-            "Generic reachability must exclude the queued reservation"
-        );
-
-        vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
-        assertEq(clearinghouse.getAccountAssetBuckets(account).otherLockedMarginAssets, buckets.otherLockedMarginAssets);
-    }
-
     function test_CheckWithdraw_RevertsWhenOpenPositionHasZeroMarkPrice() public {
         address account = address(uint160(0x5158));
         _fundTrader(account, 5000 * 1e6);
@@ -325,6 +237,99 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         vm.prank(address(clearinghouse));
         engine.checkWithdraw(account);
+    }
+
+}
+
+// Keep each concrete test harness below solc 0.8.35's via-IR assembler jump-tag limit.
+contract EngineCloseBountyReservationsTest is CfdEngineTestBase {
+
+    function test_ReserveCloseOrderExecutionBounty_AllowsStaleLastMarkPriceWhenStored() public {
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
+        config.markStalenessLimit = 300;
+        pool.proposePoolConfig(config);
+        vm.warp(block.timestamp + 72 hours + 1);
+        pool.finalizePoolConfig();
+
+        address trader = address(0x5159);
+        address account = trader;
+        address counterparty = address(0x5160);
+        address counterpartyAccount = counterparty;
+
+        _fundTrader(trader, 10_000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1500e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
+
+        vm.warp(block.timestamp + 31);
+        uint256 reserveBeforeFresh = clearinghouse.actionReserveAssets(account);
+        vm.prank(address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
+        assertEq(
+            clearinghouse.actionReserveAssets(account) - reserveBeforeFresh,
+            0,
+            "fresh sidecar path must reserve the requested bounty"
+        );
+
+        vm.warp(block.timestamp + 30 days);
+        uint256 reserveBeforeStale = clearinghouse.actionReserveAssets(account);
+        vm.prank(address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
+        assertEq(
+            clearinghouse.actionReserveAssets(account) - reserveBeforeStale,
+            0,
+            "stale sidecar path must reserve the requested bounty"
+        );
+    }
+
+    function test_ReserveCloseOrderExecutionBounty_RevertsWhenNoStoredMarkExists() public {
+        address trader = address(0x51595);
+        address account = trader;
+        address counterparty = address(0x51596);
+        address counterpartyAccount = counterparty;
+
+        _fundTrader(trader, 10_000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1500e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
+
+        _ensureLaterOracleTime();
+        vm.prank(address(router));
+        engine.updateMarkPrice(0, uint64(vm.getBlockTimestamp()));
+        vm.prank(address(router));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
+    }
+
+    function test_ReserveCloseOrderExecutionBounty_ExcludesQueuedReservationsFromGenericReachability() public {
+        address trader = address(0x5161);
+        address account = trader;
+        address counterparty = address(0x5162);
+        address counterpartyAccount = counterparty;
+
+        _fundTrader(trader, 10_000e6);
+        _fundTrader(counterparty, 50_000e6);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 2000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
+
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
+
+        IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
+        assertEq(
+            buckets.otherLockedMarginAssets,
+            4000e6 + _executionBountyReserve(1) + clearinghouse.liquidationReserveAssets(account),
+            "Other locked value must include queued margin, execution bounty, and the dedicated liquidation reserve"
+        );
+        assertEq(
+            buckets.freeSettlementAssets + buckets.activePositionMarginAssets,
+            buckets.settlementBalanceAssets - buckets.otherLockedMarginAssets,
+            "Generic reachability must exclude the queued reservation"
+        );
+
+        vm.prank(address(router));
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
+        assertEq(clearinghouse.getAccountAssetBuckets(account).otherLockedMarginAssets, buckets.otherLockedMarginAssets);
     }
 
     function test_ReserveCloseOrderExecutionBounty_AllowsFullCloseNearMaintenance() public {

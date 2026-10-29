@@ -301,8 +301,9 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     function _mockPythUpdateData(
         uint256 price
     ) internal returns (bytes[] memory updateData) {
-        vm.roll(block.number + 1);
-        vm.warp(block.timestamp + 1);
+        // The optimizer treats block fields as constant within a transaction, even across cheatcodes.
+        vm.roll(vm.getBlockNumber() + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         uint256 publishTime = _mockHistoricalPublishTime();
         baseMockPyth.setAllUniquePrices(
             _basePythFeedIds(),
@@ -317,7 +318,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     }
 
     function _mockHistoricalPublishTime() internal view returns (uint256 publishTime) {
-        publishTime = block.timestamp;
+        publishTime = vm.getBlockTimestamp();
         uint64 nextOrderId = router.nextExecuteId();
         if (nextOrderId == 0) {
             return publishTime;
@@ -325,7 +326,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(nextOrderId);
         uint256 candidate = uint256(pending.commitTime) + 1;
-        if (pending.orderId != 0 && candidate <= block.timestamp) {
+        if (pending.orderId != 0 && candidate <= publishTime) {
             publishTime = candidate;
         }
     }
@@ -490,7 +491,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         uint256 price,
         uint256 depth
     ) internal {
-        _closeAt(account, side, size, price, depth, uint64(block.timestamp));
+        _closeAt(account, side, size, price, depth, uint64(vm.getBlockTimestamp()));
     }
 
     function _closeAt(

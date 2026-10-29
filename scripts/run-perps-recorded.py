@@ -90,6 +90,9 @@ def write_replay(output, command, settings):
             return '"${PWD}"' + shlex.quote(value[len(str(ROOT)):])
         return shlex.quote(value)
     exports = "\n".join(f"export {key}={portable_setting(value)}" for key, value in replay_settings.items())
+    artifact_root = Path(os.environ.get("PERPS_REPLAY_ARTIFACT_DIR",
+                                       os.environ.get("PERPS_ARTIFACT_DIR", str(ROOT / "artifacts/perps")))).resolve()
+    artifact_relative = os.path.relpath(artifact_root, output.resolve())
     if not wrapper:
         for key in sorted(AUTO_PERSIST_ENV):
             suffix = "fuzz" if "_FUZZ_" in key else "invariant"
@@ -100,7 +103,7 @@ def write_replay(output, command, settings):
         "# Auto-generated failure_persist_dir paths follow this artifact's corpus/ directory.\n"
         "# Restore explicit external failure_persist_dir/corpus_dir paths from corpus-locations.json if needed.\n"
         'replay_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
-        'export PERPS_ARTIFACT_DIR="$(dirname "${replay_dir}")"\n'
+        'export PERPS_ARTIFACT_DIR="$(cd "${replay_dir}"/' + shlex.quote(artifact_relative) + ' && pwd)"\n'
         + exports + "\n" + replay + "\n")
 
 
@@ -191,15 +194,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allow-empty-partition", action="store_true",
                         help="allow empty discovery only inside an independently checked lane partition")
+    parser.add_argument("--discovery-file", type=Path,
+                        help="filtered executable inventory from an independently checked unfiltered discovery")
+    parser.add_argument("--trace-failures", action="store_true",
+                        help="collect verbose traces in a diagnostic rerun only if tests fail")
     parser.add_argument("lane")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    if args.discovery_file and not args.allow_empty_partition:
+        parser.error("--discovery-file requires an independently checked partition")
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if command[:2] != ["forge", "test"]:
         parser.error("command must start with forge test")
+    if args.trace_failures and any(part.startswith("-v") for part in command):
+        parser.error("--trace-failures requires a non-verbose primary run")
     project = command_root(command)
     output = Path(os.environ.get("PERPS_ARTIFACT_DIR", str(ROOT / "artifacts/perps"))) / args.lane
     output.mkdir(parents=True, exist_ok=True)
+    for artifact in output.glob("failure-traces.*"):
+        artifact.unlink()
     for campaign in ("fuzz", "invariant"):
         key = f"FOUNDRY_{campaign.upper()}_FAILURE_PERSIST_DIR"
         if key not in os.environ:
@@ -232,7 +245,12 @@ def main():
     list_command = [part for part in command if not (part.startswith("-v") or part == "--json")]
     list_command += ["--list", "--json"]
     print(f"[{args.lane}] recording discovered tests", flush=True)
-    list_status = capture(list_command, output / "selected-tests.json")
+    if args.discovery_file:
+        shutil.copyfile(args.discovery_file, output / "selected-tests.json")
+        list_status = 0
+        metadata["discovery_source"] = str(args.discovery_file)
+    else:
+        list_status = capture(list_command, output / "selected-tests.json")
     if list_status:
         metadata.update(status="discovery_failed", exit_code=list_status)
         persist()
@@ -247,6 +265,8 @@ def main():
         persist()
         raise SystemExit("Forge returned invalid discovery inventory") from error
     metadata["selected_count"] = len(selected)
+    print(f"[{args.lane}] discovery complete: {len(selected)} tests; "
+          f"setup/discovery={time.time() - started:.2f}s", flush=True)
     expected_inventory = os.environ.get("PERPS_EXPECTED_ENTRYPOINTS")
     if expected_inventory:
         expected = set(Path(expected_inventory).read_text().splitlines())
@@ -298,7 +318,10 @@ def main():
         run_command.append("--suppress-successful-traces")
     metadata["execution_command"] = run_command
     persist()
+    execution_started = time.monotonic()
     code = capture(run_command, output / "results.json")
+    metadata["execution_capture_seconds"] = round(time.monotonic() - execution_started, 3)
+    print(f"[{args.lane}] execution/result capture={metadata['execution_capture_seconds']:.2f}s", flush=True)
     suites = {}
     try:
         suites = json.loads((output / "results.json").read_text())
@@ -342,6 +365,20 @@ def main():
     metadata.update(status="passed" if code == 0 else "failed", exit_code=code,
                     duration_seconds=round(time.time() - started, 3), counts=counts)
     persist()
+    if args.trace_failures and counts["failed"]:
+        # The original complete run remains authoritative, even if a diagnostic
+        # rerun passes. Retain its counters, counterexamples and failure corpus.
+        # Reuse the exact batch, filters, seed and profile; only verbosity changes.
+        trace_command = [*run_command, "-vvv"]
+        metadata["failure_trace_command"] = trace_command
+        persist()
+        print(f"[{args.lane}] collecting failure traces in a diagnostic rerun", flush=True)
+        trace_started = time.monotonic()
+        metadata["failure_trace_exit_code"] = capture(trace_command, output / "failure-traces.json")
+        metadata["failure_trace_seconds"] = round(time.monotonic() - trace_started, 3)
+        metadata["duration_seconds"] = round(time.time() - started, 3)
+        preserve_corpus(output)
+        persist()
     print(f"[{args.lane}] {counts}; exit={code}; artifacts={output}", flush=True)
     if code:
         sys.stderr.write((output / "results.json.stderr").read_text())

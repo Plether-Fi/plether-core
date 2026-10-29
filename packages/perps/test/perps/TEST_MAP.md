@@ -476,10 +476,28 @@ PERPS_SHARD_MODE=pr FOUNDRY_PROFILE=ci FOUNDRY_FUZZ_SEED=0xdeadbeef \
 | `ci` | 2,000 | 32 | 256 | PR and post-merge |
 | `audit` | 20,000 | 256 | 1,000 | Nightly and pre-audit |
 
-The quick/CI runners partition non-fork discovery into production via-IR gates and non-via-IR correctness tests.
-PR CI applies that partition to four physical shards with one Forge thread per run. The selection checker rejects
-missing or duplicate tests. An empty filtered partition is recorded explicitly; the unfiltered shard must be nonempty.
-Post-merge/deep shards use production via-IR throughout. The audit target and manually dispatched deep workflow
+The quick/CI runners batch non-fork entrypoints before any executable discovery. Each serial batch contains at
+most four files and uses one Forge thread. Discovery compiles that batch once without via-IR, then partitions the
+executable inventory into production via-IR gates and non-via-IR correctness tests. Empty partitions are recorded
+without compilation or execution. The selection checker rejects missing, duplicate, or unexpected tests and source
+entrypoints; a successful aggregate requires every assigned file and every batch to complete. PR CI applies the
+same batching inside its four physical shards. Local `make test-perps` and `make test-perps-ci` use it for the full
+non-fork inventory. Profile budgets and seeds are unchanged.
+Fast batches collect ordinary result JSON on the primary run. If any test fails, the same batch is rerun with
+verbose tracing into `failure-traces.json`; this diagnostic rerun cannot replace the original failing result.
+Successful trace values are discarded in bounded chunks, avoiding repeated parsing of large deployment bytecode
+while retaining failure traces, counterexamples, invariant counters and all other result fields. Each batch prints
+discovery, execution/capture and total durations. Shard weights come from all 2,562 passing results in
+[CI run 40739099497](https://github.com/Plether-Fi/plether-core/actions/runs/40739099497), replacing older timings
+that assigned 79/79/4/78 files; the refreshed assignment is 60/59/61/60 files with stateful pins unchanged.
+Post-merge/deep shards use production via-IR throughout, compiling and running at most four test entrypoints per
+serial batch with one Forge thread. Shared fixtures stay at stable paths; each batch records its exact executable
+selection and results. The shard fails unless every assigned entrypoint completes successfully. Set
+`PERPS_COMPILE_BATCH_SIZE` to a positive integer to change this memory bound; replay records that setting.
+`EngineCollateralReservations.t.sol` keeps withdrawal/accounting and close-bounty cases in separate concrete
+test contracts. The combined harness triggers solc 0.8.35's `Tag too large for reserved space` assembler error
+even when compiled alone. Both harnesses retain the same fixtures, test bodies and production compiler settings.
+The audit target and manually dispatched deep workflow
 run seeds `0xdeadbeef`, `0x1` and `0x2`; nightly seeds derive from the workflow run ID. Environment overrides are
 captured in the effective configuration.
 

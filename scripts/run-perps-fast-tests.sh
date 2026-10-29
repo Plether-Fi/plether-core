@@ -6,54 +6,44 @@ package_root="${repo_root}/packages/perps"
 export FOUNDRY_PROFILE="${FOUNDRY_PROFILE:-quick}"
 export PERPS_ARTIFACT_DIR="${PERPS_ARTIFACT_DIR:-${repo_root}/artifacts/perps}"
 export PERPS_REPLAY_COMMAND="${PERPS_REPLAY_COMMAND:-bash scripts/run-perps-fast-tests.sh}"
-# Code generation differs between lanes; profile fuzz/invariant budgets do not.
-production_regex="$(python3 "${repo_root}/scripts/perps-test-inventory.py" --production-test-regex)"
-fork_path='**/fork/**'
+batch_size="${PERPS_COMPILE_BATCH_SIZE:-4}"
+if ! [[ "${batch_size}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "PERPS_COMPILE_BATCH_SIZE must be a positive integer" >&2
+    exit 2
+fi
+export PERPS_REPLAY_COMMAND="PERPS_COMPILE_BATCH_SIZE=${batch_size} ${PERPS_REPLAY_COMMAND}"
 mkdir -p "${PERPS_ARTIFACT_DIR}"
-python3 "${repo_root}/scripts/perps-test-inventory.py" > "${PERPS_ARTIFACT_DIR}/inventory.json"
 
-# Capture the unfiltered discovery universe before partitioning by codegen.
-# Shard callers supply expected source entrypoints; validate them across both lanes.
-expected_entrypoints="${PERPS_EXPECTED_ENTRYPOINTS:-}"
-unset PERPS_EXPECTED_ENTRYPOINTS
-FOUNDRY_VIA_IR=false FOUNDRY_OUT=out-ci-fast FOUNDRY_CACHE_PATH=cache-ci-fast \
-    forge test --offline --threads 1 --root "${package_root}" \
-    --no-match-path "${fork_path}" --list --json > "${PERPS_ARTIFACT_DIR}/all-tests.json"
-
-# Function filters do not bound compiler memory. Exclude entrypoints without
-# production tests from via-IR compilation, using actual discovery (including
-# inherited tests), not source-text guesses. Shared .sol helpers remain available.
-python3 - "${PERPS_ARTIFACT_DIR}/all-tests.json" "${production_regex}" \
-    "${package_root}" "${FOUNDRY_TEST:-test}" > "${PERPS_ARTIFACT_DIR}/production-skip-files.txt" <<'PY'
-import json, re, sys
-from pathlib import Path
-discovered = json.loads(Path(sys.argv[1]).read_text())
-pattern = re.compile(sys.argv[2])
-required_names = {Path(source).name for source, contracts in discovered.items()
-                  if any(pattern.search(name) for names in contracts.values() for name in names)}
-test_root = Path(sys.argv[4])
-if not test_root.is_absolute():
-    test_root = Path(sys.argv[3]) / test_root
-# Forge's --skip matches filename substrings. Retain collisions so ambiguous
-# names can only cause extra compilation, never omission.
-for name in sorted({p.name for p in test_root.rglob('*.t.sol')}):
-    if not any(name in required for required in required_names):
-        print(name)
+# PR callers already own a physical shard. Local make targets need the same
+# bounded path, rather than an initial compile of the entire package for discovery.
+if [ -z "${PERPS_EXPECTED_ENTRYPOINTS:-}" ]; then
+    if [ -n "${FOUNDRY_TEST:-}" ] && [ "${FOUNDRY_TEST}" != test ]; then
+        echo "Custom FOUNDRY_TEST requires PERPS_EXPECTED_ENTRYPOINTS" >&2
+        exit 2
+    fi
+    scratch_id="$(python3 - "${FOUNDRY_PROFILE}" "${FOUNDRY_FUZZ_SEED:-0xdeadbeef}" "${batch_size}" <<'PY'
+import hashlib, json, sys
+print(hashlib.sha256(json.dumps(['fast-local', *sys.argv[1:]]).encode()).hexdigest()[:20])
 PY
-production_skip=(--skip script)
-while IFS= read -r source; do
-    production_skip+=(--skip "${source}")
-done < "${PERPS_ARTIFACT_DIR}/production-skip-files.txt"
-
-FOUNDRY_VIA_IR=true \
-    python3 "${repo_root}/scripts/run-perps-recorded.py" --allow-empty-partition production-gates -- \
-    forge test --offline --threads 1 -vvv --root "${package_root}" --no-match-path "${fork_path}" \
-    --match-test "${production_regex}" "${production_skip[@]}"
-
-FOUNDRY_VIA_IR=false FOUNDRY_OUT=out-ci-fast FOUNDRY_CACHE_PATH=cache-ci-fast \
-    python3 "${repo_root}/scripts/run-perps-recorded.py" --allow-empty-partition correctness -- \
-    forge test --offline --threads 1 -vvv --root "${package_root}" --no-match-path "${fork_path}" \
-    --no-match-test "${production_regex}"
-
-python3 "${repo_root}/scripts/check-perps-pr-selection.py" \
-    "${PERPS_ARTIFACT_DIR}" "${package_root}" "${expected_entrypoints}"
+)"
+    scratch="${package_root}/.package-test-shard.${scratch_id}"
+    if ! mkdir "${scratch}"; then
+        echo "Fast test scratch already exists (concurrent run or interrupted cleanup): ${scratch}" >&2
+        exit 2
+    fi
+    cleanup() { rm -rf -- "${scratch}"; }
+    trap cleanup EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    cp -R "${package_root}/test" "${scratch}/test"
+    export PERPS_EXPECTED_ENTRYPOINTS="${PERPS_ARTIFACT_DIR}/fast-entrypoints.txt"
+    python3 "${repo_root}/scripts/perps-test-inventory.py" --lane correctness --format paths \
+        > "${PERPS_EXPECTED_ENTRYPOINTS}"
+    # Shared .sol fixtures retain their relative paths; only non-fork entrypoints remain.
+    find "${scratch}/test" -type f -name '*.t.sol' -delete
+    while IFS= read -r source; do
+        cp "${package_root}/test/${source}" "${scratch}/test/${source}"
+    done < "${PERPS_EXPECTED_ENTRYPOINTS}"
+    export FOUNDRY_TEST="${scratch#"${package_root}/"}/test"
+fi
+python3 "${repo_root}/scripts/run-perps-batched.py" fast "${batch_size}" --fast
