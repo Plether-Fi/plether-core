@@ -38,7 +38,8 @@ class PerpsShardRunnerTest(unittest.TestCase):
         shutil.copyfile(REPO / 'Makefile', self.root / 'Makefile')
         for name in ("run-perps-package-tests.sh", "perps-test-inventory.py", "perps-shard-weights.json",
                      "run-perps-recorded.py", "perps_forge_json.py", "run-perps-fast-tests.sh",
-                     "check-perps-pr-selection.py", "run-perps-batched.py", "run-perps-fast-batch.sh"):
+                     "check-perps-pr-selection.py", "run-perps-batched.py", "run-perps-fast-batch.sh",
+                     "run-perps-fast-batch.py"):
             shutil.copyfile(SCRIPTS / name, self.runner.parent / name)
         # Exercise the real filename inventory, including newly added entrypoints.
         self.entrypoints = {
@@ -54,7 +55,7 @@ class PerpsShardRunnerTest(unittest.TestCase):
         fake_bin.mkdir()
         fake_forge = fake_bin / "forge"
         fake_forge.write_text('''#!/usr/bin/env python3
-import json, os, pathlib, re, sys, time
+import json, os, pathlib, re, signal, sys, time
 args = sys.argv[1:]
 if args == ['--version']:
     print('forge mocked shard fixture')
@@ -79,6 +80,18 @@ if os.environ.get('SHARD_TEST_EXTRA_SOURCE') == '1':
     paths.append(str((test / 'UnexpectedCached.t.sol').relative_to(package)))
 skips = [args[i + 1] for i, arg in enumerate(args[:-1]) if arg == '--skip']
 paths = [p for p in paths if not any(skip in pathlib.Path(p).name for skip in skips)]
+if os.environ.get('SHARD_TEST_SIMULATE_CACHE') == '1':
+    cache = pathlib.Path(os.environ['FOUNDRY_CACHE_PATH'])
+    cache.mkdir(parents=True, exist_ok=True)
+    marker = cache / 'mock-compiler-input.json'
+    inputs = {p: (test / p).read_text() for p in files}
+    if not marker.exists() or json.loads(marker.read_text()) != inputs:
+        with open(os.environ['SHARD_TEST_LOG'] + '.compiles', 'a') as out:
+            out.write(json.dumps({'cache': str(cache), 'test': str(test)}) + '\\n')
+        marker.write_text(json.dumps(inputs))
+        output = pathlib.Path(os.environ['FOUNDRY_OUT'])
+        output.mkdir(parents=True, exist_ok=True)
+        (output / 'mock-bytecode').write_text('compiled')
 names = ['test_behavior']
 if os.environ.get('SHARD_TEST_PR') == '1':
     names += ['test_gas_budget']
@@ -100,12 +113,28 @@ if '--list' in args:
 if not names:
     print('No tests found in project!')
     sys.exit(0)
+event = {'pid': os.getpid(), 'test': str(test), 'via_ir': os.environ.get('FOUNDRY_VIA_IR'),
+         'cache': os.environ.get('FOUNDRY_CACHE_PATH'), 'time': time.monotonic()}
+def log_event(phase):
+    with open(os.environ['SHARD_TEST_LOG'] + '.events', 'a') as out:
+        out.write(json.dumps(dict(event, phase=phase, time=time.monotonic())) + '\\n')
+def interrupted(signum, frame):
+    log_event('interrupted')
+    sys.exit(128 + signum)
+signal.signal(signal.SIGTERM, interrupted)
+signal.signal(signal.SIGINT, interrupted)
+log_event('start')
 if os.environ.get('SHARD_TEST_SLEEP') == '1':
     time.sleep(60)
+time.sleep(float(os.environ.get('SHARD_TEST_EXECUTION_DELAY', '0')))
+failure_source = os.environ.get('SHARD_TEST_FAIL_SOURCE')
+failed = bool(failure_source and any(p.endswith(failure_source) for p in paths))
 print(json.dumps({p + ':Example': {'test_results': {
-    name + '()': {'status': 'Success', 'duration': {'secs': 0, 'nanos': 1}} for name in tests_by_path[p]
+    name + '()': {'status': 'Failure' if failed and p.endswith(failure_source) else 'Success',
+                 'duration': {'secs': 0, 'nanos': 1}} for name in tests_by_path[p]
 }} for p in paths}))
-sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
+log_event('end')
+sys.exit(17 if failed else int(os.environ.get('SHARD_TEST_EXIT', '0')))
 ''')
         fake_forge.chmod(0o755)
         self.env = {key: value for key, value in os.environ.items()
@@ -130,6 +159,24 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
 
     def executions(self):
         return [call for call in self.invocations() if call["args"][0] == "test" and "--list" not in call["args"]]
+
+    def execution_events(self):
+        path = Path(str(self.log) + '.events')
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def limit_entrypoints(self, count):
+        """Keep required stateful pins while making scheduler regressions inexpensive."""
+        keep = set(PINNED)
+        self.assertGreaterEqual(count, len(keep))
+        keep.update(sorted(self.entrypoints - self.forks - keep)[:count - len(keep)])
+        for relative in self.entrypoints - keep:
+            (self.tests / relative).unlink()
+        self.entrypoints = keep
+        self.forks = set()
+
+    def run_local(self, **environment):
+        return subprocess.run(['make', 'test-perps'], cwd=self.root,
+                              env=dict(self.env, **environment), text=True, capture_output=True)
 
     def assert_cleaned(self):
         self.assertEqual(list(self.package.glob(".package-test-shard.*")), [])
@@ -229,6 +276,9 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
                 self.assertEqual(partition[field], [])
             # Inspect only the current manifest: prior invocations may leave historical batch artifacts.
             manifest = json.loads((self.root / "artifacts/perps/fast/run.json").read_text())
+            self.assertEqual(manifest['batch_size'], 4)
+            self.assertEqual(manifest['production_batch_size'], 4)
+            self.assertEqual(manifest['workers'], 1)
             for batch in manifest['batches']:
                 directory = self.root / 'artifacts/perps/fast' / batch['lane']
                 for lane in ("production-gates", "correctness"):
@@ -257,7 +307,7 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         seen = set()
         for call in discovered:
             files = {p for p in call['files'] if p.endswith('.t.sol')}
-            self.assertLessEqual(len(files), 4)
+            self.assertLessEqual(len(files), 16)
             self.assertFalse(seen & files)
             seen.update(files)
             self.assertEqual(call['settings']['FOUNDRY_VIA_IR'], 'false')
@@ -270,6 +320,9 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         self.assertEqual(report['completed_entrypoints'], len(seen))
         self.assertEqual(report['discovered'], len(seen) + 1)
         manifest = json.loads((self.root / 'artifacts/perps/fast/run.json').read_text())
+        self.assertEqual(manifest['batch_size'], 16)
+        self.assertEqual(manifest['production_batch_size'], 4)
+        self.assertEqual(manifest['workers'], 2)
         self.assertEqual(manifest['budgets'], {'fuzz': {'runs': 256}, 'invariant': {'runs': 16, 'depth': 128}})
         replay = self.root / 'artifacts/perps/fast/batch-000/correctness/replay.sh'
         command = next(line for line in replay.read_text().splitlines() if line.startswith('export PERPS_ARTIFACT_DIR='))
@@ -278,15 +331,193 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         self.assertEqual(Path(destination).resolve(), (self.root / 'artifacts/perps').resolve())
         self.assert_cleaned()
 
+    def test_local_batches_keep_separate_stable_caches_across_replays_and_worker_counts(self):
+        self.limit_entrypoints(33)
+
+        def identities(calls):
+            return {(call['test'], call['settings']['FOUNDRY_VIA_IR'],
+                     call['settings']['FOUNDRY_CACHE_PATH'], call['settings']['FOUNDRY_OUT'])
+                    for call in calls if '-vvv' not in call['args']}
+
+        previous = None
+        for workers in ('2', '2', '1'):
+            before = len(self.executions())
+            result = self.run_local(SHARD_TEST_PR='1', PERPS_FAST_WORKERS=workers,
+                                    SHARD_TEST_SIMULATE_CACHE='1')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = self.executions()[before:]
+            current = identities(calls)
+            if previous is not None:
+                self.assertEqual(current, previous)
+            previous = current
+            ordinary = [call for call in calls if call['settings']['FOUNDRY_VIA_IR'] == 'false']
+            self.assertEqual(sorted(sum(p.endswith('.t.sol') for p in c['files']) for c in ordinary),
+                             [1, 16, 16])
+            self.assertEqual(len({c['test'] for c in ordinary}), 3)
+            caches = {c['settings']['FOUNDRY_CACHE_PATH'] for c in calls}
+            outputs = {c['settings']['FOUNDRY_OUT'] for c in calls}
+            self.assertEqual(len(caches), len(calls))
+            self.assertEqual(len(outputs), len(calls))
+            for cache in caches:
+                self.assertIn('.perps-test-build', Path(cache).parts)
+                self.assertTrue((Path(cache) / 'mock-compiler-input.json').is_file())
+            for output in outputs:
+                self.assertTrue((Path(output) / 'mock-bytecode').is_file())
+            # Discovery/execution share one ordinary cache; finished batches must
+            # retain their cache instead of recompiling on the next unchanged run.
+            compiles = Path(str(self.log) + '.compiles').read_text().splitlines()
+            self.assertEqual(len(compiles), len(caches))
+            ordinary_caches = {c['settings']['FOUNDRY_CACHE_PATH'] for c in ordinary}
+            production_caches = {c['settings']['FOUNDRY_CACHE_PATH'] for c in calls
+                                 if c['settings']['FOUNDRY_VIA_IR'] == 'true'}
+            self.assertFalse(ordinary_caches & production_caches)
+            self.assert_cleaned()
+
+    def test_large_ordinary_batches_keep_production_compilation_bounded_and_aggregate_evidence(self):
+        self.limit_entrypoints(16)
+        result = self.run_local(SHARD_TEST_PR='1', PERPS_PRODUCTION_BATCH_SIZE='3')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.executions()
+        ordinary = [c for c in calls if c['settings']['FOUNDRY_VIA_IR'] == 'false']
+        production = [c for c in calls if c['settings']['FOUNDRY_VIA_IR'] == 'true']
+        self.assertEqual(len(ordinary), 1)
+        self.assertEqual(sum(p.endswith('.t.sol') for p in ordinary[0]['files']), 16)
+        self.assertEqual(len(production), 6)
+        seen = set()
+        for call in production:
+            selected = {p for p in call['files'] if p.endswith('.t.sol')}
+            self.assertGreater(len(selected), 0)
+            self.assertLessEqual(len(selected), 3)
+            self.assertFalse(seen & selected)
+            seen.update(selected)
+            self.assertEqual(call['test'], ordinary[0]['test'])
+            self.assertIn('support/Shared.sol', call['files'])
+        self.assertEqual(seen, self.entrypoints)
+        evidence = self.root / 'artifacts/perps/fast/batch-000'
+        production_root = evidence / 'production-gates'
+        self.assertEqual(len(list(production_root.glob('part-*/run.json'))), 6)
+        metadata = json.loads((production_root / 'run.json').read_text())
+        self.assertEqual(metadata['status'], 'passed')
+        self.assertEqual(metadata['counts'], {'passed': 16, 'failed': 0, 'skipped': 0})
+        selected = json.loads((production_root / 'selected-tests.json').read_text())
+        results = json.loads((production_root / 'results.json').read_text())
+        self.assertEqual(len(selected), 16)
+        self.assertEqual(sum(len(suite['test_results']) for suite in results.values()), 16)
+        coverage = json.loads((production_root / 'execution-coverage.json').read_text())
+        self.assertEqual(coverage, {'selected': 16, 'executed': 16, 'not_run': [],
+                                    'unexpected_results': []})
+        replay = (production_root / 'replay.sh').read_text()
+        artifact_export = next(line for line in replay.splitlines()
+                               if line.startswith('export PERPS_ARTIFACT_DIR='))
+        destination = subprocess.check_output(['bash', '-c', artifact_export + '\nprintf "%s" "$PERPS_ARTIFACT_DIR"'],
+                                              env=dict(os.environ, replay_dir=str(production_root)), text=True)
+        self.assertEqual(Path(destination).resolve(), (self.root / 'artifacts/perps').resolve())
+        partition = json.loads((evidence / 'pr-selection.json').read_text())
+        self.assertEqual(partition['discovered'], 32)
+        self.assertEqual(partition['production'], 16)
+        self.assertEqual(partition['correctness'], 16)
+        for field in ('missing', 'unexpected', 'overlap', 'missing_entrypoints', 'unexpected_entrypoints'):
+            self.assertEqual(partition[field], [])
+        manifest = json.loads((self.root / 'artifacts/perps/fast/run.json').read_text())
+        self.assertEqual(manifest['counts'], {'passed': 32, 'failed': 0, 'skipped': 0})
+        self.assertEqual(manifest['budgets'], {'fuzz': {'runs': 256}, 'invariant': {'runs': 16, 'depth': 128}})
+        self.assert_cleaned()
+
+    def test_local_workers_overlap_without_exceeding_limit_or_duplicating_tests(self):
+        self.limit_entrypoints(33)
+        result = self.run_local(SHARD_TEST_EXECUTION_DELAY='0.4')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        active, maximum = set(), 0
+        for event in sorted(self.execution_events(), key=lambda e: e['time']):
+            if event['phase'] == 'start':
+                active.add(event['pid'])
+                maximum = max(maximum, len(active))
+            else:
+                active.remove(event['pid'])
+        self.assertEqual(maximum, 2)
+        self.assertEqual(active, set())
+        calls = self.executions()
+        seen = [p for call in calls for p in call['files'] if p.endswith('.t.sol')]
+        self.assertEqual(len(seen), len(set(seen)))
+        self.assertEqual(set(seen), self.entrypoints)
+        manifest = json.loads((self.root / 'artifacts/perps/fast/run.json').read_text())
+        self.assertEqual(manifest['status'], 'passed')
+        self.assertEqual(manifest['counts'], {'passed': 33, 'failed': 0, 'skipped': 0})
+        self.assertEqual(set(manifest['completed_entrypoints']), self.entrypoints)
+        self.assert_cleaned()
+
+    def test_parallel_failure_cannot_turn_aggregate_green_or_complete_failed_batch(self):
+        self.limit_entrypoints(33)
+        failed = min(self.entrypoints)
+        result = self.run_local(SHARD_TEST_FAIL_SOURCE=failed)
+        self.assertNotEqual(result.returncode, 0)
+        manifest = json.loads((self.root / 'artifacts/perps/fast/run.json').read_text())
+        self.assertEqual(manifest['status'], 'failed')
+        self.assertEqual(manifest['counts'], {'passed': 32, 'failed': 1, 'skipped': 0})
+        self.assertNotIn(failed, manifest['completed_entrypoints'])
+        self.assertTrue(manifest['selection']['failed_batches'])
+        primary = [call for call in self.executions() if '-vvv' not in call['args']]
+        seen = [p for call in primary for p in call['files'] if p.endswith('.t.sol')]
+        self.assertEqual(set(seen), self.entrypoints)
+        self.assertEqual(len(seen), len(self.entrypoints))
+        self.assert_cleaned()
+
+    def test_production_subbatch_failure_remains_failed_in_parent_evidence(self):
+        self.limit_entrypoints(16)
+        failed = min(self.entrypoints)
+        result = self.run_local(SHARD_TEST_PR='1', SHARD_TEST_ONLY_TEST='test_gas_budget',
+                                SHARD_TEST_FAIL_SOURCE=failed)
+        self.assertNotEqual(result.returncode, 0)
+        directory = self.root / 'artifacts/perps/fast/batch-000/production-gates'
+        metadata = json.loads((directory / 'run.json').read_text())
+        self.assertEqual(metadata['status'], 'failed')
+        self.assertGreater(metadata['counts']['failed'], 0)
+        self.assertTrue(any(json.loads(path.read_text())['status'] == 'failed'
+                            for path in directory.glob('part-*/run.json')))
+        manifest = json.loads((self.root / 'artifacts/perps/fast/run.json').read_text())
+        self.assertEqual(manifest['status'], 'failed')
+        self.assertEqual(manifest['completed_entrypoints'], [])
+        self.assert_cleaned()
+
+    def test_fast_controls_validate_positive_integers_and_replay_effective_values(self):
+        self.limit_entrypoints(17)
+        for name in ('PERPS_FAST_WORKERS', 'PERPS_PRODUCTION_BATCH_SIZE'):
+            for value in ('0', '-1', 'invalid'):
+                with self.subTest(name=name, value=value):
+                    result = self.run_local(**{name: value})
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertEqual(self.invocations(), [])
+                    self.assert_cleaned()
+        result = self.run_local(SHARD_TEST_PR='1', PERPS_COMPILE_BATCH_SIZE='7',
+                                PERPS_PRODUCTION_BATCH_SIZE='2', PERPS_FAST_WORKERS='3')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.root / 'artifacts/perps/fast/run.json').read_text())
+        self.assertEqual(manifest['batch_size'], 7)
+        ordinary = [c for c in self.executions() if c['settings']['FOUNDRY_VIA_IR'] == 'false']
+        self.assertEqual(sorted(sum(p.endswith('.t.sol') for p in c['files']) for c in ordinary), [3, 7, 7])
+        for replay in (self.root / 'artifacts/perps/fast').rglob('replay.sh'):
+            text = replay.read_text()
+            for setting in ('PERPS_COMPILE_BATCH_SIZE=7', 'PERPS_PRODUCTION_BATCH_SIZE=2', 'PERPS_FAST_WORKERS=3'):
+                self.assertIn(setting, text)
+        self.assert_cleaned()
+
     def cancel_fast(self, command, environment):
         process = subprocess.Popen(command, cwd=self.root,
                                    env=dict(self.env, SHARD_TEST_SLEEP='1', **environment),
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        def stop_if_running():
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate(timeout=5)
+        self.addCleanup(stop_if_running)
         active = self.root / 'artifacts/perps/fast/batch-000/correctness/run.json'
+        expected_workers = int(environment.get('PERPS_FAST_WORKERS', '2' if command[0] == 'make' else '1'))
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline and process.poll() is None:
             try:
-                if active.exists() and json.loads(active.read_text())['status'] == 'running':
+                started = [event for event in self.execution_events() if event['phase'] == 'start']
+                if (active.exists() and json.loads(active.read_text())['status'] == 'running'
+                        and len(started) >= expected_workers):
                     break
             except json.JSONDecodeError:
                 pass
@@ -301,6 +532,18 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         report = json.loads((self.root / 'artifacts/perps/pr-selection.json').read_text())
         self.assertEqual(report['status'], 'interrupted')
         self.assertEqual(report['completed_entrypoints'], 0)
+        started_pids = {event['pid'] for event in self.execution_events() if event['phase'] == 'start'}
+        self.assertGreaterEqual(len(started_pids), expected_workers)
+        deadline = time.monotonic() + 5
+        while started_pids and time.monotonic() < deadline:
+            for pid in list(started_pids):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    started_pids.remove(pid)
+            if started_pids:
+                time.sleep(0.05)
+        self.assertEqual(started_pids, set(), 'cancellation left Forge child processes running')
         self.assert_cleaned()
 
     def test_fast_cancellation_records_interruption_and_cleans_scratch(self):
@@ -375,7 +618,7 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
     def test_pr_partition_rejects_tests_dropped_from_both_filtered_lanes(self):
         result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1", SHARD_TEST_DROP_CORRECTNESS="1")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Discovery/result mismatch", result.stderr)
+        self.assertIn("Discovery/result mismatch", result.stdout + result.stderr)
         manifest = json.loads((self.root / "artifacts/perps/fast/run.json").read_text())
         self.assertEqual(manifest["status"], "failed")
         self.assertTrue(manifest['selection']['failed_batches'])

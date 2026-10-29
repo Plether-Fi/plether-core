@@ -6,12 +6,24 @@ package_root="${repo_root}/packages/perps"
 export FOUNDRY_PROFILE="${FOUNDRY_PROFILE:-quick}"
 export PERPS_ARTIFACT_DIR="${PERPS_ARTIFACT_DIR:-${repo_root}/artifacts/perps}"
 export PERPS_REPLAY_COMMAND="${PERPS_REPLAY_COMMAND:-bash scripts/run-perps-fast-tests.sh}"
-batch_size="${PERPS_COMPILE_BATCH_SIZE:-4}"
-if ! [[ "${batch_size}" =~ ^[1-9][0-9]*$ ]]; then
-    echo "PERPS_COMPILE_BATCH_SIZE must be a positive integer" >&2
-    exit 2
+# CI already selects a physical shard and keeps its conservative memory bounds.
+default_batch_size=4
+default_workers=1
+if [ -z "${PERPS_EXPECTED_ENTRYPOINTS:-}" ] && [ "${CI:-false}" != true ]; then
+    default_batch_size=16
+    default_workers=2
 fi
-export PERPS_REPLAY_COMMAND="PERPS_COMPILE_BATCH_SIZE=${batch_size} ${PERPS_REPLAY_COMMAND}"
+batch_size="${PERPS_COMPILE_BATCH_SIZE:-${default_batch_size}}"
+export PERPS_FAST_WORKERS="${PERPS_FAST_WORKERS:-${default_workers}}"
+export PERPS_PRODUCTION_BATCH_SIZE="${PERPS_PRODUCTION_BATCH_SIZE:-4}"
+for setting in PERPS_COMPILE_BATCH_SIZE PERPS_FAST_WORKERS PERPS_PRODUCTION_BATCH_SIZE; do
+    value="${!setting:-${batch_size}}"
+    if ! [[ "${value}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "${setting} must be a positive integer" >&2
+        exit 2
+    fi
+done
+export PERPS_REPLAY_COMMAND="PERPS_FAST_WORKERS=${PERPS_FAST_WORKERS} PERPS_PRODUCTION_BATCH_SIZE=${PERPS_PRODUCTION_BATCH_SIZE} PERPS_COMPILE_BATCH_SIZE=${batch_size} ${PERPS_REPLAY_COMMAND}"
 mkdir -p "${PERPS_ARTIFACT_DIR}"
 
 # PR callers already own a physical shard. Local make targets need the same
