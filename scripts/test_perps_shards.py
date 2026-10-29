@@ -139,6 +139,9 @@ sys.exit(17 if failed else int(os.environ.get('SHARD_TEST_EXIT', '0')))
         fake_forge.chmod(0o755)
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith(("FOUNDRY_", "FORGE_", "PERPS_"))}
+        # Simulated local runs must also exercise local defaults on a CI host.
+        # Tests for CI behavior opt into CI=true explicitly.
+        self.env.pop("CI", None)
         self.env.update(SETTINGS)
         self.env.update(PATH=str(fake_bin) + os.pathsep + os.environ["PATH"], SHARD_TEST_LOG=str(self.log),
                         PYTHONDONTWRITEBYTECODE="1")
@@ -444,6 +447,17 @@ sys.exit(17 if failed else int(os.environ.get('SHARD_TEST_EXIT', '0')))
         self.assertEqual(manifest['status'], 'passed')
         self.assertEqual(manifest['counts'], {'passed': 33, 'failed': 0, 'skipped': 0})
         self.assertEqual(set(manifest['completed_entrypoints']), self.entrypoints)
+        self.assert_cleaned()
+
+    def test_ci_environment_uses_serial_memory_bounded_defaults(self):
+        self.limit_entrypoints(16)
+        result = self.run_local(CI='true')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.root / 'artifacts/perps/fast/run.json').read_text())
+        self.assertEqual(manifest['batch_size'], 4)
+        self.assertEqual(manifest['production_batch_size'], 4)
+        self.assertEqual(manifest['workers'], 1)
+        self.assertEqual(manifest['counts'], {'passed': 16, 'failed': 0, 'skipped': 0})
         self.assert_cleaned()
 
     def test_parallel_failure_cannot_turn_aggregate_green_or_complete_failed_batch(self):
