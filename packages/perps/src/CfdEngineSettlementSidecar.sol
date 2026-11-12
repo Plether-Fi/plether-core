@@ -2,8 +2,10 @@
 pragma solidity 0.8.35;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdEnginePlanningReader} from "@plether/perps/CfdEnginePlanningReader.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "@plether/perps/interfaces/CfdEngineSettlementTypes.sol";
+import {ICfdEngineAccountActionView} from "@plether/perps/interfaces/ICfdEngineAccountActionView.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineSettlementHost} from "@plether/perps/interfaces/ICfdEngineSettlementHost.sol";
@@ -13,112 +15,8 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
-import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderSettlementFloorLib} from "@plether/perps/libraries/OrderSettlementFloorLib.sol";
-import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
-
-/// @dev Engine read surface used by account-action methods externalized from the bytecode-constrained host.
-interface ICfdEngineAccountActionView {
-
-    function planningReader() external view returns (address);
-
-    function positions(
-        address account
-    )
-        external
-        view
-        returns (
-            uint256 size,
-            uint256 margin,
-            uint256 entryPrice,
-            uint256 maxProfitAssets,
-            CfdTypes.Side side,
-            uint64 lastUpdateTime,
-            int256 vpiAccrued
-        );
-
-    function positionEntryCostAssetAtoms(
-        address account
-    ) external view returns (uint256);
-
-    function positionCarryState(
-        address account
-    ) external view returns (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
-
-    function sides(
-        uint256 index
-    ) external view returns (uint256 maxProfitAssets, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
-
-    function sideBorrowBaseAssets(
-        uint256 index
-    ) external view returns (uint256);
-
-    function sideCarryIndex(
-        uint256 index
-    ) external view returns (uint256);
-
-    function sideCarryTimestamp(
-        uint256 index
-    ) external view returns (uint64);
-
-    function planner() external view returns (address);
-
-    function orderRouter() external view returns (address);
-
-    function lastMarkPrice() external view returns (uint256);
-
-    function lastMarkTime() external view returns (uint64);
-
-    function CAP_PRICE() external view returns (uint256);
-
-    function traderClaimBalanceAssets(
-        address account
-    ) external view returns (uint256);
-
-    function unsettledCarryAssets(
-        address account
-    ) external view returns (uint256);
-
-    function totalTraderClaimBalanceAssets() external view returns (uint256);
-
-    function totalPositiveVpiAccruedAssets() external view returns (uint256);
-
-    function totalNegativeVpiAccruedAssets() external view returns (uint256);
-
-    function degradedMode() external view returns (bool);
-
-    function isFadWindow() external view returns (bool);
-
-    function isOracleFrozen() external view returns (bool);
-
-    function engineMarkStalenessLimit() external view returns (uint256);
-
-    function fadMaxStaleness() external view returns (uint256);
-
-    function executionFeeBps() external view returns (uint256);
-
-    function frozenCloseSpreadBps() external view returns (uint256);
-
-    function settlementBufferBps() external view returns (uint256);
-
-    function riskParams()
-        external
-        view
-        returns (
-            uint256 vpiFactor,
-            uint256 maxSkewRatio,
-            uint256 maintMarginBps,
-            uint256 initMarginBps,
-            uint256 fadMarginBps,
-            uint256 baseCarryBps,
-            uint256 minBountyAssets,
-            uint256 bountyBps,
-            uint256 keeperShareBps,
-            uint256 protocolShareBps
-        );
-
-}
 
 /// @title CfdEngineSettlementSidecar
 /// @notice Externalized settlement executor for `CfdEngine` open, close, and liquidation flows.
@@ -165,96 +63,20 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         return _buildRawSnapshot(account, poolDepthAssets, false);
     }
 
-    /// @dev Commitment needs only its position side and funding/health state. Execution still reads the full snapshot.
+    /// @dev Resolves the constructor-bound reader lazily so sidecar deployment has no host-call dependency.
     function _buildRawSnapshot(
         address account,
         uint256 poolDepthAssets,
         bool closeCommit
-    ) private view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        ICfdEngineSettlementHost host = ICfdEngineSettlementHost(ENGINE);
-        ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
-        (
-            snap.position.size,
-            snap.position.margin,
-            snap.position.entryPrice,
-            snap.position.maxProfitAssets,
-            snap.position.side,
-            snap.position.lastUpdateTime,
-            snap.position.vpiAccrued
-        ) = engine.positions(account);
-        snap.positionEntryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
-        (snap.positionBorrowBaseAssets, snap.positionLastCarryIndex, snap.position.lastCarryTimestamp) =
-            engine.positionCarryState(account);
-        snap.account = account;
-        snap.currentTimestamp = block.timestamp;
-        snap.lastMarkPrice = engine.lastMarkPrice();
-        snap.lastMarkTime = engine.lastMarkTime();
-        snap.riskParams = _loadRiskParams(engine);
-
-        // Historical carry uses live assets net of claims, even for commitment or hypothetical trade depth.
-        IHousePool pool = IHousePool(host.pool());
-        snap.poolCashAssets = pool.totalAssets();
-        snap.poolAdditionalReservedAssets =
-            pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
-        snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
-        snap.totalTraderClaimBalanceAssets = engine.totalTraderClaimBalanceAssets();
-        snap.totalPositiveVpiAccruedAssets = engine.totalPositiveVpiAccruedAssets();
-        snap.totalNegativeVpiAccruedAssets = engine.totalNegativeVpiAccruedAssets();
-        uint256 carryDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
-            snap.poolCashAssets, snap.totalTraderClaimBalanceAssets, snap.totalPositiveVpiAccruedAssets
-        );
-        // Exact enum dispatch selects the exposed side; this is not a target token-balance equality.
-        // slither-disable-next-line incorrect-equality
-        if (!closeCommit || snap.position.side == CfdTypes.Side.LONG) {
-            snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG, carryDepthAssets, snap.riskParams.baseCarryBps);
-        }
-        // The other exact enum value selects the SHORT borrow-base snapshot.
-        // slither-disable-next-line incorrect-equality
-        if (!closeCommit || snap.position.side == CfdTypes.Side.SHORT) {
-            snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT, carryDepthAssets, snap.riskParams.baseCarryBps);
-        }
-        snap.poolAssets = closeCommit ? snap.poolCashAssets : poolDepthAssets;
-
-        IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
-        CfdEngineCollateralSnapshotLib.load(snap, clearinghouse, account, closeCommit);
-
-        snap.unsettledCarryAssets = engine.unsettledCarryAssets(account);
-        snap.traderClaimBalanceForAccount = engine.traderClaimBalanceAssets(account);
-        snap.capPrice = engine.CAP_PRICE();
-        snap.isFadWindow = engine.isFadWindow();
-        if (!closeCommit) {
-            snap.degradedMode = engine.degradedMode();
-            snap.executionFeeBps = engine.executionFeeBps();
-            snap.settlementBufferBps = engine.settlementBufferBps();
-            snap.oracleFrozen = engine.isOracleFrozen();
-            snap.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
-        }
+    ) private view returns (CfdEnginePlanTypes.RawSnapshot memory) {
+        return CfdEnginePlanningReader(ICfdEngineAccountActionView(ENGINE).planningReader())
+            .buildRawSnapshot(account, poolDepthAssets, closeCommit);
     }
 
     function _loadRiskParams(
         ICfdEngineAccountActionView engine
     ) private view returns (CfdTypes.RiskParams memory params) {
         params = ICfdEngineRiskParamsView(address(engine)).riskParams();
-    }
-
-    function _sideSnapshot(
-        ICfdEngineAccountActionView engine,
-        CfdTypes.Side side,
-        uint256 poolDepthAssets,
-        uint256 baseCarryBps
-    ) private view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
-        uint256 index = uint256(side);
-        (snap.maxProfitAssets, snap.openInterest, snap.entryNotional, snap.totalMargin) = engine.sides(index);
-        snap.borrowBaseAssets = engine.sideBorrowBaseAssets(index);
-        snap.carryIndex = ICfdEnginePlanner(engine.planner())
-            .computeCurrentCarryIndex(
-                engine.sideCarryIndex(index),
-                engine.sideCarryTimestamp(index),
-                block.timestamp,
-                snap.borrowBaseAssets,
-                poolDepthAssets,
-                baseCarryBps
-            );
     }
 
     /// @inheritdoc ICfdEngineSettlementSidecar

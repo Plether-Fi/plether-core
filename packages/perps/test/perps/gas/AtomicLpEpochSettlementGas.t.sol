@@ -24,6 +24,11 @@ contract AtomicLpEpochSettlementGasTest is AtomicLpEpochSettlementTestFixture {
         );
         assertLe(
             address(engine.settlementSidecar()).code.length,
+            CFD_ENGINE_SETTLEMENT_SIDECAR_RUNTIME_TARGET,
+            "settlement sidecar must preserve at least 4 KiB of EIP-170 headroom"
+        );
+        assertLe(
+            address(engine.settlementSidecar()).code.length,
             EIP170_RUNTIME_CODE_LIMIT,
             "settlement sidecar must remain EIP-170 deployable"
         );

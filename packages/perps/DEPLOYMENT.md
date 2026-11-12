@@ -75,6 +75,8 @@ The deploy script performs creation and one-time wiring in this order:
 
 1. Deploy MockUSDG, MarginClearinghouse, CfdEngine, and the empty Engine-bound TerminalNavBookV2. Wire the Book before
    any exposure. Deploy and wire the Engine planner, settlement sidecar, and admin.
+   The Engine constructor creates its immutable planning reader, which owns read-only snapshot construction; the
+   settlement sidecar resolves that reader lazily and retains the authorized snapshot facade.
 2. Deploy HousePoolRedemptionMathSidecar, then the release HousePool. The Pool constructor also creates
    CfdEngineProtocolLens. Deploy Senior with a zero maintenance fee and zero recipient, register it, snapshot
    `Engine.protocolTreasury()`, then deploy Junior with a zero fee and that recipient. Register Junior and wire the

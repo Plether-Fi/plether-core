@@ -82,7 +82,7 @@ for request, cancellation, claim and reserve rules.
 | `PletherOracle` | Validates signed basket data and applies live, historical and frozen price rules. |
 | `PositionProtectionBook` | Tracks take-profit and stop-loss protection. |
 | `CfdEngine` | Tracks positions, risk, carry, and settlement accounting. |
-| `CfdEnginePlanningReader` | Builds read-only planner requests for its constructor-bound engine. |
+| `CfdEnginePlanningReader` | Constructs canonical read-only snapshots and planner requests for its constructor-bound engine. |
 | `HousePool` | Holds LP capital and manages the senior/junior waterfall. |
 | `TrancheVault` | Handles LP shares, deposit requests, and redemptions. |
 | `PerpsPublicLens` | Provides product-facing views of accounts, queues, and protocol state. |

@@ -163,9 +163,10 @@ twice. Funded redemption claims remain available independently of later Pool ent
 | Helper | Invocation and responsibility |
 | --- | --- |
 | `CfdEnginePlanner` and accounting libraries | Build deterministic plans from canonical snapshots. |
+| `CfdEnginePlanningReader` | Constructor-bound canonical snapshot construction. Planner requests retain the configured settlement sidecar as their snapshot source; its facade calls back into this read-only builder. |
 | `CfdOrderPolicyEvaluator` | Stateless evaluation of current Engine state against caller-pinned financial bounds. |
 | `CfdClosePreview` | Read-only pre-commit close projection, including commitment carry. It does not commit or execute. |
-| `CfdEngineSettlementSidecar` | Engine-authorized close/liquidation orchestration through Engine host hooks and custody contracts. |
+| `CfdEngineSettlementSidecar` | Engine-authorized open/close/liquidation orchestration through Engine host hooks and custody contracts. Its authorized snapshot facade forwards construction to the immutable planning reader. |
 | `OrderRouterExecutionSidecar` | Fixed delegate implementation for order preparation, isolated execution and receipts. |
 | `OrderRecoverySidecar` | Created by the execution sidecar; handles delegated expiry/invalid-order cleanup through Router host hooks. |
 | `OrderRouterLiquidationBatchSidecar` | Exactly Router-bound delegate implementation for commitments, mark refresh, protection-trigger orchestration, liquidations, atomic LP settlement and oracle configuration forwarding. |
