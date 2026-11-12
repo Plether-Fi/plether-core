@@ -715,6 +715,8 @@ contract CfdOrderPolicyEvaluatorTest is Test {
 
         vm.mockCall(ENGINE, abi.encodeWithSignature("unsettledCarryAssets(address)", ACCOUNT), abi.encode(0));
         vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceAssets()"), abi.encode(0));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("totalPositiveVpiAccruedAssets()"), abi.encode(0));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("totalNegativeVpiAccruedAssets()"), abi.encode(0));
         vm.mockCall(ENGINE, abi.encodeWithSignature("traderClaimBalanceAssets(address)", ACCOUNT), abi.encode(0));
         vm.mockCall(ENGINE, abi.encodeWithSignature("degradedMode()"), abi.encode(false));
         vm.mockCall(ENGINE, abi.encodeWithSignature("CAP_PRICE()"), abi.encode(2e8));

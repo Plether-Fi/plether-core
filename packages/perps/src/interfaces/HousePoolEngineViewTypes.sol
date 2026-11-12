@@ -18,6 +18,9 @@ library HousePoolEngineViewTypes {
     /// @param terminalLpPriceDeltaAssets Signed terminal mark-to-close delta attributable to LPs.
     /// @param terminalNavBookVersion Monotonic terminal-NAV book version captured with the engine snapshot.
     /// @param traderClaimBalanceAssets Aggregate unpaid trader claims senior to fresh discretionary payouts.
+    /// @param totalPositiveVpiAccruedAssets Refundable lifetime VPI held by the pool; excluded from LP NAV and cash.
+    /// @param totalNegativeVpiAccruedAssets Negative lifetime VPI backed by clearinghouse reserves; included in LP NAV
+    ///        as a collectible receivable, but unavailable to fund withdrawals until collected.
     /// @param hasOpenPositions Whether either side has nonzero open interest.
     /// @param markFreshnessRequired Whether any open position requires a fresh mark, including zero-profit endpoints.
     /// @param maxMarkStaleness Maximum permitted mark age for the active calendar regime, in seconds; zero when
@@ -30,6 +33,8 @@ library HousePoolEngineViewTypes {
         int256 terminalLpPriceDeltaAssets;
         uint64 terminalNavBookVersion;
         uint256 traderClaimBalanceAssets;
+        uint256 totalPositiveVpiAccruedAssets;
+        uint256 totalNegativeVpiAccruedAssets;
         bool hasOpenPositions;
         bool markFreshnessRequired;
         uint256 maxMarkStaleness;

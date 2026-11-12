@@ -564,7 +564,9 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 claimed = pool.seniorPrincipal() + pool.juniorPrincipal();
         uint256 terminalAssets = pool.totalAssets();
         ICfdEngineTypes.TerminalNavSnapshot memory terminal = engine.terminalNavSnapshot();
-        uint256 terminalLiabilities = terminal.totalTraderClaimsAssets;
+        (uint256 positiveVpi, uint256 negativeVpi) = _positionVpiTotals();
+        terminalAssets += negativeVpi;
+        uint256 terminalLiabilities = terminal.totalTraderClaimsAssets + positiveVpi;
         if (terminal.terminalLpPriceDeltaAssets >= 0) {
             terminalAssets += uint256(terminal.terminalLpPriceDeltaAssets);
         } else {
@@ -894,18 +896,38 @@ contract PerpInvariantTest is BasePerpTest {
             engine.totalTraderClaimBalanceAssets(),
             "Protocol view trader trader claims must match storage"
         );
+        (uint256 positiveVpi, uint256 negativeVpi) = _positionVpiTotals();
+        assertEq(
+            engine.totalPositiveVpiAccruedAssets(), positiveVpi, "Positive VPI aggregate must match live positions"
+        );
+        assertEq(
+            engine.totalNegativeVpiAccruedAssets(), negativeVpi, "Negative VPI aggregate must match live positions"
+        );
     }
 
     function _assertInvariant_WithdrawalReserveIncludesTraderClaimLiabilities() internal view {
         uint256 maxLiability = _maxLiability();
+        (uint256 refundableVpi,) = _positionVpiTotals();
         uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceAssets()
-            + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiability, engine.settlementBufferBps());
+            + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiability, engine.settlementBufferBps())
+            + refundableVpi;
 
         assertEq(
             _withdrawalReservedAssets(),
             expectedReserved,
-            "Withdrawal reserve must include liabilities, trader claims, and settlement headroom"
+            "Withdrawal reserve must include liabilities, trader claims, settlement headroom, and positive VPI"
         );
+    }
+
+    function _positionVpiTotals() internal view returns (uint256 positiveVpi, uint256 negativeVpi) {
+        for (uint256 i; i < 3; ++i) {
+            (,,,,,, int256 accruedVpi) = engine.positions(handler.traders(i));
+            if (accruedVpi > 0) {
+                positiveVpi += uint256(accruedVpi);
+            } else if (accruedVpi < 0) {
+                negativeVpi += uint256(-(accruedVpi + 1)) + 1;
+            }
+        }
     }
 
     function _assertInvariant_PoolLiquidityViewMatchesProtocolAccounting() internal view {

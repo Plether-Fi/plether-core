@@ -399,7 +399,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             block.timestamp,
             engineContract.sideBorrowBaseAssets(sideIndex),
             PositionRiskAccountingLib.computeNetPoolDepthAssets(
-                engineContract.pool().totalAssets(), engineContract.totalTraderClaimBalanceAssets()
+                engineContract.pool().totalAssets(),
+                engineContract.totalTraderClaimBalanceAssets(),
+                engineContract.totalPositiveVpiAccruedAssets()
             ),
             baseCarryBps
         );

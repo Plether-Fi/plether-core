@@ -20,8 +20,8 @@ The perps system is built around a few core security choices:
 - permanent account-scoped client-id resolution and authenticated terminal receipts in an immutable lifecycle Book,
 - exact-shape failure classification: only known typed policy failures are terminal, while unknown, panic,
   out-of-gas, empty, and malformed failures preserve retryability,
-- exact symmetric LP NAV that counts only account-capped collectible marked losses as receivables and never as
-  withdrawal cash before collection,
+- symmetric LP NAV with exact account-capped marked price PnL and deferred signed VPI; collectible marked losses and
+  reserve-backed negative VPI never become withdrawal cash before collection,
 - liability-scaled settlement headroom for risk-increasing admission and LP redemption funding,
 - fail-soft terminal settlement through trader claim balances,
 - degraded-mode containment if a terminal transition reveals insolvency.
@@ -336,10 +336,10 @@ These are the highest-value properties an auditor should expect to hold.
 
 | Invariant | Description |
 |-----------|-------------|
-| Buffered entry solvency | With `P = pool.totalAssets()`, `C = totalTraderClaimBalance`, `E = max(P-C, 0)`, `L = max(globalLongMaxProfit, globalShortMaxProfit)`, and `B = ceil(L * settlementBufferBps / 10_000)`, every risk-increasing open/increase requires post-op `E >= L + B` |
-| Degraded containment | If a close or liquidation leaves raw post-op `E < L`, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions; `B` is deliberately excluded |
+| Buffered entry solvency | With `P = pool.totalAssets()`, `C = totalTraderClaimBalance`, `E = max(P-C, 0)`, `L = max(globalLongMaxProfit, globalShortMaxProfit)`, `B = ceil(L * settlementBufferBps / 10_000)`, and `Rplus = totalPositiveVpiAccruedAssets`, every risk-increasing open/increase requires post-op `E >= L + B + Rplus` |
+| Degraded containment | If a close or liquidation leaves raw post-op `E < L`, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions; `B` and `Rplus` are deliberately excluded |
 | Bounded price liability | Position price PnL is bounded by size, exact entry cost, and the price interval from zero to `CAP_PRICE`; returned collateral and separate action settlement are accounted for independently |
-| Withdrawal firewall | Synchronized LP redemption funding is limited to conservative free cash after a base reserve of `C + L + B` plus any pool-level reservations |
+| Withdrawal firewall | Synchronized LP redemption funding is limited to conservative free cash after a base reserve of `C + L + B + Rplus` plus any pool-level reservations |
 | Matured Senior priority | A settlement cannot fund Junior redemptions while any eligible matured Senior demand remains unaccounted for |
 | Funded-claim backing | Every claimable LP asset is held one-for-one in vault escrow and cannot be reused by `HousePool` |
 | Trader claim liabilities are senior | Trader claim balance remains a senior claim on pool liquidity until serviced; keeper bounties are not pool liabilities |
@@ -388,8 +388,9 @@ These are the highest-value properties an auditor should expect to hold.
 | Invariant | Description |
 |-----------|-------------|
 | Canonical asset boundary | Pool depth is based on `min(rawAssets, accountedAssets)`, not raw token balance alone |
-| Economic depth | Carry, skew capacity, and VPI use canonical assets minus outstanding trader claims, floored at zero; physical custody and solvency inputs remain gross |
-| Symmetric terminal NAV | LP entry and exit pricing use the same signed exact terminal price delta and waterfall snapshot |
+| Economic depth | Carry, skew capacity, and VPI use canonical assets minus outstanding trader claims and positive accrued VPI, floored at zero; negative-VPI receivables are not cash capital |
+| Symmetric terminal NAV | LP entry and exit pricing use the same exact terminal price delta, subtract positive accrued VPI, add backed negative accrued VPI, then apply the waterfall |
+| VPI aggregate conservation | Engine unsigned totals equal the gross positive and negative contributions of all live positions; canonical replacement/deletion and transaction rollback maintain both signs |
 | Receivable/cash separation | Positive marked receivables are capped by account PnL pledge and nettable same-account claim, and never increase physical redemption funding before collection |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
 | Bounded new senior exposure | Counted admission exposure (`E + R`) cannot exceed the smaller absolute and senior-share headrooms |
@@ -854,12 +855,20 @@ receivable is capped by that account's `pnlPledgeAssets + traderClaimBalanceAsse
 reserves cannot inflate it. A negative value is the exact marked price amount LPs owe the trader within the bounded
 market. Ordinary and protection close attempts have zero bounty and no collectible escrow component.
 
+Full LP equity also includes a separate signed VPI correction. The Engine maintains `Rplus = sum(max(vpiAccrued, 0))`
+and `Rminus = sum(max(-vpiAccrued, 0))` over live positions. Both entry and exit use
+`physicalAssets - traderClaims + terminalPriceDelta - Rplus + Rminus` before flooring. Positive accrual defers LP
+ownership of refundable VPI, while negative accrual is collectible from dedicated reserve backing. This is
+conservative deferred recognition, not a forecast of the exact VPI of every hypothetical future close. The guarded
+`vpiAccountingSnapshot()` is separate from the unchanged price-only terminal snapshot.
+
 Security consequences:
 
 - new LPs receive the same marked-liability discount borne by existing LPs and do not inherit old trader obligations
   at a higher deposit NAV,
 - losing-trader value above the account-specific collectible cap is excluded, preventing phantom receivables,
-- marked receivables affect ownership pricing but remain unavailable to fund redemptions until physically collected,
+- marked price receivables and backed negative VPI affect ownership pricing but remain unavailable to fund
+  redemptions until physically collected,
 - carry, VPI, fees, frozen spread, and liquidation charges stay outside the pre-close price book,
 - realized partial-close price gains either replenish the surviving position's PnL pledge or become a nettable
   same-account trader claim; full-close price gains are free-settlement payouts or trader claims,
@@ -869,7 +878,14 @@ Security consequences:
   clawback and leave the exact residual target protected; only genuinely excess or equivalently replaced value is
   released,
 - new close-time action rebates use only pool cash free after protecting existing trader claims. Unfunded value is
-  waived rather than claim-backed, and neither anticipated VPI nor its reserve inflates terminal `K` or symmetric NAV,
+  waived rather than claim-backed. VPI never inflates terminal price `K`; its separate NAV adjustment uses accrued
+  balances and required backing, not arbitrary action-reserve funding,
+- deferred VPI receipts and negative-VPI clawback collection use balance-only inflow accounting, avoiding duplicate
+  pending-revenue ownership. Releasing positive accrual is recognized through corrected NAV without a second revenue
+  intent. Other realized revenue keeps the normal waterfall routing,
+- pool-funded protocol-fee top-ups follow canonical position installation so their live positive-VPI reserve matches
+  the planner. When both stored tranche principals are zero, these top-ups are forgone for that action; direct trader
+  fee collection remains eligible, and no unpaid-fee ledger is created,
 - a current terminal deficit blocks deposit activation,
 - the Engine fails closed if the terminal book is absent or inconsistent, an open-position mark is unavailable, or an
   account mutation is in progress. `HousePool` independently rejects or defers LP actions under its configured mark-age
@@ -929,17 +945,19 @@ C = totalTraderClaimBalance
 E = max(P - C, 0)
 L = max(bullMaxProfit, bearMaxProfit)
 B = ceil(L * settlementBufferBps / 10_000)
+Rplus = totalPositiveVpiAccruedAssets
 ```
 
-Open and increase admission requires post-op `E >= L + B`. The LP cash firewall includes the same `B`, producing a
-base reserve of `C + L + B`. The rate defaults to `25` bps and is bounded by governance to `0..1,000` bps inclusive.
+Open and increase admission requires post-op `E >= L + B + Rplus`. The LP cash firewall includes the same `B` and
+positive-VPI backing, producing a base reserve of `C + L + B + Rplus`. The buffer rate defaults to `25` bps and is
+bounded by governance to `0..1,000` bps inclusive.
 
 This is a liquidity-headroom policy, not another economic liability. It is excluded from terminal NAV, yield,
 raw degraded-mode detection, and all custody or clearinghouse reserve buckets. Closes, liquidations, and triggered
 protection closes remain live and may consume it. Attached protection uses its parent open's admission result;
 standalone protection changes on an existing position add no exposure and do not independently invoke the gate.
 
-Consequently, `L <= E < L + B` is solvent but unavailable for new risk and LP redemption funding. Raw degraded mode
+Consequently, `L <= E < L + B + Rplus` is solvent but unavailable for new risk and LP redemption funding. Raw degraded mode
 still latches only at `E < L` and may be cleared at `E >= L`; the full buffer need not be restored before clearing.
 
 ### LP-capital carry
@@ -1272,7 +1290,7 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
    that execution will pass current risk checks.
 2. At the FIFO head, the keeper supplies eligible oracle data. The planner projects carry, trade economics, and
    post-operation directional liability from one snapshot.
-3. Admission requires post-operation effective assets `E >= L + B`, using the
+3. Admission requires post-operation effective assets `E >= L + B + Rplus`, using the
    [settlement buffer](#settlement-liability-buffer); equality passes. Apply-time settlement rechecks the target.
 4. The Engine applies the plan and synchronizes the account curve. The Router settles the bounty and finalizes the
    receipt. Attached TP/SL protection inherits its parent open's risk decision rather than adding a second gate.
@@ -1435,12 +1453,14 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
 
 - liquidation does not compute a fresh VPI delta, but the gross negative accrued VPI clawback is settled from its
   dedicated reserve or equivalent withheld trader gain before residual planning,
-- VPI depends on live canonical assets net of outstanding trader claims. Claim payment alone cannot change depth,
+- VPI depends on live canonical assets net of outstanding trader claims and positive accrued VPI. Claim payment alone
+  cannot change depth; negative-VPI receivables never increase cash depth,
 - zero economic depth blocks opens/increases after projected carry collection. Protective closes create no fresh VPI
   charge or rebate at zero depth, but retain the lifetime clamp and recovery of previously accrued negative VPI,
 - voluntary closes use the same signed VPI curve and lifetime rebate clamp in live, FAD-only, and oracle-frozen regimes,
 - frozen-market stale-price protection is a fixed notional spread that leaves VPI unchanged and replaces, rather than compounds with, the Pyth adverse-confidence price shift for oracle-frozen voluntary closes only,
 - the lifetime clamp intentionally zeroes otherwise extractable rebate-only round trips,
+- signed VPI credits/refunds are not a separate maker reward; negative lifetime balances are backed and recovered,
 - partial-close VPI release is a bounded linear approximation.
 
 ### Clearinghouse limitations
@@ -1503,12 +1523,12 @@ service. A terminal price-loss write-off above an account's collectible cap and 
 create neither condition; the current accounting model has no accumulated-debt ledger to clear.
 
 1. Let closes and liquidations continue.
-2. Prevent further risk expansion via degraded mode when `E < L`, or through the ordinary `E >= L + B` admission
+2. Prevent further risk expansion via degraded mode when `E < L`, or through the ordinary `E >= L + B + Rplus` admission
    gate when raw solvency remains intact; use admin pause if additional containment is needed.
 3. Consider stricter risk settings to accelerate cleanup.
 4. Recapitalize or clear positions.
 5. Clear degraded mode only after raw solvency `E >= L` is genuinely restored; buffer restoration is not required
-   for clearing, although new risk remains blocked until `E >= L + B`.
+   for clearing, although new risk remains blocked until `E >= L + B + Rplus`.
 
 ## Asset Isolation
 

@@ -23,9 +23,9 @@ interface ICfdEngineProtocolLens {
         returns (ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot);
 
     /// @notice Builds the HousePool accounting snapshot against a caller-supplied freshness limit.
-    /// @dev Reports custody-capped `HousePool.totalAssets()` plus one authenticated Engine terminal-NAV snapshot:
-    ///      signed LP terminal delta, trader claims, larger-side maximum liability, book version, and position flags.
-    ///      Supplemental reserve is the liability-scaled settlement buffer. Open positions require freshness; frozen
+    /// @dev Reports custody-capped `HousePool.totalAssets()` plus authenticated Engine price and VPI snapshots:
+    ///      signed LP terminal delta, trader claims, both gross accrued VPI amounts, larger-side maximum liability,
+    ///      book version, and position flags. Supplemental reserve is the liability-scaled settlement buffer. Open positions require freshness; frozen
     ///      mode uses `fadMaxStaleness`, while live policy selects the tighter nonzero engine/pool limit. This function
     ///      selects but does not test the age.
     /// @param markStalenessLimit Pool-configured live mark age limit in seconds; zero delegates to the engine limit
@@ -33,6 +33,12 @@ interface ICfdEngineProtocolLens {
     function getHousePoolInputSnapshot(
         uint256 markStalenessLimit
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot);
+
+    /// @notice Returns physical pool cash after current withdrawal reserves and a caller-supplied pool reservation.
+    /// @dev Used during engine settlement; excludes refundable positive VPI and does not include receivable backing.
+    function getSettlementFreeAssets(
+        uint256 reservedPoolAssets
+    ) external view returns (uint256);
 
     /// @notice Returns HousePool-facing runtime status sourced from the engine.
     /// @return snapshot Current cached mark publish time plus oracle-frozen and degraded-mode flags

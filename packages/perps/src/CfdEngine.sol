@@ -20,6 +20,7 @@ import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.s
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
+import {VpiAccrualAccountingLib} from "@plether/perps/libraries/VpiAccrualAccountingLib.sol";
 
 interface ICfdEngineClearinghouseBinding {
 
@@ -130,6 +131,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     mapping(address => uint64) public positionEpoch;
     /// @notice Aggregate outstanding trader-claim liability, in 6-decimal settlement token units.
     uint256 public totalTraderClaimBalanceAssets;
+    /// @notice Gross positive lifetime VPI deferred from LP ownership until its position portion settles, in settlement token.
+    uint256 public totalPositiveVpiAccruedAssets;
+    /// @notice Gross negative lifetime VPI backed by dedicated clearinghouse reserves, in settlement token.
+    uint256 public totalNegativeVpiAccruedAssets;
     /// @notice One-time-configured router authorized to reserve bounties and execute orders and liquidations.
     address public orderRouter;
 
@@ -955,6 +960,17 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         return _requireTerminalNavBook().terminalNavSnapshot();
     }
 
+    /// @notice Returns stable deferred-VPI liability and backed-clawback receivable totals, in settlement token.
+    /// @dev Fails closed during multi-contract settlement, like the canonical terminal price snapshot.
+    /// @return positiveVpiAssets Gross positive accrued VPI excluded from LP NAV and economic pool depth.
+    /// @return negativeVpiAssets Gross negative accrued VPI recognized as a backed receivable, never withdrawal cash.
+    function vpiAccountingSnapshot() external view returns (uint256 positiveVpiAssets, uint256 negativeVpiAssets) {
+        if (_reentrancyGuardEntered()) {
+            revert CfdEngine__AccountingMutationInProgress();
+        }
+        return (totalPositiveVpiAccruedAssets, totalNegativeVpiAccruedAssets);
+    }
+
     /// @notice Returns the carry-index basis stored for an account's current position.
     /// @param account Account to inspect.
     /// @return borrowBaseAssets Position borrow base used for carry utilization, in 6-decimal settlement token units.
@@ -1094,7 +1110,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Permissionlessly advances both side carry indexes to the current wall-clock timestamp.
     /// @dev Accrual uses each side's current borrow base, current HousePool effective assets
-    ///      (`min(raw balance, accountedAssets)`) net of outstanding trader claims, and `baseCarryBps`.
+    ///      (`min(raw balance, accountedAssets)`) net of outstanding trader claims and deferred positive VPI, and `baseCarryBps`.
     ///      This does not checkpoint a position, collect carry from an account, or update the oracle mark.
     function checkpointCarryIndexes() external {
         _advanceAllCarryIndexes(block.timestamp);
@@ -1135,7 +1151,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     function _poolAssetsForCarry() internal view returns (uint256) {
         return address(pool) == address(0)
             ? 0
-            : PositionRiskAccountingLib.computeNetPoolDepthAssets(pool.totalAssets(), totalTraderClaimBalanceAssets);
+            : PositionRiskAccountingLib.computeNetPoolDepthAssets(
+                pool.totalAssets(), totalTraderClaimBalanceAssets, totalPositiveVpiAccruedAssets
+            );
     }
 
     /// @notice Advances side carry indexes and caches a strictly newer planned mark from the settlement sidecar.
@@ -1237,8 +1255,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     /// @notice Writes the post-settlement position state and refreshes side borrow-base accounting.
     /// @dev Callable only by the configured settlement sidecar. Removes the prior side borrow-base contribution,
     ///      copies engine-owned fields, recomputes borrow base from the current clearinghouse position-margin bucket,
-    ///      stores the current side carry index, and adds the new side contribution. Margin itself is not stored here,
-    ///      and deletion uses `settlementDeletePosition`.
+    ///      replaces the gross signed-VPI contributions, stores the current side carry index, and adds the new side
+    ///      contribution. Margin itself is not stored here, and deletion uses `settlementDeletePosition`.
     /// @param account Position account to overwrite.
     /// @param position New engine-owned position fields supplied by the settlement sidecar.
     function settlementWritePosition(
@@ -1258,6 +1276,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         if (lots == 0 || lots > type(uint112).max || position.entryCostAssetAtoms > type(uint144).max) {
             revert CfdEngine__InvalidRiskParams();
         }
+        _replaceVpiAccrual(pos.vpiAccrued, position.vpiAccrued);
         pos.lots = uint112(lots);
         pos.entryCostAssetAtoms = uint144(position.entryCostAssetAtoms);
         pos.maxProfitAssets = position.maxProfitAssets;
@@ -1270,7 +1289,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         _applySideBorrowBaseDelta(position.side, 0, newBorrowBaseAssets);
     }
 
-    /// @notice Deletes an account position and removes its side borrow-base contribution.
+    /// @notice Deletes an account position and removes its side borrow-base and gross signed-VPI contributions.
     /// @dev Callable only by the configured settlement sidecar. Clearinghouse margin must be settled separately.
     /// @param account Position account to delete.
     function settlementDeletePosition(
@@ -1280,7 +1299,23 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         if (pos.lots > 0 || pos.borrowBaseAssets > 0) {
             _applySideBorrowBaseDelta(pos.side, pos.borrowBaseAssets, 0);
         }
+        _replaceVpiAccrual(pos.vpiAccrued, 0);
         delete _positions[account];
+    }
+
+    /// @dev Position writes and deletes share the planner's checked aggregate replacement arithmetic.
+    function _replaceVpiAccrual(
+        int256 previousAccruedAssets,
+        int256 nextAccruedAssets
+    ) internal {
+        (bool valid, uint256 positiveAssets, uint256 negativeAssets) = VpiAccrualAccountingLib.tryReplace(
+            totalPositiveVpiAccruedAssets, totalNegativeVpiAccruedAssets, previousAccruedAssets, nextAccruedAssets
+        );
+        if (!valid) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        totalPositiveVpiAccruedAssets = positiveAssets;
+        totalNegativeVpiAccruedAssets = negativeAssets;
     }
 
     function _applyOpen(

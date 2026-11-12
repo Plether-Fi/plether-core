@@ -29,6 +29,12 @@ interface ICfdEngineSettlementHost {
     /// @return Aggregate senior HousePool payout liability in settlement token
     function totalTraderClaimBalanceAssets() external view returns (uint256);
 
+    /// @notice Gross deferred positive VPI, in settlement token; readable during settlement.
+    function totalPositiveVpiAccruedAssets() external view returns (uint256);
+
+    /// @notice Gross negative accrued VPI backed by dedicated clearinghouse reserves, in settlement token.
+    function totalNegativeVpiAccruedAssets() external view returns (uint256);
+
     /// @notice Applies a newer mark price and advances carry.
     /// @dev A mark whose publish time is not strictly newer than the cached time is a no-op. A strictly newer mark
     ///      advances both side carry indexes to the current block timestamp and replaces the cached price and time.
@@ -92,7 +98,7 @@ interface ICfdEngineSettlementHost {
     ) external;
 
     /// @notice Writes the post-settlement position state.
-    /// @dev Replaces all stored fields and refreshes the position and aggregate side carry borrow-base accounting.
+    /// @dev Replaces all stored fields and refreshes gross signed-VPI totals and position/aggregate carry borrow bases.
     /// @param account Position account to write
     /// @param position New stored position state from the settlement sidecar
     function settlementWritePosition(
@@ -101,7 +107,7 @@ interface ICfdEngineSettlementHost {
     ) external;
 
     /// @notice Deletes an account position.
-    /// @dev Removes the position's contribution from aggregate side carry borrow base before deleting storage.
+    /// @dev Removes the position's contributions from gross signed-VPI totals and aggregate side carry borrow base.
     /// @param account Position account to delete
     function settlementDeletePosition(
         address account

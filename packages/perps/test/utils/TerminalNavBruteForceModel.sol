@@ -53,6 +53,7 @@ library TerminalNavBruteForceModel {
     error TerminalNavBruteForceModel__InvalidPositionSize(address account, uint256 size);
     error TerminalNavBruteForceModel__InvalidEntryCost(address account, uint256 entryCost, uint256 maximumEntryCost);
     error TerminalNavBruteForceModel__OrphanPnlPledge(address account, uint256 pnlPledgeAssets);
+    error TerminalNavBruteForceModel__OrphanVpiAccrual(address account, int256 vpiAccruedAssets);
     error TerminalNavBruteForceModel__MarkPriceAboveCap(uint256 markPrice, uint256 capPrice);
     error TerminalNavBruteForceModel__SignedValueOverflow(uint256 magnitude);
 
@@ -66,6 +67,7 @@ library TerminalNavBruteForceModel {
         uint256 traderClaimBalanceAssets;
         uint256 collectibleCapAssetAtoms;
         uint256 effectiveCapAssetAtoms;
+        int256 vpiAccruedAssets;
         CfdTypes.Side side;
         bool active;
     }
@@ -83,6 +85,8 @@ library TerminalNavBruteForceModel {
         uint256 totalEntryCostAssetAtoms;
         uint256 totalEffectiveCapAssetAtoms;
         uint256 totalTraderClaimsAssets;
+        uint256 totalPositiveVpiAccruedAssets;
+        uint256 totalNegativeVpiAccruedAssets;
         SideTotals long;
         SideTotals short;
     }
@@ -116,6 +120,11 @@ library TerminalNavBruteForceModel {
             totals.totalLots += state.lots;
             totals.totalEntryCostAssetAtoms += state.entryCostAssetAtoms;
             totals.totalEffectiveCapAssetAtoms += state.effectiveCapAssetAtoms;
+            if (state.vpiAccruedAssets >= 0) {
+                totals.totalPositiveVpiAccruedAssets += uint256(state.vpiAccruedAssets);
+            } else {
+                totals.totalNegativeVpiAccruedAssets += uint256(-(state.vpiAccruedAssets + 1)) + 1;
+            }
 
             SideTotals memory sideTotals = state.side == CfdTypes.Side.LONG ? totals.long : totals.short;
             sideTotals.size += state.size;
@@ -141,6 +150,30 @@ library TerminalNavBruteForceModel {
         }
         for (uint256 i = 0; i < states.length; ++i) {
             terminalLpPriceDeltaAssets += accountDeltaAt(states[i], markPrice);
+        }
+    }
+
+    /// @notice Applies independently enumerated deferred VPI to full LP equity, with one final deficit split.
+    /// @dev The price payoff sum stays price-only; backed negative VPI is a separate receivable, never cash depth.
+    function lpEquityAt(
+        AccountState[] memory states,
+        PortfolioTotals memory totals,
+        uint256 physicalAssets,
+        uint256 markPrice,
+        uint256 capPrice
+    ) internal pure returns (uint256 distributable, uint256 deficit) {
+        uint256 assets = physicalAssets + totals.totalNegativeVpiAccruedAssets;
+        uint256 liabilities = totals.totalTraderClaimsAssets + totals.totalPositiveVpiAccruedAssets;
+        int256 priceDelta = aggregateDeltaAt(states, markPrice, capPrice);
+        if (priceDelta >= 0) {
+            assets += uint256(priceDelta);
+        } else {
+            liabilities += uint256(-(priceDelta + 1)) + 1;
+        }
+        if (assets >= liabilities) {
+            distributable = assets - liabilities;
+        } else {
+            deficit = liabilities - assets;
         }
     }
 
@@ -217,7 +250,8 @@ library TerminalNavBruteForceModel {
         address account,
         uint256 capPrice
     ) private view returns (AccountState memory state) {
-        (uint256 size,,, uint256 maxProfitAssets, CfdTypes.Side side,,) = engine.positions(account);
+        (uint256 size,,, uint256 maxProfitAssets, CfdTypes.Side side,, int256 vpiAccruedAssets) =
+            engine.positions(account);
         uint256 pnlPledgeAssets = clearinghouse.pnlPledgeAssets(account);
         uint256 traderClaimBalanceAssets = engine.traderClaimBalanceAssets(account);
         uint256 entryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
@@ -229,6 +263,7 @@ library TerminalNavBruteForceModel {
         state.pnlPledgeAssets = pnlPledgeAssets;
         state.traderClaimBalanceAssets = traderClaimBalanceAssets;
         state.side = side;
+        state.vpiAccruedAssets = vpiAccruedAssets;
 
         if (size == 0) {
             if (entryCostAssetAtoms != 0) {
@@ -236,6 +271,9 @@ library TerminalNavBruteForceModel {
             }
             if (pnlPledgeAssets != 0) {
                 revert TerminalNavBruteForceModel__OrphanPnlPledge(account, pnlPledgeAssets);
+            }
+            if (vpiAccruedAssets != 0) {
+                revert TerminalNavBruteForceModel__OrphanVpiAccrual(account, vpiAccruedAssets);
             }
             return state;
         }

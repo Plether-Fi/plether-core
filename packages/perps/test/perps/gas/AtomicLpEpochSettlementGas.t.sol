@@ -14,7 +14,7 @@ contract AtomicLpEpochSettlementGasTest is AtomicLpEpochSettlementTestFixture {
         assertLe(
             address(engine).code.length,
             CFD_ENGINE_RUNTIME_TARGET,
-            "CfdEngine must remain within its measured treasury-scheduling runtime target"
+            "CfdEngine must remain within its measured signed-VPI runtime target"
         );
         assertLe(address(engine).code.length, EIP170_RUNTIME_CODE_LIMIT, "CfdEngine must remain EIP-170 deployable");
         assertLe(

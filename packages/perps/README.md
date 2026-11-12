@@ -18,10 +18,11 @@ The underlying basket mark moves inversely to dollar strength:
 - **SHORT** profits when the basket mark rises and the dollar weakens.
 
 The mark is bounded between zero and `CAP_PRICE`. Before accepting new exposure, the protocol checks that pool
-capital can cover the worst-case directional payout plus a settlement buffer.
+capital can cover the worst-case directional payout, a settlement buffer, and outstanding refundable VPI backing.
 
-Carry is based on the utilization of LP capital after deducting unpaid trader claims. It is paid by traders to the
-pool rather than exchanged between long and short traders as funding. A separate skew charge or rebate, called
+Carry is based on the utilization of LP cash capital after deducting unpaid trader claims and positive accrued VPI.
+It is paid by traders to the pool rather than exchanged between long and short traders as funding. A separate skew
+charge or rebate, called
 virtual price impact (VPI), prices the effect of a trade on directional imbalance.
 
 ## Trading
@@ -60,6 +61,11 @@ LPs deposit USDG through one of two vaults that share a common pool:
 Deposits and redemptions use an asynchronous request, settlement, and claim process. Redemptions depend on
 available liquidity after trader claims and required reserves. Both tranches carry risk; Senior priority does
 not guarantee principal or returns.
+
+Share prices defer ownership of VPI that remains refundable on an open position. They also include negative accrued
+VPI collectible from protected trader reserves, which cannot fund withdrawals before collection. These signed VPI
+credits and refunds follow the lifetime clamp and reserve rules; there is no separate maker reward program. See
+[Deferred VPI ownership](ACCOUNTING_SPEC.md#deferred-vpi-ownership).
 
 Accepted Senior deposits are binding during normal operation and reserve backing that can limit Junior withdrawals.
 Refunds remain available under the documented recovery conditions. See the

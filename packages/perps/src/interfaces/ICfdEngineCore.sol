@@ -143,6 +143,16 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return Aggregate senior HousePool payout liability in settlement token
     function totalTraderClaimBalanceAssets() external view returns (uint256);
 
+    /// @notice Gross deferred positive VPI, in settlement token; readable during settlement.
+    function totalPositiveVpiAccruedAssets() external view returns (uint256);
+
+    /// @notice Gross negative accrued VPI backed by dedicated clearinghouse reserves, in settlement token.
+    function totalNegativeVpiAccruedAssets() external view returns (uint256);
+
+    /// @notice Returns stable deferred-positive and backed-negative VPI totals, in settlement token.
+    /// @dev Reverts while an accounting mutation is in progress; raw aggregate getters remain available to settlement.
+    function vpiAccountingSnapshot() external view returns (uint256 positiveVpiAssets, uint256 negativeVpiAssets);
+
     /// @notice Liquidates an undercollateralized position.
     /// @dev Callable only by the router. Settlement deletes the full position, routes losses or surplus, credits the
     ///      keeper internally, and can latch degraded mode if post-operation adjusted solvency is negative.

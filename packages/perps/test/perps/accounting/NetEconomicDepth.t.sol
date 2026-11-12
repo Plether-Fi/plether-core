@@ -46,6 +46,15 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
     }
 
+    function _expectedEconomicDepth() private view returns (uint256) {
+        (,,,,,, int256 traderVpi) = engine.positions(TRADER);
+        (,,,,,, int256 otherVpi) = engine.positions(OTHER);
+        uint256 positiveVpi = (traderVpi > 0 ? uint256(traderVpi) : 0) + (otherVpi > 0 ? uint256(otherVpi) : 0);
+        uint256 reserved = engine.totalTraderClaimBalanceAssets() + positiveVpi;
+        uint256 assets = pool.totalAssets();
+        return assets > reserved ? assets - reserved : 0;
+    }
+
     function test_SeededFlatClaimPaymentPreservesCarryDepth() public {
         _openBorrower();
         uint256 assets = pool.totalAssets();
@@ -53,7 +62,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _seedAuthenticatedTraderClaim(CLAIMANT, claim);
         uint256 borrowBase = engine.sideBorrowBaseAssets(0);
         uint256 startIndex = engine.sideCarryIndex(0);
-        uint256 increment = _indexIncrement(borrowBase, assets - claim, 1 days);
+        uint256 increment = _indexIncrement(borrowBase, _expectedEconomicDepth(), 1 days);
         uint256 start = vm.getBlockTimestamp();
 
         vm.warp(start + 1 days);
@@ -74,7 +83,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         uint256 assets = pool.totalAssets();
         _seedAuthenticatedTraderClaim(CLAIMANT, 400_000e6);
         (uint256 borrowBase,,) = engine.positionCarryState(TRADER);
-        uint256 expectedCarry = borrowBase * _indexIncrement(borrowBase, assets - 400_000e6, 1 days) / 1e18;
+        uint256 expectedCarry = borrowBase * _indexIncrement(borrowBase, _expectedEconomicDepth(), 1 days) / 1e18;
         uint256 beforeMargin = clearinghouse.pnlPledgeAssets(TRADER);
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(address(router));
@@ -90,7 +99,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         uint256 assets = pool.totalAssets();
         _seedAuthenticatedTraderClaim(CLAIMANT, 400_000e6);
         (uint256 borrowBase,,) = engine.positionCarryState(TRADER);
-        uint256 expectedCarry = borrowBase * _indexIncrement(borrowBase, assets - 400_000e6, 1 days) / 1e18;
+        uint256 expectedCarry = borrowBase * _indexIncrement(borrowBase, _expectedEconomicDepth(), 1 days) / 1e18;
         vm.warp(vm.getBlockTimestamp() + 1 days);
         ICfdEngineTypes.OpenPreview memory preview =
             engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 1000e18, 10_000e6, 1e8);
@@ -106,13 +115,14 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         uint256 assets = pool.totalAssets();
         uint256 borrowBase = engine.sideBorrowBaseAssets(0);
         uint256 startIndex = engine.sideCarryIndex(0);
+        uint256 oldDepth = _expectedEconomicDepth();
         uint256 start = vm.getBlockTimestamp();
         vm.warp(start + 1 days);
 
         // Authorized sidecar capability test: an unavailable payout becomes a claim without transferring cash.
         vm.prank(address(engine.settlementSidecar()));
         engine.settlementRecordTraderClaim(CLAIMANT, assets + 1, false);
-        uint256 oldIncrement = _indexIncrement(borrowBase, assets, 1 days);
+        uint256 oldIncrement = _indexIncrement(borrowBase, oldDepth, 1 days);
         assertEq(engine.sideCarryIndex(0), startIndex + oldIncrement, "creation checkpoints the old denominator");
         assertEq(pool.totalAssets(), assets);
         assertEq(engine.totalTraderClaimBalanceAssets(), assets + 1);
@@ -129,18 +139,22 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _seedAuthenticatedTraderClaim(CLAIMANT, claim);
         uint256 borrowBase = engine.sideBorrowBaseAssets(0);
         uint256 startIndex = engine.sideCarryIndex(0);
+        uint256 oldDepth = _expectedEconomicDepth();
         uint256 start = vm.getBlockTimestamp();
         vm.warp(start + 1 days);
 
         // Authorized sidecar capability test of claim netting; no cash leaves the pool.
         vm.prank(address(engine.settlementSidecar()));
         engine.settlementConsumeTraderClaim(CLAIMANT, claim);
-        uint256 oldIncrement = _indexIncrement(borrowBase, assets - claim, 1 days);
+        uint256 oldIncrement = _indexIncrement(borrowBase, oldDepth, 1 days);
         assertEq(engine.sideCarryIndex(0), startIndex + oldIncrement, "consumption checkpoints old net depth");
         assertEq(pool.totalAssets(), assets);
         vm.warp(start + 2 days);
         engine.checkpointCarryIndexes();
-        assertEq(engine.sideCarryIndex(0), startIndex + oldIncrement + _indexIncrement(borrowBase, assets, 1 days));
+        assertEq(
+            engine.sideCarryIndex(0),
+            startIndex + oldIncrement + _indexIncrement(borrowBase, _expectedEconomicDepth(), 1 days)
+        );
     }
 
     function testFuzz_ClaimsAtOrAboveAssetsCapCarryAndLeaveEmptySideIdle(
@@ -191,8 +205,8 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _fundTrader(TRADER, 50_000e6);
         _open(OTHER, CfdTypes.Side.LONG, 200_000e18, 20_000e6, 1e8);
         _open(TRADER, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
-        uint256 depth = pool.totalAssets() - 400_000e6;
         _seedAuthenticatedTraderClaim(CLAIMANT, 400_000e6);
+        uint256 depth = _expectedEconomicDepth();
         ICfdEngineTypes.ClosePreview memory beforePreview = engineLens.previewClose(TRADER, 100_000e18, 1e8);
         int256 expectedVpi = int256(uint256(200_000e6) * 200_000e6 / (200 * depth))
             - int256(uint256(100_000e6) * 100_000e6 / (200 * depth));

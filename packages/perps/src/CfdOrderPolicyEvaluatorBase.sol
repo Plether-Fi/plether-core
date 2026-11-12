@@ -81,6 +81,10 @@ interface ICfdOrderPolicyEngineView {
 
     function totalTraderClaimBalanceAssets() external view returns (uint256);
 
+    function totalPositiveVpiAccruedAssets() external view returns (uint256);
+
+    function totalNegativeVpiAccruedAssets() external view returns (uint256);
+
     function degradedMode() external view returns (bool);
 
     function CAP_PRICE() external view returns (uint256);
@@ -232,8 +236,10 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
         snapshot.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
         snapshot.totalTraderClaimBalanceAssets = engine.totalTraderClaimBalanceAssets();
+        snapshot.totalPositiveVpiAccruedAssets = engine.totalPositiveVpiAccruedAssets();
+        snapshot.totalNegativeVpiAccruedAssets = engine.totalNegativeVpiAccruedAssets();
         uint256 carryDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
-            snapshot.poolCashAssets, snapshot.totalTraderClaimBalanceAssets
+            snapshot.poolCashAssets, snapshot.totalTraderClaimBalanceAssets, snapshot.totalPositiveVpiAccruedAssets
         );
         snapshot.longSide =
             _sideSnapshot(engine, planner, CfdTypes.Side.LONG, carryDepthAssets, snapshot.riskParams.baseCarryBps);

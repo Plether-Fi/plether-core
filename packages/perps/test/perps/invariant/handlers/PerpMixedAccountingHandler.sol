@@ -61,6 +61,13 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         int256 vpi;
     }
 
+    struct TraderModelTotals {
+        uint256 cash;
+        uint256 wallet;
+        uint256 arrears;
+        uint256 margin;
+    }
+
     struct Lp {
         uint256 epoch;
         uint256 pending;
@@ -827,7 +834,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             liabilities[i % 2] += i % 2 == 0 ? traders[i].basis : traders[i].lots * CAP - traders[i].basis;
         }
         uint256 liability = liabilities[0] > liabilities[1] ? liabilities[0] : liabilities[1];
-        uint256 reserve = liability + expectedClaims + (liability * 25 + 9999) / 10_000;
+        uint256 reserve = liability + expectedClaims + _positiveVpiAccrued() + (liability * 25 + 9999) / 10_000;
         uint256 free = _depth() > reserve ? _depth() - reserve : 0;
         // Fixture governance protects the greater of principal/HWM at a 9999-bps Senior exposure ceiling.
         uint256 seniorExposure = seniorCapital > hwm ? seniorCapital : hwm;
@@ -1568,6 +1575,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         t.margin = 0;
         t.vpi = 0;
         t.liquidationReserve = 0;
+        carry.changePositiveVpi(_positiveVpiAccrued(), vm.getBlockTimestamp());
         carry.changeDepth(_depth(), vm.getBlockTimestamp());
         _apply(i);
         lastLiquidation = values;
@@ -1715,7 +1723,17 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     function _netDepth(
         uint256 grossAssets
     ) internal view returns (uint256) {
-        return grossAssets > expectedClaims ? grossAssets - expectedClaims : 0;
+        uint256 afterClaims = grossAssets > expectedClaims ? grossAssets - expectedClaims : 0;
+        uint256 positiveVpi = _positiveVpiAccrued();
+        return afterClaims > positiveVpi ? afterClaims - positiveVpi : 0;
+    }
+
+    function _positiveVpiAccrued() internal view returns (uint256 positiveVpi) {
+        for (uint256 i; i < 4; ++i) {
+            if (traders[i].vpi > 0) {
+                positiveVpi += uint256(traders[i].vpi);
+            }
+        }
     }
 
     function _apply(
@@ -3018,6 +3036,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         t.lots += lots;
         t.basis += lots * currentPrice;
         t.vpi += v.vpi;
+        carry.changePositiveVpi(_positiveVpiAccrued(), vm.getBlockTimestamp());
         sideLots[i % 2] += lots;
         _countVpi(v.vpi);
     }
@@ -3047,6 +3066,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         t.cash = v.remainingCash;
         t.claim = v.remainingClaim;
         t.vpi = v.remainingVpi;
+        carry.changePositiveVpi(_positiveVpiAccrued(), vm.getBlockTimestamp());
         t.liquidationReserve = v.remainingLiquidationReserve;
         expectedPoolCash = v.poolCashAfter;
         expectedAccounted = v.poolAccountedAfter;
@@ -3084,6 +3104,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         int256 nav = int256(_depth()) - int256(expectedClaims);
         for (uint256 i; i < 4; ++i) {
             Trader storage t = traders[i];
+            nav -= t.vpi;
             int256 pnl = int256(t.basis) - int256(t.lots * currentPrice);
             if (i % 2 != 0) {
                 pnl = -pnl;
@@ -3463,55 +3484,26 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         assertEq(carry.poolDepth(), _depth(), "independent gross assets match complete pool ledger");
         assertEq(carry.totalClaims(), expectedClaims, "independent carry claims match complete claim ledger");
-        assertEq(carry.economicDepth(), _netDepth(_depth()), "independent carry denominator excludes claims");
+        assertEq(carry.totalPositiveVpi(), _positiveVpiAccrued(), "independent accrued positive VPI ledger");
+        assertEq(carry.economicDepth(), _netDepth(_depth()), "independent carry denominator excludes claims and VPI");
         uint256 custody = expectedTreasury + expectedKeeper;
         uint256 arrears;
         uint256 wallets;
+        uint256 positiveVpi;
+        uint256 negativeVpi;
         uint256[2] memory expectedSideMargin;
         for (uint256 i; i < 4; ++i) {
-            Trader storage t = traders[i];
-            address account = actorAt(i);
-            (uint256 size, uint256 margin,, uint256 maxProfit,,, int256 vpi) = engine.positions(account);
-            assertEq(size, t.lots * 1e20, "mixed exact lots");
-            assertEq(margin, t.margin, "mixed independent pledge");
-            assertEq(engine.positionEntryCostAssetAtoms(account), t.basis, "mixed exact entry basis");
-            assertEq(maxProfit, i % 2 == 0 ? t.basis : t.lots * CAP - t.basis, "mixed endpoint liability");
-            assertEq(vpi, t.vpi, "mixed lifetime VPI");
-            assertEq(clearinghouse.balanceAssets(account), t.cash, "mixed account cash");
-            assertEq(engine.traderClaimBalanceAssets(account), t.claim, "mixed independently generated claim");
-            assertEq(clearinghouse.liquidationReserveAssets(account), t.liquidationReserve, "mixed liquidation reserve");
-            assertEq(
-                clearinghouse.vpiRebateReserveAssets(account), t.vpi < 0 ? uint256(-t.vpi) : 0, "mixed VPI backing"
-            );
-            assertEq(settlementToken.balanceOf(account), t.wallet, "mixed trader external custody");
-            CarryReferenceLedger.Account memory carryAccount = carry.accountState(account);
-            assertEq(engine.unsettledCarryAssets(account), carryAccount.arrears, "mixed carry arrears");
-            assertEq(
-                carryAccount.totalNewCarry,
-                carryAccount.totalCollected + carryAccount.totalWaived + carryAccount.arrears,
-                "per-account lifetime carry conservation"
-            );
-            arrears += carryAccount.arrears;
-            assertEq(carryAccount.pledge, t.margin, "reference ledger pledge integration");
-            assertEq(carryAccount.free, _free(i), "reference ledger free integration");
-            (uint256 borrowBase, uint256 index, uint64 timestamp) = engine.positionCarryState(account);
-            if (t.lots != 0) {
-                assertEq(borrowBase, carryAccount.borrowBase, "mixed position borrow basis");
-                assertEq(index, carryAccount.lastIndex, "mixed position checkpoint index");
-                assertEq(timestamp, carryAccount.lastTime, "mixed position checkpoint timestamp");
-            } else {
-                assertEq(borrowBase, 0, "flat generation borrow basis cleared");
-                assertEq(index, 0, "flat generation carry index cleared");
-                assertEq(timestamp, 0, "flat generation carry timestamp cleared");
+            TraderModelTotals memory totals = _assertTraderModel(i);
+            custody += totals.cash;
+            wallets += totals.wallet;
+            arrears += totals.arrears;
+            expectedSideMargin[i % 2] += totals.margin;
+            int256 accruedVpi = traders[i].vpi;
+            if (accruedVpi > 0) {
+                positiveVpi += uint256(accruedVpi);
+            } else if (accruedVpi < 0) {
+                negativeVpi += uint256(-accruedVpi);
             }
-            assertEq(
-                carryAccount.protectedFunds,
-                t.liquidationReserve + (t.vpi < 0 ? uint256(-t.vpi) : 0) + orders.margin(i) + orders.bounty(i),
-                "independent complete protected funds"
-            );
-            custody += t.cash;
-            wallets += t.wallet;
-            expectedSideMargin[i % 2] += t.margin;
         }
         assertEq(
             carry.totalNewCarry(),
@@ -3523,6 +3515,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), expectedTreasury, "mixed fee ownership");
         assertEq(clearinghouse.balanceAssets(KEEPER), expectedKeeper, "mixed exact-once keeper credits");
         assertEq(engine.totalTraderClaimBalanceAssets(), expectedClaims, "mixed aggregate claims");
+        assertEq(engine.totalPositiveVpiAccruedAssets(), positiveVpi, "mixed accrued positive VPI liability");
+        assertEq(engine.totalNegativeVpiAccruedAssets(), negativeVpi, "mixed accrued negative VPI receivable");
         assertEq(settlementToken.balanceOf(address(pool)), expectedPoolCash, "mixed modeled physical pool cash");
         assertEq(pool.accountedAssets(), expectedAccounted, "mixed canonical pool backing");
         assertEq(pool.seniorPrincipal(), expectedSenior, "mixed independent Senior waterfall");
@@ -3549,6 +3543,65 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             assertEq(engine.sideCarryIndex(side), carry.sideState(side).index, "mixed independent side carry index");
             assertEq(engine.sideCarryTimestamp(side), carry.sideState(side).timestamp, "mixed carry clock");
         }
+    }
+
+    function _assertTraderModel(
+        uint256 i
+    ) internal view returns (TraderModelTotals memory totals) {
+        Trader storage t = traders[i];
+        address account = actorAt(i);
+        _assertTraderPosition(i, account);
+        assertEq(clearinghouse.balanceAssets(account), t.cash, "mixed account cash");
+        assertEq(engine.traderClaimBalanceAssets(account), t.claim, "mixed independently generated claim");
+        assertEq(clearinghouse.liquidationReserveAssets(account), t.liquidationReserve, "mixed liquidation reserve");
+        assertEq(clearinghouse.vpiRebateReserveAssets(account), t.vpi < 0 ? uint256(-t.vpi) : 0, "mixed VPI backing");
+        assertEq(settlementToken.balanceOf(account), t.wallet, "mixed trader external custody");
+        totals = TraderModelTotals(t.cash, t.wallet, _assertTraderCarry(i, account), t.margin);
+    }
+
+    function _assertTraderPosition(
+        uint256 i,
+        address account
+    ) internal view {
+        Trader storage t = traders[i];
+        (uint256 size, uint256 margin,, uint256 maxProfit,,, int256 vpi) = engine.positions(account);
+        assertEq(size, t.lots * 1e20, "mixed exact lots");
+        assertEq(margin, t.margin, "mixed independent pledge");
+        assertEq(engine.positionEntryCostAssetAtoms(account), t.basis, "mixed exact entry basis");
+        assertEq(maxProfit, i % 2 == 0 ? t.basis : t.lots * CAP - t.basis, "mixed endpoint liability");
+        assertEq(vpi, t.vpi, "mixed lifetime VPI");
+    }
+
+    function _assertTraderCarry(
+        uint256 i,
+        address account
+    ) internal view returns (uint256 arrears) {
+        Trader storage t = traders[i];
+        CarryReferenceLedger.Account memory carryAccount = carry.accountState(account);
+        assertEq(engine.unsettledCarryAssets(account), carryAccount.arrears, "mixed carry arrears");
+        assertEq(
+            carryAccount.totalNewCarry,
+            carryAccount.totalCollected + carryAccount.totalWaived + carryAccount.arrears,
+            "per-account lifetime carry conservation"
+        );
+        assertEq(carryAccount.pledge, t.margin, "reference ledger pledge integration");
+        assertEq(carryAccount.free, _free(i), "reference ledger free integration");
+        (uint256 borrowBase, uint256 index, uint64 timestamp) = engine.positionCarryState(account);
+        if (t.lots != 0) {
+            assertEq(borrowBase, carryAccount.borrowBase, "mixed position borrow basis");
+            assertEq(index, carryAccount.lastIndex, "mixed position checkpoint index");
+            assertEq(timestamp, carryAccount.lastTime, "mixed position checkpoint timestamp");
+        } else {
+            assertEq(borrowBase, 0, "flat generation borrow basis cleared");
+            assertEq(index, 0, "flat generation carry index cleared");
+            assertEq(timestamp, 0, "flat generation carry timestamp cleared");
+        }
+        assertEq(
+            carryAccount.protectedFunds,
+            t.liquidationReserve + (t.vpi < 0 ? uint256(-t.vpi) : 0) + orders.margin(i) + orders.bounty(i),
+            "independent complete protected funds"
+        );
+        arrears = carryAccount.arrears;
     }
 
     function _assertRedeemPosition(

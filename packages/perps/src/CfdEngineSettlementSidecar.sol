@@ -82,6 +82,10 @@ interface ICfdEngineAccountActionView {
 
     function totalTraderClaimBalanceAssets() external view returns (uint256);
 
+    function totalPositiveVpiAccruedAssets() external view returns (uint256);
+
+    function totalNegativeVpiAccruedAssets() external view returns (uint256);
+
     function degradedMode() external view returns (bool);
 
     function isFadWindow() external view returns (bool);
@@ -194,8 +198,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
         snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
         snap.totalTraderClaimBalanceAssets = engine.totalTraderClaimBalanceAssets();
+        snap.totalPositiveVpiAccruedAssets = engine.totalPositiveVpiAccruedAssets();
+        snap.totalNegativeVpiAccruedAssets = engine.totalNegativeVpiAccruedAssets();
         uint256 carryDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
-            snap.poolCashAssets, snap.totalTraderClaimBalanceAssets
+            snap.poolCashAssets, snap.totalTraderClaimBalanceAssets, snap.totalPositiveVpiAccruedAssets
         );
         // Exact enum dispatch selects the exposed side; this is not a target token-balance equality.
         // slither-disable-next-line incorrect-equality
@@ -453,14 +459,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         );
         if (delta.tradeCostAssets > 0) {
             uint256 poolCashInflowAssets = uint256(delta.tradeCostAssets) - protocolFeeCreditedAssets;
-            if (poolCashInflowAssets > 0) {
-                IHousePool(host.pool())
-                    .recordClaimantInflow(
-                        poolCashInflowAssets,
-                        IHousePool.ClaimantInflowKind.Revenue,
-                        IHousePool.ClaimantInflowCashMode.CashArrived
-                    );
-            }
+            uint256 deferredVpiAssets = delta.posVpiAccruedDelta > 0 ? uint256(delta.posVpiAccruedDelta) : 0;
+            _recordCashInflow(host, poolCashInflowAssets, deferredVpiAssets);
         }
 
         if (delta.vpiRebateReserveAfterAssets > delta.vpiRebateReserveBeforeAssets) {
@@ -495,8 +495,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             int256(delta.sideOiIncrease),
             delta.sideEntryNotionalDelta
         );
-        _settleProtocolFeeTopUp(host, delta.executionFeeAssets, protocolFeeCreditedAssets);
         _writeOpenPosition(host, delta, currentPosition);
+        _settleProtocolFeeTopUp(host, delta.executionFeeAssets, protocolFeeCreditedAssets);
         _assertRequiredEffectiveAssets(host, delta.requiredEffectiveAssetsAfterAssets);
     }
 
@@ -601,19 +601,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         );
         uint256 protocolFeeCreditedAssets = _settleCloseActionCharge(host, clearinghouse, delta);
 
-        uint256 cashArrivedRevenueAssets =
-            delta.pricePnlPledgeConsumedAssets + delta.actionChargeCollectedAssets - protocolFeeCreditedAssets;
-        if (cashArrivedRevenueAssets > 0) {
-            IHousePool(host.pool())
-                .recordClaimantInflow(
-                    cashArrivedRevenueAssets,
-                    IHousePool.ClaimantInflowKind.Revenue,
-                    IHousePool.ClaimantInflowCashMode.CashArrived
-                );
-        }
-
-        uint256 feeWithheldAssets = delta.executionFeeAssets - protocolFeeCreditedAssets;
-        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldAssets - feeWithheldAssets);
+        _recordCloseInflows(host, delta, currentPosition.vpiAccrued, protocolFeeCreditedAssets);
 
         if (delta.pricePayoutAssets > 0) {
             host.settlementRecordTraderClaim(delta.account, delta.pricePayoutAssets, !delta.deletePosition);
@@ -622,10 +610,6 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             IHousePool(host.pool()).payOut(address(clearinghouse), delta.actionRebatePaidAssets);
             clearinghouse.settleAssets(delta.account, int256(delta.actionRebatePaidAssets));
         }
-
-        _settleProtocolFeeTopUp(
-            host, protocolFeeCreditedAssets + delta.protocolFeeTopUpAssets, protocolFeeCreditedAssets
-        );
 
         uint256 marginAfter = clearinghouse.pnlPledgeAssets(delta.account);
         if (marginAfter != delta.posMarginAfter) {
@@ -652,6 +636,9 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (!delta.deletePosition && delta.liquidationReserveReleaseAssets > 0) {
             clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseAssets);
         }
+        _settleProtocolFeeTopUp(
+            host, protocolFeeCreditedAssets + delta.protocolFeeTopUpAssets, protocolFeeCreditedAssets
+        );
 
         if (delta.closeState.frozenSpreadAssets > 0) {
             uint256 frozenSpreadPaidAssets = _recoveredFrozenSpreadAssets(delta);
@@ -763,6 +750,58 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             );
     }
 
+    /// @dev Deferred VPI cash and collection of an existing VPI receivable are balance changes, not earned intents.
+    function _recordCashInflow(
+        ICfdEngineSettlementHost host,
+        uint256 totalCashAssets,
+        uint256 balanceOnlyAssets
+    ) private {
+        IHousePool pool = IHousePool(host.pool());
+        if (balanceOnlyAssets > 0) {
+            pool.recordClaimantInflow(
+                balanceOnlyAssets,
+                IHousePool.ClaimantInflowKind.BalanceOnly,
+                IHousePool.ClaimantInflowCashMode.CashArrived
+            );
+        }
+        uint256 revenueAssets = totalCashAssets - balanceOnlyAssets;
+        if (revenueAssets > 0) {
+            pool.recordClaimantInflow(
+                revenueAssets, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+            );
+        }
+    }
+
+    function _recordCloseInflows(
+        ICfdEngineSettlementHost host,
+        CfdEnginePlanTypes.CloseDelta calldata delta,
+        int256 previousAccruedVpiAssets,
+        uint256 protocolFeeCreditedAssets
+    ) private {
+        uint256 clawbackAssets = _negativeVpiReserveTarget(previousAccruedVpiAssets)
+            - _negativeVpiReserveTarget(previousAccruedVpiAssets - delta.posVpiAccruedReduction);
+        _recordCashInflow(
+            host,
+            delta.pricePnlPledgeConsumedAssets + delta.actionChargeCollectedAssets - protocolFeeCreditedAssets,
+            delta.vpiRebateReserveConsumedAssets
+        );
+        uint256 withheldClawbackAssets = clawbackAssets - delta.vpiRebateReserveConsumedAssets;
+        uint256 feeWithheldAssets = delta.executionFeeAssets - protocolFeeCreditedAssets;
+        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldAssets - feeWithheldAssets - withheldClawbackAssets);
+    }
+
+    function _recordLiquidationInflows(
+        ICfdEngineSettlementHost host,
+        CfdEnginePlanTypes.LiquidationDelta calldata delta,
+        uint256 seizedAssets
+    ) private {
+        (,,,,,, int256 accruedVpiAssets) = ICfdEngineAccountActionView(address(host)).positions(delta.account);
+        uint256 withheldClawbackAssets =
+            _negativeVpiReserveTarget(accruedVpiAssets) - delta.vpiRebateReserveConsumedAssets;
+        _recordCashInflow(host, seizedAssets + delta.actionChargeCollectedAssets, delta.vpiRebateReserveConsumedAssets);
+        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldAssets - withheldClawbackAssets);
+    }
+
     /// @notice Applies the live liquidation settlement plan produced by the planner.
     /// @dev Callable only by `ENGINE`. The host must supply a liquidatable delta
     ///      consistent with live state; this function neither checks `delta.liquidatable` nor recomputes the plan. It
@@ -833,16 +872,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (seizedAssets != delta.settlementSeizedAssets) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
-        uint256 cashArrivedRevenueAssets = seizedAssets + delta.actionChargeCollectedAssets;
-        if (cashArrivedRevenueAssets > 0) {
-            IHousePool(host.pool())
-                .recordClaimantInflow(
-                    cashArrivedRevenueAssets,
-                    IHousePool.ClaimantInflowKind.Revenue,
-                    IHousePool.ClaimantInflowCashMode.CashArrived
-                );
-        }
-        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldAssets);
+        _recordLiquidationInflows(host, delta, seizedAssets);
 
         if (delta.freshTraderPayoutAssets > 0) {
             host.settlementRecordTraderClaim(delta.account, delta.freshTraderPayoutAssets, false);

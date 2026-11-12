@@ -13,7 +13,7 @@ This guide maps contract responsibilities, custody, and the flows between trader
 | `OrderLifecycleBook` | Permanent client-id identity, pending policy, timing, authenticated terminal outcomes | Only its bound Router registers and finalizes orders. It holds no tokens. |
 | `PositionProtectionBook` | Take-profit/stop-loss state, trigger reward, latest close-attempt linkage | Calls narrow Router hooks to create orders; it cannot execute a trade or move pool cash itself. |
 | `PletherOracle` | Signed basket validation, accepted live basket, historical execution prices | Only the configured Router updates the accepted current basket. Historical helpers do not authenticate arbitrary caller-supplied caches. |
-| `CfdEngine` | Positions, carry, risk admission, trader claims, settlement plans | Uses the Clearinghouse and HousePool for custody; holds no trader or LP funds itself. |
+| `CfdEngine` | Positions, gross positive/negative accrued VPI totals, carry, risk admission, trader claims, settlement plans | Uses the Clearinghouse and HousePool for custody; holds no trader or LP funds itself. |
 | `TerminalNavBookV2` | Aggregate account-capped price curves for LP NAV | Only the bound Engine can synchronize curves, deriving them from canonical Engine/Clearinghouse state. It does not measure available cash. |
 | `HousePool` | Recognized pool USDG, Senior/Junior waterfall, LP epoch clock and settlement | Engine/settlement sidecar may request trading payouts/inflows; configured vaults participate in LP settlement. |
 | `TrancheVault` | LP shares, deposit escrow, redemption queues and funded claims | Chooses request epochs using the Pool clock; only the Pool activates deposits or funds redemptions. |
@@ -81,12 +81,20 @@ liability and transfers Pool USDG to the Clearinghouse; payment into an open pos
 Do not conflate three measurements:
 
 - **Cash:** recognized Pool USDG, subject to reserves and payout priorities.
-- **Economic depth:** `max(pool assets - outstanding trader claims, 0)`, used by carry/skew/VPI calculations.
-- **LP NAV:** Pool assets minus trader claims plus the signed account-capped terminal price delta at the mark.
-  Distributable equity is floored at zero; any negative remainder is recorded separately as a terminal deficit.
+- **Economic depth:** `max(pool assets - outstanding trader claims - positive accrued VPI, 0)`, used by carry/skew/VPI
+  calculations. Backed negative VPI is a clearinghouse receivable and cannot supply cash depth.
+- **LP NAV:** Pool assets minus trader claims plus the signed account-capped terminal price delta, minus positive
+  accrued VPI plus backed negative accrued VPI. Distributable equity is floored once at zero; any negative remainder
+  is recorded separately as a terminal deficit.
 
 NAV can include collectible trader losses that are not yet Pool cash. Conversely, raw excess tokens are cash at the
 address but are not recognized Pool assets. [Accounting specification](ACCOUNTING_SPEC.md) defines each calculation.
+
+The Engine replaces each position's VPI contributions at canonical write/delete hooks. Stable accounting uses its
+guarded `vpiAccountingSnapshot()` alongside the price-only terminal snapshot. LP funding and pool-funded fee top-ups
+reserve gross positive VPI even when negative VPI offsets it in NAV. Incoming deferred VPI and collection of negative
+VPI backing are balance-only flows; the waterfall recognizes retained VPI through the corrected NAV when accrual
+is removed. Both LP directions therefore price the same deferred ownership.
 
 ## Trading flows
 

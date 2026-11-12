@@ -13,9 +13,9 @@ import {Test} from "forge-std/Test.sol";
 
 /// @notice Independent execution-fee ledger for funded live-market opens and full closes.
 /// @dev Scope: zero VPI/carry, no frozen spread, ample pool liquidity, and losses smaller than posted margin.
-///      Consequently all assessed fees are cash-eligible. Gains withhold fees from the payout; flat/loss closes
-///      collect them from cash. This is not a model of fee waivers, claim priority, or liquidation charges.
-///      Expected fees use only submitted size/price and the configured rate, never a production preview or delta.
+///      The fixture has no tranche principal, so pool-funded fee top-ups are forgone. Gain withholding reduces
+///      the fee that reaches treasury; the remainder is collected from trader cash. Expected credits use only
+///      submitted size/price and the configured rate, never a production preview or delta.
 contract PerpFeeHandler is Test {
 
     uint256 public constant POSITION_SIZE = 50_000e18;
@@ -125,7 +125,7 @@ contract PerpFeeHandler is Test {
         try router.commitOrder(CfdTypes.Side.LONG, POSITION_SIZE, 0, 0, true) returns (uint64 orderId) {
             if (_execute(orderId, price)) {
                 ghostHasPosition[actor] = false;
-                _accrueExpectedFee(price);
+                _accrueExpectedCloseFee(price);
                 ++successfulCloses;
             }
         } catch (bytes memory reason) {
@@ -183,6 +183,19 @@ contract PerpFeeHandler is Test {
         uint256 expectedFee = expectedExecutionFee(POSITION_SIZE, price, feeBps);
         ghostTrackedFeesAssets += expectedFee;
         ghostAccruedFeesAssets += expectedFee;
+    }
+
+    function _accrueExpectedCloseFee(
+        uint256 price
+    ) internal {
+        uint256 assessedFee = expectedExecutionFee(POSITION_SIZE, price, feeBps);
+        // LONG positions in this market earn price PnL when the mark falls. Entry cost and exit value
+        // are exact settlement atoms because POSITION_SIZE is a whole number of 100-token lots.
+        uint256 priceGain = price < ENTRY_PRICE ? POSITION_SIZE * (ENTRY_PRICE - price) / 1e20 : 0;
+        uint256 withheldFee = priceGain < assessedFee ? priceGain : assessedFee;
+        uint256 creditedFee = assessedFee - withheldFee;
+        ghostTrackedFeesAssets += creditedFee;
+        ghostAccruedFeesAssets += creditedFee;
     }
 
     function _execute(

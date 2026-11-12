@@ -12,7 +12,7 @@ library HousePoolAccountingLib {
     /// @notice Conservative pool cash available for LP withdrawal after senior protocol reservations.
     /// @param physicalAssets Canonical physical pool assets.
     /// @param maxLiability Maximum side-liability envelope.
-    /// @param reserved Sum of max liability, outstanding trader claims, and supplemental reservation.
+    /// @param reserved Sum of max liability, trader claims, refundable positive VPI, and supplemental reservation.
     /// @param freeAssets Physical assets above `reserved`, floored at zero.
     struct WithdrawalSnapshot {
         uint256 physicalAssets;
@@ -21,9 +21,9 @@ library HousePoolAccountingLib {
         uint256 freeAssets;
     }
 
-    /// @notice Pool assets distributable to tranche claims after trader claims and the canonical terminal delta.
-    /// @param distributable Terminal LP equity after trader claims and the signed delta, floored at zero.
-    /// @param deficit Trader claims and terminal payables above physical assets and terminal receivables.
+    /// @notice Pool assets distributable to tranche claims after price and backed lifetime-VPI adjustments.
+    /// @param distributable Terminal LP equity after claims, the signed price delta, and lifetime VPI, floored at zero.
+    /// @param deficit Trader claims and terminal payables above physical assets and collectible receivables.
     struct ReconcileSnapshot {
         uint256 distributable;
         uint256 deficit;
@@ -39,7 +39,8 @@ library HousePoolAccountingLib {
 
     /// @notice Builds the base withdrawal reserve and free-cash snapshot.
     /// @dev `reserved` uses the engine maximum-profit envelope rather than an MtM liability and includes the engine's
-    ///      supplemental protected headroom. Free cash saturates at zero when reservations equal or exceed assets.
+    ///      supplemental protected headroom and refundable positive lifetime VPI. Negative VPI backing remains in
+    ///      clearinghouse custody and is not withdrawal cash. Free cash saturates at zero when reservations cover assets.
     ///      Callers may layer additional reservations on the result.
     /// @param engineSnapshot Engine-supplied physical assets and liability reservations.
     /// @return snapshot Withdrawal accounting values in 6-decimal settlement token.
@@ -49,7 +50,7 @@ library HousePoolAccountingLib {
         snapshot.physicalAssets = engineSnapshot.physicalAssets;
         snapshot.maxLiability = engineSnapshot.maxLiabilityAssets;
         snapshot.reserved = engineSnapshot.maxLiabilityAssets + engineSnapshot.traderClaimBalanceAssets
-            + engineSnapshot.supplementalReservedAssets;
+            + engineSnapshot.supplementalReservedAssets + engineSnapshot.totalPositiveVpiAccruedAssets;
         snapshot.freeAssets =
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
     }
@@ -60,8 +61,9 @@ library HousePoolAccountingLib {
     function buildReconcileSnapshot(
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
-        uint256 terminalAssets = engineSnapshot.physicalAssets;
-        uint256 terminalLiabilities = engineSnapshot.traderClaimBalanceAssets;
+        uint256 terminalAssets = engineSnapshot.physicalAssets + engineSnapshot.totalNegativeVpiAccruedAssets;
+        uint256 terminalLiabilities =
+            engineSnapshot.traderClaimBalanceAssets + engineSnapshot.totalPositiveVpiAccruedAssets;
         int256 terminalDelta = engineSnapshot.terminalLpPriceDeltaAssets;
         if (terminalDelta >= 0) {
             terminalAssets += uint256(terminalDelta);

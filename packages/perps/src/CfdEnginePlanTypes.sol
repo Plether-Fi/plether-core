@@ -85,7 +85,7 @@ library CfdEnginePlanTypes {
     /// @param positionLastCarryIndex Side carry index last checkpointed for the position, scaled by 1e18.
     /// @param longSide Aggregate LONG-side state.
     /// @param shortSide Aggregate SHORT-side state.
-    /// @param poolAssets Gross physical assets used for planning; VPI and skew subtract aggregate trader claims.
+    /// @param poolAssets Gross physical assets used for planning; VPI and skew subtract claims and positive accrued VPI.
     /// @param poolCashAssets Physical-asset basis for open solvency and cash available for payouts and fee top-ups.
     /// @param poolAdditionalReservedAssets Pending claimant inflows and unassigned assets protected from fee top-ups.
     /// @param poolQueuesTradingRevenue Whether new revenue joins the pending claimant reserve until reconciliation.
@@ -97,6 +97,8 @@ library CfdEnginePlanTypes {
     /// @param protectedExecutionBountyAssets Execution-bounty reservations excluded from action-charge collection.
     /// @param unsettledCarryAssets Carry already checkpointed but not yet collected for `account`.
     /// @param totalTraderClaimBalanceAssets Aggregate outstanding trader-claim liability.
+    /// @param totalPositiveVpiAccruedAssets Aggregate refundable positive lifetime VPI held in pool cash.
+    /// @param totalNegativeVpiAccruedAssets Aggregate negative lifetime VPI backed in the clearinghouse.
     /// @param traderClaimBalanceForAccount Outstanding trader claim owned by `account`.
     /// @param degradedMode Whether the engine was already in degraded mode.
     /// @param capPrice Maximum execution and risk price, with 8 decimals.
@@ -134,6 +136,8 @@ library CfdEnginePlanTypes {
 
         uint256 unsettledCarryAssets;
         uint256 totalTraderClaimBalanceAssets;
+        uint256 totalPositiveVpiAccruedAssets;
+        uint256 totalNegativeVpiAccruedAssets;
         uint256 traderClaimBalanceForAccount;
         bool degradedMode;
 
@@ -204,7 +208,8 @@ library CfdEnginePlanTypes {
     /// @param positionMarginAfterOpen Resulting clearinghouse position-margin bucket in 6-decimal settlement token.
     /// @param sideOiIncrease Increase in aggregate side open interest, with 18 decimals.
     /// @param sideEntryNotionalDelta Signed change in exact side entry cost scaled by `1e20`, with 26-decimal precision.
-    /// @param requiredEffectiveAssetsAfterAssets Minimum post-settlement effective assets required by protected admission.
+    /// @param requiredEffectiveAssetsAfterAssets Claims-net physical assets required to cover price liability,
+    ///        settlement headroom, and the projected positive lifetime-VPI reserve.
     /// @param sideMaxProfitIncrease Increase in the aggregate side maximum-profit envelope, in 6-decimal settlement token.
     /// @param tradeCostAssets Signed VPI plus execution fee; positive debits the account and negative rebates it.
     /// @param marginDeltaAssets Order margin supplied for the open/increase.

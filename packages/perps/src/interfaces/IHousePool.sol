@@ -12,7 +12,10 @@ interface IHousePool {
         /// @notice Trading, carry, or spread revenue owned by tranche claimants.
         Revenue,
         /// @notice Owner-funded value routed as claimant equity restoration without minting LP shares.
-        Recapitalization
+        Recapitalization,
+        /// @notice Cash recognition whose ownership is already represented by a lifetime-VPI NAV adjustment.
+        ///         Never queues a second pending revenue or recapitalization entitlement.
+        BalanceOnly
     }
 
     /// @notice Whether claimant inflow accounting should recognize newly arrived cash.
@@ -225,7 +228,7 @@ interface IHousePool {
 
     /// @notice Emitted when claimant-owned revenue or recapitalization is routed into pool accounting.
     /// @param caller Authorized engine or settlement sidecar that recorded the inflow.
-    /// @param kind Revenue or recapitalization ownership bucket.
+    /// @param kind Revenue, recapitalization, or balance-only cash recognition.
     /// @param cashMode Whether canonical accounted assets increased or cash was already retained.
     /// @param amountAssets Routed claimant value in settlement token.
     event ClaimantInflowAccounted(
@@ -265,6 +268,8 @@ interface IHousePool {
     function totalAssets() external view returns (uint256);
 
     /// @notice Cash above all current engine and pool reserves, safe to query during engine settlement.
+    /// @dev Returns zero while both stored tranche principals are zero; diagnostic free-cash views retain their
+    ///      physical reserve calculation regardless of this protocol-fee eligibility rule.
     /// @return Unreserved settlement token available for a protocol-fee top-up.
     function getSettlementFreeAssets() external view returns (uint256);
 
@@ -311,7 +316,8 @@ interface IHousePool {
     ///      `CashArrived` increments canonical accounted assets but does not transfer tokens, so the caller must have
     ///      already delivered the matching settlement token. `AlreadyRetained` only routes ownership for value already held by
     ///      the pool. Revenue is quarantined when no tranche principal exists; recapitalization is always queued for
-    ///      explicit waterfall reconciliation.
+    ///      explicit waterfall reconciliation. `BalanceOnly` recognizes cash without adding pending claimant value:
+    ///      its ownership is already represented by the lifetime-VPI adjustment in canonical LP NAV.
     /// @param amount settlement token amount to route through claimant accounting (6 decimals)
     /// @param kind Economic source bucket for the claimant inflow
     /// @param cashMode Whether to recognize newly arrived cash or only route value already in canonical pool assets

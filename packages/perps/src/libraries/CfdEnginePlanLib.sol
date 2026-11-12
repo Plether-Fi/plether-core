@@ -13,6 +13,7 @@ import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginC
 import {OpenAccountingLib} from "@plether/perps/libraries/OpenAccountingLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
+import {VpiAccrualAccountingLib} from "@plether/perps/libraries/VpiAccrualAccountingLib.sol";
 
 /// @title CfdEnginePlanLib
 /// @notice Pure accounting and validation plans for the CfdEngine plan-to-apply architecture.
@@ -340,6 +341,18 @@ library CfdEnginePlanLib {
             return _numericOpenFailure(delta);
         }
 
+        {
+            (bool aggregateVpiFits,,) = VpiAccrualAccountingLib.tryReplace(
+                effectiveSnap.totalPositiveVpiAccruedAssets,
+                effectiveSnap.totalNegativeVpiAccruedAssets,
+                effectiveSnap.position.vpiAccrued,
+                effectiveSnap.position.vpiAccrued + openState.vpiAssets
+            );
+            if (!aggregateVpiFits) {
+                return _numericOpenFailure(delta);
+            }
+        }
+
         delta.vpiRebateReserveBeforeAssets = effectiveSnap.vpiRebateReserveAssets;
         if (delta.vpiRebateReserveBeforeAssets < _negativeVpiReserveTarget(effectiveSnap.position.vpiAccrued)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED;
@@ -445,8 +458,9 @@ library CfdEnginePlanLib {
         CfdTypes.Order memory order,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) private pure {
-        uint256 netDepthAssets =
-            PositionRiskAccountingLib.computeNetPoolDepthAssets(snap.poolAssets, snap.totalTraderClaimBalanceAssets);
+        uint256 netDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
+            snap.poolAssets, snap.totalTraderClaimBalanceAssets, snap.totalPositiveVpiAccruedAssets
+        );
         if (netDepthAssets == 0) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
             return;
@@ -690,11 +704,11 @@ library CfdEnginePlanLib {
     /// @notice Applies the effective-asset requirement when a planned open preserves protected settlement headroom.
     /// @dev The selected side copies are increased by the delta. Current assets use `snap.poolCashAssets`; the physical
     ///      asset delta reflects the fee actually credited from trade cost and affordable post-open pool cash. Trader
-    ///      claims and pending payouts are unchanged. The protected buffer is liability-scaled and rounded up. This
-    ///      helper writes the required effective-asset target into `delta` on success.
+    ///      claims and pending payouts are unchanged. Positive accrued VPI is protected alongside the liability-scaled
+    ///      buffer. This helper writes the required claims-net effective-asset target into `delta` on success.
     /// @param snap Current pool, claim, degradation, and side-liability snapshot.
     /// @param delta Partially built open delta with side and economic changes.
-    /// @return satisfied Whether projected effective assets cover liability and the configured settlement buffer.
+    /// @return satisfied Whether projected effective assets cover liability, positive accrued VPI, and settlement buffer.
     function _applyOpenSettlementBufferAfterPlan(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.OpenDelta memory delta
@@ -732,8 +746,8 @@ library CfdEnginePlanLib {
             }
             poolCashBeforeTopUp = snap.poolCashAssets - rebateAssets;
         }
-        uint256 newRevenueReserveAssets =
-            snap.poolQueuesTradingRevenue && cashDeltaBeforeTopUp > 0 ? uint256(cashDeltaBeforeTopUp) : 0;
+        uint256 positiveVpiAfterAssets =
+            _positiveVpiAfterPositionChange(snap, snap.position.vpiAccrued + delta.posVpiAccruedDelta);
         uint256 feeShortfallAssets = delta.executionFeeAssets - directlyCreditedAssets;
         uint256 topUpAssets = feeShortfallAssets == 0
             ? 0
@@ -744,7 +758,7 @@ library CfdEnginePlanLib {
                     poolCashBeforeTopUp,
                     postMaxLiability,
                     snap.totalTraderClaimBalanceAssets,
-                    newRevenueReserveAssets
+                    positiveVpiAfterAssets
                 )
             );
         if (cashDeltaBeforeTopUp < type(int256).min + int256(topUpAssets)) {
@@ -767,11 +781,14 @@ library CfdEnginePlanLib {
             }),
             snap.degradedMode
         );
-        satisfied = SolvencyAccountingLib.hasRequiredSettlementBuffer(
-            result.effectiveAssetsAfterAssets, result.maxLiabilityAfterAssets, snap.settlementBufferBps
-        );
+        satisfied = result.effectiveAssetsAfterAssets >= positiveVpiAfterAssets
+            && SolvencyAccountingLib.hasRequiredSettlementBuffer(
+                result.effectiveAssetsAfterAssets - positiveVpiAfterAssets,
+                result.maxLiabilityAfterAssets,
+                snap.settlementBufferBps
+            );
         if (satisfied) {
-            delta.requiredEffectiveAssetsAfterAssets = result.maxLiabilityAfterAssets
+            delta.requiredEffectiveAssetsAfterAssets = positiveVpiAfterAssets + result.maxLiabilityAfterAssets
                 + SolvencyAccountingLib.settlementBufferTargetAssets(
                     result.maxLiabilityAfterAssets, snap.settlementBufferBps
                 );
@@ -994,7 +1011,7 @@ library CfdEnginePlanLib {
         return delta;
     }
 
-    /// @dev Mirrors HousePool's live settlement reserve after the close side delta and cash movements preceding
+    /// @dev Mirrors HousePool's live settlement reserve after the close side/VPI deltas and cash movements preceding
     ///      the protocol-fee top-up. Fresh trader payouts and rebates retain their separate cash-priority policy.
     function _freePoolCashForProtocolFee(
         CfdEnginePlanTypes.RawSnapshot memory snap,
@@ -1005,30 +1022,48 @@ library CfdEnginePlanLib {
         uint256 maxLiabilityAssets = SolvencyAccountingLib.getMaxLiabilityAfterClose(
             snap.longSide.maxProfitAssets, snap.shortSide.maxProfitAssets, delta.side, delta.posMaxProfitReduction
         );
-        uint256 newRevenueReserveAssets;
-        if (snap.poolQueuesTradingRevenue) {
-            uint256 cashArrivedRevenueAssets = delta.pricePnlPledgeConsumedAssets + delta.actionChargeCollectedAssets
-                - delta.actionProtocolFeeCreditedAssets;
-            uint256 retainedRevenueAssets =
-                delta.actionChargeWithheldAssets - (delta.executionFeeAssets - delta.actionProtocolFeeCreditedAssets);
-            newRevenueReserveAssets = cashArrivedRevenueAssets + retainedRevenueAssets;
-        }
         return _freePoolCashAfterLiabilityReserves(
-            snap, poolCashAssets, maxLiabilityAssets, traderClaimsAssets, newRevenueReserveAssets
+            snap,
+            poolCashAssets,
+            maxLiabilityAssets,
+            traderClaimsAssets,
+            _positiveVpiAfterPositionChange(snap, snap.position.vpiAccrued - delta.posVpiAccruedReduction)
         );
     }
 
-    /// @dev Matches HousePool's settlement-free cash reserve after a projected side update and queued revenue.
+    /// @notice Replaces the current position's positive contribution for a projected cash reserve.
+    /// @dev Open planning checks aggregate replacement before reaching this helper. Closing only removes the
+    ///      proportional prior contribution, so canonical snapshots cannot increase or underflow the total.
+    function _positiveVpiAfterPositionChange(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        int256 nextVpiAccruedAssets
+    ) private pure returns (uint256) {
+        (uint256 oldPositiveAssets,) = VpiAccrualAccountingLib.contribution(snap.position.vpiAccrued);
+        (uint256 newPositiveAssets,) = VpiAccrualAccountingLib.contribution(nextVpiAccruedAssets);
+        return snap.totalPositiveVpiAccruedAssets - oldPositiveAssets + newPositiveAssets;
+    }
+
+    /// @dev Matches HousePool's settlement fee budget after a projected side and positive-VPI update.
     function _freePoolCashAfterLiabilityReserves(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 poolCashAssets,
         uint256 maxLiabilityAssets,
         uint256 traderClaimsAssets,
-        uint256 newRevenueReserveAssets
+        uint256 positiveVpiAfterAssets
     ) private pure returns (uint256) {
+        // With no claimed tranche capital, reconciliation must assign finalized equity before treasury top-ups.
+        // There is no unpaid-fee ledger: the uncollected top-up is forgone for this action.
+        if (snap.poolQueuesTradingRevenue) {
+            return 0;
+        }
+        // Deduct the new reservation separately so an exhausted budget cannot overflow a reserve sum.
+        if (poolCashAssets <= positiveVpiAfterAssets) {
+            return 0;
+        }
+        poolCashAssets -= positiveVpiAfterAssets;
         uint256 reservedAssets = maxLiabilityAssets + traderClaimsAssets
             + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, snap.settlementBufferBps)
-            + snap.poolAdditionalReservedAssets + newRevenueReserveAssets;
+            + snap.poolAdditionalReservedAssets;
         return poolCashAssets > reservedAssets ? poolCashAssets - reservedAssets : 0;
     }
 
@@ -1337,7 +1372,7 @@ library CfdEnginePlanLib {
                 preSkewAssets: preSkewAssets,
                 postSkewAssets: postSkewAssets,
                 poolDepthAssets: PositionRiskAccountingLib.computeNetPoolDepthAssets(
-                    snap.poolAssets, snap.totalTraderClaimBalanceAssets
+                    snap.poolAssets, snap.totalTraderClaimBalanceAssets, snap.totalPositiveVpiAccruedAssets
                 ),
                 vpiFactor: snap.riskParams.vpiFactor,
                 frozenCloseSpreadBps: snap.frozenCloseSpreadBps,

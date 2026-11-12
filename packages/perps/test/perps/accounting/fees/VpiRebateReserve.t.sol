@@ -64,6 +64,7 @@ contract VpiRebateReserveTest is Test {
             lastCarryTimestamp: 1,
             vpiAccrued: -10e6
         });
+        snap.totalNegativeVpiAccruedAssets = 10e6;
         snap.positionEntryCostAssetAtoms = entryCostAssetAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = ENTRY_PRICE;
@@ -174,6 +175,7 @@ contract VpiRebateReserveTest is Test {
             lastCarryTimestamp: 1,
             vpiAccrued: -10e6
         });
+        snap.totalNegativeVpiAccruedAssets = 10e6;
         snap.positionEntryCostAssetAtoms = entryCostAssetAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = ENTRY_PRICE;
@@ -275,6 +277,7 @@ contract VpiRebateReserveTest is Test {
     function test_LiquidationCancelsFundedVpiOnceAndProtectsBounty() public pure {
         CfdEnginePlanTypes.RawSnapshot memory baseline = _positionSnapshot(0, 0, 0);
         baseline.position.vpiAccrued = 0;
+        baseline.totalNegativeVpiAccruedAssets = 0;
         baseline.actionReserveAssets = 0;
         baseline.accountBuckets.settlementBalanceAssets = 21e6;
         baseline.accountBuckets.otherLockedMarginAssets = 1e6;

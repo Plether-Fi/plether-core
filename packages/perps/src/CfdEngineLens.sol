@@ -703,8 +703,8 @@ contract CfdEngineLens is ICfdEngineLens {
 
     /// @notice Reconstructs planner input from engine and clearinghouse state plus hypothetical pool depth.
     /// @dev `poolDepthAssets` populates both asset and cash fields. This lens does not populate the last-mark context
-    ///      used only by close-commitment planning. Current carry indexes use actual assets net of claims rather than
-    ///      hypothetical depth. VPI and skew subtract claims from the gross planning input.
+    ///      used only by close-commitment planning. Current carry indexes use actual assets net of claims and positive
+    ///      accrued VPI rather than hypothetical depth. VPI and skew make the same deductions from gross planning input.
     /// @param account Account whose position, buckets, carry, and claims are loaded.
     /// @param poolDepthAssets Hypothetical pool assets and cash, in 6-decimal settlement token units.
     /// @return snap Raw planner snapshot.
@@ -740,6 +740,8 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.protectedExecutionBountyAssets = clearinghouse.totalBountyReservationsAssets(account);
         snap.unsettledCarryAssets = engineContract.unsettledCarryAssets(account);
         snap.totalTraderClaimBalanceAssets = engineContract.totalTraderClaimBalanceAssets();
+        snap.totalPositiveVpiAccruedAssets = engineContract.totalPositiveVpiAccruedAssets();
+        snap.totalNegativeVpiAccruedAssets = engineContract.totalNegativeVpiAccruedAssets();
         snap.traderClaimBalanceForAccount = engineContract.traderClaimBalanceAssets(account);
         snap.degradedMode = engineContract.degradedMode();
         snap.capPrice = engineContract.CAP_PRICE();
@@ -818,7 +820,7 @@ contract CfdEngineLens is ICfdEngineLens {
     }
 
     /// @notice Projects a side's cumulative carry index through the current block timestamp.
-    /// @dev Utilization uses live assets net of trader claims, including during hypothetical-depth simulations.
+    /// @dev Utilization uses live assets net of trader claims and positive VPI, including hypothetical simulations.
     /// @param side Side whose index is projected.
     /// @return Current cumulative carry index, scaled by 1e18.
     function _currentSideCarryIndex(
@@ -832,7 +834,9 @@ contract CfdEngineLens is ICfdEngineLens {
             block.timestamp,
             engineContract.sideBorrowBaseAssets(sideIndex),
             PositionRiskAccountingLib.computeNetPoolDepthAssets(
-                engineContract.pool().totalAssets(), engineContract.totalTraderClaimBalanceAssets()
+                engineContract.pool().totalAssets(),
+                engineContract.totalTraderClaimBalanceAssets(),
+                engineContract.totalPositiveVpiAccruedAssets()
             ),
             baseCarryBps
         );
