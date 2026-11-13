@@ -205,12 +205,10 @@ contract LiquidationTest is BasePerpTest {
 
         // Ethical: Alice keeps surplus equity after the total charge and carry accrued between open and FAD liquidation.
         uint256 chBalance = clearinghouse.balanceAssets(account);
-        assertApproxEqAbs(
-            chBalance,
-            preview.settlementRetainedAssets,
-            20,
-            "Live retained equity should match preview up to execution-time carry"
-        );
+        // The preview is 203,399 seconds after opening; execution adds one authored second.
+        // $100,000 at 5% owes 32,248,699 atoms then 32,248,858 atoms, a 159-atom increment.
+        assertEq(vm.getBlockTimestamp(), FRIDAY_EVENING + 1);
+        assertEq(chBalance, preview.settlementRetainedAssets - 159, "execution collects one more second of flat carry");
     }
 
     function test_LiquidationOnPriceDrop() public {
@@ -246,7 +244,8 @@ contract LiquidationTest is BasePerpTest {
         // The dedicated liquidation reserve was fixed at $100 from the opening notional.
         // Residual = $460 - $100 = $360.
         uint256 chBalance = clearinghouse.balanceAssets(account);
-        assertApproxEqAbs(chBalance, 360_000_000, 20, "Alice retains equity net of the charge and one-second carry");
+        // $100,000 at 5% for one second is 158.548959... atoms, rounded down to 158.
+        assertEq(chBalance, 359_999_842, "Alice retains equity net of the charge and one-second flat carry");
     }
 
     function test_SolventPosition_RevertsLiquidation() public {

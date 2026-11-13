@@ -7,8 +7,8 @@ import {MixedLpTestHarness} from "../../invariant/support/MixedLpTestHarness.sol
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 
-/// @notice Historical first opens must checkpoint old aggregate borrowing before inserting new exposure.
-/// @dev All expected clocks, bases and depth come from submitted inputs in the independent mixed ledger.
+/// @notice Historical first opens must checkpoint carry clocks before inserting new exposure.
+/// @dev All expected clocks and exposures come from submitted inputs in the independent mixed ledger.
 /// No Engine index, observed position, preview, or event is used to calculate an expected value.
 contract HistoricalOpenCarryTest is BasePerpTest {
 
@@ -44,22 +44,22 @@ contract HistoricalOpenCarryTest is BasePerpTest {
             OrderRouter(address(router)),
             address(this)
         );
-        // Both directional indexes have economically meaningful old borrowing when the new actor enters.
+        // Existing exposure keeps the shared carry clock active before the new actor enters.
         handler.openOrIncrease(1, 200, 80_000_002);
         handler.openOrIncrease(2, 180, 120_000_002);
     }
 
-    function test_HistoricalLongOpenCheckpointsBothOldBorrowBasesBeforeNewExposure() public {
+    function test_HistoricalLongOpenCheckpointsGlobalIndexBeforeNewExposure() public {
         _historicalOpenAndNextCheckpoint(0);
         assertEq(engine.positionEpoch(handler.actorAt(0)), 1);
     }
 
-    function test_HistoricalShortOpenCheckpointsBothOldBorrowBasesBeforeNewExposure() public {
+    function test_HistoricalShortOpenCheckpointsGlobalIndexBeforeNewExposure() public {
         _historicalOpenAndNextCheckpoint(3);
         assertEq(engine.positionEpoch(handler.actorAt(3)), 1);
     }
 
-    function test_HistoricalReopenUsesNewGenerationWithoutRetroactiveBorrowing() public {
+    function test_HistoricalReopenUsesNewGenerationWithoutRetroactiveCarry() public {
         handler.openOrIncrease(0, 17, 80_000_002);
         handler.advanceAndCheckpoint(1 hours);
         assertGt(handler.carry().accountState(handler.actorAt(0)).totalNewCarry, 0);
@@ -81,68 +81,44 @@ contract HistoricalOpenCarryTest is BasePerpTest {
         uint256 retainedMarkTime = vm.getBlockTimestamp();
         uint256 fillTime = retainedMarkTime + 1; // executeHead advances one block and one wall-clock second.
         CarryReferenceLedger ledger = handler.carry();
-        uint256 longAtFill;
-        uint256 shortAtFill;
-        {
-            CarryReferenceLedger.Side memory oldLong = ledger.sideState(0);
-            CarryReferenceLedger.Side memory oldShort = ledger.sideState(1);
-            uint256 oldDepth = _depth();
-            longAtFill = oldLong.index + _increment(oldLong.borrowBase, oldDepth, fillTime - oldLong.timestamp);
-            shortAtFill = oldShort.index + _increment(oldShort.borrowBase, oldDepth, fillTime - oldShort.timestamp);
-            assertGt(longAtFill, oldLong.index, "old Long exposure accrues before new exposure is added");
-            assertGt(shortAtFill, oldShort.index, "old Short exposure accrues before new exposure is added");
-        }
+        uint256 oldIndex = ledger.carryIndex();
+        uint256 indexAtFill = oldIndex + _increment(fillTime - ledger.carryTimestamp());
+        assertGt(indexAtFill, oldIndex, "existing exposure accrues before new exposure is added");
 
         handler.executeHead(false);
         assertEq(handler.traderState(actor).basis, 17 * 120_000_002, "historical fill remains the entry basis");
         assertEq(engine.lastMarkPrice(), 90_000_002, "older fill cannot replace the newer cached price");
         assertEq(engine.lastMarkTime(), retainedMarkTime, "mark age and carry checkpoint time are distinct");
-        assertEq(engine.sideCarryTimestamp(0), fillTime);
-        assertEq(engine.sideCarryTimestamp(1), fillTime);
-        assertEq(engine.sideCarryIndex(0), longAtFill, "old Long basis covers only its own elapsed interval");
-        assertEq(engine.sideCarryIndex(1), shortAtFill, "old Short basis covers only its own elapsed interval");
+        assertEq(engine.carryTimestamp(), fillTime);
+        assertEq(engine.carryIndex(), indexAtFill, "the shared clock covers only elapsed holding time");
         CarryReferenceLedger.Account memory opened = ledger.accountState(handler.actorAt(actor));
-        assertEq(opened.lastIndex, actor % 2 == 0 ? longAtFill : shortAtFill);
+        assertEq(opened.lastIndex, indexAtFill);
         assertEq(opened.lastTime, fillTime);
         assertEq(opened.totalNewCarry, oldGenerationCarry, "new position owes no pre-open carry");
-        _nextCheckpoint(ledger, actor, opened, longAtFill, shortAtFill);
+        _nextCheckpoint(ledger, actor, opened, indexAtFill);
     }
 
     function _nextCheckpoint(
         CarryReferenceLedger ledger,
         uint256 actor,
         CarryReferenceLedger.Account memory opened,
-        uint256 longAtFill,
-        uint256 shortAtFill
+        uint256 indexAtFill
     ) private {
-        uint256 depthAfterOpen = _depth();
-        uint256 longAfter = longAtFill + _increment(ledger.sideState(0).borrowBase, depthAfterOpen, 1 hours);
-        uint256 shortAfter = shortAtFill + _increment(ledger.sideState(1).borrowBase, depthAfterOpen, 1 hours);
-        uint256 targetDelta = (actor % 2 == 0 ? longAfter : shortAfter) - opened.lastIndex;
-        uint256 carryForNewInterval = opened.borrowBase * targetDelta / 1e18;
+        uint256 indexAfter = indexAtFill + _increment(1 hours);
+        uint256 carryForNewInterval = opened.maxProfit * (indexAfter - opened.lastIndex) / 1e18;
         assertGt(carryForNewInterval, 0, "the next assessment has an independently measurable economic effect");
         handler.advanceAndCheckpoint(1 hours);
-        assertEq(engine.sideCarryIndex(0), longAfter, "new Long basis applies only after the actual open");
-        assertEq(engine.sideCarryIndex(1), shortAfter, "new Short basis applies only after the actual open");
+        assertEq(engine.carryIndex(), indexAfter, "new exposure starts at the actual open's shared index");
         CarryReferenceLedger.Account memory assessed = ledger.accountState(handler.actorAt(actor));
         assertEq(assessed.totalNewCarry - opened.totalNewCarry, carryForNewInterval);
         assertEq(assessed.pledge, opened.pledge - carryForNewInterval, "only post-open carry debits new pledge");
         handler.assertModel();
     }
 
-    function _depth() private view returns (uint256) {
-        uint256 cash = handler.expectedPoolCash();
-        uint256 accounted = handler.expectedAccounted();
-        return cash < accounted ? cash : accounted;
-    }
-
     function _increment(
-        uint256 borrow,
-        uint256 depth,
         uint256 elapsed
     ) private pure returns (uint256) {
-        uint256 utilization = borrow == 0 ? 0 : depth == 0 || borrow >= depth ? 10_000 : borrow * 10_000 / depth;
-        return 500 * utilization * elapsed * 1e18 / (365 days * 10_000 * 10_000);
+        return 500 * elapsed * 1e18 / (365 days * 10_000);
     }
 
 }

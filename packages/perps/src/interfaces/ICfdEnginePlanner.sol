@@ -34,20 +34,18 @@ interface ICfdEnginePlanner {
         uint256 fadRunwaySeconds
     ) external pure returns (bool fadWindow, bool oracleFrozen);
 
-    /// @notice Projects a side carry index from utilization and elapsed time.
-    /// @dev `poolAssets` is economic depth after subtracting outstanding trader claims, floored at zero.
+    /// @notice Projects a flat annual carry index from elapsed time and `baseCarryBps`.
+    /// @dev Margin, pool depth, exposure, and position direction are not inputs to the global rate index.
     function computeCurrentCarryIndex(
         uint256 storedIndex,
         uint64 previousTimestamp,
         uint256 currentTimestamp,
-        uint256 borrowBaseAssets,
-        uint256 poolAssets,
         uint256 baseCarryBps
     ) external pure returns (uint256 index);
 
     /// @notice Converts a carry-index delta into 6-decimal settlement token carry.
     function computeIndexedCarryAssets(
-        uint256 borrowBaseAssets,
+        uint256 maxProfitAssets,
         uint256 carryIndexDelta
     ) external pure returns (uint256 carryAssets);
 

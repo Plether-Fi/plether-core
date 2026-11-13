@@ -40,7 +40,7 @@ contract MixedLpTestHarness is PerpMixedAccountingHandler {
     function changeRawPoolCash(
         uint256 nextCash
     ) external {
-        engine.checkpointCarryIndexes();
+        engine.checkpointCarryIndex();
         carry.advance(vm.getBlockTimestamp());
         if (nextCash < expectedPoolCash) {
             uint256 removed = expectedPoolCash - nextCash;

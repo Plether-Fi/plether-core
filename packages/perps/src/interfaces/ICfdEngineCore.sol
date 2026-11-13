@@ -178,17 +178,26 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return Maximum supported oracle price
     function CAP_PRICE() external view returns (uint256);
 
-    /// @notice Realizes accrued carry before a clearinghouse balance mutation changes the carry basis.
+    /// @notice Realizes accrued carry before a clearinghouse balance mutation changes reachable collateral.
     /// @dev Callable only by the configured clearinghouse. Accounts without an open position are no-ops.
     /// @param account Account whose carry should be realized if a position exists
     function realizeCarryBeforeMarginChange(
         address account
     ) external;
 
-    /// @notice Permissionlessly advances both side carry indexes to the current timestamp.
-    /// @dev Uses effective HousePool depth capped by raw token custody, and does not realize carry against individual
-    ///      accounts or update the oracle mark.
-    function checkpointCarryIndexes() external;
+    /// @notice Permissionlessly advances the global carry index to the current timestamp.
+    /// @dev Accrues the flat annual rate independently of margin and pool utilization; does not collect carry
+    ///      against individual accounts or update the oracle mark.
+    function checkpointCarryIndex() external;
+
+    /// @notice Stored global carry index, scaled by 1e18.
+    function carryIndex() external view returns (uint256);
+
+    /// @notice Timestamp through which the stored global carry index has advanced.
+    function carryTimestamp() external view returns (uint64);
+
+    /// @notice Global carry index projected through the current block timestamp.
+    function currentCarryIndex() external view returns (uint256);
 
     /// @notice Returns whether recurring FAD, an override day, or the configured pre-override runway is active.
     /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after

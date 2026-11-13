@@ -131,9 +131,14 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         _fundTrader(trader, 10_000e6);
 
         _open(account, CfdTypes.Side.LONG, 100_000e18, 4000e6, 1e8);
+        uint256 openedAt = vm.getBlockTimestamp();
 
         vm.warp(1_709_985_600);
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
+        assertEq(vm.getBlockTimestamp() - openedAt, 450_000);
+        // The $100,000 maximum-profit envelope owes $5000 annually. At 450,000 elapsed
+        // seconds this is $71.347031, independently rounded down to settlement atoms.
+        uint256 expectedCarry = 71_347_031;
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 0.8e8);
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
@@ -156,6 +161,9 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
             preview.frozenSpreadAssets,
             "Previewed paid and offset spread must conserve the assessment"
         );
+        // Preview reports the fresh payout; the custody delta also includes the preceding carry debit.
+        assertEq(observed.immediatePayoutAssets + expectedCarry, preview.immediatePayoutAssets);
+        observed.immediatePayoutAssets += expectedCarry;
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
         assertEq(
             clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,

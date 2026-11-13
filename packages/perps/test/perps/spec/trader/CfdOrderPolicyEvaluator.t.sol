@@ -673,15 +673,9 @@ contract CfdOrderPolicyEvaluatorTest is Test {
                 abi.encodeWithSignature("sides(uint256)", side),
                 abi.encode(uint256(0), uint256(0), uint256(0), uint256(0))
             );
-            vm.mockCall(ENGINE, abi.encodeWithSignature("sideBorrowBaseAssets(uint256)", side), abi.encode(0));
-            vm.mockCall(ENGINE, abi.encodeWithSignature("sideCarryIndex(uint256)", side), abi.encode(0));
-            vm.mockCall(
-                ENGINE,
-                abi.encodeWithSignature("sideCarryTimestamp(uint256)", side),
-                abi.encode(uint64(block.timestamp))
-            );
         }
 
+        vm.mockCall(ENGINE, abi.encodeWithSignature("currentCarryIndex()"), abi.encode(0));
         vm.mockCall(POOL, abi.encodeWithSignature("totalAssets()"), abi.encode(2_000_000e6));
         // Funded LP principals with no pending or unassigned reserves in this bounty-accounting scenario.
         vm.mockCall(POOL, abi.encodeWithSignature("pendingRecapitalizationAssets()"), abi.encode(0));

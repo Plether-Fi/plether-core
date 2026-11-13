@@ -1161,8 +1161,8 @@ contract GasProfileTest is RecordedOrderReceipts {
         assertEq(engine.totalTraderClaimBalanceAssets(), preview.traderClaimBalanceAssets);
         assertEq(engine.positionEntryCostAssetAtoms(account), 0);
         assertEq(engine.unsettledCarryAssets(account), 0);
-        (uint256 borrowBase, uint256 index, uint64 timestamp) = engine.positionCarryState(account);
-        assertEq(borrowBase, 0);
+        (uint256 maxProfitAssets, uint256 index, uint64 timestamp) = engine.positionCarryState(account);
+        assertEq(maxProfitAssets, 0);
         assertEq(index, 0);
         assertEq(timestamp, 0);
         assertEq(clearinghouse.lockedMarginAssets(account), 0);

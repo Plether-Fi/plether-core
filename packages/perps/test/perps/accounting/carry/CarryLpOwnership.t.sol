@@ -17,8 +17,7 @@ contract CarryLpOwnershipTest is HousePoolAsyncTestBase {
     uint256 private constant VIRTUAL_SHARES = 1000;
 
     struct CarryStart {
-        uint256 borrowBase;
-        uint256 depth;
+        uint256 maxProfitExposure;
         uint256 timestamp;
         uint256 checkpointedIndex;
     }
@@ -86,7 +85,7 @@ contract CarryLpOwnershipTest is HousePoolAsyncTestBase {
         assertGe(juniorVault.balanceOf(address(juniorVault)), escrowShares);
         uint256 valueBeforeCollection = juniorVault.convertToAssets(escrowShares);
 
-        assertEq(_collectCarry(), carry, "activation must checkpoint indexes without collecting account debt");
+        assertEq(_collectCarry(), carry, "LP activation leaves historical carry debt for later account collection");
         assertEq(_juniorNav(), oldNav + DEPOSIT + carry);
         uint256 expectedValue = escrowShares * (oldNav + DEPOSIT + carry + 1) / (supply + escrowShares + VIRTUAL_SHARES);
         assertEq(juniorVault.convertToAssets(escrowShares), expectedValue);
@@ -138,7 +137,7 @@ contract CarryLpOwnershipTest is HousePoolAsyncTestBase {
         assertEq(supplyAfterFunding, expected.supply - expected.shares);
         uint256 escrowCashBefore = settlementToken.balanceOf(address(juniorVault));
         uint256 remainingNav = _juniorNav();
-        assertEq(_collectCarry(), expected.carry, "funding changes depth after checkpointing historical carry");
+        assertEq(_collectCarry(), expected.carry, "redemption funding does not collect historical carry");
         assertEq(_juniorNav(), remainingNav + expected.carry, "remaining shares own the collected revenue");
         (, uint256 claimAssetsAfterCollection) = _fundedExit(expected.requestId);
         assertEq(claimAssetsAfterCollection, expected.assetsAfter, "funded exit entitlement is fixed");
@@ -220,10 +219,8 @@ contract CarryLpOwnershipTest is HousePoolAsyncTestBase {
         _open(TRADER, CfdTypes.Side.LONG, SIZE, margin, 1e8);
         (uint256 size,,,,,,) = engine.positions(TRADER);
         assertEq(size, SIZE);
-        uint256 actualMargin = clearinghouse.getAccountAssetBuckets(TRADER).activePositionMarginAssets;
-        (start.borrowBase,,) = engine.positionCarryState(TRADER);
-        assertEq(start.borrowBase, 100_000e6 - actualMargin);
-        start.depth = pool.accountedAssets();
+        (start.maxProfitExposure,,) = engine.positionCarryState(TRADER);
+        assertEq(start.maxProfitExposure, 100_000e6, "carry basis is the full maximum-profit envelope");
         start.timestamp = vm.getBlockTimestamp();
         assertEq(_terminalLpPriceDelta(), 0);
     }
@@ -232,17 +229,13 @@ contract CarryLpOwnershipTest is HousePoolAsyncTestBase {
         CarryStart memory start
     ) private view returns (uint256) {
         // Independent integer specification; no production carry helper, preview or collected balance supplies debt.
-        return start.borrowBase * (start.checkpointedIndex + _independentIndex(start)) / 1e18;
+        return start.maxProfitExposure * (start.checkpointedIndex + _independentIndex(start)) / 1e18;
     }
 
     function _independentIndex(
         CarryStart memory start
     ) private view returns (uint256) {
-        uint256 utilizationBps = start.borrowBase * 10_000 / start.depth;
-        if (utilizationBps > 10_000) {
-            utilizationBps = 10_000;
-        }
-        return 500 * utilizationBps * 1e18 * (vm.getBlockTimestamp() - start.timestamp) / (365 days * 10_000 * 10_000);
+        return 500 * 1e18 * (vm.getBlockTimestamp() - start.timestamp) / (365 days * 10_000);
     }
 
     function _collectCarry() private returns (uint256 collected) {

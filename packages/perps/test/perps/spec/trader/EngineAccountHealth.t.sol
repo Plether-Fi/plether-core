@@ -48,7 +48,8 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         address account = carol;
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        // $5,000 funds fees/reserves, roughly half a year's $2,493 flat carry, and post-increase margin.
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 5000 * 1e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
@@ -224,14 +225,14 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
     struct CarryRateChangeModel {
         uint256 openedAt;
         uint256 finalizedAt;
-        uint256 utilizationBps;
+        uint256 initialIndex;
         uint256 oldRateIndex;
         uint256 finalIndex;
         uint256 expectedCarryAssets;
         uint256 poolBefore;
         uint256 settlementBefore;
         uint256 initialPledgeAssets;
-        uint256 initialBorrowBaseAssets;
+        uint256 initialMaxProfitAssets;
     }
 
     function test_FinalizeRiskParams_NoRetroactiveCarryEffect() public {
@@ -245,22 +246,19 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         model.poolBefore = settlementToken.balanceOf(address(pool));
         model.settlementBefore = clearinghouse.balanceAssets(carol);
         // The supplied $10,000 first pays a 4-bps execution fee and funds a 10-bps liquidation reserve.
-        // The remaining $9,860 pledge funds part of the $100,000 maximum-profit envelope.
+        // The remaining $9,860 pledge protects health but does not discount the $100,000 carry basis.
         assertEq(engine.executionFeeBps(), 4);
         model.initialPledgeAssets = 10_000e6 - 100_000e6 * 4 / 10_000 - 100_000e6 * 10 / 10_000;
-        model.initialBorrowBaseAssets = 100_000e6 - model.initialPledgeAssets;
+        model.initialMaxProfitAssets = 100_000e6;
         assertEq(clearinghouse.liquidationReserveAssets(carol), 100_000e6 * 10 / 10_000);
         assertEq(clearinghouse.pnlPledgeAssets(carol), model.initialPledgeAssets);
-        assertEq(engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.LONG)), model.initialBorrowBaseAssets);
+        assertEq(_sideMaxProfit(CfdTypes.Side.LONG), model.initialMaxProfitAssets);
         assertEq(pool.totalAssets(), model.poolBefore);
-        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), 0);
-        (uint256 borrowBase, uint256 accountIndex, uint64 accountTime) = engine.positionCarryState(carol);
-        assertEq(borrowBase, model.initialBorrowBaseAssets);
-        assertEq(accountIndex, 0);
+        model.initialIndex = engine.carryIndex();
+        (uint256 maxProfitAssets, uint256 accountIndex, uint64 accountTime) = engine.positionCarryState(carol);
+        assertEq(maxProfitAssets, model.initialMaxProfitAssets);
+        assertEq(accountIndex, model.initialIndex);
         assertEq(accountTime, model.openedAt);
-        model.utilizationBps = model.initialBorrowBaseAssets * 10_000 / model.poolBefore;
-        assertGt(model.utilizationBps, 0);
-        assertLt(model.utilizationBps, 10_000);
 
         vm.warp(model.openedAt + 1 days);
         ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
@@ -274,12 +272,16 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         // No preceding mark refresh or manual checkpoint may mask finalization's own old-rate checkpoint.
         engineAdmin.finalizeRiskConfig();
         model.oldRateIndex =
-            500 * model.utilizationBps * 1e18 * (model.finalizedAt - model.openedAt) / (365 days * 10_000 * 10_000);
+            model.initialIndex + 500 * 1e18 * (model.finalizedAt - model.openedAt) / (365 days * 10_000);
         assertGt(model.oldRateIndex, 0);
-        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), model.oldRateIndex);
-        assertEq(engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG)), model.finalizedAt);
+        assertEq(engine.carryIndex(), model.oldRateIndex);
+        assertEq(engine.carryTimestamp(), model.finalizedAt);
         (, accountIndex, accountTime) = engine.positionCarryState(carol);
-        assertEq(accountIndex, 0, "changing the rate checkpoints global indexes without collecting the position");
+        assertEq(
+            accountIndex,
+            model.initialIndex,
+            "changing the rate checkpoints global indexes without collecting the position"
+        );
         assertEq(accountTime, model.openedAt);
         assertEq(clearinghouse.balanceAssets(carol), model.settlementBefore);
         assertEq(settlementToken.balanceOf(address(pool)), model.poolBefore);
@@ -287,11 +289,10 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         vm.warp(model.finalizedAt + 1 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        model.finalIndex =
-            model.oldRateIndex + 1500 * model.utilizationBps * 1e18 * 1 days / (365 days * 10_000 * 10_000);
-        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), model.finalIndex);
+        model.finalIndex = model.oldRateIndex + uint256(1500) * 1e18 * 1 days / (365 days * 10_000);
+        assertEq(engine.carryIndex(), model.finalIndex);
         assertGt(model.finalIndex, model.oldRateIndex);
-        model.expectedCarryAssets = model.initialBorrowBaseAssets * model.finalIndex / 1e18;
+        model.expectedCarryAssets = model.initialMaxProfitAssets * (model.finalIndex - model.initialIndex) / 1e18;
         assertGt(model.expectedCarryAssets, 0);
 
         vm.prank(carol);
@@ -301,8 +302,8 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         assertEq(engine.unsettledCarryAssets(carol), 0);
         (, uint256 marginAfter,,,,,) = engine.positions(carol);
         assertEq(marginAfter, model.initialPledgeAssets - model.expectedCarryAssets + 1e6);
-        (borrowBase, accountIndex, accountTime) = engine.positionCarryState(carol);
-        assertEq(borrowBase, model.initialBorrowBaseAssets + model.expectedCarryAssets - 1e6);
+        (maxProfitAssets, accountIndex, accountTime) = engine.positionCarryState(carol);
+        assertEq(maxProfitAssets, model.initialMaxProfitAssets, "margin consumption and top-up cannot reprice carry");
         assertEq(accountIndex, model.finalIndex);
         assertEq(accountTime, block.timestamp);
     }

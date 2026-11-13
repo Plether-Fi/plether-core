@@ -14,9 +14,7 @@ contract CarryReferenceLedger {
     uint256 internal constant YEAR = 31_536_000;
 
     struct Side {
-        uint256 index;
-        uint256 borrowBase;
-        uint256 timestamp;
+        uint256 maxProfitExposure;
     }
 
     struct Account {
@@ -27,7 +25,6 @@ contract CarryReferenceLedger {
         uint256 pledge;
         uint256 free;
         uint256 protectedFunds;
-        uint256 borrowBase;
         uint256 lastIndex;
         uint256 lastTime;
         uint256 arrears;
@@ -48,6 +45,8 @@ contract CarryReferenceLedger {
 
     mapping(address => Account) private _accounts;
     Side[2] private _sides;
+    uint256 public carryIndex;
+    uint256 public carryTimestamp;
     /// @notice Gross canonical pool assets; claim liabilities never rewrite this cash/accounting quantity.
     uint256 public poolDepth;
     uint256 public totalClaims;
@@ -77,8 +76,7 @@ contract CarryReferenceLedger {
     ) {
         poolDepth = initialDepth;
         annualBps = initialAnnualBps;
-        _sides[0].timestamp = initialTime;
-        _sides[1].timestamp = initialTime;
+        carryTimestamp = initialTime;
     }
 
     function accountState(
@@ -114,8 +112,9 @@ contract CarryReferenceLedger {
         _replace(account, side, maxProfit, pledge, free, protectedFunds, true, timestamp);
     }
 
-    /// @notice Initialize a funded actor without a position. Future paid claims are free cash until an input-derived
-    ///      open transition activates it. Kept explicit because an active endpoint position can have zero max profit.
+    /// @notice Initialize a funded actor without a position, without checkpointing the market clock.
+    /// @dev Flat-account deposits do not invoke Engine carry collection. Future paid claims are free cash until an
+    ///      input-derived open transition activates the actor. An active endpoint position can have zero max profit.
     function initializeFlatAccount(
         address account,
         uint256 free,
@@ -125,23 +124,21 @@ contract CarryReferenceLedger {
         if (_accounts[account].initialized) {
             revert AlreadyInitialized();
         }
-        advance(timestamp);
         _accounts[account].initialized = true;
         _replace(account, 0, 0, 0, free, protectedFunds, false, timestamp);
     }
 
-    /// @notice Both directional clocks advance against the same old net depth and old borrow bases.
+    /// @notice One clock advances at the flat annual rate while any maximum-profit exposure is active.
     function advance(
         uint256 timestamp
     ) public {
-        for (uint8 side; side < 2; ++side) {
-            Side storage state = _sides[side];
-            if (timestamp <= state.timestamp) {
-                continue;
-            }
-            state.index += indexIncrement(state.borrowBase, economicDepth(), annualBps, timestamp - state.timestamp);
-            state.timestamp = timestamp;
+        if (timestamp <= carryTimestamp) {
+            return;
         }
+        if (_sides[0].maxProfitExposure != 0 || _sides[1].maxProfitExposure != 0) {
+            carryIndex += indexIncrement(annualBps, timestamp - carryTimestamp);
+        }
+        carryTimestamp = timestamp;
     }
 
     function changeDepth(
@@ -157,7 +154,7 @@ contract CarryReferenceLedger {
         return poolDepth > totalClaims ? poolDepth - totalClaims : 0;
     }
 
-    /// @notice Book independently derived claim creation or netting only after closing the old-depth interval.
+    /// @notice Book independently derived claim creation or netting after advancing the flat-rate clock.
     function changeClaims(
         uint256 newClaims,
         uint256 timestamp
@@ -166,9 +163,9 @@ contract CarryReferenceLedger {
         totalClaims = newClaims;
     }
 
-    /// @notice Replace input-derived effective depth for a passive cash change that does not checkpoint either side.
-    /// @dev External token shocks and terminal LP dust transfers change physical cash without advancing carry clocks.
-    ///      The next checkpoint observes this depth over its entire still-uncheckpointed interval, as specified.
+    /// @notice Replace input-derived effective depth for a passive cash change that does not checkpoint the global index.
+    /// @dev LP liquidity changes, external token shocks, and terminal dust transfers do not advance the carry clock.
+    ///      Depth changes have no effect on the flat-rate interval assessed at the next Engine checkpoint.
     function changeDepthWithoutCheckpoint(
         uint256 newDepth
     ) external {
@@ -193,8 +190,8 @@ contract CarryReferenceLedger {
         if (!state.active) {
             return result;
         }
-        uint256 endIndex = _sides[state.side].index;
-        result.newCarry = amountFromIndex(state.borrowBase, endIndex - state.lastIndex);
+        uint256 endIndex = carryIndex;
+        result.newCarry = amountFromIndex(state.maxProfit, endIndex - state.lastIndex);
         result.assessed = state.arrears + result.newCarry;
         state.lastIndex = endIndex;
         state.lastTime = timestamp;
@@ -210,12 +207,11 @@ contract CarryReferenceLedger {
         uint256 paid = result.fromMargin + result.fromFree;
         state.totalCollected += paid;
         totalCollected += paid;
-        _refreshBorrowBase(state);
         poolDepth += paid;
     }
 
     /// @notice Assess old exposure before refunding collateral, retaining all assessed carry as arrears.
-    /// @dev Source-position refunds change future borrowing basis without collecting their returned backing.
+    /// @dev Source-position refunds do not alter full max-profit exposure or collect their returned backing.
     function assessWithoutCollection(
         address account,
         uint256 timestamp
@@ -225,8 +221,8 @@ contract CarryReferenceLedger {
         if (!state.active) {
             return;
         }
-        uint256 endIndex = _sides[state.side].index;
-        uint256 newlyAssessed = amountFromIndex(state.borrowBase, endIndex - state.lastIndex);
+        uint256 endIndex = carryIndex;
+        uint256 newlyAssessed = amountFromIndex(state.maxProfit, endIndex - state.lastIndex);
         state.arrears += newlyAssessed;
         state.totalNewCarry += newlyAssessed;
         totalNewCarry += newlyAssessed;
@@ -245,12 +241,11 @@ contract CarryReferenceLedger {
         if (!state.active) {
             return result;
         }
-        Side storage side = _sides[state.side];
-        uint256 projectedIndex = side.index;
-        if (timestamp > side.timestamp) {
-            projectedIndex += indexIncrement(side.borrowBase, economicDepth(), annualBps, timestamp - side.timestamp);
+        uint256 projectedIndex = carryIndex;
+        if (timestamp > carryTimestamp && (_sides[0].maxProfitExposure != 0 || _sides[1].maxProfitExposure != 0)) {
+            projectedIndex += indexIncrement(annualBps, timestamp - carryTimestamp);
         }
-        result.newCarry = amountFromIndex(state.borrowBase, projectedIndex - state.lastIndex);
+        result.newCarry = amountFromIndex(state.maxProfit, projectedIndex - state.lastIndex);
         result.assessed = state.arrears + result.newCarry;
         result.fromMargin = _min(result.assessed, state.pledge);
         result.fromFree = _min(result.assessed - result.fromMargin, state.free);
@@ -308,7 +303,6 @@ contract CarryReferenceLedger {
         Account storage state = _accounts[account];
         if (state.active) {
             state.pledge += amount;
-            _refreshBorrowBase(state);
         } else {
             state.free += amount;
         }
@@ -326,7 +320,6 @@ contract CarryReferenceLedger {
         }
         state.free -= amount;
         state.pledge += amount;
-        _refreshBorrowBase(state);
     }
 
     /// @notice Carry-only withdrawal guard. Price-risk admission is a separate responsibility of the caller's model.
@@ -365,7 +358,7 @@ contract CarryReferenceLedger {
     }
 
     /// @notice Classify a separately modeled reservation after the caller has accounted for its checkpoint.
-    /// @dev Unlike reserveFree, this operation intentionally leaves all clocks and borrow bases untouched. It does
+    /// @dev Unlike reserveFree, this operation intentionally leaves the global clock and maximum-profit exposure untouched. It does
     ///      not imply that the production reservation skips carry: public commits checkpoint before reserving cash.
     function reserveWithoutCheckpoint(
         address account,
@@ -381,7 +374,7 @@ contract CarryReferenceLedger {
 
     /// @notice Model a hypothetical split close bounty after its commitment checkpoint.
     /// @dev Public close commitment currently requires zero bounty. This reference-only transition shows
-    ///      how moving pledge would affect borrow base without resetting accrued carry or clocks.
+    ///      that moving pledge does not affect the full max-profit basis or reset accrued carry or clocks.
     function reserveBountyWithoutCheckpoint(
         address account,
         uint256 freePart,
@@ -397,7 +390,6 @@ contract CarryReferenceLedger {
         state.free -= freePart;
         state.pledge -= pledgePart;
         state.protectedFunds += freePart + pledgePart;
-        _refreshBorrowBase(state);
     }
 
     /// @notice Release an order's independently tracked remaining reservation without collecting source carry.
@@ -418,7 +410,6 @@ contract CarryReferenceLedger {
         Account storage state = _account(account);
         _consumeProtected(state, amount);
         state.pledge += amount;
-        _refreshBorrowBase(state);
     }
 
     /// @notice Debit protected settlement paid or forfeited by an independently modeled terminal order outcome.
@@ -445,7 +436,7 @@ contract CarryReferenceLedger {
     ) external {
         Account storage state = _account(account);
         advance(timestamp);
-        if (state.active && (state.lastTime != timestamp || state.lastIndex != _sides[state.side].index)) {
+        if (state.active && (state.lastTime != timestamp || state.lastIndex != carryIndex)) {
             revert CheckpointRequired();
         }
         if (!active && state.arrears != 0) {
@@ -514,34 +505,18 @@ contract CarryReferenceLedger {
         poolDepth += physicalPaid;
     }
 
-    /// @notice Integer bps are floored before annualization; utilization saturates before any multiplication.
-    function utilization(
-        uint256 borrowBase,
-        uint256 depth
-    ) public pure returns (uint256) {
-        if (borrowBase == 0) {
-            return 0;
-        }
-        if (depth == 0 || borrowBase >= depth) {
-            return BPS;
-        }
-        return _rationalProduct(borrowBase, BPS, 1, depth);
-    }
-
     function indexIncrement(
-        uint256 borrowBase,
-        uint256 depth,
         uint256 rate,
         uint256 elapsed
     ) public pure returns (uint256) {
-        return _rationalProduct(rate * utilization(borrowBase, depth), elapsed, SCALE, YEAR * BPS * BPS);
+        return _rationalProduct(rate, elapsed, SCALE, YEAR * BPS);
     }
 
     function amountFromIndex(
-        uint256 borrowBase,
+        uint256 maxProfitExposure,
         uint256 delta
     ) public pure returns (uint256) {
-        return _rationalProduct(borrowBase, delta, 1, SCALE);
+        return _rationalProduct(maxProfitExposure, delta, 1, SCALE);
     }
 
     function _rationalProduct(
@@ -589,25 +564,18 @@ contract CarryReferenceLedger {
             revert InvalidSide();
         }
         Account storage state = _accounts[account];
-        _sides[state.side].borrowBase -= state.borrowBase;
+        if (state.active) {
+            _sides[state.side].maxProfitExposure -= state.maxProfit;
+        }
         state.side = side;
         state.active = active;
-        state.maxProfit = maxProfit;
+        state.maxProfit = active ? maxProfit : 0;
         state.pledge = pledge;
         state.free = free;
         state.protectedFunds = protectedFunds;
-        state.borrowBase = active && maxProfit > pledge ? maxProfit - pledge : 0;
-        state.lastIndex = _sides[side].index;
+        state.lastIndex = carryIndex;
         state.lastTime = timestamp;
-        _sides[side].borrowBase += state.borrowBase;
-    }
-
-    function _refreshBorrowBase(
-        Account storage state
-    ) private {
-        uint256 next = state.active && state.maxProfit > state.pledge ? state.maxProfit - state.pledge : 0;
-        _sides[state.side].borrowBase = _sides[state.side].borrowBase - state.borrowBase + next;
-        state.borrowBase = next;
+        _sides[side].maxProfitExposure += state.maxProfit;
     }
 
     function _account(

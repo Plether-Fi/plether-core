@@ -72,13 +72,10 @@ contract VpiRebateReserveTest is Test {
             maxProfitAssets: maxProfitAssets,
             openInterest: size,
             entryNotional: entryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
-            totalMargin: marginAssets,
-            borrowBaseAssets: 0,
-            carryIndex: 0
+            totalMargin: marginAssets
         });
-        snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitAssets: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseAssets: 0, carryIndex: 0
-        });
+        snap.shortSide =
+            CfdEnginePlanTypes.SideSnapshot({maxProfitAssets: 0, openInterest: 0, entryNotional: 0, totalMargin: 0});
         snap.poolAssets = 1_000_000e6;
         snap.poolCashAssets = 1_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
@@ -182,9 +179,7 @@ contract VpiRebateReserveTest is Test {
             maxProfitAssets: maxProfitAssets,
             openInterest: size,
             entryNotional: entryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
-            totalMargin: marginAssets,
-            borrowBaseAssets: 0,
-            carryIndex: 0
+            totalMargin: marginAssets
         });
         snap.poolAssets = 1_000_000e6;
         snap.poolCashAssets = 1_000_000e6;

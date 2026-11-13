@@ -65,9 +65,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         uint64 lastUpdateTime;
         /// @notice Unix timestamp of the last position carry checkpoint.
         uint64 lastCarryTimestamp;
-        /// @notice Carry basis `max(maxProfitAssets - activeMarginAssets, 0)`, in 6-decimal settlement token units.
-        uint256 borrowBaseAssets;
-        /// @notice Side carry index stored at the last position carry checkpoint, scaled by 1e18.
+        /// @notice Global carry index stored at the last position carry checkpoint, scaled by 1e18.
         uint256 lastCarryIndex;
         /// @notice Lifetime signed VPI balance in 6-decimal settlement token units; positive is a charge and negative is a rebate.
         int256 vpiAccrued;
@@ -108,12 +106,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     uint256 public lastMarkPrice;
     /// @notice Oracle publish timestamp associated with `lastMarkPrice`, in Unix seconds.
     uint64 public lastMarkTime;
-    /// @notice Aggregate carry borrow base by side index (`0` LONG; `1` SHORT), in 6-decimal settlement token units.
-    uint256[2] public sideBorrowBaseAssets;
-    /// @notice Cumulative utilization-adjusted carry multiplier by side index (`0` LONG; `1` SHORT), scaled by 1e18.
-    uint256[2] public sideCarryIndex;
-    /// @notice Wall-clock Unix timestamp through which each side carry index (`0` LONG; `1` SHORT) has been advanced.
-    uint64[2] public sideCarryTimestamp;
+    /// @notice Global cumulative flat annual carry multiplier, scaled by 1e18.
+    uint256 public carryIndex;
+    /// @notice Wall-clock Unix timestamp through which the global carry index has advanced.
+    uint64 public carryTimestamp;
 
     /// @notice Account carry checkpointed but not yet physically collected, in 6-decimal settlement token units.
     mapping(address => uint256) public unsettledCarryAssets;
@@ -495,7 +491,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     /// @notice Adds isolated margin to an existing open position without changing size.
     /// @dev The caller must equal `account`. Collectible accrued carry is realized first and any uncovered amount
     ///      remains unsettled; then clearinghouse free settlement is locked as active position margin and aggregate
-    ///      side margin and borrow-base accounting are refreshed. A zero amount reverts with `CfdEngine__ZeroAmount`.
+    ///      side margin accounting is refreshed; the full maximum-profit carry basis is unchanged. A zero amount
+    ///      reverts with `CfdEngine__ZeroAmount`.
     /// @param account Position owner and required caller.
     /// @param amount Nonzero amount to move from free settlement into position margin, in 6-decimal settlement token units.
     function addMargin(
@@ -517,10 +514,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         _realizeCarryFromSettlement(account, pos);
 
-        uint256 marginBefore = _positionMarginBucketAssets(account);
         clearinghouse.lockPositionMargin(account, amount);
         _sideState(pos.side).totalMargin += amount;
-        _syncPositionBorrowBaseToMargin(pos, marginBefore + amount);
         pos.lastUpdateTime = uint64(block.timestamp);
         pos.lastCarryTimestamp = uint64(block.timestamp);
         _endTerminalCurveMutation(account, expectedOldHash);
@@ -551,10 +546,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Settles the caller's trader claim balance into the clearinghouse.
     /// @dev The caller must equal `account`. Settlement is all-or-nothing and is available only when HousePool cash
-    ///      covers all outstanding trader claims. Side carry indexes and any open-position indexed carry are
-    ///      checkpointed before the pool payout and clearinghouse credit change their respective carry bases. Available
+    ///      covers all outstanding trader claims. The global carry index and any open-position indexed carry are
+    ///      checkpointed before the pool payout and clearinghouse credit change collateral balances. Available
     ///      margin and free settlement pay carry first, retaining arrears. The incoming claim payment is not collected
-    ///      in this call. When it becomes PnL pledge, aggregate side margin and borrow-base accounting are refreshed.
+    ///      in this call. When it becomes PnL pledge, aggregate side margin accounting is refreshed; the full
+    ///      maximum-profit carry basis is unchanged.
     /// @param account Claim beneficiary and required caller.
     function settleTraderClaim(
         address account
@@ -563,7 +559,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             revert CfdEngine__NotAccountOwner();
         }
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
-        _advanceAllCarryIndexes(block.timestamp);
+        _advanceCarryIndex(block.timestamp);
         StoredPosition storage pos = _positions[account];
         if (pos.lots > 0) {
             _realizeCarryFromSettlement(account, pos);
@@ -579,7 +575,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         if (pos.lots > 0) {
             uint256 marginAfter = _positionMarginBucketAssets(account);
             _syncTotalSideMargin(pos.side, marginBefore, marginAfter);
-            _syncPositionBorrowBaseToMargin(pos, marginAfter);
         }
 
         traderClaimBalanceAssets[account] -= claimAmountAssets;
@@ -604,7 +599,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         bytes4 selector = ICfdEngineSettlementSidecar.reserveCloseOrderExecutionBounty.selector;
         bytes4 invalidResult = ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector;
         // Reuse one fixed buffer for the two-word call and six-word response. Do not return from assembly:
-        // borrow/terminal synchronization and the nonReentrant epilogue must still run.
+        // terminal synchronization and the nonReentrant epilogue must still run.
         assembly ("memory-safe") {
             effects := mload(0x40)
             mstore(effects, selector)
@@ -620,7 +615,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             }
             mstore(0x40, add(effects, 192))
         }
-        _syncPositionBorrowBase(account, _positions[account]);
         _endTerminalCurveMutation(account, expectedOldHash);
     }
 
@@ -638,7 +632,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         if (address(pool) == address(0)) {
             revert CfdEngine__InvalidPool();
         }
-        _advanceAllCarryIndexes(block.timestamp);
+        _advanceCarryIndex(block.timestamp);
         uint256 balanceBefore = settlementToken.balanceOf(address(pool));
         settlementToken.safeTransferFrom(msg.sender, address(pool), amountAssets);
         uint256 balanceAfter = settlementToken.balanceOf(address(pool));
@@ -667,7 +661,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     }
 
     /// @notice Applies finalized risk parameters from the timelocked engine admin.
-    /// @dev Callable only by `admin`, which is responsible for validation and timelock enforcement. Carry indexes are
+    /// @dev Callable only by `admin`, which is responsible for validation and timelock enforcement. The carry index is
     ///      advanced before the carry-rate parameter can change.
     /// @param config Validated configuration: VPI/skew fields use 1e18 scaling, the minimum bounty uses 6-decimal
     ///               settlement token units, and margin, carry, bounty, execution-fee, spread, and buffer rates use basis points.
@@ -675,7 +669,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         ICfdEngineAdminHost.EngineRiskConfig calldata config
     ) external onlyAdmin {
         // CfdEngineAdmin is the sole caller and validates the staged configuration before finalization.
-        _advanceAllCarryIndexes(block.timestamp);
+        _advanceCarryIndex(block.timestamp);
         _activeRiskParams = config.riskParams;
         executionFeeBps = config.executionFeeBps;
         frozenCloseSpreadBps = config.frozenCloseSpreadBps;
@@ -800,43 +794,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         selected.totalMargin = selected.totalMargin - marginBefore + marginAfter;
     }
 
-    function _positionBorrowBase(
-        uint256 maxProfitAssets,
-        uint256 marginAssets
-    ) internal pure returns (uint256 borrowBaseAssets) {
-        assembly ("memory-safe") {
-            if gt(maxProfitAssets, marginAssets) { borrowBaseAssets := sub(maxProfitAssets, marginAssets) }
-        }
-    }
-
-    function _applySideBorrowBaseDelta(
-        CfdTypes.Side side,
-        uint256 oldBorrowBaseAssets,
-        uint256 newBorrowBaseAssets
-    ) internal {
-        uint256 index = _sideIndex(side);
-        sideBorrowBaseAssets[index] = sideBorrowBaseAssets[index] - oldBorrowBaseAssets + newBorrowBaseAssets;
-    }
-
-    function _syncPositionBorrowBase(
-        address account,
-        StoredPosition storage pos
-    ) internal {
-        _syncPositionBorrowBaseToMargin(pos, _positionMarginBucketAssets(account));
-    }
-
-    function _syncPositionBorrowBaseToMargin(
-        StoredPosition storage pos,
-        uint256 marginAssets
-    ) internal {
-        if (pos.lots == 0) {
-            return;
-        }
-        uint256 newBorrowBaseAssets = _positionBorrowBase(pos.maxProfitAssets, marginAssets);
-        _applySideBorrowBaseDelta(pos.side, pos.borrowBaseAssets, newBorrowBaseAssets);
-        pos.borrowBaseAssets = newBorrowBaseAssets;
-    }
-
     function _payOrRecordTraderClaim(
         address account,
         uint256 amountAssets,
@@ -849,7 +806,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         if (_canPayFreshPoolPayout(amountAssets)) {
             _payTraderClaim(account, amountAssets, positionRemainsOpen);
         } else {
-            _advanceAllCarryIndexes(block.timestamp);
+            _advanceCarryIndex(block.timestamp);
             traderClaimBalanceAssets[account] += amountAssets;
             totalTraderClaimBalanceAssets += amountAssets;
             emit TraderClaimRecorded(account, amountAssets);
@@ -957,14 +914,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Returns the carry-index basis stored for an account's current position.
     /// @param account Account to inspect.
-    /// @return borrowBaseAssets Position borrow base used for carry utilization, in 6-decimal settlement token units.
-    /// @return lastCarryIndex Side carry index stored at the position's last checkpoint, scaled by 1e18.
+    /// @return maxProfitAssets Full maximum-profit carry exposure, in 6-decimal settlement token units.
+    /// @return lastCarryIndex Global carry index stored at the position's last checkpoint, scaled by 1e18.
     /// @return lastCarryTimestamp Unix timestamp of the position's last carry checkpoint.
     function positionCarryState(
         address account
-    ) external view returns (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp) {
+    ) external view returns (uint256 maxProfitAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp) {
         StoredPosition storage pos = _positions[account];
-        return (pos.borrowBaseAssets, pos.lastCarryIndex, pos.lastCarryTimestamp);
+        return (pos.maxProfitAssets, pos.lastCarryIndex, pos.lastCarryTimestamp);
     }
 
     /// @notice Returns the engine's active position-risk, VPI, carry, and liquidation-charge parameters.
@@ -1081,7 +1038,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         uint256 newMarkPrice,
         uint64 newMarkTime
     ) internal {
-        _advanceAllCarryIndexes(block.timestamp);
+        _advanceCarryIndex(block.timestamp);
         if (newMarkTime < lastMarkTime) {
             return;
         }
@@ -1092,53 +1049,40 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         lastMarkTime = newMarkTime;
     }
 
-    /// @notice Permissionlessly advances both side carry indexes to the current wall-clock timestamp.
-    /// @dev Accrual uses each side's current borrow base, current HousePool effective assets
-    ///      (`min(raw balance, accountedAssets)`) net of outstanding trader claims, and `baseCarryBps`.
-    ///      This does not checkpoint a position, collect carry from an account, or update the oracle mark.
-    function checkpointCarryIndexes() external {
-        _advanceAllCarryIndexes(block.timestamp);
+    /// @notice Permissionlessly checkpoints the global carry index at the current wall-clock timestamp.
+    /// @dev Does not collect account carry or update the oracle mark. With no maximum-profit exposure the clock
+    ///      advances without growing the index, so future positions never inherit an inactive interval.
+    function checkpointCarryIndex() external {
+        _advanceCarryIndex(block.timestamp);
     }
 
-    function _advanceAllCarryIndexes(
+    function _advanceCarryIndex(
         uint256 timestampNow
     ) internal {
-        if (timestampNow <= sideCarryTimestamp[0] && timestampNow <= sideCarryTimestamp[1]) {
+        if (timestampNow <= carryTimestamp) {
             return;
         }
-        // Neither side update moves pool cash; both indexes must use the same pool observation.
-        uint256 poolAssets = _poolAssetsForCarry();
-        for (uint256 index; index < 2; ++index) {
-            if (timestampNow > sideCarryTimestamp[index]) {
-                sideCarryIndex[index] = _currentSideCarryIndex(CfdTypes.Side(index), timestampNow, poolAssets);
-                sideCarryTimestamp[index] = uint64(timestampNow);
-            }
-        }
+        carryIndex = _currentCarryIndex(timestampNow);
+        carryTimestamp = uint64(timestampNow);
     }
 
-    function _currentSideCarryIndex(
-        CfdTypes.Side side,
-        uint256 timestampNow,
-        uint256 poolAssets
-    ) internal view returns (uint256 index) {
-        uint256 sideIndex = _sideIndex(side);
-        index = PositionRiskAccountingLib.computeCurrentCarryIndex(
-            sideCarryIndex[sideIndex],
-            sideCarryTimestamp[sideIndex],
-            timestampNow,
-            sideBorrowBaseAssets[sideIndex],
-            poolAssets,
-            _activeRiskParams.baseCarryBps
+    /// @notice Returns the global carry index projected through the current block timestamp.
+    function currentCarryIndex() external view returns (uint256) {
+        return _currentCarryIndex(block.timestamp);
+    }
+
+    function _currentCarryIndex(
+        uint256 timestampNow
+    ) internal view returns (uint256) {
+        if (sides[0].maxProfitAssets == 0 && sides[1].maxProfitAssets == 0) {
+            return carryIndex;
+        }
+        return PositionRiskAccountingLib.computeCurrentCarryIndex(
+            carryIndex, carryTimestamp, timestampNow, _activeRiskParams.baseCarryBps
         );
     }
 
-    function _poolAssetsForCarry() internal view returns (uint256) {
-        return address(pool) == address(0)
-            ? 0
-            : PositionRiskAccountingLib.computeNetPoolDepthAssets(pool.totalAssets(), totalTraderClaimBalanceAssets);
-    }
-
-    /// @notice Advances side carry indexes and caches a strictly newer planned mark from the settlement sidecar.
+    /// @notice Advances the global carry index and caches a strictly newer planned mark from the settlement sidecar.
     /// @dev Callable only by the configured settlement sidecar. A mark whose publish time is not strictly newer is a
     ///      no-op. The sidecar is trusted to supply a planner-capped price; this hook does not clamp it independently.
     /// @param newMarkPrice Planner-approved mark price, with 8 decimals.
@@ -1234,11 +1178,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         _payOrRecordTraderClaim(account, amountAssets, positionRemainsOpen);
     }
 
-    /// @notice Writes the post-settlement position state and refreshes side borrow-base accounting.
-    /// @dev Callable only by the configured settlement sidecar. Removes the prior side borrow-base contribution,
-    ///      copies engine-owned fields, recomputes borrow base from the current clearinghouse position-margin bucket,
-    ///      stores the current side carry index, and adds the new side contribution. Margin itself is not stored here,
-    ///      and deletion uses `settlementDeletePosition`.
+    /// @notice Writes post-settlement position state and checkpoints its global carry basis.
+    /// @dev Callable only by the configured settlement sidecar. Maximum-profit exposure is the sole carry basis.
+    ///      Margin is held by the clearinghouse; deletion uses `settlementDeletePosition`.
     /// @param account Position account to overwrite.
     /// @param position New engine-owned position fields supplied by the settlement sidecar.
     function settlementWritePosition(
@@ -1246,14 +1188,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         CfdEngineSettlementTypes.PositionState calldata position
     ) external onlySettlementSidecar {
         StoredPosition storage pos = _positions[account];
-        if (pos.lots > 0 || pos.borrowBaseAssets > 0) {
-            _applySideBorrowBaseDelta(pos.side, pos.borrowBaseAssets, 0);
-        }
         if (pos.lots == 0) {
             ++positionEpoch[account];
         }
-        uint256 newBorrowBaseAssets =
-            _positionBorrowBase(position.maxProfitAssets, _positionMarginBucketAssets(account));
         uint256 lots = CfdMath.sizeToLots(position.size);
         if (lots == 0 || lots > type(uint112).max || position.entryCostAssetAtoms > type(uint144).max) {
             revert CfdEngine__InvalidRiskParams();
@@ -1264,22 +1201,16 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         pos.side = position.side;
         pos.lastUpdateTime = position.lastUpdateTime;
         pos.lastCarryTimestamp = position.lastCarryTimestamp;
-        pos.borrowBaseAssets = newBorrowBaseAssets;
-        pos.lastCarryIndex = _currentSideCarryIndex(position.side, block.timestamp, _poolAssetsForCarry());
+        pos.lastCarryIndex = _currentCarryIndex(block.timestamp);
         pos.vpiAccrued = position.vpiAccrued;
-        _applySideBorrowBaseDelta(position.side, 0, newBorrowBaseAssets);
     }
 
-    /// @notice Deletes an account position and removes its side borrow-base contribution.
+    /// @notice Deletes an account position and its carry checkpoint.
     /// @dev Callable only by the configured settlement sidecar. Clearinghouse margin must be settled separately.
     /// @param account Position account to delete.
     function settlementDeletePosition(
         address account
     ) external onlySettlementSidecar {
-        StoredPosition storage pos = _positions[account];
-        if (pos.lots > 0 || pos.borrowBaseAssets > 0) {
-            _applySideBorrowBaseDelta(pos.side, pos.borrowBaseAssets, 0);
-        }
         delete _positions[account];
     }
 
@@ -1293,8 +1224,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             _realizeCarryFromSettlement(delta.account, pos);
         } else {
             // A historical fill can predate the cached mark, so settlement may leave mark state untouched.
-            // Checkpoint old aggregate borrowing before the new position changes side bases or pool depth.
-            _advanceAllCarryIndexes(block.timestamp);
+            // Checkpoint elapsed carry before installing the new maximum-profit exposure.
+            _advanceCarryIndex(block.timestamp);
         }
         CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
         settlementSidecar.executeOpen(delta, currentPosition, publishTime);
@@ -1388,17 +1319,17 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         pos.vpiAccrued = stored.vpiAccrued;
     }
 
-    /// @dev Indexes have just advanced, so checkpoint against the stored index without recomputing utilization.
+    /// @dev Advances the global clock once, then assesses the position against its stored index checkpoint.
     function _checkpointPositionCarry(
         address account,
         StoredPosition storage pos
     ) private returns (uint256 carryDue) {
-        _advanceAllCarryIndexes(block.timestamp);
-        uint256 endIndex = sideCarryIndex[_sideIndex(pos.side)];
+        _advanceCarryIndex(block.timestamp);
+        uint256 endIndex = carryIndex;
         carryDue = unsettledCarryAssets[account];
-        // Side indexes are monotonic; a flat position has zero borrow base.
+        // The global index is monotonic; a flat position has zero maximum-profit exposure.
         carryDue += PositionRiskAccountingLib.computeIndexedCarryAssets(
-            pos.borrowBaseAssets, endIndex - pos.lastCarryIndex
+            pos.maxProfitAssets, endIndex - pos.lastCarryIndex
         );
         pos.lastCarryTimestamp = uint64(block.timestamp);
         pos.lastCarryIndex = endIndex;
@@ -1425,7 +1356,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
         if (marginConsumedAssets > 0) {
             _sideState(pos.side).totalMargin -= marginConsumedAssets;
-            _syncPositionBorrowBaseToMargin(pos, marginBefore - marginConsumedAssets);
         }
 
         if (realizedCarryAssets > 0) {
@@ -1456,7 +1386,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             return;
         }
 
-        _advanceAllCarryIndexes(block.timestamp);
+        _advanceCarryIndex(block.timestamp);
         traderClaimBalanceAssets[account] -= amountAssets;
         totalTraderClaimBalanceAssets -= amountAssets;
     }

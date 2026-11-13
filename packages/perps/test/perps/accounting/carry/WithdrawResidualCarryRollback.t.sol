@@ -13,11 +13,11 @@ import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginC
 contract WithdrawResidualCarryRollbackTest is BasePerpTest {
 
     struct CarryState {
-        uint256 borrowBaseAssets;
+        uint256 maxProfitAssets;
         uint256 lastCarryIndex;
         uint64 lastCarryTimestamp;
-        uint256 sideCarryIndex;
-        uint64 sideCarryTimestamp;
+        uint256 carryIndex;
+        uint64 carryTimestamp;
         uint256 unsettledCarryAssets;
     }
 
@@ -134,15 +134,14 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
 
         {
             vm.warp(block.timestamp + 10 * 365 days);
-            engine.checkpointCarryIndexes();
-            uint64 refreshedAt = engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG));
+            engine.checkpointCarryIndex();
+            uint64 refreshedAt = engine.carryTimestamp();
             vm.prank(address(router));
             engine.updateMarkPrice(riskPrice, refreshedAt);
             assertEq(engine.lastMarkPrice(), riskPrice, "setup must keep the intended live mark");
             assertEq(engine.lastMarkTime(), refreshedAt, "setup must refresh mark time after carry accrual");
         }
 
-        CfdTypes.Side positionSide;
         {
             uint256 pendingCarryAssets = _expectedIndexedCarryAssets(account);
             (
@@ -155,7 +154,6 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
             assertGt(carryConsumption.freeSettlementConsumedAssets, 0, "setup must provisionally debit free settlement");
             assertGt(carryConsumption.uncoveredAssets, 0, "setup must leave uncovered carry after realization");
 
-            positionSide = _position(account).side;
             uint256 reachablePriceCollateralAssets =
                 afterCarry.activePositionMarginAssets + engine.traderClaimBalanceAssets(account);
             uint256 requiredMarginBps = _withdrawRequiredMarginBps();
@@ -166,7 +164,7 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
             );
         }
 
-        RollbackState memory beforeState = _rollbackState(account, positionSide);
+        RollbackState memory beforeState = _rollbackState(account);
 
         // The clearinghouse checkpoints carry, provisionally debits settlement, and enters the Engine guard.
         // The uncovered carry must reject here; all earlier mutations belong to the same transaction and roll back.
@@ -174,7 +172,7 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         vm.prank(account);
         clearinghouse.withdraw(account, 1e6);
 
-        _assertCarryStateEq(_carryState(account, positionSide), beforeState.carry);
+        _assertCarryStateEq(_carryState(account), beforeState.carry);
         _assertCustodyStateEq(_custodyState(account, account), beforeState.custody);
         assertEq(
             terminalNavBook.curveHashOf(account), beforeState.terminalCurveHash, "terminal curve hash must roll back"
@@ -209,10 +207,9 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
     }
 
     function _rollbackState(
-        address account,
-        CfdTypes.Side side
+        address account
     ) internal view returns (RollbackState memory state) {
-        state.carry = _carryState(account, side);
+        state.carry = _carryState(account);
         state.custody = _custodyState(account, account);
         state.terminalCurveHash = terminalNavBook.curveHashOf(account);
         state.terminalBook = terminalNavBook.bookState();
@@ -237,13 +234,11 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
     }
 
     function _carryState(
-        address account,
-        CfdTypes.Side side
+        address account
     ) internal view returns (CarryState memory state) {
-        (state.borrowBaseAssets, state.lastCarryIndex, state.lastCarryTimestamp) = engine.positionCarryState(account);
-        uint256 sideIndex = uint256(side);
-        state.sideCarryIndex = engine.sideCarryIndex(sideIndex);
-        state.sideCarryTimestamp = engine.sideCarryTimestamp(sideIndex);
+        (state.maxProfitAssets, state.lastCarryIndex, state.lastCarryTimestamp) = engine.positionCarryState(account);
+        state.carryIndex = engine.carryIndex();
+        state.carryTimestamp = engine.carryTimestamp();
         state.unsettledCarryAssets = engine.unsettledCarryAssets(account);
     }
 
@@ -270,11 +265,11 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         CarryState memory actual,
         CarryState memory expected
     ) internal pure {
-        assertEq(actual.borrowBaseAssets, expected.borrowBaseAssets, "position borrow base must roll back");
+        assertEq(actual.maxProfitAssets, expected.maxProfitAssets, "maximum-profit exposure must roll back");
         assertEq(actual.lastCarryIndex, expected.lastCarryIndex, "position carry index must roll back");
         assertEq(actual.lastCarryTimestamp, expected.lastCarryTimestamp, "position carry timestamp must roll back");
-        assertEq(actual.sideCarryIndex, expected.sideCarryIndex, "side carry index must roll back");
-        assertEq(actual.sideCarryTimestamp, expected.sideCarryTimestamp, "side carry timestamp must roll back");
+        assertEq(actual.carryIndex, expected.carryIndex, "global carry index must roll back");
+        assertEq(actual.carryTimestamp, expected.carryTimestamp, "global carry timestamp must roll back");
         assertEq(actual.unsettledCarryAssets, expected.unsettledCarryAssets, "unsettled carry must roll back");
     }
 

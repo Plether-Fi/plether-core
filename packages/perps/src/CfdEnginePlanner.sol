@@ -40,21 +40,19 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         uint256 storedIndex,
         uint64 previousTimestamp,
         uint256 currentTimestamp,
-        uint256 borrowBaseAssets,
-        uint256 poolAssets,
         uint256 baseCarryBps
     ) external pure returns (uint256 index) {
         return PositionRiskAccountingLib.computeCurrentCarryIndex(
-            storedIndex, previousTimestamp, currentTimestamp, borrowBaseAssets, poolAssets, baseCarryBps
+            storedIndex, previousTimestamp, currentTimestamp, baseCarryBps
         );
     }
 
     /// @inheritdoc ICfdEnginePlanner
     function computeIndexedCarryAssets(
-        uint256 borrowBaseAssets,
+        uint256 maxProfitAssets,
         uint256 carryIndexDelta
     ) external pure returns (uint256 carryAssets) {
-        return PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, carryIndexDelta);
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(maxProfitAssets, carryIndexDelta);
     }
 
     /// @inheritdoc ICfdEnginePlanner

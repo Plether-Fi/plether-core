@@ -74,7 +74,12 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
             assessed.close.safeMarginReleaseAssets,
             assessed.close.actionChargeFromReleasedMarginAssets + assessed.close.netReleasedMarginAssets
         );
+        uint256 quotedAt = vm.getBlockTimestamp();
         bytes[] memory update = _mockPythUpdateData(PRICE);
+        assertEq(vm.getBlockTimestamp() - quotedAt, 1, "the authored execution tick advances one second");
+        assessed = policyEvaluator.assessCommittedOrder(address(engine), id, executor, PRICE);
+        // The carry-enabled subclass uses 10% annually on the full $10,000 envelope: one second costs 31 atoms.
+        assertEq(assessed.carryAssets, _riskParams().baseCarryBps == 0 ? 0 : 31);
         vm.recordLogs();
         vm.prank(executor);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);

@@ -7,7 +7,7 @@ date: "28 July 2026"
 version: "1.0"
 status: "Technical white paper"
 code_revision: "06d0ab451ad9bb42f4e9869fc94b0eeb1e88efe5"
-documentation_updated: "26 October 2026"
+documentation_updated: "13 November 2026"
 implementation_revision: "b431a689cb29482a1500d23ccd96abfef8c4cb90"
 ---
 
@@ -27,8 +27,8 @@ domain makes every position's price-PnL finite and permits a constant-time,
 common-mark liability envelope computed from two side aggregates. Plether
 combines that envelope with a USDG balance sheet that distinguishes physical
 cash from mathematical claims, a senior/junior LP capital stack, delayed
-historical-oracle execution, utilization-priced LP capital, and fail-soft
-terminal settlement. LP entry and exit use one exact signed mark-to-close
+historical-oracle execution, flat annual carry on full maximum-profit exposure,
+and fail-soft terminal settlement. LP entry and exit use one exact signed mark-to-close
 adjustment: an Engine-maintained terminal book aggregates account-local price
 PnL from whole lots, exact entry cost, and collectible collateral caps.
 
@@ -50,7 +50,8 @@ ECB daily reference-rate observations from January 2016 through June 2026. A
 companion Python model preserves selected accounting kernels from the original
 publication revision, executes its historical numerical settlement vectors, and
 produces the reported empirical results from a deterministic scenario replay.
-Those research kernels predate the current exact account-capped settlement.
+Those research kernels predate the current exact account-capped settlement and
+flat maximum-profit carry policy.
 
 ### Status and scope
 
@@ -61,7 +62,10 @@ been maintained and was checked against implementation revision
 version, and `code_revision` identify the original research snapshot; they do
 not imply that the historical Python model implements every current mechanism.
 The implementation and [accounting specification](ACCOUNTING_SPEC.md) remain
-normative where this paper differs. The paper is a market-design and accounting
+normative where this paper differs. Section 5.2 and the associated current-policy
+references were updated on 13 November 2026 for flat carry on full maximum-profit
+exposure; the frozen empirical model and its historical outputs retain their
+original utilization-priced policy. The paper is a market-design and accounting
 analysis, not investment advice, a promise of solvency, or a security audit.
 
 For a first pass, read Sections 2–3 for the payoff and balance sheet, Sections
@@ -243,8 +247,8 @@ Short positive PnL is zero and \(G(0)=L_{\mathrm{LONG}}\). At \(p=C\),
 Long positive PnL is zero and \(G(C)=L_{\mathrm{SHORT}}\). Therefore the
 maximum is the larger endpoint value. \(\square\)
 
-The engine stores side open interest, entry notional, margin, borrow base, and
-maximum-profit totals. A new position adds either \(q e\) or \(q(C-e)\) to one
+The engine stores side open interest, entry notional, margin, and maximum-profit
+totals, plus one global carry index and timestamp. A new position adds either \(q e\) or \(q(C-e)\) to one
 side. Computing \(L_{\max}\) therefore requires two aggregate reads and one
 comparison, independent of account count.
 
@@ -312,7 +316,7 @@ trader can owe value that has not entered HousePool custody.
 | Raw assets | Literal USDG token balance at HousePool | USDG `balanceOf(HousePool)` |
 | Accounted assets | USDG admitted into protocol economics | HousePool accounting ledger |
 | Physical assets \(A\) | Conservative backing `min(raw, accounted)` | `HousePool.totalAssets()` |
-| Economic pool depth \(D\) | Physical assets net of existing trader claims, floored at zero | Carry, VPI, and skew-limit calculations |
+| Economic pool depth \(D\) | Physical assets net of existing trader claims, floored at zero | VPI and skew-limit calculations |
 | Excess assets | Unsolicited raw surplus not yet assigned | `raw - accounted`, floored at zero |
 | Free trader settlement | Unlocked account cash, subject to withdrawal and health checks | MarginClearinghouse account |
 | Position margin / PnL pledge | Trader cash pledged to the live position's price losses; `pnlPledgeAssets` is this same bucket | Clearinghouse position bucket plus Engine accounting |
@@ -815,8 +819,8 @@ fee."
 
 ### 5.1 Virtual price impact
 
-Carry, VPI, and the hard skew limit share an economic depth that excludes
-cash already owed to traders:
+VPI and the hard skew limit share an economic depth that excludes cash already
+owed to traders. Flat carry is independent of this depth:
 
 \[
 D=\max(A-K,0).
@@ -905,68 +909,75 @@ $20,000 rebate before the lifetime clamp.
 
 ### 5.2 LP-capital carry
 
-For position \(i\), Plether defines an LP-backed borrow base
+Each position pays flat simple annual carry on its full maximum-profit exposure:
 
 \[
-b_i=\max(L_i^{\max}-m_i,0),
+\mathrm{carry}_i=L_i^{\max}\,r\,\frac{\Delta t}{365\text{ days}}.
 \]
 
-where \(m_i\) is active position margin and \(L_i^{\max}\) is that position's
-maximum price profit. Subtracting margin is a **carry-pricing convention**: it
-prices only the portion of maximum-profit exposure governance treats as rented
-LP capacity. Trader-owned position margin remains in MarginClearinghouse and
-does not reduce HousePool's endpoint reserve. A fully margined position may
-therefore have zero borrow base while its full maximum price profit remains in
-the HousePool liability aggregate.
+Here \(L_i^{\max}\) is the position's maximum possible price profit and
+\(r=\mathrm{baseCarryBps}/10{,}000\). The release rate is 500 basis points,
+or 5% annually. The existing governed annual-rate parameter remains configurable;
+a finalized rate change checkpoints elapsed time at the old rate before applying
+the new rate prospectively. Carry is simple, not compounded.
 
-For side \(s\), utilization uses the same claim-net economic depth \(D\):
+Posted margin, pool utilization, physical assets, outstanding trader claims,
+and the opposite side's positions do not discount this charge. Fully and
+over-margined positions pay the same carry as otherwise identical positions
+with less margin. Both sides pay independently; their charges are not allocated
+from one shared endpoint-reserve bill. Risk admission and LP withdrawals still
+reserve the larger directional payout envelope plus the settlement buffer.
+That solvency constraint does not change the carry rate.
+
+The Engine uses the position's canonical `maxProfitAssets` directly. There is
+no separate carry-exposure cache. Both directions share one global `carryIndex`
+and `carryTimestamp`; the side snapshots contain no duplicated carry fields.
+For elapsed seconds \(\Delta t\), while either side has positive maximum-profit
+exposure, the global index increment is
 
 \[
-B_s=\sum_{i\in s}b_i,
+\Delta I
+=\left\lfloor
+\frac{\mathrm{baseCarryBps}\,10^{18}\,\Delta t}
+{365\text{ days}\,10{,}000}
+\right\rfloor,
 \qquad
-u_s=\min(B_s/D,1)
-\quad\text{when}\quad D>0.
-\]
-
-If \(B_s=0\), utilization is zero. If \(B_s>0\) while \(D=0\),
-utilization is defined as 100% rather than dividing by zero.
-
-If \(r_{\max}\) is the annual simple carry rate at full utilization, the side
-rate is
-
-\[
-r_s=r_{\max}u_s.
-\]
-
-Each position accrues against a cumulative side index:
-
-\[
 \mathrm{carry}_i
-=b_i\Delta I_s.
+=\left\lfloor\frac{L_i^{\max}\Delta I}{10^{18}}\right\rfloor.
 \]
 
-The implementation performs the utilization and time multiplication in one
-combined integer expression to retain more precision than first rounding a
-displayed basis-point rate.
+`currentCarryIndex()` projects this one clock. When both directional
+maximum-profit totals are zero, the index stays fixed and its timestamp still
+checkpoints. A zero maximum-profit endpoint position accrues zero carry.
+Exposure increases and reductions assess the old interval before installing
+the new maximum profit. A new or reopened position stores the current global
+index and never pays for time before execution, including historical-price fills
+or opening on a direction that was idle while the other side traded.
 
-This is capital rent, not a transfer from the heavier side to the lighter side.
-Both Long and Short can pay simultaneously because both can reserve LP balance
-sheet capacity simultaneously. Carry continues during stale and frozen oracle
-windows. Health checks project collection from active position margin first,
-then eligible free settlement. The margin debit reduces the PnL pledge used by
-exact price-risk health and increases the borrow base; even fully collected
-carry can therefore cause a maintenance breach. Any remainder after both
-sources are exhausted independently blocks withdrawal and makes the account
-liquidatable. Same-account claims cannot fund carry. Before a mutation changes
-the borrow basis or rate denominator, elapsed carry is checkpointed, collected
-cash is recorded as LP revenue, and the remaining amount is retained in the
-account-specific `unsettledCarryAssets` bucket. Only that unpaid remainder enters
-a later terminal action-charge calculation.
+This cleanup changes the Engine storage layout and planner/view interfaces.
+It requires a fresh compatible deployment; existing deployed state and earlier
+carry getters cannot be reused as an upgrade path.
+
+This is a trader-to-pool payment, not a transfer between the heavier and lighter
+sides. Carry continues during stale and frozen oracle windows. Health checks
+project collection from active position margin first, then eligible free
+settlement. Collection reduces the PnL pledge but leaves the maximum-profit
+carry basis unchanged; even fully collected carry can cause a maintenance
+breach. Any remainder after both sources are exhausted independently blocks
+withdrawal and makes the account liquidatable. Same-account claims cannot
+fund carry. Checkpoints collect available cash as LP revenue and retain an
+uncovered remainder in the account-specific `unsettledCarryAssets` bucket.
+Only that unpaid remainder enters a later terminal action-charge calculation.
 
 Carry ownership is determined at collection. Indexed pending carry and retained
-arrears are trader debt, excluded from LP NAV until cash reaches the pool. LP
-liquidity and claim changes checkpoint side indexes to preserve the old
-utilization rate; they do not sweep individual accounts. Carry collected before a deposit activates
+arrears are trader debt, excluded from LP NAV until cash reaches the pool.
+HousePool liquidity accounting does not checkpoint the global index or sweep
+individual accounts. Excess accounting, seed initialization, and LP epoch settlement
+leave its stored index and timestamp unchanged while projected carry continues to
+accrue. Engine-owned claim and collateral hooks retain their checkpoint behavior.
+An atomic settlement can separately synchronize an oracle mark through the Engine;
+that operation keeps its existing carry checkpoint behavior.
+Carry collected before a deposit activates
 is reflected in its share price. Shares activated before collection participate
 even while in deposit-claim escrow. Redemption shares participate until funding
 burns them; their funded cash claim has a fixed entitlement afterward.
@@ -978,22 +989,22 @@ barrier. Retained arrears follow the same policy when eventually collected.
 The net NAV increase can be smaller than the collected cash: collecting pledged
 margin reduces any price-loss receivable capped by that pledge. For a solvent
 pool at a fixed mark with no other flows, aggregate tranche NAV changes by
-collected carry plus the change in terminal LP-side price PnL. The same collateral cannot contribute
-both its old marked receivable and the newly collected revenue.
+collected carry plus the change in terminal LP-side price PnL. The same collateral
+cannot contribute both its old marked receivable and newly collected revenue.
 
-**Example.** Let physical pool assets be $100 million with no trader claims,
-so \(D=\$100\) million, and let the full-utilization base rate be 5%:
+**Example.** At a flat 5% annual rate, unchanged maximum-profit exposures produce:
 
-| Side | Max-profit envelope | Position margin | Borrow base | Utilization | Effective annual rate | One-year carry |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Long | $40.0m | $4.0m | $36.0m | 36.0% | 1.800% | $648,000 |
-| Short | $25.0m | $2.5m | $22.5m | 22.5% | 1.125% | $253,125 |
+| Side | Max-profit envelope | Position margin | Carry basis | Annual rate | One-year carry |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Long | $40.0m | $4.0m | $40.0m | 5% | $2,000,000 |
+| Short | $25.0m | $2.5m | $25.0m | 5% | $1,250,000 |
 
-The example produces $901,125 of total one-year carry before changes in
-positions, pool depth, or collection. The historical model's rate-view helper
-displays the Short rate as 112 basis points after flooring,
-while both its combined index calculation and the current Solidity index
-calculation preserve the 112.5-basis-point economic product.
+Total one-year carry is $3,250,000 before exposure/rate changes or collection
+rounding. Changing only position margin, pool depth, or the other side does not
+change an existing position's charge. Collection timing and available trader
+cash can change when and how much of that accrued amount becomes LP revenue.
+The historical research model in Section 8 retains the earlier utilization-priced
+carry policy; its published revenue results are not estimates for this formula.
 
 ---
 
@@ -1449,7 +1460,8 @@ the first available fix of each month, after a 20-observation signal history:
    endpoint solvency and the reference 40% final-skew wall pass;
 6. each position posts 1.5% margin, has a 1% maintenance requirement, and is
    scheduled to close after 63 calendar days;
-7. carry accrues at 5% annually at full side utilization;
+7. historical carry accrues at 5% annually at full side utilization, rather
+   than the current flat 5% on full maximum-profit exposure;
 8. the senior coupon checkpoints at the 8% reference rate over each observed
    calendar interval;
 9. voluntary closes pay the 4-basis-point treasury execution fee; and
@@ -1465,10 +1477,11 @@ interleaved; the model checks final skew but does not simulate transaction-level
 intermediate skew, VPI, or queue execution.
 
 The replay's reference endpoint-solvency predicate predates and does not model
-the production settlement buffer. It also uses gross physical cash for carry
-utilization rather than the current claim-net depth \(D\). Its cohort-admission
-and carry results remain historical research outputs rather than exact
-reproductions of the current implementation.
+the production settlement buffer. It also retains the historical margin-subtracted,
+utilization-priced carry policy and uses gross physical cash for that utilization.
+Current Solidity charges flat annual carry on full maximum-profit exposure. Its
+cohort-admission and carry results remain historical research outputs rather than
+exact reproductions of the current implementation.
 
 The historical model labels uncollectible price loss as uncovered-loss telemetry.
 That label is not current Terminal NAV V2 settlement semantics: production caps
@@ -1712,9 +1725,9 @@ market, recurring funding is primarily a transfer between opposing trader
 cohorts and balanced open interest is the natural clearing condition. Plether
 does not require one side's notional to fund the other. The HousePool can
 underwrite net directional open interest up to its bounded-credit admission
-limits, and carry prices each side's use of LP-backed capacity independently.
-Consequently both sides can pay carry at once: their rents compensate pool
-capital rather than forcing a zero-sum funding transfer between Long and Short.
+limits. Both sides independently pay flat carry on their full maximum-profit
+exposure, compensating pool capital rather than forcing a zero-sum funding
+transfer between Long and Short.
 
 ---
 
@@ -1778,8 +1791,9 @@ Plether mitigates but does not eliminate these risks through:
   constant depth, but changing depth and lifetime clamps alter path outcomes;
   partial closes prorate the lifetime accrual used to clamp a fresh curve delta,
   and liquidation computes no fresh VPI.
-- **Carry governance:** the rate curve is parameterized, not a market-clearing
-  theorem.
+- **Carry governance:** the flat annual rate is governed, not market-clearing.
+  It does not fall when positions are over-margined or pool liquidity increases;
+  predictable accrual does not guarantee collection or a stable level of demand.
 - **Claims:** claims preserve exit-state liveness, not immediate redemption.
 - **Price-loss tails:** loss above the account's precommitted collectible cap is
   written off rather than converted into LP equity, deficit, trader claim, or
@@ -1910,7 +1924,7 @@ when normal settlement assumptions fail.
 | \(A\) | Canonical physical HousePool assets |
 | \(B_{\mathrm{settle}}\) | Liability-scaled settlement headroom, atom-ceiled from \(L_{\max}\) |
 | \(C\) | Immutable protocol price cap |
-| \(D\) | Economic pool depth \(\max(A-K,0)\), used by carry, VPI, and the skew limit |
+| \(D\) | Economic pool depth \(\max(A-K,0)\), used by VPI and the skew limit |
 | \(E_i\) | Exact entry cost of account \(i\), in USDG atoms |
 | \(e_i\) | Position entry price |
 | \(G(p)\) | Gross positive price PnL at common mark \(p\) |
@@ -1929,7 +1943,7 @@ when normal settlement assumptions fail.
 | \(q_i\) | Position size |
 | \(S\) | Absolute directional skew, or senior principal where stated |
 | \(T\) | Signed terminal LP equity before the tranche waterfall |
-| \(u_s\) | LP borrow-base utilization for side \(s\) |
+| \(u_s\) | Historical research-model borrow-base utilization for side \(s\), not a current carry input |
 | \(w_j\) | Basket component weight |
 | \(\delta_i(p)\) | Account \(i\)'s signed LP-side terminal price delta |
 | \(\Delta_{\mathrm{terminal}}(p)\) | Exact aggregate signed terminal price delta |

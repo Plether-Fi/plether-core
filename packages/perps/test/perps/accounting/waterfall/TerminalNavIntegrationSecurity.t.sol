@@ -163,9 +163,8 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         (uint256 remainingSize,, uint256 remainingEntryPrice, uint256 remainingMaxProfitAssets,,,) =
             engine.positions(TRADER);
         uint256 livePledgeAssets = clearinghouse.pnlPledgeAssets(TRADER);
-        uint256 expectedBorrowBaseAssets =
-            remainingMaxProfitAssets > livePledgeAssets ? remainingMaxProfitAssets - livePledgeAssets : 0;
-        (uint256 positionBorrowBaseAssets,,) = engine.positionCarryState(TRADER);
+        uint256 expectedMaxProfitAssets = remainingMaxProfitAssets;
+        (uint256 positionMaxProfitAssets,,) = engine.positionCarryState(TRADER);
 
         assertGt(settledClaimAssets, 0, "setup must service a nonzero deferred claim");
         assertEq(remainingSize, HALF_POSITION_SIZE, "claim settlement must leave the live position open");
@@ -176,14 +175,14 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
             "side total margin must include claim value converted into live PnL pledge"
         );
         assertEq(
-            positionBorrowBaseAssets,
-            expectedBorrowBaseAssets,
-            "position borrow base must be recomputed from the increased live PnL pledge"
+            positionMaxProfitAssets,
+            expectedMaxProfitAssets,
+            "claim-funded margin must not discount the full maximum-profit carry basis"
         );
         assertEq(
-            engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.LONG)),
-            expectedBorrowBaseAssets,
-            "single-position side borrow base must match its recomputed position borrow base"
+            _sideMaxProfit(CfdTypes.Side.LONG),
+            expectedMaxProfitAssets,
+            "single-position side maximum profit must remain the canonical exposure"
         );
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(TRADER, remainingSize, MARK_PRICE);
@@ -193,7 +192,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         (uint256 sizeAfter,,,,,,) = engine.positions(TRADER);
         assertEq(sizeAfter, 0, "full close after claim settlement must remove the position");
         assertEq(_sideTotalMargin(CfdTypes.Side.LONG), 0, "full close must clear side margin");
-        assertEq(engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.LONG)), 0, "full close must clear side borrow base");
+        assertEq(_sideMaxProfit(CfdTypes.Side.LONG), 0, "full close must clear side maximum-profit exposure");
     }
 
     function test_LiveClaimSettlementSynchronizesCachesAndAllowsLiquidation() public {
@@ -214,9 +213,9 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         assertEq(sizeAfter, 0, "liquidation after claim settlement must remove the position");
         assertEq(_sideTotalMargin(CfdTypes.Side.LONG), 0, "liquidation must clear side margin without underflow");
         assertEq(
-            engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.LONG)),
+            _sideMaxProfit(CfdTypes.Side.LONG),
             0,
-            "liquidation must clear side borrow base without underflow"
+            "liquidation must clear side maximum-profit exposure without underflow"
         );
     }
 
@@ -488,10 +487,10 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     function _carryStateHash(
         address account
     ) private view returns (bytes32 stateHash) {
-        (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp) =
+        (uint256 maxProfitAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp) =
             engine.positionCarryState(account);
         stateHash = keccak256(
-            abi.encode(borrowBaseAssets, lastCarryIndex, lastCarryTimestamp, engine.unsettledCarryAssets(account))
+            abi.encode(maxProfitAssets, lastCarryIndex, lastCarryTimestamp, engine.unsettledCarryAssets(account))
         );
     }
 
@@ -500,12 +499,8 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
             abi.encode(
                 _sideState(CfdTypes.Side.LONG),
                 _sideState(CfdTypes.Side.SHORT),
-                engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.LONG)),
-                engine.sideBorrowBaseAssets(uint256(CfdTypes.Side.SHORT)),
-                engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)),
-                engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)),
-                engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG)),
-                engine.sideCarryTimestamp(uint256(CfdTypes.Side.SHORT))
+                engine.carryIndex(),
+                engine.carryTimestamp()
             )
         );
     }

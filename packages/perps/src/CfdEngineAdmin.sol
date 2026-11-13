@@ -126,7 +126,7 @@ contract CfdEngineAdmin is Ownable2Step {
 
     /// @notice Applies the pending risk configuration once its timelock has elapsed.
     /// @dev Callable only by the current owner. Clears the local proposal before calling the engine, but an engine revert
-    ///      rolls back those clears and the event. The canonical engine checkpoints both side carry indexes under the old
+    ///      rolls back those clears and the event. The canonical engine checkpoints the global carry index under the old
     ///      carry rate before replacing risk parameters, execution fee, frozen-close spread, and settlement buffer.
     function finalizeRiskConfig() external onlyOwner {
         _requireTimelockReady(riskConfigActivationTime);

@@ -288,8 +288,8 @@ contract PerpsPoolEpochForkTest is BasePerpTest {
         bytes memory state = abi.encode(
             engine.lastMarkPrice(),
             engine.lastMarkTime(),
-            engine.sideCarryIndex(0),
-            engine.sideCarryIndex(1),
+            engine.carryIndex(),
+            engine.carryTimestamp(),
             pool.lastReconcileTime(),
             pool.lastSeniorCouponCheckpointTime(),
             pool.seniorPrincipal(),

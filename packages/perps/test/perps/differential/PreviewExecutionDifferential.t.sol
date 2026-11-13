@@ -561,7 +561,12 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
 
+        uint256 beforeOracleTime = vm.getBlockTimestamp();
         _ensureLaterOracleTime();
+        assertEq(vm.getBlockTimestamp() - beforeOracleTime, 1);
+        // A $10,000 maximum-profit envelope at 5% annually accrues exactly 15 atoms in one second.
+        // The preview's price seizure excludes this preceding carry debit.
+        uint256 expectedCarry = 15;
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         vm.assume(preview.liquidatable);
 
@@ -581,8 +586,13 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(
             bucketsAfter.settlementBalanceAssets,
             bucketsBefore.settlementBalanceAssets + preview.immediatePayoutAssets - preview.seizedCollateralAssets
-                - preview.keeperBountyAssets - preview.protocolLiquidationFeeAssets,
-            "Liquidation preview should match the live settlement-balance mutation"
+                - preview.keeperBountyAssets - preview.protocolLiquidationFeeAssets - expectedCarry,
+            "Liquidation preview and independently known carry reconcile the complete settlement mutation"
+        );
+        assertEq(
+            bucketsAfter.settlementBalanceAssets,
+            preview.settlementRetainedAssets,
+            "Liquidation preview must exactly predict final settlement after carry and terminal charges"
         );
         assertEq(bucketsAfter.activePositionMarginAssets, 0, "Liquidation should clear the live position-margin bucket");
         assertEq(

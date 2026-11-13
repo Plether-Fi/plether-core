@@ -16,7 +16,6 @@ import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
 import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderSettlementFloorLib} from "@plether/perps/libraries/OrderSettlementFloorLib.sol";
-import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @dev Engine read surface used by account-action methods externalized from the bytecode-constrained host.
 interface ICfdEngineAccountActionView {
@@ -44,23 +43,13 @@ interface ICfdEngineAccountActionView {
 
     function positionCarryState(
         address account
-    ) external view returns (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
+    ) external view returns (uint256 maxProfitAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
 
     function sides(
         uint256 index
     ) external view returns (uint256 maxProfitAssets, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
 
-    function sideBorrowBaseAssets(
-        uint256 index
-    ) external view returns (uint256);
-
-    function sideCarryIndex(
-        uint256 index
-    ) external view returns (uint256);
-
-    function sideCarryTimestamp(
-        uint256 index
-    ) external view returns (uint64);
+    function currentCarryIndex() external view returns (uint256);
 
     function planner() external view returns (address);
 
@@ -179,33 +168,30 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             snap.position.vpiAccrued
         ) = engine.positions(account);
         snap.positionEntryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
-        (snap.positionBorrowBaseAssets, snap.positionLastCarryIndex, snap.position.lastCarryTimestamp) =
-            engine.positionCarryState(account);
+        (, snap.positionLastCarryIndex, snap.position.lastCarryTimestamp) = engine.positionCarryState(account);
+        snap.carryIndex = engine.currentCarryIndex();
         snap.account = account;
         snap.currentTimestamp = block.timestamp;
         snap.lastMarkPrice = engine.lastMarkPrice();
         snap.lastMarkTime = engine.lastMarkTime();
         snap.riskParams = _loadRiskParams(engine);
 
-        // Historical carry uses live assets net of claims, even for commitment or hypothetical trade depth.
+        // Cash and reserve observations support settlement and admission; flat carry does not depend on depth.
         IHousePool pool = IHousePool(host.pool());
         snap.poolCashAssets = pool.totalAssets();
         snap.poolAdditionalReservedAssets =
             pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
         snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
         snap.totalTraderClaimBalanceAssets = engine.totalTraderClaimBalanceAssets();
-        uint256 carryDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
-            snap.poolCashAssets, snap.totalTraderClaimBalanceAssets
-        );
         // Exact enum dispatch selects the exposed side; this is not a target token-balance equality.
         // slither-disable-next-line incorrect-equality
         if (!closeCommit || snap.position.side == CfdTypes.Side.LONG) {
-            snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG, carryDepthAssets, snap.riskParams.baseCarryBps);
+            snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG);
         }
-        // The other exact enum value selects the SHORT borrow-base snapshot.
+        // The other exact enum value selects the SHORT aggregate snapshot.
         // slither-disable-next-line incorrect-equality
         if (!closeCommit || snap.position.side == CfdTypes.Side.SHORT) {
-            snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT, carryDepthAssets, snap.riskParams.baseCarryBps);
+            snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT);
         }
         snap.poolAssets = closeCommit ? snap.poolCashAssets : poolDepthAssets;
 
@@ -233,22 +219,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
     function _sideSnapshot(
         ICfdEngineAccountActionView engine,
-        CfdTypes.Side side,
-        uint256 poolDepthAssets,
-        uint256 baseCarryBps
+        CfdTypes.Side side
     ) private view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
         uint256 index = uint256(side);
         (snap.maxProfitAssets, snap.openInterest, snap.entryNotional, snap.totalMargin) = engine.sides(index);
-        snap.borrowBaseAssets = engine.sideBorrowBaseAssets(index);
-        snap.carryIndex = ICfdEnginePlanner(engine.planner())
-            .computeCurrentCarryIndex(
-                engine.sideCarryIndex(index),
-                engine.sideCarryTimestamp(index),
-                block.timestamp,
-                snap.borrowBaseAssets,
-                poolDepthAssets,
-                baseCarryBps
-            );
     }
 
     /// @inheritdoc ICfdEngineSettlementSidecar

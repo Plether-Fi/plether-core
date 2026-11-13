@@ -150,7 +150,10 @@ contract PriceAndActionReservePriorityCloseTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
+        // $100,000 maximum profit owes $5000 after one year. The $6000 opening margin leaves
+        // $5860 pledge after its $40 execution fee and $100 liquidation reserve, so carry leaves
+        // $860 pledge. Its released surplus covers the close fee without touching the queued order.
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 6000e6, 1e8);
 
         uint64 queuedOrderId = router.nextCommitId();
         uint256 committedMarginAssets = _freeSettlementAssets(account) - 200_000;
@@ -164,7 +167,9 @@ contract PriceAndActionReservePriorityCloseTest is BasePerpTest {
         assertTrue(preview.valid, "Full close should collect charges from released surplus");
         assertEq(preview.realizedPnlAssets, 0, "Setup must isolate action charges from price PnL");
 
+        uint256 poolBefore = pool.totalAssets();
         _close(account, CfdTypes.Side.LONG, 100_000e18, 1e8);
+        assertEq(pool.totalAssets() - poolBefore, 5000e6, "one-year flat carry on full maximum profit");
 
         assertEq(
             router.getAccountReservations(account).committedMarginAssets,

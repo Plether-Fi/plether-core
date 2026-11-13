@@ -125,8 +125,12 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         uint256 beforeDepth = pool.totalAssets();
         uint256 beforeMargin = clearinghouse.pnlPledgeAssets(account);
         ICfdEngineLens.MaxOpenQuote memory quote = _quote(account, CfdTypes.Side.LONG, 20_000e6, 1e8);
-        assertEq(quote.maxSizeDelta, 1000e18, "old pre-carry cap was only 800 tokens");
-        assertGt(quote.preview.pendingCarryAssets, 0);
+        // $400,000 maximum profit at 5% annually over 28 days owes $1534.246575.
+        // Adding that cash to $1,002,000 depth raises the 40% skew cap from $400,800
+        // to $401,413.698630, leaving 1400 tokens of additional whole-lot capacity.
+        assertEq(beforeDepth, 1_002_000e6);
+        assertEq(quote.preview.pendingCarryAssets, 1_534_246_575);
+        assertEq(quote.maxSizeDelta, 1400e18, "post-carry skew capacity rounds down to whole lots");
         assertEq(pool.totalAssets(), beforeDepth, "view must not collect carry");
         assertEq(clearinghouse.pnlPledgeAssets(account), beforeMargin);
         _open(account, CfdTypes.Side.LONG, quote.maxSizeDelta, 20_000e6, 1e8);

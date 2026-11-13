@@ -34,8 +34,8 @@ contract CarryProjectionTest is BasePerpTest {
     function _claim(
         uint256 amount
     ) private {
-        // Synthetic claims must retain the production ordering: close the old net-depth carry interval first.
-        engine.checkpointCarryIndexes();
+        // Synthetic claims must retain the production ordering: preserve the same carry checkpoint ordering as claim creation.
+        engine.checkpointCarryIndex();
         bytes32 oldHash = terminalNavBook.curveHashOf(ACCOUNT);
         stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(ACCOUNT)
             .checked_write(amount);
@@ -171,7 +171,8 @@ contract CarryProjectionTest is BasePerpTest {
         assertEq(keccak256(abi.encode(projected.accountBuckets)), keccak256(abi.encode(actual.accountBuckets)));
         assertEq(keccak256(abi.encode(projected.lockedBuckets)), keccak256(abi.encode(actual.lockedBuckets)));
         assertEq(projected.position.margin, actual.position.margin);
-        assertEq(projected.positionBorrowBaseAssets, actual.positionBorrowBaseAssets);
+        assertEq(projected.position.maxProfitAssets, actual.position.maxProfitAssets);
+        assertEq(projected.carryIndex, actual.carryIndex);
         if (pending > 0) {
             assertEq(projected.positionLastCarryIndex, actual.positionLastCarryIndex);
         }
@@ -197,7 +198,7 @@ contract CarryProjectionTest is BasePerpTest {
         uint256 hypotheticalDepth = liveDepth * 2;
         CfdEnginePlanTypes.RawSnapshot memory live = _snapshot(liveDepth);
         CfdEnginePlanTypes.RawSnapshot memory hypothetical = _snapshot(hypotheticalDepth);
-        // Lens simulation supplies hypothetical cash as well as depth. Carry indexes still use the live pool.
+        // Simulated cash and depth change trade settlement capacity, never the flat carry index.
         hypothetical.poolCashAssets = hypotheticalDepth;
         uint256 expectedCarry = _expectedIndexedCarryAssets(ACCOUNT);
         assertGt(expectedCarry, 0);
