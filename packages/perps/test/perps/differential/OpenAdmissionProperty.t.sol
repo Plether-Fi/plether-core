@@ -136,18 +136,11 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
     }
 
     function _carryState() private view returns (bytes32) {
-        (uint256 borrowBase, uint256 lastIndex, uint64 lastTimestamp) = engine.positionCarryState(ACCOUNT);
-        return keccak256(
-            abi.encode(
-                borrowBase,
-                lastIndex,
-                lastTimestamp,
-                engine.sideCarryIndex(0),
-                engine.sideCarryIndex(1),
-                engine.sideCarryTimestamp(0),
-                engine.sideCarryTimestamp(1)
-            )
-        );
+        (uint256 maxProfitAssets, uint256 lastIndex, uint64 lastTimestamp) = engine.positionCarryState(ACCOUNT);
+        return
+            keccak256(
+                abi.encode(maxProfitAssets, lastIndex, lastTimestamp, engine.carryIndex(), engine.carryTimestamp())
+            );
     }
 
     function _admissionState() private view returns (bytes32) {

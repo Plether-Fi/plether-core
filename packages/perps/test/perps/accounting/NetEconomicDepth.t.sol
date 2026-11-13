@@ -25,134 +25,121 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _setRiskParams(params);
     }
 
-    // Independent arithmetic: do not use the production utilization or carry-index helper as an oracle.
-    function _indexIncrement(
-        uint256 borrowBase,
-        uint256 depth,
-        uint256 elapsed
-    ) private pure returns (uint256) {
-        if (borrowBase == 0) {
-            return 0;
-        }
-        uint256 utilization = depth == 0 ? 10_000 : borrowBase * 10_000 / depth;
-        if (utilization > 10_000) {
-            utilization = 10_000;
-        }
-        return 500 * utilization * 1e18 * elapsed / (365 days * 10_000 * 10_000);
-    }
+    // Independently calculated 5% annual index for one day; margin, claims and pool depth cannot reprice it.
+    uint256 private constant ONE_DAY_INDEX = 136_986_301_369_863;
 
-    function _openBorrower() private {
+    function _openTraderPosition() private {
         _fundTrader(TRADER, 100_000e6);
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
     }
 
-    function test_SeededFlatClaimPaymentPreservesCarryDepth() public {
-        _openBorrower();
+    function test_SeededFlatClaimPaymentPreservesFlatCarry() public {
+        _openTraderPosition();
         uint256 assets = pool.totalAssets();
         uint256 claim = 400_000e6;
         _seedAuthenticatedTraderClaim(CLAIMANT, claim);
-        uint256 borrowBase = engine.sideBorrowBaseAssets(0);
-        uint256 startIndex = engine.sideCarryIndex(0);
-        uint256 increment = _indexIncrement(borrowBase, assets - claim, 1 days);
+        uint256 maxProfitAssets = _sideMaxProfit(CfdTypes.Side.LONG);
+        uint256 startIndex = engine.carryIndex();
+        uint256 increment = ONE_DAY_INDEX;
         uint256 start = vm.getBlockTimestamp();
 
         vm.warp(start + 1 days);
         vm.prank(CLAIMANT);
         engine.settleTraderClaim(CLAIMANT);
-        assertEq(engine.sideCarryIndex(0), startIndex + increment, "pre-payment carry uses net depth");
+        assertEq(engine.carryIndex(), startIndex + increment, "claim payment preserves the flat annual rate");
         assertEq(pool.totalAssets(), assets - claim, "payment removes exactly the claim cash");
         assertEq(engine.totalTraderClaimBalanceAssets(), 0);
-        assertEq(engine.sideBorrowBaseAssets(0), borrowBase, "flat claimant cannot change borrower collateral");
+        assertEq(_sideMaxProfit(CfdTypes.Side.LONG), maxProfitAssets, "flat claimant cannot change position exposure");
 
         vm.warp(start + 2 days);
-        engine.checkpointCarryIndexes();
-        assertEq(engine.sideCarryIndex(0), startIndex + 2 * increment, "payment cannot reprice future carry");
+        engine.checkpointCarryIndex();
+        assertEq(engine.carryIndex(), startIndex + 2 * increment, "payment cannot reprice future carry");
     }
 
-    function test_SeededClaimsCloseCommitmentProjectsAndCollectsNetDepthCarry() public {
-        _openBorrower();
+    function test_SeededClaimsCloseCommitmentProjectsAndCollectsFlatCarry() public {
+        _openTraderPosition();
         uint256 assets = pool.totalAssets();
         _seedAuthenticatedTraderClaim(CLAIMANT, 400_000e6);
-        (uint256 borrowBase,,) = engine.positionCarryState(TRADER);
-        uint256 expectedCarry = borrowBase * _indexIncrement(borrowBase, assets - 400_000e6, 1 days) / 1e18;
+        (uint256 maxProfitAssets,,) = engine.positionCarryState(TRADER);
+        assertEq(maxProfitAssets, 100_000e6, "carry basis is full maximum profit despite margin and claims");
+        uint256 expectedCarry = 13_698_630;
         uint256 beforeMargin = clearinghouse.pnlPledgeAssets(TRADER);
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(address(router));
         CfdEnginePlanTypes.CloseCommitment memory effects = engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18);
-        assertEq(effects.carryCollectedAssets, expectedCarry, "commitment snapshot includes aggregate claims");
+        assertEq(effects.carryCollectedAssets, expectedCarry, "claims do not change commitment carry");
         assertEq(effects.carryOutstandingAssets, 0);
         assertEq(pool.totalAssets(), assets + expectedCarry);
         assertEq(clearinghouse.pnlPledgeAssets(TRADER), beforeMargin - expectedCarry);
     }
 
-    function test_SeededClaimsOpenPreviewProjectsNetCarryAndMatchesExecution() public {
-        _openBorrower();
+    function test_SeededClaimsOpenPreviewProjectsFlatCarryAndMatchesExecution() public {
+        _openTraderPosition();
         uint256 assets = pool.totalAssets();
         _seedAuthenticatedTraderClaim(CLAIMANT, 400_000e6);
-        (uint256 borrowBase,,) = engine.positionCarryState(TRADER);
-        uint256 expectedCarry = borrowBase * _indexIncrement(borrowBase, assets - 400_000e6, 1 days) / 1e18;
+        (uint256 maxProfitAssets,,) = engine.positionCarryState(TRADER);
+        assertEq(maxProfitAssets, 100_000e6, "carry basis is full maximum profit despite margin and claims");
+        uint256 expectedCarry = 13_698_630;
         vm.warp(vm.getBlockTimestamp() + 1 days);
         ICfdEngineTypes.OpenPreview memory preview =
             engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 1000e18, 10_000e6, 1e8);
         assertTrue(preview.valid);
-        assertEq(preview.pendingCarryAssets, expectedCarry, "preview carry uses actual cash net of claims");
+        assertEq(preview.pendingCarryAssets, expectedCarry, "preview carry is independent of claims");
         _open(TRADER, CfdTypes.Side.LONG, 1000e18, 10_000e6, 1e8);
         assertEq(clearinghouse.pnlPledgeAssets(TRADER), preview.postMarginAssets);
         assertEq(pool.totalAssets(), assets + expectedCarry + uint256(preview.vpiAssets));
     }
 
-    function test_ClaimCreationHookCheckpointsOldDepthBeforeIncreasingLiability() public {
-        _openBorrower();
+    function test_ClaimCreationHookCheckpointsFlatCarryBeforeIncreasingLiability() public {
+        _openTraderPosition();
         uint256 assets = pool.totalAssets();
-        uint256 borrowBase = engine.sideBorrowBaseAssets(0);
-        uint256 startIndex = engine.sideCarryIndex(0);
+        uint256 startIndex = engine.carryIndex();
         uint256 start = vm.getBlockTimestamp();
         vm.warp(start + 1 days);
 
         // Authorized sidecar capability test: an unavailable payout becomes a claim without transferring cash.
         vm.prank(address(engine.settlementSidecar()));
         engine.settlementRecordTraderClaim(CLAIMANT, assets + 1, false);
-        uint256 oldIncrement = _indexIncrement(borrowBase, assets, 1 days);
-        assertEq(engine.sideCarryIndex(0), startIndex + oldIncrement, "creation checkpoints the old denominator");
+        uint256 oldIncrement = ONE_DAY_INDEX;
+        assertEq(engine.carryIndex(), startIndex + oldIncrement, "creation checkpoints elapsed flat carry");
         assertEq(pool.totalAssets(), assets);
         assertEq(engine.totalTraderClaimBalanceAssets(), assets + 1);
 
         vm.warp(start + 2 days);
-        engine.checkpointCarryIndexes();
-        assertEq(engine.sideCarryIndex(0), startIndex + oldIncrement + _indexIncrement(borrowBase, 0, 1 days));
+        engine.checkpointCarryIndex();
+        assertEq(engine.carryIndex(), startIndex + oldIncrement + ONE_DAY_INDEX);
     }
 
-    function test_ClaimConsumptionHookCheckpointsOldDepthBeforeReducingLiability() public {
-        _openBorrower();
+    function test_ClaimConsumptionHookCheckpointsFlatCarryBeforeReducingLiability() public {
+        _openTraderPosition();
         uint256 assets = pool.totalAssets();
         uint256 claim = 400_000e6;
         _seedAuthenticatedTraderClaim(CLAIMANT, claim);
-        uint256 borrowBase = engine.sideBorrowBaseAssets(0);
-        uint256 startIndex = engine.sideCarryIndex(0);
+        uint256 startIndex = engine.carryIndex();
         uint256 start = vm.getBlockTimestamp();
         vm.warp(start + 1 days);
 
         // Authorized sidecar capability test of claim netting; no cash leaves the pool.
         vm.prank(address(engine.settlementSidecar()));
         engine.settlementConsumeTraderClaim(CLAIMANT, claim);
-        uint256 oldIncrement = _indexIncrement(borrowBase, assets - claim, 1 days);
-        assertEq(engine.sideCarryIndex(0), startIndex + oldIncrement, "consumption checkpoints old net depth");
+        uint256 oldIncrement = ONE_DAY_INDEX;
+        assertEq(engine.carryIndex(), startIndex + oldIncrement, "consumption checkpoints elapsed flat carry");
         assertEq(pool.totalAssets(), assets);
         vm.warp(start + 2 days);
-        engine.checkpointCarryIndexes();
-        assertEq(engine.sideCarryIndex(0), startIndex + oldIncrement + _indexIncrement(borrowBase, assets, 1 days));
+        engine.checkpointCarryIndex();
+        assertEq(engine.carryIndex(), startIndex + oldIncrement + ONE_DAY_INDEX);
     }
 
-    function testFuzz_ClaimsAtOrAboveAssetsCapCarryAndLeaveEmptySideIdle(
+    function testFuzz_ClaimsAtOrAboveAssetsDoNotChangeFlatCarry(
         bool excess
     ) public {
-        _openBorrower();
+        _openTraderPosition();
         _seedAuthenticatedTraderClaim(CLAIMANT, pool.totalAssets() + (excess ? 1e6 : 0));
-        uint256 startIndex = engine.sideCarryIndex(0);
+        uint256 startIndex = engine.carryIndex();
         vm.warp(vm.getBlockTimestamp() + 1 days);
-        engine.checkpointCarryIndexes();
-        assertEq(engine.sideCarryIndex(0), startIndex + _indexIncrement(engine.sideBorrowBaseAssets(0), 0, 1 days));
-        assertEq(engine.sideCarryIndex(1), 0, "zero borrowing never accrues carry, even at zero net depth");
+        engine.checkpointCarryIndex();
+        assertEq(engine.carryIndex(), startIndex + ONE_DAY_INDEX);
+        assertEq(_sideMaxProfit(CfdTypes.Side.SHORT), 0, "an empty side has no exposure to charge");
     }
 
     function test_SeededClaimPaymentPreservesOpenVpiAndMaximumSkewQuote() public {
@@ -236,7 +223,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
     function testFuzz_ZeroNetDepthCloseDoesNotPayFreshVpiRebate(
         bool excess
     ) public {
-        _openBorrower();
+        _openTraderPosition();
         _seedAuthenticatedTraderClaim(CLAIMANT, pool.totalAssets() + (excess ? 1e6 : 0));
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(TRADER, 100_000e18, 1e8);
         assertTrue(preview.valid, "protective close remains available");
@@ -270,8 +257,8 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         assertEq(clearinghouse.vpiRebateReserveAssets(TRADER), 0);
     }
 
-    function test_CashShortfallCloseCreatesClaimAndRefillPaymentPreservesCarryDepth() public {
-        _openBorrower();
+    function test_CashShortfallCloseCreatesClaimAndRefillPaymentPreservesFlatCarry() public {
+        _openTraderPosition();
         _fundTrader(CLAIMANT, 20_000e6);
         _open(CLAIMANT, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
         // Model a physical cash shortfall; claim creation and payment themselves use production entrypoints.
@@ -285,19 +272,19 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _assertTerminalCurveAuthenticated(CLAIMANT);
         settlementToken.mint(address(pool), assetsBeforeLoss);
         uint256 depth = pool.totalAssets() - claim;
-        uint256 expected = _indexIncrement(engine.sideBorrowBaseAssets(0), depth, 1 days);
-        uint256 startIndex = engine.sideCarryIndex(0);
+        uint256 expected = ONE_DAY_INDEX;
+        uint256 startIndex = engine.carryIndex();
         uint256 start = vm.getBlockTimestamp();
         vm.warp(start + 1 days);
         vm.prank(CLAIMANT);
         engine.settleTraderClaim(CLAIMANT);
-        assertEq(engine.sideCarryIndex(0), startIndex + expected);
+        assertEq(engine.carryIndex(), startIndex + expected);
         assertEq(pool.totalAssets(), depth);
         assertEq(engine.totalTraderClaimBalanceAssets(), 0);
         _assertTerminalCurveAuthenticated(CLAIMANT);
         vm.warp(start + 2 days);
-        engine.checkpointCarryIndexes();
-        assertEq(engine.sideCarryIndex(0), startIndex + 2 * expected);
+        engine.checkpointCarryIndex();
+        assertEq(engine.carryIndex(), startIndex + 2 * expected);
     }
 
 }

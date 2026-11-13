@@ -156,7 +156,7 @@ without a new deployment.
 
 `CfdEngine.recapitalizePool(amountAssets)` is an immediate, owner-only, non-reentrant recovery action.
 The engine owner approves the engine to pull USDG from its own wallet directly into the configured HousePool.
-The engine checkpoints carry against the old pool depth, verifies the exact token balance increase, and records
+The engine checkpoints carry through the current timestamp, verifies the exact token balance increase, and records
 `Recapitalization` with `CashArrived` atomically. Existing excess cannot substitute for the incoming transfer.
 The pool queues claimant allocation for normal reconciliation; no shares are minted and degraded mode is not
 automatically cleared. Funding remains available with stale marks, frozen markets, and LP pause or settlement holds.
@@ -318,7 +318,7 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
 | `HousePool.reconcile()` | Either configured tranche vault | Internal integration hook; users enter and claim through the vault |
 | `HousePool.settleLpEpoch(...)` | Configured Router when positions exist outside frozen mode; otherwise permissionless | Live route binds the Router's exact mark/time; every route respects the settlement hold |
 
-The no-carry release methods change reservation buckets only. Carry remains derived from canonical Engine indexes and
+The no-carry release methods change reservation buckets only. Carry remains derived from the canonical Engine global index and
 is assessed by the planner/Engine. On a retryable order item failure, the self-call revert restores the released
 reservation, so a classifier cannot strand value between custody buckets.
 
@@ -388,7 +388,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Invariant | Description |
 |-----------|-------------|
 | Canonical asset boundary | Pool depth is based on `min(rawAssets, accountedAssets)`, not raw token balance alone |
-| Economic depth | Carry, skew capacity, and VPI use canonical assets minus outstanding trader claims, floored at zero; physical custody and solvency inputs remain gross |
+| Economic depth | Skew capacity and VPI use canonical assets minus outstanding trader claims, floored at zero; flat carry is independent of depth; physical custody and solvency inputs remain gross |
 | Symmetric terminal NAV | LP entry and exit pricing use the same signed exact terminal price delta and waterfall snapshot |
 | Receivable/cash separation | Positive marked receivables are capped by account PnL pledge and nettable same-account claim, and never increase physical redemption funding before collection |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
@@ -946,25 +946,41 @@ still latches only at `E < L` and may be cleared at `E >= L`; the full buffer ne
 
 The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
 
-- carry base: `max(positionMaxProfitAssets - activePositionMarginAssets, 0)`
-- utilization denominator: `max(pool.totalAssets() - totalTraderClaimBalanceAssets, 0)`; a positive base at zero depth
-  uses full utilization. Claim creation, consumption, and payment checkpoint both side indexes before changing depth
-- accrual clock: wall-clock time
+- carry exposure: canonical `position.maxProfitAssets`, including fully and over-margined positions; there is no
+  separate cached exposure or directional carry aggregate
+- annual rate: flat `baseCarryBps`, with release default `500 bps` (5% over 365 days), independent of margin, pool
+  utilization, pool availability, claims, and the opposite side. Both sides pay independently; carry is not allocated
+  from a shared-reserve bill. Zero maximum-profit exposure accrues zero position carry
+- governance: the existing annual-rate parameter remains timelocked and bounded. Checkpoint the old rate before a
+  new rate takes effect; changes must not reprice historical intervals
+- accrual clock: one global `carryIndex` and `carryTimestamp` shared by both directions. The index advances at the
+  flat annual rate while either side has positive maximum-profit exposure; when both are zero, its timestamp
+  checkpoints without index growth. New and reopened positions capture the current index and never inherit
+  pre-entry accrual, including when their own direction was previously idle
+- deployment compatibility: the single-index storage layout, singular `checkpointCarryIndex()` entrypoint, and
+  reduced planner/view interfaces require a fresh compatible stack. Do not mix prior directional-index contracts or
+  assume their storage can be upgraded into this layout
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
 - claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryAssets`,
   then apply the full incoming credit. The credit can fund retained arrears at a later checkpoint, including at the same
   timestamp; it is not collected or waived in this call. Claim liquidity checks run after collection, and any failure
   rolls back the collection and credit
-- realization points: open, close, add margin, pool-asset changes, risk-parameter changes, and owner clearinghouse
-  `deposit` / `depositMargin` / withdraw paths before the carry base/rate denominator changes. Owner deposits may
+- realization points: open, close, liquidation, add margin, and owner clearinghouse
+  `deposit` / `depositMargin` / withdraw paths. Exposure/rate changes checkpoint the old interval; Engine-owned
+  claim and recapitalization hooks retain their index checkpoints. Margin and pool changes do not change the carry
+  basis or rate. Owner deposits may
   collect realized carry from post-deposit settlement in the same transaction; withdrawals realize carry before
   reducing settlement. Credit-only `depositFor` makes no carry checkpoint and leaves accrued carry due
+- LP liquidity independence: HousePool excess accounting, seed initialization, and LP epoch settlement make no
+  Engine carry-checkpoint call and leave the stored global index and timestamp unchanged. They do not collect
+  account debt; projected flat-rate carry remains due at the next Engine or explicit checkpoint. An atomic Router
+  settlement may separately advance carry while synchronizing the oracle mark
 - destination: realized carry becomes LP trading revenue
 - collection priority: active position margin first, then free settlement; all other locked buckets and trader claims
   remain protected during carry collection
 - projection: planners and account views share `projectCarryLoss` for post-carry buckets. Its output must not alias
-  raw custody; ledger diagnostics retain raw values. The planner updates side margin, borrowing bases, carry indexes,
-  arrears and pool revenue together, using carry accrued against live depth even for hypothetical trade simulations
+  raw custody; ledger diagnostics retain raw values. The planner updates side margin, the position carry checkpoint,
+  arrears and pool revenue together, using maximum profit directly and one global index in the raw snapshot. Actual and hypothetical pool depth must not alter accrued carry
 - health: project margin consumption before evaluating exact price risk. Fully paid carry is not delinquency, but a
   reduced pledge may breach maintenance. Carry uncovered by both margin and free settlement independently blocks
   withdrawal and makes the account liquidatable; claims cannot fund carry. Stored arrears alone are not delinquency
@@ -1424,7 +1440,7 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
   The checkpoint advances even when the result is zero, without retaining the fractional remainder. Each such
   conversion can discard less than one USDG atom (`0.000001 USDG`). User-triggered checkpoints, including
   zero-amount withdrawals, can therefore reduce LP carry revenue; an interval whose entire accrual is below one atom
-  contributes no collectible carry. Practical savings depend on borrow size, utilization, checkpoint frequency, and
+  contributes no collectible carry. Practical savings depend on maximum-profit exposure, annual rate, checkpoint frequency, and
   transaction costs. The implementation does not persist fractional carry.
 - **Zero-share Junior maintenance-fee checkpoints:** With a nonzero maintenance-fee rate and sufficiently
   small raw Junior share supply, the fee for completed chargeable hours can round down to zero shares. The checkpoint

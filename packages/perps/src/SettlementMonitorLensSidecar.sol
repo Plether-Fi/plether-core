@@ -503,8 +503,7 @@ contract SettlementMonitorLensSidecar {
     function _plannerSemanticsValid(
         address planner
     ) internal view returns (bool valid) {
-        bytes4 carrySelector =
-            bytes4(keccak256("computeCurrentCarryIndex(uint256,uint64,uint256,uint256,uint256,uint256)"));
+        bytes4 carrySelector = bytes4(keccak256("computeCurrentCarryIndex(uint256,uint64,uint256,uint256)"));
         bytes4 calendarSelector = bytes4(keccak256("marketCalendarStatus(uint256,bool,bool,uint256)"));
         assembly ("memory-safe") {
             let input := mload(0x40)
@@ -512,10 +511,8 @@ contract SettlementMonitorLensSidecar {
             mstore(add(input, 4), 7)
             mstore(add(input, 36), 11)
             mstore(add(input, 68), 11)
-            mstore(add(input, 100), 13)
-            mstore(add(input, 132), 17)
-            mstore(add(input, 164), 19)
-            valid := staticcall(STATIC_READ_GAS, planner, input, 196, input, 32)
+            mstore(add(input, 100), 19)
+            valid := staticcall(STATIC_READ_GAS, planner, input, 132, input, 32)
             valid := and(valid, and(eq(returndatasize(), 32), eq(mload(input), 7)))
             if valid {
                 mstore(input, calendarSelector)

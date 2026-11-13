@@ -121,17 +121,26 @@ interface ICfdEngine is ICfdEngineTypes {
     ) external returns (uint256 keeperBountyAssets);
 
     /// @notice Realizes accrued carry against the current reachable collateral before a user-level
-    ///         settlement balance mutation changes the carry basis.
+    ///         settlement balance mutation changes reachable collateral.
     /// @dev Callable only by the configured clearinghouse. Accounts without a position are no-ops.
     /// @param account Account whose open-position carry should be realized if a position exists
     function realizeCarryBeforeMarginChange(
         address account
     ) external;
 
-    /// @notice Permissionlessly advances both side carry indexes to the current timestamp.
-    /// @dev Uses effective HousePool depth capped by raw token custody, and does not realize carry against individual
-    ///      accounts or update the oracle mark.
-    function checkpointCarryIndexes() external;
+    /// @notice Permissionlessly advances the global carry index to the current timestamp.
+    /// @dev Accrues the flat annual rate independently of margin and pool utilization; does not collect carry
+    ///      against individual accounts or update the oracle mark.
+    function checkpointCarryIndex() external;
+
+    /// @notice Stored global carry index, scaled by 1e18.
+    function carryIndex() external view returns (uint256);
+
+    /// @notice Timestamp through which the stored global carry index has advanced.
+    function carryTimestamp() external view returns (uint64);
+
+    /// @notice Global carry index projected through the current block timestamp.
+    function currentCarryIndex() external view returns (uint256);
 
     /// @notice Canonical liquidation preview using the pool's current custody-capped effective assets.
     /// @dev Implemented by the diagnostic engine lens, not by the canonical stateful `CfdEngine` deployment.
@@ -169,7 +178,7 @@ interface ICfdEngine is ICfdEngineTypes {
     function lastMarkTime() external view returns (uint64);
 
     /// @notice Pushes a fresh mark price without processing an order.
-    /// @dev Callable only by the router. Caps the price, rejects an older publish time, advances side indexes, and
+    /// @dev Callable only by the router. Caps the price, rejects an older publish time, advances the global carry index, and
     ///      updates the cached mark; account-level carry is realized on execution and margin-mutating paths.
     /// @param price       New mark price (8 decimals)
     /// @param publishTime Oracle publish timestamp for the price update
@@ -230,12 +239,12 @@ interface ICfdEngine is ICfdEngineTypes {
 
     /// @notice Returns the indexed carry basis for a position.
     /// @param account Account to inspect
-    /// @return borrowBaseAssets Position LP borrow base used for carry utilization, in settlement token
-    /// @return lastCarryIndex Side carry index last stored on the position, scaled by 1e18
+    /// @return maxProfitAssets Full maximum-profit carry exposure, in settlement token
+    /// @return lastCarryIndex Global carry index last stored on the position, scaled by 1e18
     /// @return lastCarryTimestamp Unix timestamp through which position carry was last checkpointed
     function positionCarryState(
         address account
-    ) external view returns (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
+    ) external view returns (uint256 maxProfitAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
 
     /// @notice True when a close or liquidation has latched degraded mode after revealing adjusted insolvency.
     /// @return Whether risk-increasing actions are disabled by the insolvency latch

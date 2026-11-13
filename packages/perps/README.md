@@ -20,9 +20,15 @@ The underlying basket mark moves inversely to dollar strength:
 The mark is bounded between zero and `CAP_PRICE`. Before accepting new exposure, the protocol checks that pool
 capital can cover the worst-case directional payout plus a settlement buffer.
 
-Carry is based on the utilization of LP capital after deducting unpaid trader claims. It is paid by traders to the
-pool rather than exchanged between long and short traders as funding. A separate skew charge or rebate, called
-virtual price impact (VPI), prices the effect of a trade on directional imbalance.
+Carry is a flat simple annual charge on each position's full maximum possible profit. The release annual rate is
+`500 bps` (5%): a position with 10,000 USDG of maximum profit accrues 500 USDG over 365 days. Posted margin, pool
+utilization, trader claims, and other positions do not discount that charge. Governance may change the annual rate
+through the existing timelock; a new rate applies prospectively after the old rate is checkpointed.
+HousePool liquidity accounting leaves the stored carry clock untouched and does not collect trader debt;
+projected carry continues to accrue until a later Engine or explicit checkpoint.
+
+Traders pay carry to the pool rather than exchange it between long and short traders as funding. A separate skew
+charge or rebate, called virtual price impact (VPI), prices the effect of a trade on directional imbalance.
 
 ## Trading
 

@@ -7,12 +7,13 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 contract PendingDepositLifecycleCarryTest is BasePerpTest {
 
     /// @dev accounting; source: ACCOUNTING_SPEC.md#lp-capital-carry.
-    function test_CarryCheckpointsChargeIndexedBorrowBaseAcrossPriceSwing() public {
+    function test_CarryCheckpointsChargeMaximumProfitAcrossPriceSwing() public {
         address checkpointed = address(0xCA11);
         address lazy = address(0x1A2E);
         uint256 size = 100_000e18;
@@ -52,22 +53,23 @@ contract PendingDepositLifecycleCarryTest is BasePerpTest {
         uint256 lazyCarry = pool.totalAssets() - poolBeforeLazyCheckpoint;
 
         assertEq(lazyCarry, expectedLazy);
-        assertGt(
+        assertApproxEqAbs(
             checkpointedFirstCarry + checkpointedSecondCarry,
             lazyCarry,
-            "Earlier margin collection increases the later borrow base; previously assessed carry is never recomputed"
+            1,
+            "Collection timing cannot change the exposure or flat rate; only per-checkpoint rounding may differ"
         );
     }
 
     /// @dev accounting; source: ACCOUNTING_SPEC.md#lp-capital-carry.
-    function test_AddingPositionMarginUpdatesBorrowBaseOnlyAfterOldCarryAccrues() public {
+    function test_AddingPositionMarginPreservesFullMaxProfitCarryBasis() public {
         address account = address(0xB0A);
         uint256 size = 100_000e18;
         uint256 margin = 10_000e6;
 
         _fundTrader(account, margin + 20_000e6);
         _open(account, CfdTypes.Side.LONG, size, margin, 1e8);
-        uint256 borrowBaseBefore = _positionBorrowBaseAssets(account);
+        uint256 maxProfitBefore = _positionMaxProfitAssets(account);
 
         vm.warp(block.timestamp + 10 days);
         vm.prank(address(router));
@@ -78,11 +80,11 @@ contract PendingDepositLifecycleCarryTest is BasePerpTest {
         engine.addMargin(account, 10_000e6);
         uint256 realizedCarry = pool.totalAssets() - poolBefore;
 
-        assertGt(realizedCarry, 0, "old borrow base should accrue before the margin increase");
+        assertGt(realizedCarry, 0, "maximum-profit exposure should accrue before the margin increase");
         assertEq(
-            _positionBorrowBaseAssets(account),
-            borrowBaseBefore + realizedCarry - 10_000e6,
-            "added position margin should reduce future borrow base"
+            _positionMaxProfitAssets(account),
+            maxProfitBefore,
+            "adding margin and collecting carry must not change the full maximum-profit basis"
         );
     }
 
@@ -242,15 +244,15 @@ contract HistoricalCarryCheckpointTest is BasePerpTest {
     }
 
     /// @dev accounting; source: ACCOUNTING_SPEC.md#lp-capital-carry.
-    function test_CarryCheckpointCannotForgiveHistoricalLpBackedTime() public {
+    function test_CarryCheckpointCannotForgiveHistoricalExposureTime() public {
         _fundTrader(trader, 150_000e6);
         _open(trader, CfdTypes.Side.LONG, 200_000e18, 100_000e6, 1e8);
 
         uint256 balanceBeforeCheckpoint = clearinghouse.balanceAssets(trader);
         uint256 elapsed = 30 days;
-        uint256 entryPriceLpBackedNotionalAssets = 9000e6;
+        uint256 entryMaxProfitAssets = 200_000e6;
         uint256 minimumHistoricalCarryAssets =
-            (entryPriceLpBackedNotionalAssets * 500 * elapsed) / (CfdMath.SECONDS_PER_YEAR * 10_000);
+            (entryMaxProfitAssets * 500 * elapsed) / (CfdMath.SECONDS_PER_YEAR * 10_000);
 
         vm.warp(block.timestamp + elapsed);
         vm.prank(address(router));
@@ -263,11 +265,174 @@ contract HistoricalCarryCheckpointTest is BasePerpTest {
         vm.stopPrank();
 
         uint256 balanceAfterCheckpoint = clearinghouse.balanceAssets(trader);
-        assertLe(
+        assertApproxEqAbs(
             balanceAfterCheckpoint,
             balanceBeforeCheckpoint + 1 - minimumHistoricalCarryAssets,
-            "A favorable checkpoint price must not erase carry owed for historical LP-backed exposure"
+            1,
+            "A favorable price cannot reprice the full entry maximum-profit exposure"
         );
+    }
+
+}
+
+/// @notice Known-value integration checks for flat annual maximum-profit carry.
+contract FlatMaximumProfitCarryTest is BasePerpTest {
+
+    address private constant LONG_TRADER = address(0xF1A71);
+    address private constant SHORT_TRADER = address(0xF1A72);
+    uint256 private constant PRICE = 80_000_000;
+
+    function _checkpointFlatCarry(
+        address account
+    ) private returns (uint256 collected) {
+        uint256 beforeCash = pool.accountedAssets();
+        vm.prank(address(clearinghouse));
+        engine.realizeCarryBeforeMarginChange(account);
+        return pool.accountedAssets() - beforeCash;
+    }
+
+    function test_FullyAndOverMarginedPositionsPayFivePercentOnBothSides() public {
+        _fundTrader(LONG_TRADER, 120_000e6);
+        _fundTrader(SHORT_TRADER, 170_000e6);
+        _open(LONG_TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, PRICE);
+        _open(SHORT_TRADER, CfdTypes.Side.SHORT, 100_000e18, 150_000e6, PRICE);
+        assertGt(clearinghouse.pnlPledgeAssets(LONG_TRADER), 80_000e6);
+        assertGt(clearinghouse.pnlPledgeAssets(SHORT_TRADER), 120_000e6);
+        assertEq(_positionMaxProfitAssets(LONG_TRADER), 80_000e6);
+        assertEq(_positionMaxProfitAssets(SHORT_TRADER), 120_000e6);
+
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        assertEq(_checkpointFlatCarry(LONG_TRADER), 4000e6, "$80k maximum profit costs $4k per year");
+        assertEq(_checkpointFlatCarry(SHORT_TRADER), 6000e6, "$120k maximum profit costs $6k per year");
+        assertEq(_positionMaxProfitAssets(LONG_TRADER), 80_000e6, "margin-funded carry cannot grow its own basis");
+        assertEq(_positionMaxProfitAssets(SHORT_TRADER), 120_000e6);
+        assertEq(_checkpointFlatCarry(LONG_TRADER), 0, "same-time collection cannot charge twice");
+    }
+
+    function test_ZeroAndDifferentPoolDepthsDoNotChangeAnnualCarry() public {
+        _fundTrader(LONG_TRADER, 100_000e6);
+        _open(LONG_TRADER, CfdTypes.Side.LONG, 100_000e18, 50_000e6, PRICE);
+        uint256 started = vm.getBlockTimestamp();
+        for (uint256 scenario; scenario < 3; ++scenario) {
+            uint256 snapshot = vm.snapshotState();
+            uint256 initialCash = pool.rawAssets();
+            uint256 drain = scenario == 0 ? 0 : scenario == 1 ? initialCash / 2 : initialCash;
+            if (drain > 0) {
+                vm.prank(address(pool));
+                settlementToken.transfer(address(0xDEAD), drain);
+            }
+            if (scenario == 2) {
+                assertEq(pool.totalAssets(), 0, "the final scenario has no pool depth");
+            }
+            vm.warp(started + 365 days);
+            assertEq(_checkpointFlatCarry(LONG_TRADER), 4000e6, "only position exposure and elapsed time set carry");
+            assertTrue(vm.revertToState(snapshot));
+        }
+    }
+
+    function test_OtherPositionsOpeningAndClosingDoNotRepriceExistingCarry() public {
+        _fundTrader(LONG_TRADER, 120_000e6);
+        _fundTrader(SHORT_TRADER, 170_000e6);
+        address anotherLong = address(0xF1A73);
+        _fundTrader(anotherLong, 120_000e6);
+        _open(LONG_TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, PRICE);
+        uint256 started = vm.getBlockTimestamp();
+        vm.warp(started + 365 days / 2);
+        _open(SHORT_TRADER, CfdTypes.Side.SHORT, 100_000e18, 150_000e6, PRICE);
+        _open(anotherLong, CfdTypes.Side.LONG, 100_000e18, 100_000e6, PRICE);
+        _close(SHORT_TRADER, CfdTypes.Side.SHORT, 100_000e18, PRICE);
+        _close(anotherLong, CfdTypes.Side.LONG, 100_000e18, PRICE);
+        vm.warp(started + 365 days);
+        assertEq(
+            _checkpointFlatCarry(LONG_TRADER), 4000e6, "other traders cannot discount or raise this position's rent"
+        );
+    }
+
+    function test_GlobalIndexIsSharedAndLateOppositeOpenPaysOnlyItsHoldingTime() public {
+        _fundTrader(LONG_TRADER, 120_000e6);
+        _fundTrader(SHORT_TRADER, 170_000e6);
+        _open(LONG_TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, PRICE);
+        uint256 started = vm.getBlockTimestamp();
+
+        vm.warp(started + 365 days / 2);
+        engine.checkpointCarryIndex();
+        assertEq(engine.carryIndex(), 0.025e18, "the only clock has accrued one half-year");
+        _open(SHORT_TRADER, CfdTypes.Side.SHORT, 100_000e18, 150_000e6, PRICE);
+        (, uint256 shortStartIndex,) = engine.positionCarryState(SHORT_TRADER);
+        assertEq(shortStartIndex, 0.025e18, "a late opposite-side open captures the existing global index");
+
+        vm.warp(started + 365 days);
+        assertEq(_checkpointFlatCarry(LONG_TRADER), 4000e6, "the original long pays for its full year");
+        assertEq(_checkpointFlatCarry(SHORT_TRADER), 3000e6, "the new short pays only for its half-year");
+        assertEq(engine.carryIndex(), 0.05e18);
+    }
+
+    function test_EmptyMarketReopenDoesNotInheritIdleTime() public {
+        _fundTrader(LONG_TRADER, 120_000e6);
+        _fundTrader(SHORT_TRADER, 170_000e6);
+        _open(LONG_TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, PRICE);
+        uint256 started = vm.getBlockTimestamp();
+        vm.warp(started + 365 days / 2);
+        uint256 poolBefore = pool.accountedAssets();
+        _close(LONG_TRADER, CfdTypes.Side.LONG, 100_000e18, PRICE);
+        assertEq(pool.accountedAssets() - poolBefore, 2000e6);
+        assertEq(_sideState(CfdTypes.Side.LONG).maxProfitAssets, 0);
+        assertEq(_sideState(CfdTypes.Side.SHORT).maxProfitAssets, 0);
+        assertEq(engine.carryIndex(), 0.025e18);
+
+        vm.warp(started + 3 * 365 days / 2);
+        engine.checkpointCarryIndex();
+        assertEq(engine.carryIndex(), 0.025e18, "an empty market does not grow its carry index");
+        assertEq(engine.carryTimestamp(), vm.getBlockTimestamp(), "the idle checkpoint closes the old interval");
+        _open(SHORT_TRADER, CfdTypes.Side.SHORT, 100_000e18, 150_000e6, PRICE);
+        (, uint256 reopenedAtIndex,) = engine.positionCarryState(SHORT_TRADER);
+        assertEq(reopenedAtIndex, 0.025e18);
+
+        vm.warp(started + 2 * 365 days);
+        assertEq(_checkpointFlatCarry(SHORT_TRADER), 3000e6, "the reopened market pays only its active half-year");
+        assertEq(engine.carryIndex(), 0.05e18);
+    }
+
+    function test_GlobalRateChangeAppliesProspectivelyToBothSides() public {
+        _fundTrader(LONG_TRADER, 120_000e6);
+        _fundTrader(SHORT_TRADER, 170_000e6);
+        _open(LONG_TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, PRICE);
+        _open(SHORT_TRADER, CfdTypes.Side.SHORT, 100_000e18, 150_000e6, PRICE);
+        uint256 started = vm.getBlockTimestamp();
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        config.riskParams.baseCarryBps = 1000;
+        engineAdmin.proposeRiskConfig(config);
+
+        vm.warp(started + 365 days / 2);
+        engineAdmin.finalizeRiskConfig();
+        assertEq(engine.carryIndex(), 0.025e18, "governance checkpoints both sides' old rate once");
+        vm.warp(started + 365 days);
+        assertEq(_checkpointFlatCarry(LONG_TRADER), 6000e6, "$80k pays half a year each at five and ten percent");
+        assertEq(_checkpointFlatCarry(SHORT_TRADER), 9000e6, "$120k uses the same prospective rate history");
+        assertEq(engine.carryIndex(), 0.075e18);
+    }
+
+    function test_IncreaseAndPartialCloseApplyNewExposureOnlyToFutureTime() public {
+        _fundTrader(LONG_TRADER, 150_000e6);
+        _open(LONG_TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, PRICE);
+        uint256 started = vm.getBlockTimestamp();
+        for (uint256 scenario; scenario < 2; ++scenario) {
+            uint256 snapshot = vm.snapshotState();
+            vm.warp(started + 365 days / 2);
+            uint256 cashBefore = pool.accountedAssets();
+            if (scenario == 0) {
+                _open(LONG_TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, PRICE);
+                assertEq(_positionMaxProfitAssets(LONG_TRADER), 160_000e6);
+            } else {
+                _close(LONG_TRADER, CfdTypes.Side.LONG, 50_000e18, PRICE);
+                assertEq(_positionMaxProfitAssets(LONG_TRADER), 40_000e6);
+            }
+            // At unchanged price and zero VPI, only historical carry reaches pool cash here.
+            assertEq(pool.accountedAssets() - cashBefore, 2000e6, "the first half-year uses the original $80k exposure");
+            vm.warp(started + 365 days);
+            assertEq(_checkpointFlatCarry(LONG_TRADER), scenario == 0 ? 4000e6 : 1000e6);
+            assertTrue(vm.revertToState(snapshot));
+        }
     }
 
 }

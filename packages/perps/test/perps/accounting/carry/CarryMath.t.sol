@@ -6,38 +6,35 @@ import {Test} from "forge-std/Test.sol";
 
 contract CarryMathTest is Test {
 
-    function test_ComputeBorrowBase_ZeroWhenMarginCoversMaxProfit() public pure {
-        uint256 borrowBaseAssets = PositionRiskAccountingLib.computeBorrowBaseAssets(100_000e6, 200_000e6);
-        assertEq(borrowBaseAssets, 0);
-    }
-
-    function test_ComputeBorrowBase_GrowsWithLeverage() public pure {
-        uint256 lowLeverageCarryBase = PositionRiskAccountingLib.computeBorrowBaseAssets(100_000e6, 50_000e6);
-        uint256 highLeverageCarryBase = PositionRiskAccountingLib.computeBorrowBaseAssets(100_000e6, 10_000e6);
-        assertGt(highLeverageCarryBase, lowLeverageCarryBase);
-        assertEq(lowLeverageCarryBase, 50_000e6);
-        assertEq(highLeverageCarryBase, 90_000e6);
-    }
-
-    function test_ComputeCurrentCarryIndex_ScalesBySideUtilization() public pure {
-        uint256 utilizationBps = PositionRiskAccountingLib.computeBorrowUtilizationBps(100_000e6, 200_000e6);
-        uint256 carryIndex =
-            PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 365 days, 100_000e6, 200_000e6, 500);
-        assertEq(utilizationBps, 5000);
-        assertEq(carryIndex, 0.025e18);
+    function test_ComputeCurrentCarryIndex_UsesOnlyAnnualRateAndElapsedTime() public pure {
+        assertEq(PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 365 days, 500), 0.05e18);
+        assertEq(PositionRiskAccountingLib.computeCurrentCarryIndex(1e18, 100, 100 + 365 days, 500), 1.05e18);
+        assertEq(PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 365 days / 2, 1000), 0.05e18);
     }
 
     function test_ComputeIndexedCarry_FullYearAtFivePercent() public pure {
-        uint256 carryIndexDelta = PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 365 days, 1, 1, 500);
-        uint256 carryAssets = PositionRiskAccountingLib.computeIndexedCarryAssets(90_000e6, carryIndexDelta);
+        uint256 carryIndexDelta = PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 365 days, 500);
         assertEq(carryIndexDelta, 0.05e18);
-        assertEq(carryAssets, 4500e6);
+        assertEq(PositionRiskAccountingLib.computeIndexedCarryAssets(100_000e6, carryIndexDelta), 5000e6);
+        assertEq(PositionRiskAccountingLib.computeIndexedCarryAssets(0, carryIndexDelta), 0);
     }
 
-    function test_ComputeCurrentCarryIndex_UsesSinglePassUtilizationFormula() public pure {
-        uint256 index =
-            PositionRiskAccountingLib.computeCurrentCarryIndex(1e18, 100, 100 + 365 days, 100_000e6, 200_000e6, 500);
-        assertEq(index, 1.025e18);
+    function test_ComputeCurrentCarryIndex_AccumulatesSimpleAnnualRate() public pure {
+        uint256 index = PositionRiskAccountingLib.computeCurrentCarryIndex(1e18, 100, 100 + 365 days, 500);
+        assertEq(index, 1.05e18);
+        assertEq(PositionRiskAccountingLib.computeIndexedCarryAssets(100_000e6, index - 1e18), 5000e6);
+    }
+
+    function test_ComputeCurrentCarryIndex_ZeroRateAndNonAdvancingTime() public pure {
+        assertEq(PositionRiskAccountingLib.computeCurrentCarryIndex(1e18, 100, 100 + 365 days, 0), 1e18);
+        assertEq(PositionRiskAccountingLib.computeCurrentCarryIndex(1e18, 100, 100, 500), 1e18);
+        assertEq(PositionRiskAccountingLib.computeCurrentCarryIndex(1e18, 100, 99, 500), 1e18);
+    }
+
+    function test_ComputeIndexedCarry_OneSecondRoundsToSettlementAtoms() public pure {
+        uint256 index = PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 1, 500);
+        assertEq(PositionRiskAccountingLib.computeIndexedCarryAssets(10_000e6, index), 15);
+        assertEq(PositionRiskAccountingLib.computeIndexedCarryAssets(120_000e6, index), 190);
     }
 
 }

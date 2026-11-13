@@ -13,7 +13,7 @@ This guide maps contract responsibilities, custody, and the flows between trader
 | `OrderLifecycleBook` | Permanent client-id identity, pending policy, timing, authenticated terminal outcomes | Only its bound Router registers and finalizes orders. It holds no tokens. |
 | `PositionProtectionBook` | Take-profit/stop-loss state, trigger reward, latest close-attempt linkage | Calls narrow Router hooks to create orders; it cannot execute a trade or move pool cash itself. |
 | `PletherOracle` | Signed basket validation, accepted live basket, historical execution prices | Only the configured Router updates the accepted current basket. Historical helpers do not authenticate arbitrary caller-supplied caches. |
-| `CfdEngine` | Positions, carry, risk admission, trader claims, settlement plans | Uses the Clearinghouse and HousePool for custody; holds no trader or LP funds itself. |
+| `CfdEngine` | Positions, one global carry clock, risk admission, trader claims, settlement plans | Uses the Clearinghouse and HousePool for custody; holds no trader or LP funds itself. |
 | `TerminalNavBookV2` | Aggregate account-capped price curves for LP NAV | Only the bound Engine can synchronize curves, deriving them from canonical Engine/Clearinghouse state. It does not measure available cash. |
 | `HousePool` | Recognized pool USDG, Senior/Junior waterfall, LP epoch clock and settlement | Engine/settlement sidecar may request trading payouts/inflows; configured vaults participate in LP settlement. |
 | `TrancheVault` | LP shares, deposit escrow, redemption queues and funded claims | Chooses request epochs using the Pool clock; only the Pool activates deposits or funds redemptions. |
@@ -81,7 +81,10 @@ liability and transfers Pool USDG to the Clearinghouse; payment into an open pos
 Do not conflate three measurements:
 
 - **Cash:** recognized Pool USDG, subject to reserves and payout priorities.
-- **Economic depth:** `max(pool assets - outstanding trader claims, 0)`, used by carry/skew/VPI calculations.
+- **Economic depth:** `max(pool assets - outstanding trader claims, 0)`, used by skew/VPI calculations. Carry uses each position's canonical maximum profit and one global index at the flat annual rate; no separate exposure cache or directional index is stored.
+- **LP liquidity and carry:** HousePool liquidity accounting makes no carry-checkpoint call. Stored carry state can
+  lag projected accrual until an Engine or explicit checkpoint; an atomic Router settlement may independently
+  synchronize the mark and advance the Engine clock.
 - **LP NAV:** Pool assets minus trader claims plus the signed account-capped terminal price delta at the mark.
   Distributable equity is floored at zero; any negative remainder is recorded separately as a terminal deficit.
 

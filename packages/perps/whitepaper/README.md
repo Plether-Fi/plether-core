@@ -24,7 +24,7 @@ Important differences from the current protocol:
 | Area | Research-model treatment |
 | --- | --- |
 | Price settlement | Legacy collateral/claim ordering and uncovered-loss telemetry; no exact-lot entry-cost book, claim-first capped price collection, or separate action/liquidation reserves |
-| Carry and admission | Historical carry collection and gross-cash utilization; no current margin-first carry checkpoint or liability-scaled settlement buffer |
+| Carry and admission | Historical margin-subtracted carry base, gross-cash utilization pricing, and collection; current Solidity instead charges flat annual carry on full maximum-profit exposure and uses margin-first collection plus a liability-scaled settlement buffer |
 | LP valuation | A realized-cash waterfall and a separate conservative side-envelope stress shadow; neither implements `TerminalNavBookV2` share NAV |
 | Execution | Daily ECB fixes, not Pyth ticks; no confidence shifts, VPI in the scenario replay, frozen execution, slippage rejection, or keeper delays |
 | Capital and epochs | Static LP capital; no deposits, withdrawals, recapitalizations, synchronized LP epochs, Senior capacity admission, or Junior maintenance-fee dilution |

@@ -726,8 +726,8 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         PythStructs.Price memory pythBefore = baseMockPyth.getPriceUnsafe(BASE_PYTH_FEED_A);
         uint256 markPriceBefore = engine.lastMarkPrice();
         uint64 markTimeBefore = engine.lastMarkTime();
-        uint256 longCarryBefore = engine.sideCarryIndex(uint256(CfdTypes.Side.LONG));
-        uint256 shortCarryBefore = engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT));
+        uint256 carryBefore = engine.carryIndex();
+        uint64 carryTimeBefore = engine.carryTimestamp();
         uint256 reconcileBefore = pool.lastReconcileTime();
         uint256 couponBefore = pool.lastSeniorCouponCheckpointTime();
         uint256 seniorBefore = pool.seniorPrincipal();
@@ -743,8 +743,8 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         assertEq(pythAfter.publishTime, pythBefore.publishTime, "Pyth timestamp must roll back");
         assertEq(engine.lastMarkPrice(), markPriceBefore, "Engine price must roll back");
         assertEq(engine.lastMarkTime(), markTimeBefore, "Engine timestamp must roll back");
-        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), longCarryBefore, "long carry must roll back");
-        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)), shortCarryBefore, "short carry must roll back");
+        assertEq(engine.carryIndex(), carryBefore, "carry index must roll back");
+        assertEq(engine.carryTimestamp(), carryTimeBefore, "carry timestamp must roll back");
         assertEq(pool.lastReconcileTime(), reconcileBefore, "reconcile checkpoint must roll back");
         assertEq(pool.lastSeniorCouponCheckpointTime(), couponBefore, "coupon checkpoint must roll back");
         assertEq(pool.seniorPrincipal(), seniorBefore);

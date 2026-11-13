@@ -47,7 +47,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
 
         address account = handler.actorAt(0);
         assertGt(_positionSize(account), 0, "Position must be live before funding");
-        (uint256 borrowBaseBefore, uint256 indexBefore, uint64 timestampBefore) = engine.positionCarryState(account);
+        (uint256 maxProfitBefore, uint256 indexBefore, uint64 timestampBefore) = engine.positionCarryState(account);
         uint256 marginBefore = clearinghouse.pnlPledgeAssets(account);
         uint256 settlementBefore = clearinghouse.balanceAssets(account);
         uint256 poolBefore = housePool.totalAssets();
@@ -56,8 +56,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         for (uint256 i; i < 3; ++i) {
             handler.warpForward(1 hours);
             handler.depositCollateralFor(0, i, 100e6);
-            (uint256 borrowBaseAfter, uint256 indexAfter, uint64 timestampAfter) = engine.positionCarryState(account);
-            assertEq(borrowBaseAfter, borrowBaseBefore, "Funding must preserve the position's carry basis");
+            (uint256 maxProfitAfter, uint256 indexAfter, uint64 timestampAfter) = engine.positionCarryState(account);
+            assertEq(maxProfitAfter, maxProfitBefore, "Funding must preserve the position's carry basis");
             assertEq(indexAfter, indexBefore, "Funding must not advance the position carry checkpoint");
             assertEq(timestampAfter, timestampBefore, "Repeated funding must not reset the carry interval");
             assertEq(

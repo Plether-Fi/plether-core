@@ -268,7 +268,9 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         latestAuthoredTick = HistoricalTick({
             componentPrice: 1e8, publishTime: vm.getBlockTimestamp(), previousPublishTime: 0, available: true
         });
-        carry = new CarryReferenceLedger(expectedPoolCash, vm.getBlockTimestamp(), 500);
+        // These fixtures start from permanent seeds only. Neither seed liquidity nor flat-account deposits
+        // checkpoint the Engine, so the independently authored carry clock starts at its zero storage default.
+        carry = new CarryReferenceLedger(expectedPoolCash, 0, 500);
         orders = new PendingOrderReferenceLedger();
         vm.deal(address(this), 100_000 ether);
         vm.deal(KEEPER, 100_000 ether);
@@ -326,7 +328,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             lots = 500 - traders[i].lots;
         }
         uint256 price = bound(priceSeed, 80_000_001, 120_000_003);
-        // Margin comfortably covers the independently bounded mark domain while leaving LP-backed carry exposure.
+        // Margin comfortably covers the independently bounded mark domain; carry still uses full maximum profit.
         uint256 contribution = lots * 60e6;
         _ensurePledge(i, traders[i].lots * 60e6);
         if (_free(i) < contribution + 1e6) {
@@ -374,7 +376,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         vm.warp(_nextLiveTime(vm.getBlockTimestamp() + bound(secondsSeed, 1, 6 hours)));
         frozen = false;
         assertFalse(engine.isOracleFrozen(), "independently selected live calendar");
-        engine.checkpointCarryIndexes();
+        engine.checkpointCarryIndex();
         carry.advance(vm.getBlockTimestamp());
         for (uint256 i; i < 4; ++i) {
             if (traders[i].lots != 0) {
@@ -431,7 +433,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         vm.warp(target);
         frozen = enterFrozen;
-        engine.checkpointCarryIndexes();
+        engine.checkpointCarryIndex();
         carry.advance(vm.getBlockTimestamp());
         for (uint256 i; i < 4; ++i) {
             if (traders[i].lots != 0) {
@@ -560,6 +562,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             assertModel();
             return;
         }
+        // Router settlement refreshes the mark, which checkpoints carry independently of LP liquidity.
         carry.advance(vm.getBlockTimestamp());
         _reconcile();
         _modelJuniorRedemptions();
@@ -567,7 +570,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         router.settleLpEpoch{value: 1}(data);
         currentMarkTime = vm.getBlockTimestamp();
         hasAcceptedMark = true;
-        carry.changeDepth(_depth(), vm.getBlockTimestamp());
+        carry.changeDepthWithoutCheckpoint(_depth());
         ++lpSettlements;
         assertModel();
     }
@@ -1137,7 +1140,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             _deposit(0, 100e6);
         }
         uint256 removed = expectedPoolCash;
-        engine.checkpointCarryIndexes();
+        engine.checkpointCarryIndex();
         carry.advance(vm.getBlockTimestamp());
         settlementToken.burn(address(pool), removed);
         expectedPoolCash = 0;
@@ -1188,7 +1191,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         _trade(3, 100, 300e6, false);
         _withdraw(3, _free(3));
         uint256 removed = expectedPoolCash;
-        engine.checkpointCarryIndexes();
+        engine.checkpointCarryIndex();
         carry.advance(vm.getBlockTimestamp());
         settlementToken.burn(address(pool), removed);
         expectedPoolCash = 0;
@@ -1420,7 +1423,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     function _setLiquidationPoolCash(
         uint256 nextCash
     ) internal {
-        engine.checkpointCarryIndexes();
+        engine.checkpointCarryIndex();
         carry.advance(vm.getBlockTimestamp());
         if (nextCash < expectedPoolCash) {
             uint256 removed = expectedPoolCash - nextCash;
@@ -3240,18 +3243,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
                 engine.traderClaimBalanceAssets(actorAt(i))
             )
         );
-        bytes32 indexes = keccak256(
-            abi.encode(
-                engine.sideCarryIndex(0),
-                engine.sideCarryIndex(1),
-                engine.sideCarryTimestamp(0),
-                engine.sideCarryTimestamp(1)
-            )
-        );
+        bytes32 carryClock = keccak256(abi.encode(engine.carryIndex(), engine.carryTimestamp()));
         bytes32 protocol = keccak256(
             abi.encode(pool.accountedAssets(), settlementToken.balanceOf(address(pool)), router.nextCommitId())
         );
-        return keccak256(abi.encode(account, indexes, protocol));
+        return keccak256(abi.encode(account, carryClock, protocol));
     }
 
     function pausePending() public {
@@ -3463,7 +3459,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         assertEq(carry.poolDepth(), _depth(), "independent gross assets match complete pool ledger");
         assertEq(carry.totalClaims(), expectedClaims, "independent carry claims match complete claim ledger");
-        assertEq(carry.economicDepth(), _netDepth(_depth()), "independent carry denominator excludes claims");
+        assertEq(carry.economicDepth(), _netDepth(_depth()), "independent economic depth excludes claims");
         uint256 custody = expectedTreasury + expectedKeeper;
         uint256 arrears;
         uint256 wallets;
@@ -3494,13 +3490,13 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             arrears += carryAccount.arrears;
             assertEq(carryAccount.pledge, t.margin, "reference ledger pledge integration");
             assertEq(carryAccount.free, _free(i), "reference ledger free integration");
-            (uint256 borrowBase, uint256 index, uint64 timestamp) = engine.positionCarryState(account);
+            (uint256 maxProfitExposure, uint256 index, uint64 timestamp) = engine.positionCarryState(account);
             if (t.lots != 0) {
-                assertEq(borrowBase, carryAccount.borrowBase, "mixed position borrow basis");
+                assertEq(maxProfitExposure, carryAccount.maxProfit, "mixed position maximum-profit carry exposure");
                 assertEq(index, carryAccount.lastIndex, "mixed position checkpoint index");
                 assertEq(timestamp, carryAccount.lastTime, "mixed position checkpoint timestamp");
             } else {
-                assertEq(borrowBase, 0, "flat generation borrow basis cleared");
+                assertEq(maxProfitExposure, 0, "flat generation maximum-profit exposure cleared");
                 assertEq(index, 0, "flat generation carry index cleared");
                 assertEq(timestamp, 0, "flat generation carry timestamp cleared");
             }
@@ -3541,13 +3537,13 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             explicitFunding + externalShockIn,
             "mixed external-flow conservation"
         );
+        assertEq(engine.carryIndex(), carry.carryIndex(), "mixed independent global carry index");
+        assertEq(engine.carryTimestamp(), carry.carryTimestamp(), "mixed global carry clock");
         for (uint8 side; side < 2; ++side) {
-            (, uint256 oi,, uint256 margin) = engine.sides(side);
+            (uint256 maxProfit, uint256 oi,, uint256 margin) = engine.sides(side);
             assertEq(margin, expectedSideMargin[side], "mixed aggregate side margin");
             assertEq(oi, sideLots[side] * 1e20);
-            assertEq(engine.sideBorrowBaseAssets(side), carry.sideState(side).borrowBase, "mixed carry borrow basis");
-            assertEq(engine.sideCarryIndex(side), carry.sideState(side).index, "mixed independent side carry index");
-            assertEq(engine.sideCarryTimestamp(side), carry.sideState(side).timestamp, "mixed carry clock");
+            assertEq(maxProfit, carry.sideState(side).maxProfitExposure, "mixed side maximum-profit exposure");
         }
     }
 

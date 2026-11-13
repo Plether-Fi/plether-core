@@ -308,12 +308,8 @@ contract DepositForCarryTest is BasePerpTest {
     function _carryState() private view returns (bytes32) {
         return keccak256(
             abi.encode(
-                engine.sideCarryIndex(0),
-                engine.sideCarryIndex(1),
-                engine.sideCarryTimestamp(0),
-                engine.sideCarryTimestamp(1),
-                engine.sideBorrowBaseAssets(0),
-                engine.sideBorrowBaseAssets(1),
+                engine.carryIndex(),
+                engine.carryTimestamp(),
                 engine.unsettledCarryAssets(ACCOUNT),
                 engine.traderClaimBalanceAssets(ACCOUNT)
             )
@@ -398,7 +394,8 @@ contract DepositForCarryTest is BasePerpTest {
         CfdEnginePlanTypes.RawSnapshot memory actual = _snapshot();
         assertEq(keccak256(abi.encode(actual.accountBuckets)), keccak256(abi.encode(projected.accountBuckets)));
         assertEq(actual.position.margin, projected.position.margin);
-        assertEq(actual.positionBorrowBaseAssets, projected.positionBorrowBaseAssets);
+        assertEq(actual.position.maxProfitAssets, projected.position.maxProfitAssets);
+        assertEq(actual.carryIndex, projected.carryIndex);
         assertEq(actual.unsettledCarryAssets, projected.unsettledCarryAssets);
         assertEq(actual.poolAssets, projected.poolAssets);
         assertEq(actual.poolCashAssets, projected.poolCashAssets);

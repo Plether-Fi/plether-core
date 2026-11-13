@@ -322,13 +322,10 @@ contract CfdEnginePlanLibHarness {
             maxProfitAssets: currentMaxProfitAssets,
             openInterest: params.currentSize,
             entryNotional: currentEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
-            totalMargin: params.positionMarginAssets,
-            borrowBaseAssets: 0,
-            carryIndex: 0
+            totalMargin: params.positionMarginAssets
         });
-        snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitAssets: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseAssets: 0, carryIndex: 0
-        });
+        snap.shortSide =
+            CfdEnginePlanTypes.SideSnapshot({maxProfitAssets: 0, openInterest: 0, entryNotional: 0, totalMargin: 0});
         snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
             settlementBalanceAssets: totalSettlementAssets,
             totalLockedMarginAssets: totalLockedAssets,
@@ -431,16 +428,16 @@ abstract contract CfdEngineTestBase is BasePerpTest {
     function _expectedIndexedCarry(
         address account
     ) internal view returns (uint256) {
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        (uint256 size,,,,,,) = engine.positions(account);
         if (size == 0) {
             return 0;
         }
-        (uint256 borrowBaseAssets, uint256 startIndex,) = engine.positionCarryState(account);
-        uint256 endIndex = _currentSideCarryIndex(side);
+        (uint256 maxProfitAssets, uint256 startIndex,) = engine.positionCarryState(account);
+        uint256 endIndex = _currentCarryIndex();
         if (endIndex <= startIndex) {
             return 0;
         }
-        return PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, endIndex - startIndex);
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(maxProfitAssets, endIndex - startIndex);
     }
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {

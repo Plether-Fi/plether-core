@@ -67,6 +67,24 @@ not the neutral mark:
 For example, opening LONG with `targetPrice = 95_000_000` accepts a raw execution price of 0.95 or higher.
 If your UI uses an inverse price, convert both the submitted value and comparison direction.
 
+## Carry budget
+
+Budget holding cost against the position's full maximum profit, rather than its margin or current notional:
+`annualCarryAssets = positionMaxProfitAssets * baseCarryBps / 10_000`. Release defaults use `500 bps` (5% simple annual
+carry over 365 days). The rate does not depend on pool utilization, trader claims, other positions, or posted margin.
+A governance rate change applies prospectively under its timelock. Increasing or reducing exposure checkpoints the
+old interval before installing the new maximum-profit basis. Collection can reduce position margin and therefore
+health even though the carry basis remains unchanged; accrued carry may also exceed currently collectible funds.
+
+For a deployment supporting the current interfaces, read `currentCarryIndex()` for the projected global clock and
+`positionCarryState(account)` for the position's canonical maximum profit and its last index/time checkpoint.
+Both directions share the same clock; entering an idle direction does not create a discount or charge historical
+elapsed time. The cleanup removes earlier directional carry getters and changes planner snapshots, so use bindings
+for the verified deployment rather than mixing interfaces from an older release.
+HousePool liquidity accounting does not checkpoint or collect carry. Use `currentCarryIndex()` rather than assuming
+the stored `carryIndex` was refreshed by a deposit, redemption, or excess-accounting action. An atomic Router
+settlement can separately refresh the oracle mark and advance the Engine clock.
+
 ## Building an order
 
 Submit the complete `OrderV3Types.OrderRequest` through `IPerpsTraderActions.commitOrder(request)`. It contains

@@ -1066,25 +1066,25 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     function _expectedIndexedCarryAssets(
         address account
     ) internal view returns (uint256) {
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        (uint256 size,,,,,,) = engine.positions(account);
         if (size == 0) {
             return 0;
         }
-        (uint256 borrowBaseAssets, uint256 startIndex,) = engine.positionCarryState(account);
-        if (borrowBaseAssets == 0) {
+        (uint256 maxProfitAssets, uint256 startIndex,) = engine.positionCarryState(account);
+        if (maxProfitAssets == 0) {
             return 0;
         }
-        uint256 endIndex = _currentSideCarryIndex(side);
+        uint256 endIndex = _currentCarryIndex();
         if (endIndex <= startIndex) {
             return 0;
         }
-        return PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, endIndex - startIndex);
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(maxProfitAssets, endIndex - startIndex);
     }
 
-    function _positionBorrowBaseAssets(
+    function _positionMaxProfitAssets(
         address account
-    ) internal view returns (uint256 borrowBaseAssets) {
-        (borrowBaseAssets,,) = engine.positionCarryState(account);
+    ) internal view returns (uint256 maxProfitAssets) {
+        (maxProfitAssets,,) = engine.positionCarryState(account);
     }
 
     function _lastCarryTimestamp(
@@ -1093,21 +1093,8 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         (,, lastCarryTimestamp) = engine.positionCarryState(account);
     }
 
-    function _currentSideCarryIndex(
-        CfdTypes.Side side
-    ) internal view returns (uint256 index) {
-        uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,,,) = engine.riskParams();
-        uint256 grossAssets = pool.totalAssets();
-        uint256 claims = engine.totalTraderClaimBalanceAssets();
-        index = PositionRiskAccountingLib.computeCurrentCarryIndex(
-            engine.sideCarryIndex(sideIndex),
-            engine.sideCarryTimestamp(sideIndex),
-            vm.getBlockTimestamp(),
-            engine.sideBorrowBaseAssets(sideIndex),
-            grossAssets > claims ? grossAssets - claims : 0,
-            baseCarryBps
-        );
+    function _currentCarryIndex() internal view returns (uint256) {
+        return engine.currentCarryIndex();
     }
 
     function _accountOf(

@@ -39,14 +39,23 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
 
     function test_RouterFullClose_CarryVpiBackingAndReleasedSurplusBeforeFifoCollection() public {
         CloseFixture memory f = _prepareClose();
+        // The intervening skew trade advances one second: $10,000 maximum profit at 5% owes 15 atoms.
+        uint256 commitmentCarry = router.lifecycleBook().pendingIntent(f.closeId).commitment.carryCollectedAssets;
+        assertEq(commitmentCarry, 15, "commitment collects the independently known pre-execution carry");
         // Remain within the ordinary order deadline while accruing nonzero execution-time carry.
         vm.warp(vm.getBlockTimestamp() + 30);
         bytes[] memory update = _mockPythUpdateData(CLOSE_PRICE);
         (CfdEnginePlanTypes.CloseDelta memory d, OrderV3Types.ExecutionAssessment memory assessment) = _planAndAssess(f);
         _assertCombinedFunding(d, f.vpiBacking);
-        assertEq(assessment.carryAssets, d.pendingCarryAssets);
-        assertEq(assessment.actionChargeCollectedAssets, d.realizedCarryAssets + d.actionChargeCollectedAssets);
-        assertEq(assessment.actionChargeAssessedAssets, d.realizedCarryAssets + d.actionChargeAssessedAssets);
+        assertEq(assessment.carryAssets, commitmentCarry + d.pendingCarryAssets);
+        assertEq(
+            assessment.actionChargeCollectedAssets,
+            commitmentCarry + d.realizedCarryAssets + d.actionChargeCollectedAssets
+        );
+        assertEq(
+            assessment.actionChargeAssessedAssets,
+            commitmentCarry + d.realizedCarryAssets + d.actionChargeAssessedAssets
+        );
 
         vm.recordLogs();
         vm.prank(KEEPER);

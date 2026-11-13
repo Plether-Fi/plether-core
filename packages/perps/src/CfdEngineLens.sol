@@ -173,7 +173,7 @@ contract CfdEngineLens is ICfdEngineLens {
 
     /// @notice Simulates a close/decrease with caller-supplied hypothetical pool accounting depth and cash.
     /// @dev Matches `previewClose` except `poolDepthAssets` replaces current pool assets for VPI, payout affordability,
-    ///      and solvency calculations. Side carry-index projection still uses the live pool's actual `totalAssets`.
+    ///      and solvency calculations. Global carry-index projection is independent of the pool.
     /// @param account Account whose current position is hypothetically reduced.
     /// @param sizeDelta Position size to close, with 18 decimals.
     /// @param oraclePrice Candidate close price, with 8 decimals.
@@ -223,7 +223,7 @@ contract CfdEngineLens is ICfdEngineLens {
 
     /// @notice Simulates full liquidation with caller-supplied hypothetical pool accounting depth and cash.
     /// @dev Matches `previewLiquidation` except `poolDepthAssets` replaces current pool assets for payout-affordability and
-    ///      solvency calculations. Side carry-index projection still uses the live pool's actual `totalAssets`.
+    ///      solvency calculations. Global carry-index projection is independent of the pool.
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
     /// @param poolDepthAssets Hypothetical pool assets and cash, in 6-decimal settlement token units.
@@ -703,8 +703,8 @@ contract CfdEngineLens is ICfdEngineLens {
 
     /// @notice Reconstructs planner input from engine and clearinghouse state plus hypothetical pool depth.
     /// @dev `poolDepthAssets` populates both asset and cash fields. This lens does not populate the last-mark context
-    ///      used only by close-commitment planning. Current carry indexes use actual assets net of claims rather than
-    ///      hypothetical depth. VPI and skew subtract claims from the gross planning input.
+    ///      used only by close-commitment planning. The global carry index is independent of actual or hypothetical
+    ///      pool depth. VPI and skew subtract claims from the gross planning input.
     /// @param account Account whose position, buckets, carry, and claims are loaded.
     /// @param poolDepthAssets Hypothetical pool assets and cash, in 6-decimal settlement token units.
     /// @return snap Raw planner snapshot.
@@ -722,9 +722,10 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.positionEntryCostAssetAtoms = engineContract.positionEntryCostAssetAtoms(account);
         snap.account = account;
         snap.currentTimestamp = block.timestamp;
-        (snap.positionBorrowBaseAssets, snap.positionLastCarryIndex,) = engineContract.positionCarryState(account);
-        snap.longSide = _sideSnapshot(CfdTypes.Side.LONG, long);
-        snap.shortSide = _sideSnapshot(CfdTypes.Side.SHORT, short);
+        (, snap.positionLastCarryIndex,) = engineContract.positionCarryState(account);
+        snap.carryIndex = engineContract.currentCarryIndex();
+        snap.longSide = _sideSnapshot(long);
+        snap.shortSide = _sideSnapshot(short);
         snap.poolAssets = poolDepthAssets;
         snap.poolCashAssets = poolDepthAssets;
         IHousePool pool = IHousePool(address(engineContract.pool()));
@@ -799,43 +800,18 @@ contract CfdEngineLens is ICfdEngineLens {
         (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
     }
 
-    /// @notice Extends an aggregate side-state tuple with current borrow base and projected carry index.
-    /// @param sideId Side identifier used for carry state.
+    /// @notice Converts an aggregate side-state tuple to its planner representation.
     /// @param side Aggregate side state loaded from the engine.
     /// @return snap Complete planner side snapshot.
     function _sideSnapshot(
-        CfdTypes.Side sideId,
         ICfdEngineTypes.SideState memory side
-    ) internal view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
+    ) internal pure returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
         snap = CfdEnginePlanTypes.SideSnapshot({
             maxProfitAssets: side.maxProfitAssets,
             openInterest: side.openInterest,
             entryNotional: side.entryNotional,
-            totalMargin: side.totalMargin,
-            borrowBaseAssets: engineContract.sideBorrowBaseAssets(uint256(sideId)),
-            carryIndex: _currentSideCarryIndex(sideId)
+            totalMargin: side.totalMargin
         });
-    }
-
-    /// @notice Projects a side's cumulative carry index through the current block timestamp.
-    /// @dev Utilization uses live assets net of trader claims, including during hypothetical-depth simulations.
-    /// @param side Side whose index is projected.
-    /// @return Current cumulative carry index, scaled by 1e18.
-    function _currentSideCarryIndex(
-        CfdTypes.Side side
-    ) internal view returns (uint256) {
-        uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,,,) = engineContract.riskParams();
-        return PositionRiskAccountingLib.computeCurrentCarryIndex(
-            engineContract.sideCarryIndex(sideIndex),
-            engineContract.sideCarryTimestamp(sideIndex),
-            block.timestamp,
-            engineContract.sideBorrowBaseAssets(sideIndex),
-            PositionRiskAccountingLib.computeNetPoolDepthAssets(
-                engineContract.pool().totalAssets(), engineContract.totalTraderClaimBalanceAssets()
-            ),
-            baseCarryBps
-        );
     }
 
     /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.

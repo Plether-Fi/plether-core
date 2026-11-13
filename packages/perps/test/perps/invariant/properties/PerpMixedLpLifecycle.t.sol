@@ -296,7 +296,7 @@ contract PerpMixedLpLifecycleTest is BasePerpTest {
         handler.changeRawPoolCash(seniorCapital);
         handler.settleJuniorEpoch(false);
         uint256 accountedBeforeClaims = handler.expectedAccounted();
-        uint256 carryClockBeforeClaims = engine.sideCarryTimestamp(0);
+        uint256 carryClockBeforeClaims = engine.carryTimestamp();
         vm.warp(vm.getBlockTimestamp() + 17);
         handler.claimJuniorRedeemRefund(0);
         assertTrue(handler.lpState(0).redeemQueued, "refund does not discard outstanding funded cash");
@@ -310,9 +310,7 @@ contract PerpMixedLpLifecycleTest is BasePerpTest {
         assertEq(
             handler.expectedAccounted(), accountedBeforeClaims, "passive returned dust does not create accounted assets"
         );
-        assertEq(
-            engine.sideCarryTimestamp(0), carryClockBeforeClaims, "passive returned dust does not checkpoint carry"
-        );
+        assertEq(engine.carryTimestamp(), carryClockBeforeClaims, "passive returned dust does not checkpoint carry");
         vm.mockCall(address(pool), abi.encodeCall(pool.accountedAssets, ()), abi.encode(accountedBeforeClaims + 1));
         vm.expectRevert();
         handler.assertModel();
@@ -438,18 +436,18 @@ contract PerpMixedLpLifecycleTest is BasePerpTest {
         assertEq(handler.lpClaimsAfterFurtherFunding(), 1);
     }
 
-    function test_ActiveBorrowSurvivesDelayedFinalDustBeforeNextCarryCheckpoint() public {
+    function test_ActiveExposureSurvivesDelayedFinalDustBeforeNextCarryCheckpoint() public {
         _preparePartialTwo();
         handler.openOrIncrease(0, 17, 100_000_003);
-        assertGt(handler.carry().accountState(handler.actorAt(0)).borrowBase, 0);
+        assertGt(handler.carry().accountState(handler.actorAt(0)).maxProfit, 0);
         handler.changeRawPoolCash(0);
         handler.settleJuniorEpoch(false);
         uint256 epochId = handler.lpState(0).redeemEpoch;
         uint256 dust = handler.redeemEpochState(epochId).assetDust;
         assertGt(dust, 0, "two-controller independently modeled funded-asset dust");
         assertEq(handler.carry().poolDepth(), 0);
-        uint256 checkpoint = handler.carry().sideState(0).timestamp;
-        uint256 index = handler.carry().sideState(0).index;
+        uint256 checkpoint = handler.carry().carryTimestamp();
+        uint256 index = handler.carry().carryIndex();
         uint256 accounted = handler.expectedAccounted();
         uint256 collected = handler.carryCollected();
 
@@ -458,19 +456,19 @@ contract PerpMixedLpLifecycleTest is BasePerpTest {
         handler.claimJuniorRedeemRefund(0);
         handler.claimJuniorRedeem(1);
         assertEq(handler.expectedPoolCash(), 0, "one controller still owes its funding acknowledgement");
-        assertEq(handler.carry().sideState(0).timestamp, checkpoint);
+        assertEq(handler.carry().carryTimestamp(), checkpoint);
         handler.claimJuniorRedeem(0);
         assertEq(handler.expectedPoolCash(), dust);
         assertEq(handler.carry().poolDepth(), dust, "passive dust changes depth for the next assessment");
         assertEq(handler.expectedAccounted(), accounted);
-        assertEq(engine.sideCarryTimestamp(0), checkpoint);
-        assertEq(engine.sideCarryIndex(0), index);
+        assertEq(engine.carryTimestamp(), checkpoint);
+        assertEq(engine.carryIndex(), index);
         handler.assertModel();
 
         handler.advanceAndCheckpoint(37);
-        assertGt(handler.carryCollected(), collected, "real active borrow is assessed after passive dust");
-        assertGt(engine.sideCarryIndex(0), index);
-        assertEq(engine.sideCarryTimestamp(0), vm.getBlockTimestamp());
+        assertGt(handler.carryCollected(), collected, "real active exposure is assessed after passive dust");
+        assertGt(engine.carryIndex(), index);
+        assertEq(engine.carryTimestamp(), vm.getBlockTimestamp());
         handler.assertModel();
     }
 
