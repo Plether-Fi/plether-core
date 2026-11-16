@@ -49,10 +49,7 @@ library CfdEnginePlanLib {
     function _negativeVpiReserveTarget(
         int256 vpiAccruedAssets
     ) private pure returns (uint256 targetAssets) {
-        if (vpiAccruedAssets < 0) {
-            // This form also supports `type(int256).min` without negating it directly.
-            targetAssets = uint256(-(vpiAccruedAssets + 1)) + 1;
-        }
+        (, targetAssets) = VpiAccrualAccountingLib.contribution(vpiAccruedAssets);
     }
 
     /// @notice Projects release of no-longer-required VPI backing into an account-bucket snapshot.
@@ -1084,8 +1081,8 @@ library CfdEnginePlanLib {
                 ? delta.priceGainAssets
                 : delta.actionChargeAssessedAssets;
             delta.actionChargeToCollectAssets = delta.actionChargeAssessedAssets - delta.actionChargeWithheldAssets;
-            uint256 vpiClawbackAssets =
-                _negativeVpiReserveTarget(snap.position.vpiAccrued) - delta.vpiRebateReserveAfterAssets;
+            // Canonical proportional removal has the prior accrual's sign and cannot exceed its magnitude.
+            uint256 vpiClawbackAssets = _negativeVpiReserveTarget(delta.posVpiAccruedReduction);
             vpiClawbackWithheldAssets = delta.actionChargeWithheldAssets < vpiClawbackAssets
                 ? delta.actionChargeWithheldAssets
                 : vpiClawbackAssets;
@@ -1101,11 +1098,10 @@ library CfdEnginePlanLib {
         uint256 executionFeeEligibleAssets = nonClawbackWithheldAssets + nonVpiReserveCollectedAssets;
         delta.executionFeeAssets =
             cs.executionFeeAssets < executionFeeEligibleAssets ? cs.executionFeeAssets : executionFeeEligibleAssets;
-        uint256 feeWithheldAssets =
-            delta.executionFeeAssets < nonClawbackWithheldAssets ? delta.executionFeeAssets : nonClawbackWithheldAssets;
-        uint256 feeToCollectAssets = delta.executionFeeAssets - feeWithheldAssets;
-        delta.actionProtocolFeeCreditedAssets =
-            feeToCollectAssets < nonVpiReserveCollectedAssets ? feeToCollectAssets : nonVpiReserveCollectedAssets;
+        // The eligibility cap already bounds this remainder by non-VPI collected cash.
+        delta.actionProtocolFeeCreditedAssets = delta.executionFeeAssets > nonClawbackWithheldAssets
+            ? delta.executionFeeAssets - nonClawbackWithheldAssets
+            : 0;
     }
 
     function _postCloseHealthy(

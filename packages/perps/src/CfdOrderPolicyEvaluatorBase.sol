@@ -13,6 +13,7 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
+import {CfdEngineRawSnapshotLib} from "@plether/perps/libraries/CfdEngineRawSnapshotLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @dev Permissionless Engine read surface used to build policy-evaluation snapshots.
@@ -211,75 +212,26 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         uint256 poolDepthAssets,
         uint256 poolCashAssets
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
-        (
-            snapshot.position.size,
-            snapshot.position.margin,
-            snapshot.position.entryPrice,
-            snapshot.position.maxProfitAssets,
-            snapshot.position.side,
-            snapshot.position.lastUpdateTime,
-            snapshot.position.vpiAccrued
-        ) = engine.positions(account);
-        snapshot.positionEntryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
-        (snapshot.positionBorrowBaseAssets, snapshot.positionLastCarryIndex, snapshot.position.lastCarryTimestamp) =
-            engine.positionCarryState(account);
-
-        snapshot.account = account;
-        snapshot.currentTimestamp = block.timestamp;
+        IHousePool pool = IHousePool(engine.pool());
+        CfdEngineRawSnapshotLib.loadCore(snapshot, address(engine), account, pool);
         snapshot.lastMarkPrice = engine.lastMarkPrice();
         snapshot.lastMarkTime = engine.lastMarkTime();
-        snapshot.riskParams = engine.riskParams();
 
         snapshot.poolCashAssets = poolCashAssets;
-        IHousePool pool = IHousePool(engine.pool());
-        snapshot.poolAdditionalReservedAssets =
-            pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
-        snapshot.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
-        snapshot.totalTraderClaimBalanceAssets = engine.totalTraderClaimBalanceAssets();
-        snapshot.totalPositiveVpiAccruedAssets = engine.totalPositiveVpiAccruedAssets();
-        snapshot.totalNegativeVpiAccruedAssets = engine.totalNegativeVpiAccruedAssets();
         uint256 carryDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
             snapshot.poolCashAssets, snapshot.totalTraderClaimBalanceAssets, snapshot.totalPositiveVpiAccruedAssets
         );
-        snapshot.longSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.LONG, carryDepthAssets, snapshot.riskParams.baseCarryBps);
-        snapshot.shortSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.SHORT, carryDepthAssets, snapshot.riskParams.baseCarryBps);
+        snapshot.longSide = CfdEngineRawSnapshotLib.loadSide(
+            address(engine), planner, CfdTypes.Side.LONG, carryDepthAssets, snapshot.riskParams.baseCarryBps
+        );
+        snapshot.shortSide = CfdEngineRawSnapshotLib.loadSide(
+            address(engine), planner, CfdTypes.Side.SHORT, carryDepthAssets, snapshot.riskParams.baseCarryBps
+        );
         snapshot.poolAssets = poolDepthAssets;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
         CfdEngineCollateralSnapshotLib.load(snapshot, clearinghouse, account, false);
-
-        snapshot.unsettledCarryAssets = engine.unsettledCarryAssets(account);
-        snapshot.traderClaimBalanceForAccount = engine.traderClaimBalanceAssets(account);
-        snapshot.degradedMode = engine.degradedMode();
-        snapshot.capPrice = engine.CAP_PRICE();
-        snapshot.executionFeeBps = engine.executionFeeBps();
-        snapshot.settlementBufferBps = engine.settlementBufferBps();
-        snapshot.isFadWindow = engine.isFadWindow();
-        snapshot.oracleFrozen = engine.isOracleFrozen();
-        snapshot.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
-    }
-
-    function _sideSnapshot(
-        ICfdOrderPolicyEngineView engine,
-        ICfdEnginePlanner planner,
-        CfdTypes.Side side,
-        uint256 poolDepthAssets,
-        uint256 baseCarryBps
-    ) private view returns (CfdEnginePlanTypes.SideSnapshot memory snapshot) {
-        uint256 index = uint256(side);
-        (snapshot.maxProfitAssets, snapshot.openInterest, snapshot.entryNotional, snapshot.totalMargin) =
-            engine.sides(index);
-        snapshot.borrowBaseAssets = engine.sideBorrowBaseAssets(index);
-        snapshot.carryIndex = planner.computeCurrentCarryIndex(
-            engine.sideCarryIndex(index),
-            engine.sideCarryTimestamp(index),
-            block.timestamp,
-            snapshot.borrowBaseAssets,
-            poolDepthAssets,
-            baseCarryBps
-        );
+        CfdEngineRawSnapshotLib.loadExecutionContext(snapshot, address(engine));
     }
 
     function _requireValidOpenDelta(

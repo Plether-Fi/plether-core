@@ -9,7 +9,6 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
-import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -17,6 +16,7 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IOrderRouterEmergencyAdmin} from "@plether/perps/interfaces/IOrderRouterEmergencyAdmin.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
+import {CfdEngineRawSnapshotLib} from "@plether/perps/libraries/CfdEngineRawSnapshotLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @dev Minimal canonical Router binding used by the refund-aware liquidation preview.
@@ -712,25 +712,12 @@ contract CfdEngineLens is ICfdEngineLens {
         address account,
         uint256 poolDepthAssets
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        ICfdEngineTypes.SideState memory long;
-        ICfdEngineTypes.SideState memory short;
-        (long.maxProfitAssets, long.openInterest, long.entryNotional, long.totalMargin) =
-            engineContract.sides(uint8(CfdTypes.Side.LONG));
-        (short.maxProfitAssets, short.openInterest, short.entryNotional, short.totalMargin) =
-            engineContract.sides(uint8(CfdTypes.Side.SHORT));
-        snap.position = _position(account);
-        snap.positionEntryCostAssetAtoms = engineContract.positionEntryCostAssetAtoms(account);
-        snap.account = account;
-        snap.currentTimestamp = block.timestamp;
-        (snap.positionBorrowBaseAssets, snap.positionLastCarryIndex,) = engineContract.positionCarryState(account);
-        snap.longSide = _sideSnapshot(CfdTypes.Side.LONG, long);
-        snap.shortSide = _sideSnapshot(CfdTypes.Side.SHORT, short);
+        IHousePool pool = IHousePool(address(engineContract.pool()));
+        CfdEngineRawSnapshotLib.loadCore(snap, address(engineContract), account, pool);
+        snap.longSide = _sideSnapshot(CfdTypes.Side.LONG);
+        snap.shortSide = _sideSnapshot(CfdTypes.Side.SHORT);
         snap.poolAssets = poolDepthAssets;
         snap.poolCashAssets = poolDepthAssets;
-        IHousePool pool = IHousePool(address(engineContract.pool()));
-        snap.poolAdditionalReservedAssets =
-            pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
-        snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
         snap.accountBuckets = clearinghouse.getAccountAssetBuckets(account);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
@@ -738,19 +725,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.actionReserveAssets = clearinghouse.actionReserveAssets(account);
         snap.vpiRebateReserveAssets = clearinghouse.vpiRebateReserveAssets(account);
         snap.protectedExecutionBountyAssets = clearinghouse.totalBountyReservationsAssets(account);
-        snap.unsettledCarryAssets = engineContract.unsettledCarryAssets(account);
-        snap.totalTraderClaimBalanceAssets = engineContract.totalTraderClaimBalanceAssets();
-        snap.totalPositiveVpiAccruedAssets = engineContract.totalPositiveVpiAccruedAssets();
-        snap.totalNegativeVpiAccruedAssets = engineContract.totalNegativeVpiAccruedAssets();
-        snap.traderClaimBalanceForAccount = engineContract.traderClaimBalanceAssets(account);
-        snap.degradedMode = engineContract.degradedMode();
-        snap.capPrice = engineContract.CAP_PRICE();
-        snap.riskParams = _riskParams();
-        snap.executionFeeBps = engineContract.executionFeeBps();
-        snap.settlementBufferBps = engineContract.settlementBufferBps();
-        snap.isFadWindow = engineContract.isFadWindow();
-        snap.oracleFrozen = engineContract.isOracleFrozen();
-        snap.frozenCloseSpreadBps = engineContract.frozenCloseSpreadBps();
+        CfdEngineRawSnapshotLib.loadExecutionContext(snap, address(engineContract));
     }
 
     /// @notice Adjusts a memory snapshot for execution-bounty value forfeited before liquidation settlement.
@@ -801,22 +776,14 @@ contract CfdEngineLens is ICfdEngineLens {
         (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
     }
 
-    /// @notice Extends an aggregate side-state tuple with current borrow base and projected carry index.
+    /// @notice Loads an aggregate side state with current borrow base and projected carry index.
     /// @param sideId Side identifier used for carry state.
-    /// @param side Aggregate side state loaded from the engine.
     /// @return snap Complete planner side snapshot.
     function _sideSnapshot(
-        CfdTypes.Side sideId,
-        ICfdEngineTypes.SideState memory side
+        CfdTypes.Side sideId
     ) internal view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
-        snap = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitAssets: side.maxProfitAssets,
-            openInterest: side.openInterest,
-            entryNotional: side.entryNotional,
-            totalMargin: side.totalMargin,
-            borrowBaseAssets: engineContract.sideBorrowBaseAssets(uint256(sideId)),
-            carryIndex: _currentSideCarryIndex(sideId)
-        });
+        snap = CfdEngineRawSnapshotLib.loadSideState(address(engineContract), sideId);
+        snap.carryIndex = _currentSideCarryIndex(sideId);
     }
 
     /// @notice Projects a side's cumulative carry index through the current block timestamp.
@@ -840,12 +807,6 @@ contract CfdEngineLens is ICfdEngineLens {
             ),
             baseCarryBps
         );
-    }
-
-    /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.
-    /// @return params Current risk, VPI, carry, margin, and bounty settings.
-    function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
-        params = ICfdEngineRiskParamsView(address(engineContract)).riskParams();
     }
 
 }

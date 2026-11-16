@@ -16,6 +16,7 @@ import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginC
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderSettlementFloorLib} from "@plether/perps/libraries/OrderSettlementFloorLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
+import {VpiAccrualAccountingLib} from "@plether/perps/libraries/VpiAccrualAccountingLib.sol";
 
 /// @title CfdEngineAccountLens
 /// @notice Rich per-account diagnostic lens for audits, tests, and operator tooling.
@@ -323,9 +324,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     function _negativeVpiReserveTarget(
         int256 vpiAccruedAssets
     ) private pure returns (uint256 targetAssets) {
-        if (vpiAccruedAssets < 0) {
-            targetAssets = uint256(-(vpiAccruedAssets + 1)) + 1;
-        }
+        (, targetAssets) = VpiAccrualAccountingLib.contribution(vpiAccruedAssets);
     }
 
     /// @notice Returns the exact account-local cap committed to the terminal price-PnL book.

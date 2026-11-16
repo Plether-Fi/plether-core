@@ -17,6 +17,7 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderSettlementFloorLib} from "@plether/perps/libraries/OrderSettlementFloorLib.sol";
+import {VpiAccrualAccountingLib} from "@plether/perps/libraries/VpiAccrualAccountingLib.sol";
 
 /// @title CfdEngineSettlementSidecar
 /// @notice Externalized settlement executor for `CfdEngine` open, close, and liquidation flows.
@@ -201,9 +202,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function _negativeVpiReserveTarget(
         int256 vpiAccruedAssets
     ) private pure returns (uint256 targetAssets) {
-        if (vpiAccruedAssets < 0) {
-            targetAssets = uint256(-(vpiAccruedAssets + 1)) + 1;
-        }
+        (, targetAssets) = VpiAccrualAccountingLib.contribution(vpiAccruedAssets);
     }
 
     function _liveMark(
@@ -318,7 +317,12 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             delta.sideEntryNotionalDelta
         );
         _writeOpenPosition(host, delta, currentPosition);
-        _settleProtocolFeeTopUp(host, delta.executionFeeAssets, protocolFeeCreditedAssets);
+        _settleProtocolFeeTopUp(
+            host,
+            delta.executionFeeAssets > protocolFeeCreditedAssets
+                ? delta.executionFeeAssets - protocolFeeCreditedAssets
+                : 0
+        );
         _assertRequiredEffectiveAssets(host, delta.requiredEffectiveAssetsAfterAssets);
     }
 
@@ -423,7 +427,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         );
         uint256 protocolFeeCreditedAssets = _settleCloseActionCharge(host, clearinghouse, delta);
 
-        _recordCloseInflows(host, delta, currentPosition.vpiAccrued, protocolFeeCreditedAssets);
+        _recordCloseInflows(host, delta, protocolFeeCreditedAssets);
 
         if (delta.pricePayoutAssets > 0) {
             host.settlementRecordTraderClaim(delta.account, delta.pricePayoutAssets, !delta.deletePosition);
@@ -458,9 +462,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (!delta.deletePosition && delta.liquidationReserveReleaseAssets > 0) {
             clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseAssets);
         }
-        _settleProtocolFeeTopUp(
-            host, protocolFeeCreditedAssets + delta.protocolFeeTopUpAssets, protocolFeeCreditedAssets
-        );
+        _settleProtocolFeeTopUp(host, delta.protocolFeeTopUpAssets);
 
         if (delta.closeState.frozenSpreadAssets > 0) {
             uint256 frozenSpreadPaidAssets = _recoveredFrozenSpreadAssets(delta);
@@ -597,11 +599,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function _recordCloseInflows(
         ICfdEngineSettlementHost host,
         CfdEnginePlanTypes.CloseDelta calldata delta,
-        int256 previousAccruedVpiAssets,
         uint256 protocolFeeCreditedAssets
     ) private {
-        uint256 clawbackAssets = _negativeVpiReserveTarget(previousAccruedVpiAssets)
-            - _negativeVpiReserveTarget(previousAccruedVpiAssets - delta.posVpiAccruedReduction);
+        // Canonical proportional removal has the prior accrual's sign and cannot exceed its magnitude.
+        uint256 clawbackAssets = _negativeVpiReserveTarget(delta.posVpiAccruedReduction);
         _recordCashInflow(
             host,
             delta.pricePnlPledgeConsumedAssets + delta.actionChargeCollectedAssets - protocolFeeCreditedAssets,
@@ -752,24 +753,18 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @dev The top-up is capped by both the requested shortfall and current free pool cash, then paid to the clearinghouse
     ///      and credited to the host's protocol-treasury account.
     /// @param host Bound engine settlement host.
-    /// @param amountAssets Total protocol-fee amount intended to be credited.
-    /// @param clearinghouseCreditedAssets Portion already credited from clearinghouse cash collection.
+    /// @param requestedPoolFundingAssets Outstanding protocol-fee amount requested from pool cash.
     function _settleProtocolFeeTopUp(
         ICfdEngineSettlementHost host,
-        uint256 amountAssets,
-        uint256 clearinghouseCreditedAssets
+        uint256 requestedPoolFundingAssets
     ) private {
-        if (clearinghouseCreditedAssets > amountAssets) {
-            clearinghouseCreditedAssets = amountAssets;
-        }
-        uint256 poolFundedAssets = amountAssets - clearinghouseCreditedAssets;
-        if (poolFundedAssets == 0) {
+        if (requestedPoolFundingAssets == 0) {
             return;
         }
 
         IHousePool pool = IHousePool(host.pool());
         uint256 freeCashAssets = pool.getSettlementFreeAssets();
-        uint256 topUpAssets = poolFundedAssets < freeCashAssets ? poolFundedAssets : freeCashAssets;
+        uint256 topUpAssets = requestedPoolFundingAssets < freeCashAssets ? requestedPoolFundingAssets : freeCashAssets;
         if (topUpAssets == 0) {
             return;
         }

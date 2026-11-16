@@ -17,6 +17,7 @@ import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProte
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 import {ExecutionBlockNumberLib} from "@plether/perps/libraries/ExecutionBlockNumberLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
+import {VpiAccrualAccountingLib} from "@plether/perps/libraries/VpiAccrualAccountingLib.sol";
 
 /// @notice Narrow engine view surface used by position-protection actions and lifecycle validation.
 interface IPositionProtectionEngine is ICfdEngineRiskParamsView {
@@ -975,9 +976,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     function _negativeVpiReserveTarget(
         int256 vpiAccruedAssets
     ) private pure returns (uint256 targetAssets) {
-        if (vpiAccruedAssets < 0) {
-            targetAssets = uint256(-(vpiAccruedAssets + 1)) + 1;
-        }
+        (, targetAssets) = VpiAccrualAccountingLib.contribution(vpiAccruedAssets);
     }
 
     function _ownedActiveProtection(

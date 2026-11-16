@@ -163,6 +163,7 @@ twice. Funded redemption claims remain available independently of later Pool ent
 | Helper | Invocation and responsibility |
 | --- | --- |
 | `CfdEnginePlanner` and accounting libraries | Build deterministic plans from canonical snapshots. |
+| `CfdEngineRawSnapshotLib` | Internal shared loaders for position, pool ownership, risk, execution context and side fields used by planning, policy assessment and Lens snapshots. |
 | `CfdEnginePlanningReader` | Constructor-bound canonical snapshot construction. Planner requests retain the configured settlement sidecar as their snapshot source; its facade calls back into this read-only builder. |
 | `CfdOrderPolicyEvaluator` | Stateless evaluation of current Engine state against caller-pinned financial bounds. |
 | `CfdClosePreview` | Read-only pre-commit close projection, including commitment carry. It does not commit or execute. |
@@ -172,6 +173,11 @@ twice. Funded redemption claims remain available independently of later Pool ent
 | `OrderRouterLiquidationBatchSidecar` | Exactly Router-bound delegate implementation for commitments, mark refresh, protection-trigger orchestration, liquidations, atomic LP settlement and oracle configuration forwarding. |
 | `HousePoolRedemptionMathSidecar` | Immutable stateless pure redemption-budget calculations; no custody or settlement authority. |
 | `SettlementMonitorLensSidecar` | Constructor-bound read implementation called only by its monitor facade. |
+
+Raw-snapshot wrappers retain their distinct read policies: execution and assessment use live pool cash, while Lens
+simulation uses its supplied hypothetical cash and local carry projection. Close commitment reads only the exposed
+side and omits execution-only fields. Stable HousePool snapshots remain separate because their guarded reads are
+not interchangeable with reads performed during settlement.
 
 Integrators call the public Router, Engine, Book or Lens surface, not matching sidecar selectors. Router delegatecalls
 retain the Router execution/event address and use authenticated host callbacks. Engine settlement-sidecar calls use
