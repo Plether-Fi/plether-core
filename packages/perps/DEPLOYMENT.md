@@ -22,6 +22,10 @@ Immutable and one-time bindings prevent a Router-only replacement or an in-place
 There is no live-state migration tool. Cutover needs a separate plan for existing positions, queued orders,
 protections, balances, claims, and LP obligations.
 
+Manual shutdown uses the existing `OrderRouterAdmin` and `HousePool` entry pauses, left in place while obligations
+are settled. Do not use the LP epoch settlement hold as a permanent stop because it also blocks redemption funding.
+The source adds no automatic wipeout latch or irreversible restart restriction.
+
 Generate consumer ABIs from the release build. Current requests and client-intent hashes use V3; receipts and execution
 configuration hashes use V5. Pin the manifest and runtime hashes with those ABIs. Keep historical manifests, decoders,
 and services available until their positions and pending work are resolved; do not redirect old requests or receipt

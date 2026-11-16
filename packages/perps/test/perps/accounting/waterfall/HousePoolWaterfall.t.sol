@@ -178,10 +178,10 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
+        uint256 survivingHwm = pool.seniorHighWaterMark();
 
         uint256 pendingAmount = 100_000e6;
         uint256 traderClaimLiability = 50_040e6;
-        uint256 settleableAmount = pendingAmount - traderClaimLiability;
 
         settlementToken.mint(address(pool), pendingAmount);
         vm.prank(address(engine));
@@ -191,19 +191,21 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         _setTotalTraderClaim(traderClaimLiability);
 
         (uint256 pendingSenior,, uint256 maxSeniorWithdraw,) = pool.getPendingTrancheState();
-        assertEq(pendingSenior, settleableAmount, "Preview should only credit liability-adjusted recap assets");
+        assertEq(pendingSenior, survivingHwm, "Preview should restore only the surviving Senior entitlement");
         assertEq(maxSeniorWithdraw, 0, "Residual pending recapitalization should stay reserved from withdrawals");
 
         vm.prank(address(seniorVault));
         pool.reconcile();
 
-        assertEq(pool.seniorPrincipal(), settleableAmount, "Live reconcile should apply only the settleable recap");
-        assertEq(pool.seniorHighWaterMark(), pendingAmount, "Residual recap should preserve senior's recovery target");
+        assertEq(
+            pool.seniorPrincipal(), survivingHwm, "Live reconcile should restore only surviving Senior entitlement"
+        );
+        assertEq(pool.seniorHighWaterMark(), survivingHwm, "Residual recap must not create a new Senior target");
         assertEq(pool.pendingRecapitalizationAssets(), traderClaimLiability, "Unsettled recap must remain pending");
         assertEq(pool.pendingTradingRevenueAssets(), 0);
 
         IHousePool.PoolLiquidityView memory viewData = pool.getPoolLiquidityView();
-        assertEq(viewData.seniorPrincipalAssets, settleableAmount, "Liquidity view should not overstate senior NAV");
+        assertEq(viewData.seniorPrincipalAssets, survivingHwm, "Liquidity view should not overstate senior NAV");
         assertEq(
             viewData.pendingRecapitalizationAssets, traderClaimLiability, "Liquidity view should expose residual recap"
         );
@@ -214,9 +216,9 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         vm.prank(address(seniorVault));
         pool.reconcile();
 
-        assertEq(pool.seniorPrincipal(), pendingAmount, "Residual recap should settle once backing becomes available");
+        assertEq(pool.seniorPrincipal(), survivingHwm, "Later backing must not increase Senior beyond its HWM");
         assertEq(pool.pendingRecapitalizationAssets(), 0, "Fully settled recap should clear the pending bucket");
-        assertEq(pool.unassignedAssets(), 0, "Settled recap should keep senior restoration out of unassigned assets");
+        assertEq(pool.unassignedAssets(), pendingAmount - survivingHwm, "Excess recap should remain unassigned");
     }
 
     function test_PendingRevenue_CapsAgainstTraderClaimLiabilitiesAndCarriesResidual() public {

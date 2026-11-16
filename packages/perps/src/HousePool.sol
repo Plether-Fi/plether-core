@@ -18,7 +18,6 @@ import {ITrancheVaultBootstrap} from "@plether/perps/interfaces/ITrancheVaultBoo
 import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccountingLib.sol";
 import {HousePoolFreshnessLib} from "@plether/perps/libraries/HousePoolFreshnessLib.sol";
 import {HousePoolPendingPreviewLib} from "@plether/perps/libraries/HousePoolPendingPreviewLib.sol";
-import {HousePoolReconcilePlanLib} from "@plether/perps/libraries/HousePoolReconcilePlanLib.sol";
 import {HousePoolSeedLifecycleLib} from "@plether/perps/libraries/HousePoolSeedLifecycleLib.sol";
 import {HousePoolSeniorCapacityLib} from "@plether/perps/libraries/HousePoolSeniorCapacityLib.sol";
 import {HousePoolTrancheGateLib} from "@plether/perps/libraries/HousePoolTrancheGateLib.sol";
@@ -159,6 +158,12 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     uint256 public pendingRecapitalizationAssets;
     /// @notice Unsettled claimant trading revenue reserved from withdrawals (6-decimal settlement token).
     uint256 public pendingTradingRevenueAssets;
+    /// @dev Claimant inflows queued since the last reconcile that applied any pending value. This lets a fresh
+    ///      receipt fund its first allocation without reserving value already assigned on a later reconcile.
+    uint256 internal freshlyQueuedClaimantAssets;
+    /// @dev Pool payouts since the last reconcile, bounded by pending claimant intent. A fresh canonical snapshot
+    ///      decides whether that payout actually consumed backing for a pending claimant bucket.
+    uint256 internal pendingClaimantPayoutDebitAssets;
     /// @notice Accepted senior delayed-deposit assets not yet cancelled or finalized (6-decimal settlement token).
     uint256 public override reservedSeniorDepositAssets;
     /// @notice Explicit terminal LP deficit captured by the most recent mark-fresh reconcile (6-decimal settlement token).
@@ -610,6 +615,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         }
         accountedAssets -= amount;
         settlementToken.safeTransfer(recipient, amount);
+        // The Engine may still be inside a terminal-book mutation. Defer ownership clipping until the next stable
+        // reconcile; physical cash alone omits collectible receivables that may still back claimant intent.
+        pendingClaimantPayoutDebitAssets += _min(
+            amount, _pendingClaimantBucketAssets() - pendingClaimantPayoutDebitAssets
+        );
     }
 
     /// @notice Records claimant-owned value into the tranche claimant path.
@@ -643,8 +653,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
         if (kind == IHousePool.ClaimantInflowKind.Recapitalization) {
             _recordPendingClaimantInflow(kind, amount);
+            freshlyQueuedClaimantAssets += amount;
         } else if (seniorPrincipal + juniorPrincipal == 0) {
             _recordPendingClaimantInflow(kind, amount);
+            freshlyQueuedClaimantAssets += amount;
         }
 
         emit ClaimantInflowAccounted(msg.sender, kind, cashMode, amount);
@@ -1559,43 +1571,38 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         uint256 couponElapsed =
             block.timestamp > lastSeniorCouponCheckpointTime ? block.timestamp - lastSeniorCouponCheckpointTime : 0;
         bool markFresh = _markIsFreshForReconcile(accountingSnapshot, statusSnapshot);
+        bool markValid =
+            markFresh && (!accountingSnapshot.hasOpenPositions || statusSnapshot.lastMarkTime <= block.timestamp);
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot =
             HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets = _getPendingClaimantBuckets();
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets =
-            _settleablePendingClaimantBuckets(reconcileSnapshot, claimantBuckets);
-        bool allowRevenueContinuation = seniorPrincipal + juniorPrincipal != 0;
-        HousePoolReconcilePlanLib.ReconcilePlan memory plan = HousePoolReconcilePlanLib.planReconcile(
-            _currentPendingAccountingState(),
-            reconcileSnapshot,
-            _pendingClaimantBucketAssets(settleableClaimantBuckets),
-            poolConfig.seniorRateBps,
-            couponElapsed,
-            markFresh
-        );
-        // Nonpending equity can restore seeded LP principal before the queued revenue is routed.
-        allowRevenueContinuation = allowRevenueContinuation
-            || plan.state.waterfall.seniorPrincipal + plan.state.waterfall.juniorPrincipal != 0;
+        (
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets,
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory remainingClaimantBuckets
+        ) = _resolvePendingClaimantBuckets(reconcileSnapshot, claimantBuckets, markValid);
+        HousePoolPendingPreviewLib.PendingAccountingState memory nextState =
+            _previewPendingAccountingState(reconcileSnapshot, settleableClaimantBuckets, couponElapsed, markFresh);
 
         if (couponElapsed > 0) {
             lastSeniorCouponCheckpointTime = block.timestamp;
         }
 
-        _setWaterfallState(plan.state.waterfall);
-        unassignedAssets = plan.state.unassignedAssets;
+        _setWaterfallState(nextState.waterfall);
+        unassignedAssets = nextState.unassignedAssets;
 
         if (markFresh) {
             terminalDeficitAssets = reconcileSnapshot.deficit;
             lastReconcileTime = block.timestamp;
-
-            uint256 juniorRevenueWithoutOwners = HousePoolReconcilePlanLib.juniorRevenueWithoutOwners(plan);
-            if (juniorRevenueWithoutOwners > 0) {
-                juniorPrincipal -= juniorRevenueWithoutOwners;
-                unassignedAssets += juniorRevenueWithoutOwners;
-            }
         }
 
-        _applyPendingClaimantBucketsLive(settleableClaimantBuckets, claimantBuckets, allowRevenueContinuation);
+        pendingRecapitalizationAssets = remainingClaimantBuckets.recapitalizationAssets;
+        pendingTradingRevenueAssets = remainingClaimantBuckets.revenueAssets;
+        uint256 remainingPendingAssets = _pendingClaimantBucketAssets(remainingClaimantBuckets);
+        freshlyQueuedClaimantAssets = _pendingClaimantBucketAssets(settleableClaimantBuckets) != 0
+            ? 0
+            : _min(freshlyQueuedClaimantAssets, remainingPendingAssets);
+        pendingClaimantPayoutDebitAssets =
+            markValid ? 0 : _min(pendingClaimantPayoutDebitAssets, remainingPendingAssets);
     }
 
     function _getWithdrawalSnapshot()
@@ -1615,20 +1622,18 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot =
             HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets = _getPendingClaimantBuckets();
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets =
-            _settleablePendingClaimantBuckets(reconcileSnapshot, claimantBuckets);
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory residualClaimantBuckets =
-            HousePoolPendingPreviewLib.subtractClaimantBuckets(claimantBuckets, settleableClaimantBuckets);
-        ctx.residualPendingClaimantAssets = _pendingClaimantBucketAssets(residualClaimantBuckets);
-        bool allowRevenueContinuation = seniorPrincipal + juniorPrincipal != 0;
-        ctx.pendingState = _previewPendingAccountingState(
-            accountingSnapshot,
-            statusSnapshot,
-            reconcileSnapshot,
-            settleableClaimantBuckets,
-            claimantBuckets,
-            allowRevenueContinuation
-        );
+        bool markFresh = _markIsFreshForReconcile(accountingSnapshot, statusSnapshot);
+        bool markValid =
+            markFresh && (!accountingSnapshot.hasOpenPositions || statusSnapshot.lastMarkTime <= block.timestamp);
+        (
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets,
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory remainingClaimantBuckets
+        ) = _resolvePendingClaimantBuckets(reconcileSnapshot, claimantBuckets, markValid);
+        ctx.residualPendingClaimantAssets = _pendingClaimantBucketAssets(remainingClaimantBuckets);
+        uint256 couponElapsed =
+            block.timestamp > lastSeniorCouponCheckpointTime ? block.timestamp - lastSeniorCouponCheckpointTime : 0;
+        ctx.pendingState =
+            _previewPendingAccountingState(reconcileSnapshot, settleableClaimantBuckets, couponElapsed, markFresh);
     }
 
     function _buildCurrentHousePoolContext() internal view returns (HousePoolContext memory ctx) {
@@ -1636,42 +1641,53 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     }
 
     function _previewPendingAccountingState(
-        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
-        HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot,
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot,
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets,
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets,
-        bool allowRevenueContinuation
+        uint256 couponElapsed,
+        bool markFresh
     ) internal view returns (HousePoolPendingPreviewLib.PendingAccountingState memory pendingState) {
         pendingState = _currentPendingAccountingState();
-
-        bool markFresh = _markIsFreshForReconcile(accountingSnapshot, statusSnapshot);
-        uint256 couponElapsed =
-            block.timestamp > lastSeniorCouponCheckpointTime ? block.timestamp - lastSeniorCouponCheckpointTime : 0;
-        HousePoolReconcilePlanLib.ReconcilePlan memory plan = HousePoolReconcilePlanLib.planReconcile(
-            pendingState,
-            reconcileSnapshot,
-            _pendingClaimantBucketAssets(settleableClaimantBuckets),
-            poolConfig.seniorRateBps,
-            couponElapsed,
-            markFresh
-        );
-
-        pendingState = plan.state;
-        allowRevenueContinuation = allowRevenueContinuation
-            || pendingState.waterfall.seniorPrincipal + pendingState.waterfall.juniorPrincipal != 0;
-
+        uint256 allocatedAssets = _pendingClaimantBucketAssets(settleableClaimantBuckets);
+        if (couponElapsed > 0 && pendingState.juniorSupply > 0) {
+            (pendingState.waterfall,) = HousePoolWaterfallAccountingLib.paySeniorCoupon(
+                pendingState.waterfall, poolConfig.seniorRateBps, couponElapsed
+            );
+        }
+        uint256 claimedBeforeRecap = pendingState.waterfall.seniorPrincipal + pendingState.waterfall.juniorPrincipal;
+        uint256 ordinaryRevenue;
         if (markFresh) {
-            uint256 juniorRevenueWithoutOwners = HousePoolReconcilePlanLib.juniorRevenueWithoutOwners(plan);
-            if (juniorRevenueWithoutOwners > 0) {
-                pendingState.waterfall.juniorPrincipal -= juniorRevenueWithoutOwners;
-                pendingState.unassignedAssets += juniorRevenueWithoutOwners;
+            uint256 distributable = reconcileSnapshot.distributable > allocatedAssets
+                ? reconcileSnapshot.distributable - allocatedAssets
+                : 0;
+            pendingState.unassignedAssets = _min(pendingState.unassignedAssets, distributable);
+            uint256 distributableToClaims = distributable - pendingState.unassignedAssets;
+            if (distributableToClaims < claimedBeforeRecap) {
+                pendingState.waterfall = HousePoolWaterfallAccountingLib.absorbLoss(
+                    pendingState.waterfall, claimedBeforeRecap - distributableToClaims
+                );
+            } else {
+                ordinaryRevenue = distributableToClaims - claimedBeforeRecap;
             }
         }
 
-        HousePoolPendingPreviewLib.applyPendingClaimantBucketsPreview(
-            pendingState, settleableClaimantBuckets, claimantBuckets, allowRevenueContinuation
+        // Losses precede the recap; the recap precedes ordinary gains so Senior's gap is filled only once.
+        HousePoolPendingPreviewLib.applyClaimantRecapitalizationIntent(
+            pendingState, settleableClaimantBuckets.recapitalizationAssets
         );
+        if (ordinaryRevenue > 0) {
+            if (claimedBeforeRecap == 0) {
+                HousePoolPendingPreviewLib.applyRevenueIntent(pendingState, ordinaryRevenue);
+            } else {
+                uint256 juniorBeforeRevenue = pendingState.waterfall.juniorPrincipal;
+                pendingState.waterfall =
+                    HousePoolWaterfallAccountingLib.distributeRevenue(pendingState.waterfall, ordinaryRevenue);
+                if (pendingState.juniorSupply == 0) {
+                    pendingState.unassignedAssets += pendingState.waterfall.juniorPrincipal - juniorBeforeRevenue;
+                    pendingState.waterfall.juniorPrincipal = juniorBeforeRevenue;
+                }
+            }
+        }
+        HousePoolPendingPreviewLib.applyRevenueIntent(pendingState, settleableClaimantBuckets.revenueAssets);
     }
 
     function _markIsFreshForReconcile(
@@ -1756,25 +1772,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         lastSeniorCouponCheckpointTime = block.timestamp;
     }
 
-    function _applyPendingClaimantBucketsLive(
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets,
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets,
-        bool allowRevenueContinuation
-    ) internal {
-        if (_pendingClaimantBucketAssets(settleableClaimantBuckets) == 0) {
-            return;
-        }
-
-        HousePoolPendingPreviewLib.PendingAccountingState memory state = _currentPendingAccountingState();
-        HousePoolPendingPreviewLib.applyPendingClaimantBucketsPreview(
-            state, settleableClaimantBuckets, claimantBuckets, allowRevenueContinuation
-        );
-        _decreasePendingClaimantBuckets(settleableClaimantBuckets);
-
-        _setWaterfallState(state.waterfall);
-        unassignedAssets = state.unassignedAssets;
-    }
-
     function _getPendingClaimantBuckets()
         internal
         view
@@ -1782,13 +1779,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     {
         buckets.recapitalizationAssets = pendingRecapitalizationAssets;
         buckets.revenueAssets = pendingTradingRevenueAssets;
-    }
-
-    function _decreasePendingClaimantBuckets(
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets
-    ) internal {
-        pendingRecapitalizationAssets -= claimantBuckets.recapitalizationAssets;
-        pendingTradingRevenueAssets -= claimantBuckets.revenueAssets;
     }
 
     function _recordPendingClaimantInflow(
@@ -1826,11 +1816,33 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         return HousePoolPendingPreviewLib.claimantBucketAssets(claimantBuckets);
     }
 
-    function _settleablePendingClaimantBuckets(
+    /// @dev Allocate once, then retire spent unsupported intent from the unallocated remainder.
+    function _resolvePendingClaimantBuckets(
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot,
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets
-    ) internal pure returns (HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets) {
-        return HousePoolPendingPreviewLib.capClaimantBuckets(claimantBuckets, reconcileSnapshot.distributable);
+        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets,
+        bool markValid
+    )
+        internal
+        view
+        returns (
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets,
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory remainingClaimantBuckets
+        )
+    {
+        settleableClaimantBuckets = HousePoolPendingPreviewLib.settleableClaimantBuckets(
+            claimantBuckets,
+            reconcileSnapshot.distributable,
+            seniorPrincipal + juniorPrincipal + unassignedAssets,
+            freshlyQueuedClaimantAssets
+        );
+        remainingClaimantBuckets =
+            HousePoolPendingPreviewLib.subtractClaimantBuckets(claimantBuckets, settleableClaimantBuckets);
+        if (markValid) {
+            uint256 remainingAssets = _pendingClaimantBucketAssets(remainingClaimantBuckets);
+            remainingClaimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(
+                remainingClaimantBuckets, remainingAssets - _min(pendingClaimantPayoutDebitAssets, remainingAssets)
+            );
+        }
     }
 
     function _getHousePoolInputSnapshot()

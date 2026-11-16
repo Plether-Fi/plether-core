@@ -160,6 +160,8 @@ The engine checkpoints carry against the old pool depth, verifies the exact toke
 `Recapitalization` with `CashArrived` atomically. Existing excess cannot substitute for the incoming transfer.
 The pool queues claimant allocation for normal reconciliation; no shares are minted and degraded mode is not
 automatically cleared. Funding remains available with stale marks, frozen markets, and LP pause or settlement holds.
+Recapitalization restores only the existing Senior entitlement; it does not establish a new high-water mark after
+a wipeout or lift operator entry pauses.
 `CfdEngineAdmin` retains its configuration-only role.
 
 ### One-time wiring
@@ -344,6 +346,8 @@ These are the highest-value properties an auditor should expect to hold.
 | Funded-claim backing | Every claimable LP asset is held one-for-one in vault escrow and cannot be reused by `HousePool` |
 | Trader claim liabilities are senior | Trader claim balance remains a senior claim on pool liquidity until serviced; keeper bounties are not pool liabilities |
 | Explicit terminal deficit | Signed terminal liabilities above physical assets and collectible terminal receivables are persisted on fresh reconcile and block LP entry |
+| Claimant allocation once | Unchanged repeated reconciliation cannot re-reserve already credited backing; a bounded payout debit retires unsupported pending value at the next mark-valid stable canonical preview/reconcile without treating marked receivables as withdrawal cash |
+| Senior restoration once | Coupon and loss precede pending recapitalization, ordinary positive revenue follows it, and pending revenue is last; pending recapitalization fills the existing Senior recovery gap before later revenue can fill the same gap |
 
 ### Position and engine accounting
 
@@ -490,9 +494,8 @@ governance owns the coordinator and assigns its guardian.
   reuses the exact single-order Clearinghouse reversal for each invalidated open; this is bounded by the 32-order
   account cap and remains inside one rollback frame.
 - HousePool pause blocks LP entry only. Redemptions, synchronized redemption funding, and funded claims remain live.
-  It does not itself unlock cancellation of a matured deposit; that request still needs an existing rejection,
-  projected wipe, Senior impairment, or explicit settlement hold for a committed Senior request, or later activation
-  after recovery.
+  While Pool entry is paused, both tranches may cancel unfinalized deposits, including matured Junior and committed
+  Senior requests. Cancellation preserves escrow accounting and releases any Senior reservation.
 - The independent settlement hold makes every synchronized epoch call revert before mutation, including direct
   cached/no-position and Router atomic-refresh routes. It stops new Senior requests and reservations while allowing
   existing Senior commitments to be refunded. Junior requests, redemptions, trading,
@@ -877,7 +880,7 @@ Security consequences:
 
 Ordinary LP entry remains asynchronous: assets are funded into request escrow, a complete pending Junior deposit is
 cancellable before maturity, and an accepted Senior deposit is a firm commitment. Senior refunds require epoch
-rejection, projected terminal wipe, Senior impairment, or an explicit LP settlement hold. Shares are
+rejection, projected terminal wipe, Senior impairment, a Pool entry pause, or an explicit LP settlement hold. Shares are
 minted only after synchronized `HousePool` settlement fixes the batch price. ERC-4626 `deposit` and `mint` only claim
 already activated shares. The one-hour cooldown is timestamped at that successful activation, not at claim. A claim is
 therefore an administrative transfer that propagates the source activation timestamp with
@@ -1392,7 +1395,7 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
 - governance can prospectively reduce senior limits below live exposure, closing new senior entry and potentially
   reducing Junior redemption-funding capacity until the covenant is cured; it cannot force existing Senior capital out,
 - accepted senior reservations are grandfathered against later cap or accounting changes; an explicit settlement hold,
-  projected terminal wipe, Senior impairment, or epoch rejection allows escrow recovery,
+  projected terminal wipe, Senior impairment, epoch rejection, or a Pool entry pause allows escrow recovery,
 - wallet shares remain governed by the latest applicable activation timestamp, so voluntarily combining a newer lot
   with an older wallet balance preserves the newer lot's remaining cooldown. Administrative claims do not manufacture
   a claim-time delay, and the direct route can consume an independently aged source lot without mixing it into the
@@ -1502,13 +1505,16 @@ This runbook concerns actual negative terminal LP equity or trader payout claims
 service. A terminal price-loss write-off above an account's collectible cap and a waived terminal action remainder
 create neither condition; the current accounting model has no accumulated-debt ledger to clear.
 
-1. Let closes and liquidations continue.
-2. Prevent further risk expansion via degraded mode when `E < L`, or through the ordinary `E >= L + B` admission
-   gate when raw solvency remains intact; use admin pause if additional containment is needed.
-3. Consider stricter risk settings to accelerate cleanup.
-4. Recapitalize or clear positions.
-5. Clear degraded mode only after raw solvency `E >= L` is genuinely restored; buffer restoration is not required
-   for clearing, although new risk remains blocked until `E >= L + B`.
+1. Keep closes, liquidations, claims and refunds available under their normal safety checks.
+2. For a manual shutdown, pause `OrderRouterAdmin` and `HousePool` entry and leave them paused. Router risk-off
+   cleanup refunds queued opens; Pool entry pause lets both tranches refund unfinalized deposits, including matured
+   Junior and committed Senior requests.
+3. Do not leave the LP epoch settlement hold active as the shutdown mechanism: it prevents redemption funding.
+   Preserve eligible redemption requests, funding and already-funded claims.
+4. Fund or settle existing obligations as needed. Funding does not reset Senior's HWM or lift either entry pause.
+5. Clear degraded mode only after raw solvency `E >= L` is genuinely restored when needed for remaining settlement.
+   Keep the entry pauses in place even if cash or prices recover. This is an operator policy; the contracts add no
+   automatic wipeout latch or irreversible shutdown/restart feature.
 
 ## Asset Isolation
 
