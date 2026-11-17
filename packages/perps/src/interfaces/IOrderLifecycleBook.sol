@@ -14,9 +14,16 @@ interface IOrderLifecycleBook {
         OrderV3Types.ConstraintKind constraint, uint256 actual, uint256 limit
     );
 
-    /// @notice Records the Router's close-admission or open-bounty commitment for a pending order.
+    /// @notice Records close effects or reconciles open custody across both reservation hooks.
+    function recordCommitment(
+        uint64 orderId,
+        CfdEnginePlanTypes.CloseCommitment calldata effects,
+        bool isClose
+    ) external;
+
+    /// @notice Records the Router's close-admission commitment for a pending order.
     /// @param orderId Pending order whose commitment is recorded.
-    /// @param effects Carry and bounty effects returned by the Engine or open-order reservation path.
+    /// @param effects Carry and bounty effects returned by the Engine.
     function recordCommitment(
         uint64 orderId,
         CfdEnginePlanTypes.CloseCommitment calldata effects

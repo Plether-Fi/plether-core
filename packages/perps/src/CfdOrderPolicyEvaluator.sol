@@ -62,9 +62,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         snapshot.accountBuckets.totalLockedMarginAssets -= release;
         snapshot.accountBuckets.freeSettlementAssets += release;
         assessment = _assessSnapshot(context, order, pending.bounds, planner, snapshot);
-        if (order.isClose) {
-            _includeCommitment(assessment, pending.commitment, pending.bounds, pending.executionBountyAssets);
-        }
+        _includeCommitment(assessment, pending.commitment, pending.bounds, pending.executionBountyAssets);
     }
 
     function _pending(
