@@ -174,6 +174,13 @@ contract PerpsReleaseDeploymentSizeTest is Test {
             vm.computeCreateAddress(address(d.engineLens), 1),
             ""
         );
+        // The lens creates its immutable admission validator with its second CREATE.
+        _measure(
+            "cfdOrderAdmissionValidator",
+            "CfdOrderAdmissionValidator.sol:CfdOrderAdmissionValidator",
+            vm.computeCreateAddress(address(d.engineLens), 2),
+            abi.encode(address(d.engine))
+        );
         _measure(
             "cfdOrderPolicyEvaluator",
             "CfdOrderPolicyEvaluator.sol:CfdOrderPolicyEvaluator",

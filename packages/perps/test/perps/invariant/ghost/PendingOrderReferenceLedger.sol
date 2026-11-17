@@ -226,8 +226,8 @@ contract PendingOrderReferenceLedger {
         return _queuedLots(actorIndex, liveLots, CfdTypes.Side(actorIndex % 2), riskOffCutoff);
     }
 
-    /// @notice Projects queued exposure from independently modeled live lots and side. Expired orders still count
-    /// until terminalized; cutoff-invalid opens do not. Once a close flattens the family, a later open can change side.
+    /// @notice Projects queued exposure from independently modeled live lots and side. Expired orders and
+    /// cutoff-invalid opens do not count. Once a close flattens the family, a later open can change side.
     function queuedLots(
         uint256 actorIndex,
         uint256 liveLots,
@@ -250,13 +250,13 @@ contract PendingOrderReferenceLedger {
                 continue;
             }
             OrderV3Types.OrderRequest storage request = pending.request;
-            if (!request.isClose && pending.id <= riskOffCutoff) {
+            if (block.timestamp > pending.deadline || (!request.isClose && pending.id <= riskOffCutoff)) {
                 continue;
             }
             uint256 orderLots = request.sizeDelta / CfdTypes.SIZE_QUANTUM;
             if (request.isClose) {
-                if (lots != 0 && request.side == side) {
-                    lots = orderLots < lots ? lots - orderLots : 0;
+                if (lots != 0 && request.side == side && orderLots <= lots) {
+                    lots -= orderLots;
                 }
             } else if (lots == 0) {
                 lots = orderLots;

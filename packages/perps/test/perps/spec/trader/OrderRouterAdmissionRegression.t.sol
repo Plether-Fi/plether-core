@@ -77,6 +77,25 @@ contract OrderRouterAdmissionRegressionTest is SourceBoundBountyFixture {
         _rejectImpossible(request);
     }
 
+    function test_ImpossiblePartialCloseCannotSupportAnOpposingOpen() public {
+        _fundTrader(BOUNTY_TRADER, 5000e6);
+        _open(BOUNTY_TRADER, CfdTypes.Side.LONG, 3 * BOUNTY_SIZE, 1000e6, BOUNTY_PRICE);
+        OrderV3Types.OrderRequest memory request = _bountyRequest(CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+        // Full closes ignore this bound, but the first reduction necessarily leaves a position.
+        request.bounds.minPostPositionEquityAssets = type(uint256).max;
+        vm.prank(BOUNTY_TRADER);
+        uint64 first = router.commitOrder(request);
+        uint64 second = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, 2 * BOUNTY_SIZE, 0);
+        _rejectOpen(
+            _bountyRequest(CfdTypes.Side.SHORT, false, BOUNTY_SIZE, 1000e6),
+            CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING
+        );
+        _bountyExecute(first, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Failed);
+        _bountyExecute(second, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        (uint256 size,,,,,,) = engine.positions(BOUNTY_TRADER);
+        assertEq(size, BOUNTY_SIZE, "the impossible predecessor cannot erase this residual exposure");
+    }
+
     function test_ImpossibleCloseFeeAndActionBoundsCannotSupportAFlip() public {
         _position(CfdTypes.Side.SHORT);
         OrderV3Types.OrderRequest memory request = _bountyRequest(CfdTypes.Side.SHORT, true, BOUNTY_SIZE, 0);

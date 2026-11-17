@@ -167,11 +167,17 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 executionBountyAssets
     ) external view returns (uint8 code) {
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, engineContract.pool().totalAssets());
-        CfdTypes.Order memory order;
-        order.account = account;
-        order.side = side;
-        order.sizeDelta = sizeDelta;
-        order.marginDelta = marginDelta;
+        CfdTypes.Order memory order = CfdTypes.Order({
+            account: account,
+            sizeDelta: sizeDelta,
+            marginDelta: marginDelta,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: side,
+            isClose: false
+        });
         return engineContract.planner().planOpenCommit(snap, order, oraclePrice, executionBountyAssets);
     }
 

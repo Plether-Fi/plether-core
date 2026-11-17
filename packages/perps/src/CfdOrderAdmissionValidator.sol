@@ -137,6 +137,8 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
                     if (
                         position.exists && pending.side == position.side && pending.sizeDelta <= position.size
                             && position.size - pending.sizeDelta <= intent.bounds.maxPostPositionSize
+                            && (position.size == pending.sizeDelta
+                                || intent.bounds.minPostPositionEquityAssets <= uint256(type(int256).max))
                     ) {
                         position.size -= pending.sizeDelta;
                         position.exists = position.size != 0;
