@@ -369,7 +369,8 @@ factor:
 ```text
 hourlyFeeRay = floor(r * 1e27 / (10_000 * 8_760))
 retentionRay = rayPowUp(1e27 - hourlyFeeRay, chargeableHours)
-feeShares    = floor(rawSupply * (1e27 - retentionRay) / retentionRay)
+nominalFeeShares = floor(rawSupply * (1e27 - retentionRay) / retentionRay)
+feeShares = min(nominalFeeShares, max((uint256.max - 1000) - rawSupply, 0))
 effectiveSupply = rawSupply + pendingFeeShares
 ```
 
@@ -377,6 +378,11 @@ Retention rounds up and fee shares round down, so the protocol does not exceed t
 charges at most `8_760` hours; if more time elapsed, older hours are explicitly forgiven and the boundary advances to
 the latest completed Unix hour. The nominal APR is therefore not an exact annual dilution percentage: at `1_000 bps`,
 hourly retention produces approximately `9.516%` dilution over a flat year.
+
+Pending quotes and checkpoint mints use the same supply cap, reserving the 1,000 virtual shares added by pricing.
+The cap is checked before evaluating a potentially overflowing nominal fee. A successful checkpoint consumes the
+elapsed hours even when the cap reduces the mint to zero; excess fee shares are forgiven and cannot reappear after
+a later burn. `forgivenHours` continues to report only hours beyond the one-year catch-up window.
 
 Integer rounding can make split checkpoints differ from a single checkpoint by a small number of share atoms.
 The [maintenance-fee math tests](test/perps/accounting/fees/JuniorMaintenanceFeeMathLib.t.sol) specify and check that

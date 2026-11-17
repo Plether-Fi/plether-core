@@ -1170,6 +1170,12 @@ supply (`raw + pending fee shares`). Every Junior conversion, preview, and settl
 while raw supply remains the conservation quantity for actually issued balances. Pending deposits are excluded until
 activation; pending redemption shares remain exposed until funding burns them.
 
+Both pending quotes and fee mints are capped at the remaining headroom below `uint256.max - 1000`, preserving room
+for the virtual-share pricing offset. The bound is checked before the nominal fee quotient can overflow. Checkpoints
+still consume elapsed hours when the cap reduces or eliminates the mint, permanently forgiving unmintable fees so
+they cannot block fee disablement or burns. This fee cap does not constrain non-fee mints or prevent dust-NAV supply
+pumping; those deposit paths are separate concerns.
+
 Accrual uses completed Unix hours and is bounded to 8,760 charged hours per crystallization, with older backlog
 forgiven. It continues during settlement holds, oracle freezes, losses, and zero NAV. A held, no-progress, or reverted
 settlement must roll back both minting and checkpoint state without forgiving elapsed time. Minted zero-NAV shares are

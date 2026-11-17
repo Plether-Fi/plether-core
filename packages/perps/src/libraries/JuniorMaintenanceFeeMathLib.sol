@@ -52,25 +52,39 @@ library JuniorMaintenanceFeeMathLib {
             revert JuniorMaintenanceFeeMathLib__InvalidChargeableHours(chargeableHours);
         }
 
-        uint256 hourlyRetentionRay = RAY - hourlyFeeRay(aprBps);
+        uint256 hourlyRetentionRay;
+        unchecked {
+            // hourlyFeeRay validates the APR cap, which keeps the hourly fee below RAY.
+            hourlyRetentionRay = RAY - hourlyFeeRay(aprBps);
+        }
         return _rayPowUp(hourlyRetentionRay, chargeableHours);
     }
 
-    /// @notice Returns Junior shares to mint so the recipient owns the accrued fraction after dilution.
+    /// @notice Returns accrued Junior fee shares, capped to the remaining supply headroom.
     /// @param rawSupply Existing ERC-20 Junior supply, excluding the ERC-4626 virtual-share offset.
     /// @param aprBps Nominal annual maintenance fee in basis points.
     /// @param chargeableHours Number of completed fee hours, capped at one fixed year.
+    /// @param maxSupply Largest supply permitted after the fee mint.
     function pendingFeeShares(
         uint256 rawSupply,
         uint256 aprBps,
-        uint256 chargeableHours
+        uint256 chargeableHours,
+        uint256 maxSupply
     ) internal pure returns (uint256 feeShares) {
         uint256 retainedRay = retentionRay(aprBps, chargeableHours);
-        if (rawSupply == 0 || retainedRay == RAY) {
+        if (retainedRay == RAY || rawSupply >= maxSupply) {
             return 0;
         }
 
-        return Math.mulDiv(rawSupply, RAY - retainedRay, retainedRay, Math.Rounding.Floor);
+        // rawSupply + floor(rawSupply * (RAY - retainedRay) / retainedRay)
+        // equals floor(rawSupply * RAY / retainedRay). Bound it before the fee quotient can overflow.
+        unchecked {
+            // rawSupply < maxSupply and retainedRay <= RAY prove both subtractions safe.
+            if (rawSupply > Math.mulDiv(maxSupply, retainedRay, RAY, Math.Rounding.Floor)) {
+                return maxSupply - rawSupply;
+            }
+            return Math.mulDiv(rawSupply, RAY - retainedRay, retainedRay, Math.Rounding.Floor);
+        }
     }
 
     /// @dev Computes `baseRay**exponent` in RAY scale, rounding every multiplication toward greater retention.

@@ -337,7 +337,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     // Junior maintenance fee
     // ---------------------------------------------------------------------
 
-    /// @notice Shares that would be minted if the Junior maintenance fee were checkpointed now.
+    /// @notice Mintable Junior maintenance-fee shares, reserving the virtual-share offset used in pricing.
     function pendingMaintenanceFeeShares() public view returns (uint256) {
         uint256 rawSupply = totalSupply();
         if (IS_SENIOR || maintenanceFeeAprBps == 0 || rawSupply == 0) {
@@ -347,7 +347,9 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (chargeableHours == 0) {
             return 0;
         }
-        return JuniorMaintenanceFeeMathLib.pendingFeeShares(rawSupply, maintenanceFeeAprBps, chargeableHours);
+        return JuniorMaintenanceFeeMathLib.pendingFeeShares(
+            rawSupply, maintenanceFeeAprBps, chargeableHours, type(uint256).max - VIRTUAL_SHARES
+        );
     }
 
     /// @notice Issued supply plus currently accrued, not-yet-minted Junior maintenance-fee shares.
@@ -434,8 +436,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         }
         uint256 previousBoundary = maintenanceFeeCheckpointBoundary;
         uint256 currentBoundary = _completedMaintenanceFeeBoundary(block.timestamp);
-        uint256 feeShares =
-            JuniorMaintenanceFeeMathLib.pendingFeeShares(rawSupply, maintenanceFeeAprBps, chargeableHours);
+        uint256 feeShares = pendingMaintenanceFeeShares();
+        // Consume these hours even when the supply cap forgives some or all of their fee shares.
         maintenanceFeeCheckpointBoundary = currentBoundary;
         if (feeShares != 0) {
             super._update(address(0), maintenanceFeeRecipient, feeShares);
