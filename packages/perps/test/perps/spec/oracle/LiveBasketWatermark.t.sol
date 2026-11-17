@@ -64,6 +64,23 @@ contract LiveBasketWatermarkTest is Test {
         assertEq(oracle.getLatestPrice(), 100_000_000);
     }
 
+    function test_FirstLiveBasketRequiresEveryFeedAtOrAfterEngineMark() public {
+        engine.setLastMark(100_000_000, 993);
+
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__FeedTimeOutOfOrder.selector, B, 992, 993));
+        oracle.updatePrice{value: FEE}(
+            address(this), _twoTicks(100_000_000, 994, 990, 100_000_000, 992, 990), IPletherOracle.PriceMode.MarkRefresh
+        );
+        assertFalse(oracle.hasAcceptedBasket());
+
+        IPletherOracle.PriceSnapshot memory snapshot = oracle.updatePrice{value: FEE}(
+            address(this), _twoTicks(100_000_000, 994, 990, 100_000_000, 993, 992), IPletherOracle.PriceMode.MarkRefresh
+        );
+        assertEq(snapshot.publishTime, 994);
+        assertTrue(oracle.hasAcceptedBasket());
+        assertEq(oracle.getAcceptedFeedPublishTimes()[1], 993);
+    }
+
     function test_RejectsMissingAndRegressedComponents() public {
         oracle.updatePrice{value: FEE}(
             address(this), _twoTicks(100_000_000, 990, 980, 100_000_000, 993, 980), IPletherOracle.PriceMode.MarkRefresh

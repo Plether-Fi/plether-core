@@ -742,8 +742,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         basket.confidence = basket.price * basketMaxConfidenceRatioBps / 10_000;
     }
 
-    /// @dev Every state-changing caller is nonReentrant. During the Pyth call, views can only see the previous
-    ///      complete accepted basket; after the call, all accepted-basket writes occur without another external call.
+    /// @dev Every state-changing caller is nonReentrant. External calls during validation can only see the previous
+    ///      complete accepted basket. All accepted-basket writes occur together after validation.
     // slither-disable-start reentrancy-eth
     // slither-disable-start cyclomatic-complexity
     function _resolveCurrentBasket(
@@ -773,21 +773,25 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             revert PletherOracle__ArrayLengthMismatch(feeds.length, len, len, len);
         }
 
+        // A fresh oracle uses the Engine mark as the floor until it has accepted per-feed timestamps.
+        bool hasPreviousBasket = hasAcceptedBasket;
+        uint256 bootstrapMarkTime = hasPreviousBasket ? 0 : engine.lastMarkTime();
         for (uint256 i; i < len; ++i) {
             uint256 feedTime = feeds[i].price.publishTime;
-            if (hasAcceptedBasket && feedTime < _acceptedPrices[i].publishTime) {
-                revert PletherOracle__FeedTimeOutOfOrder(pythFeedIds[i], feedTime, _acceptedPrices[i].publishTime);
+            uint256 minFeedTime = hasPreviousBasket ? _acceptedPrices[i].publishTime : bootstrapMarkTime;
+            if (feedTime < minFeedTime) {
+                revert PletherOracle__FeedTimeOutOfOrder(pythFeedIds[i], feedTime, minFeedTime);
             }
             if (OracleFreshnessPolicyLib.isStale(feedTime, policy.maxStaleness, block.timestamp)) {
                 revert PletherOracle__StalePrice(mode, pythFeedIds[i], feedTime, policy.maxStaleness, block.timestamp);
             }
         }
         basket = _computeBasketPriceFromFeeds(mode, feeds, divergence);
-        if (hasAcceptedBasket && basket.publishTime < _acceptedBasket.publishTime) {
+        if (hasPreviousBasket && basket.publishTime < _acceptedBasket.publishTime) {
             revert PletherOracle__PriceOutOfOrder(basket.publishTime, _acceptedBasket.publishTime);
         }
         if (
-            hasAcceptedBasket && basket.publishTime == _acceptedBasket.publishTime
+            hasPreviousBasket && basket.publishTime == _acceptedBasket.publishTime
                 && basket.price != _acceptedBasket.price
         ) {
             revert PletherOracle__EqualTimeMarkMismatch(basket.publishTime, basket.price, _acceptedBasket.price);
