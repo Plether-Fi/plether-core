@@ -787,11 +787,11 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             }
         }
         basket = _computeBasketPriceFromFeeds(mode, feeds, divergence);
-        if (hasPreviousBasket && basket.publishTime < _acceptedBasket.publishTime) {
+        if (hasAcceptedBasket && basket.publishTime < _acceptedBasket.publishTime) {
             revert PletherOracle__PriceOutOfOrder(basket.publishTime, _acceptedBasket.publishTime);
         }
         if (
-            hasPreviousBasket && basket.publishTime == _acceptedBasket.publishTime
+            hasAcceptedBasket && basket.publishTime == _acceptedBasket.publishTime
                 && basket.price != _acceptedBasket.price
         ) {
             revert PletherOracle__EqualTimeMarkMismatch(basket.publishTime, basket.price, _acceptedBasket.price);
