@@ -552,7 +552,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertGt(address(redemptionMathSidecar).code.length, 0, "redemption math sidecar code");
         assertEq(
             redemptionMathSidecar.implementationId(),
-            keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
+            keccak256("Plether.HousePoolRedemptionMathSidecar.v2"),
             "redemption math sidecar ID"
         );
         assertFalse(pool.lpEpochSettlementPaused(), "LP epoch settlement starts paused");
