@@ -17,6 +17,7 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IOrderRouterEmergencyAdmin} from "@plether/perps/interfaces/IOrderRouterEmergencyAdmin.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
+import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @dev Minimal canonical Router binding used by the refund-aware liquidation preview.
@@ -665,7 +666,8 @@ contract CfdEngineLens is ICfdEngineLens {
         if (protectionId != 0) {
             protection = protectionBook.getPositionProtection(protectionId);
         }
-        uint256 remaining = router.pendingOrderCounts(snap.account);
+        uint256 pendingCount = router.pendingOrderCounts(snap.account);
+        uint256 remaining = pendingCount;
         for (uint64 orderId = router.accountHeadOrderId(snap.account); orderId != 0;) {
             if (remaining == 0) {
                 revert CfdEngineLens__InvalidRouterQueue();
@@ -688,6 +690,9 @@ contract CfdEngineLens is ICfdEngineLens {
             orderId = next;
         }
         uint256 released = preview.releasedCommittedMarginAssets + preview.releasedBountyAssets;
+        if (preview.refundedOrderCount != 0 && preview.refundedOrderCount == pendingCount) {
+            released += snap.protectedReleasedMarginAssets;
+        }
         snap.lockedBuckets.committedOrderMarginAssets -= preview.releasedCommittedMarginAssets;
         snap.lockedBuckets.reservedSettlementAssets -= preview.releasedBountyAssets;
         snap.lockedBuckets.totalLockedMarginAssets -= released;
@@ -731,13 +736,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.poolAdditionalReservedAssets =
             pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
         snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
-        IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
-        snap.accountBuckets = clearinghouse.getAccountAssetBuckets(account);
-        snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        snap.liquidationReserveAssets = clearinghouse.liquidationReserveAssets(account);
-        snap.actionReserveAssets = clearinghouse.actionReserveAssets(account);
-        snap.vpiRebateReserveAssets = clearinghouse.vpiRebateReserveAssets(account);
-        snap.protectedExecutionBountyAssets = clearinghouse.totalBountyReservationsAssets(account);
+        CfdEngineCollateralSnapshotLib.load(snap, engineContract.clearinghouse(), account, false);
         snap.unsettledCarryAssets = engineContract.unsettledCarryAssets(account);
         snap.totalTraderClaimBalanceAssets = engineContract.totalTraderClaimBalanceAssets();
         snap.traderClaimBalanceForAccount = engineContract.traderClaimBalanceAssets(account);

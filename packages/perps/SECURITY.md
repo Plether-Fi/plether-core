@@ -479,8 +479,9 @@ governance owns the coordinator and assigns its guardian.
 - Router pause records an inclusive, monotonic order-id cutoff. Pending opens at or below it are permanently invalid,
   including after unpause; later orders are unaffected.
 - Cleanup is permissionless and oracle-independent. It returns all remaining committed margin and execution bounty to
-  the trader's free internal settlement, pays the caller nothing, and defers carry checkpointing to the trader's next
-  ordinary margin mutation. The protocol incident keeper therefore funds cleanup gas. The terminal Book receipt uses
+  the trader's free internal settlement and pays the caller nothing. A final receipt that makes protected top-ups
+  eligible checkpoints carry before updating the borrow base, without debiting settlement. The protocol incident
+  keeper therefore funds cleanup gas. The terminal Book receipt uses
   reason `RiskOff`, execution mode and price source `None`, the cleaner as executor, and the account as bounty
   recipient with disposition `RefundedToAccount` when the bounty is nonzero. A zero bounty instead has disposition
   `None` and a zero recipient.

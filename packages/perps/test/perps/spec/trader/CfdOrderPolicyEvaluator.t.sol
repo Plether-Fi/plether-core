@@ -19,7 +19,7 @@ contract BountyBackingHarness is CfdOrderPolicyEvaluator {
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 bounty
     ) external pure returns (OrderV3Types.ExecutionAssessment memory) {
-        return _evaluateClose(snapshot, delta, bounds, bounty, true);
+        return _evaluateClose(snapshot, delta, bounds, bounty, true, false);
     }
 
 }
@@ -698,7 +698,9 @@ contract CfdOrderPolicyEvaluatorTest is Test {
             actionReserveAssets: BOUNTY,
             vpiRebateReserveAssets: 0,
             totalLockedAssets: BOUNTY,
-            freeSettlementAssets: 20_000e6 - BOUNTY
+            freeSettlementAssets: 20_000e6 - BOUNTY,
+            protectedPledgeAssets: 0,
+            protectedReleasedAssets: 0
         });
         vm.mockCall(
             CLEARINGHOUSE, abi.encodeWithSignature("getPnlIsolationBuckets(address)", ACCOUNT), abi.encode(buckets)

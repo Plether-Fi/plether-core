@@ -392,7 +392,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 i = actorSeed % 4;
         uint256 amount = bound(amountSeed, 1, 100e6);
         _deposit(i, amount);
-        if (traders[i].lots != 0) {
+        // This ledger models ordinary pledge. Protected top-ups have dedicated queue tests.
+        if (traders[i].lots != 0 && orders.count(i) == 0) {
             if (amount > _free(i)) {
                 bytes32 afterDeposit = _economicFingerprint(i);
                 vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
@@ -1650,7 +1651,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 i,
         uint256 target
     ) internal {
-        if (traders[i].lots == 0) {
+        if (traders[i].lots == 0 || orders.count(i) != 0) {
             return;
         }
         // A real one-atom deposit assesses old carry before deciding the fresh collateral contribution.

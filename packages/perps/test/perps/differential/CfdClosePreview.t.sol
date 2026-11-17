@@ -50,7 +50,9 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
             actionReserveAssets: 0,
             vpiRebateReserveAssets: 0,
             totalLockedAssets: 10_000e6,
-            freeSettlementAssets: 200_000
+            freeSettlementAssets: 200_000,
+            protectedPledgeAssets: 0,
+            protectedReleasedAssets: 0
         });
         vm.mockCall(
             address(clearinghouse),

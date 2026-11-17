@@ -303,7 +303,7 @@ library CfdEnginePlanLib {
 
         if (
             effectiveSnap.position.size > 0
-                && _applyPendingCarryRealizationToSnapshot(effectiveSnap, delta.pendingCarryAssets)
+                && _applyPendingCarryRealizationToSnapshot(effectiveSnap, delta.pendingCarryAssets, false)
                     != delta.pendingCarryAssets
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
@@ -591,7 +591,7 @@ library CfdEnginePlanLib {
             return true;
         }
         uint256 pending = _pendingCarryAssets(snap);
-        return _applyPendingCarryRealizationToSnapshot(snap, pending) == pending;
+        return _applyPendingCarryRealizationToSnapshot(snap, pending, false) == pending;
     }
 
     /// @notice Projects the carry checkpoint performed by close commitment, preserving any unpaid carry.
@@ -600,7 +600,7 @@ library CfdEnginePlanLib {
     function projectCloseCommitCarry(
         CfdEnginePlanTypes.RawSnapshot memory snap
     ) internal pure returns (uint256 collectedAssets) {
-        collectedAssets = _applyPendingCarryRealizationToSnapshot(snap, _pendingCarryAssets(snap));
+        collectedAssets = _applyPendingCarryRealizationToSnapshot(snap, _pendingCarryAssets(snap), false);
         snap.positionLastCarryIndex = _selectedSide(snap, snap.position.side).carryIndex;
         snap.position.lastCarryTimestamp = uint64(snap.currentTimestamp);
     }
@@ -613,7 +613,8 @@ library CfdEnginePlanLib {
     /// @return realizedCarryAssets Carry covered by active position margin and free settlement.
     function _applyPendingCarryRealizationToSnapshot(
         CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 pendingCarryAssets
+        uint256 pendingCarryAssets,
+        bool includeProtected
     ) private pure returns (uint256 realizedCarryAssets) {
         if (pendingCarryAssets == 0 || snap.position.size == 0) {
             return 0;
@@ -621,7 +622,9 @@ library CfdEnginePlanLib {
         (
             MarginClearinghouseAccountingLib.SettlementConsumption memory consumption,
             IMarginClearinghouse.AccountAssetBuckets memory afterBuckets
-        ) = MarginClearinghouseAccountingLib.projectCarryLoss(snap.accountBuckets, pendingCarryAssets);
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(
+            snap.accountBuckets, pendingCarryAssets, includeProtected ? 0 : snap.protectedPositionMarginAssets
+        );
         realizedCarryAssets = consumption.totalConsumedAssets;
         snap.accountBuckets = afterBuckets;
         snap.position.margin = afterBuckets.activePositionMarginAssets;
@@ -629,8 +632,12 @@ library CfdEnginePlanLib {
         snap.lockedBuckets.totalLockedMarginAssets = afterBuckets.totalLockedMarginAssets;
         CfdEnginePlanTypes.SideSnapshot memory selected = _selectedSide(snap, snap.position.side);
         selected.totalMargin -= consumption.activeMarginConsumedAssets;
-        uint256 borrowBaseAfterAssets =
-            PositionRiskAccountingLib.computeBorrowBaseAssets(snap.position.maxProfitAssets, snap.position.margin);
+        if (snap.protectedPositionMarginAssets > snap.position.margin) {
+            snap.protectedPositionMarginAssets = snap.position.margin;
+        }
+        uint256 borrowBaseAfterAssets = PositionRiskAccountingLib.computeBorrowBaseAssets(
+            snap.position.maxProfitAssets, snap.position.margin - snap.protectedPositionMarginAssets
+        );
         selected.borrowBaseAssets = selected.borrowBaseAssets - snap.positionBorrowBaseAssets + borrowBaseAfterAssets;
         snap.positionBorrowBaseAssets = borrowBaseAfterAssets;
         snap.positionLastCarryIndex = selected.carryIndex;
@@ -664,7 +671,8 @@ library CfdEnginePlanLib {
         if (snap.traderClaimBalanceForAccount > uint256(type(int256).max) - delta.positionMarginAfterOpen) {
             return (false, riskState);
         }
-        uint256 reachableCollateralAssets = delta.positionMarginAfterOpen + snap.traderClaimBalanceForAccount;
+        uint256 reachableCollateralAssets =
+            delta.positionMarginAfterOpen - snap.protectedPositionMarginAssets + snap.traderClaimBalanceForAccount;
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculateExactPnl(
             delta.newPosSize / CfdTypes.SIZE_QUANTUM,
             delta.newPosEntryCostAssetAtoms,
@@ -812,7 +820,7 @@ library CfdEnginePlanLib {
             return delta;
         }
         delta.pendingCarryAssets = _pendingCarryAssets(snap);
-        delta.realizedCarryAssets = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryAssets);
+        delta.realizedCarryAssets = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryAssets, true);
 
         CfdTypes.Position memory pos = snap.position;
         delta.side = pos.side;
@@ -1438,7 +1446,7 @@ library CfdEnginePlanLib {
         }
 
         delta.pendingCarryAssets = _pendingCarryAssets(snap);
-        delta.realizedCarryAssets = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryAssets);
+        delta.realizedCarryAssets = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryAssets, true);
         pos = snap.position;
         delta.side = pos.side;
         delta.posSize = pos.size;

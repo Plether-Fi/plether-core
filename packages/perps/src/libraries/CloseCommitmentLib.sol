@@ -34,7 +34,8 @@ library CloseCommitmentLib {
         effects.carryCollectedAssets = CfdEnginePlanLib.projectCloseCommitCarry(snap);
         effects.carryOutstandingAssets = snap.unsettledCarryAssets;
         if (size != snap.position.size) {
-            if (snap.unsettledCarryAssets != 0) {
+            // Check that the reducing fill can collect the remaining carry without spending protected pledge at commit.
+            if (snap.unsettledCarryAssets > snap.protectedPositionMarginAssets) {
                 revert ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded(snap.unsettledCarryAssets);
             }
             uint256 bps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
@@ -43,7 +44,7 @@ library CloseCommitmentLib {
                     snap.positionEntryCostAssetAtoms,
                     snap.lastMarkPrice,
                     snap.capPrice,
-                    snap.position.margin + snap.traderClaimBalanceForAccount,
+                    snap.position.margin - snap.unsettledCarryAssets + snap.traderClaimBalanceForAccount,
                     bps
                 )
                 .liquidatable) {

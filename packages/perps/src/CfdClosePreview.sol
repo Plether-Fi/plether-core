@@ -82,7 +82,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
             preview.commitmentCarryAssets = preview.commitment.carryCollectedAssets;
             delta = planner.planClose(snapshot, _requestOrder(account, request), executionPrice);
         }
-        preview.assessment = _evaluateClose(snapshot, delta, request.bounds, 0, executor == account);
+        preview.assessment = _evaluateClose(snapshot, delta, request.bounds, 0, executor == account, false);
         _includeCommitment(preview.assessment, preview.commitment, request.bounds, 0);
     }
 
@@ -158,7 +158,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         preview.commitment = CloseCommitmentLib.project(snapshot, order.sizeDelta);
         preview.commitmentCarryAssets = preview.commitment.carryCollectedAssets;
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snapshot, order, executionPrice);
-        preview.assessment = _evaluateClose(snapshot, delta, bounds, 0, executor == order.account);
+        preview.assessment = _evaluateClose(snapshot, delta, bounds, 0, executor == order.account, false);
         _includeCommitment(preview.assessment, preview.commitment, bounds, 0);
     }
 

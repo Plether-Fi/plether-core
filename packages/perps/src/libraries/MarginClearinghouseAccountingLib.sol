@@ -94,10 +94,11 @@ library MarginClearinghouseAccountingLib {
     /// @return consumption Free/active consumption, total debit, and uncovered remainder.
     function planCarryLossConsumption(
         IMarginClearinghouse.AccountAssetBuckets memory buckets,
-        uint256 lossAssets
+        uint256 lossAssets,
+        uint256 protectedPledgeAssets
     ) internal pure returns (SettlementConsumption memory consumption) {
-        consumption.activeMarginConsumedAssets =
-            buckets.activePositionMarginAssets < lossAssets ? buckets.activePositionMarginAssets : lossAssets;
+        uint256 eligiblePledgeAssets = buckets.activePositionMarginAssets - protectedPledgeAssets;
+        consumption.activeMarginConsumedAssets = eligiblePledgeAssets < lossAssets ? eligiblePledgeAssets : lossAssets;
         uint256 remainderAssets = lossAssets - consumption.activeMarginConsumedAssets;
         consumption.freeSettlementConsumedAssets =
             buckets.freeSettlementAssets < remainderAssets ? buckets.freeSettlementAssets : remainderAssets;
@@ -113,12 +114,20 @@ library MarginClearinghouseAccountingLib {
     function projectCarryLoss(
         IMarginClearinghouse.AccountAssetBuckets memory buckets,
         uint256 pendingCarryAssets
+    ) internal pure returns (SettlementConsumption memory, IMarginClearinghouse.AccountAssetBuckets memory) {
+        return projectCarryLoss(buckets, pendingCarryAssets, 0);
+    }
+
+    function projectCarryLoss(
+        IMarginClearinghouse.AccountAssetBuckets memory buckets,
+        uint256 pendingCarryAssets,
+        uint256 protectedPledgeAssets
     )
         internal
         pure
         returns (SettlementConsumption memory consumption, IMarginClearinghouse.AccountAssetBuckets memory afterBuckets)
     {
-        consumption = planCarryLossConsumption(buckets, pendingCarryAssets);
+        consumption = planCarryLossConsumption(buckets, pendingCarryAssets, protectedPledgeAssets);
         afterBuckets = IMarginClearinghouse.AccountAssetBuckets({
             settlementBalanceAssets: buckets.settlementBalanceAssets - consumption.totalConsumedAssets,
             totalLockedMarginAssets: buckets.totalLockedMarginAssets - consumption.activeMarginConsumedAssets,
@@ -126,6 +135,19 @@ library MarginClearinghouseAccountingLib {
             otherLockedMarginAssets: buckets.otherLockedMarginAssets,
             freeSettlementAssets: buckets.freeSettlementAssets - consumption.freeSettlementConsumedAssets
         });
+    }
+
+    /// @dev Ordinary pledge is released and spent first. Any unused protected release stays encumbered.
+    function protectedCloseRelease(
+        uint256 pledgeAssets,
+        uint256 protectedPledgeAssets,
+        uint256 releasedPledgeAssets,
+        uint256 chargeFromReleaseAssets
+    ) internal pure returns (uint256) {
+        uint256 ordinaryPledgeAssets = pledgeAssets - protectedPledgeAssets;
+        uint256 availableToRelease =
+            ordinaryPledgeAssets > chargeFromReleaseAssets ? ordinaryPledgeAssets : chargeFromReleaseAssets;
+        return releasedPledgeAssets > availableToRelease ? releasedPledgeAssets - availableToRelease : 0;
     }
 
     /// @notice Plans how signed action cost and newly supplied margin change settlement and PnL pledge.

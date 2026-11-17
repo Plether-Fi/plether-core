@@ -161,6 +161,10 @@ interface IMarginClearinghouse {
         uint256 vpiRebateReserveAssets;
         uint256 totalLockedAssets;
         uint256 freeSettlementAssets;
+        /// @notice Protected top-ups still pledged to the active position, included in `pnlPledgeAssets`.
+        uint256 protectedPledgeAssets;
+        /// @notice Protected top-ups released by a close, included only in `totalLockedAssets`.
+        uint256 protectedReleasedAssets;
     }
 
     /// @notice Legacy three-field locked-margin split for one clearinghouse account.
@@ -320,6 +324,23 @@ interface IMarginClearinghouse {
     function lockPositionMargin(
         address account,
         uint256 amountAssets
+    ) external;
+
+    function lockPositionTopUp(
+        address account,
+        uint256 amountAssets
+    ) external;
+
+    function protectedTopUps(
+        address account
+    ) external view returns (uint256 pledgedAssets, uint256 releasedAssets);
+
+    function eligiblePositionMarginAssets(
+        address account
+    ) external view returns (uint256);
+
+    function releaseProtectedTopUp(
+        address account
     ) external;
 
     /// @notice Unlocks active position margin back into free settlement.
@@ -516,6 +537,13 @@ interface IMarginClearinghouse {
         address account,
         uint256 lossAssets,
         address recipient
+    ) external returns (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets);
+
+    function consumePositionCarry(
+        address account,
+        uint256 lossAssets,
+        address recipient,
+        bool includeProtected
     ) external returns (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets);
 
     /// @notice Collects terminal position price loss from PnL pledge only.

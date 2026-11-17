@@ -131,6 +131,8 @@ library CfdEnginePlanTypes {
         uint256 actionReserveAssets;
         uint256 vpiRebateReserveAssets;
         uint256 protectedExecutionBountyAssets;
+        uint256 protectedPositionMarginAssets;
+        uint256 protectedReleasedMarginAssets;
 
         uint256 unsettledCarryAssets;
         uint256 totalTraderClaimBalanceAssets;

@@ -16,6 +16,7 @@ import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineS
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
@@ -517,15 +518,35 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         _realizeCarryFromSettlement(account, pos);
 
-        uint256 marginBefore = _positionMarginBucketAssets(account);
-        clearinghouse.lockPositionMargin(account, amount);
+        clearinghouse.lockPositionTopUp(account, amount);
         _sideState(pos.side).totalMargin += amount;
-        _syncPositionBorrowBaseToMargin(pos, marginBefore + amount);
+        _syncPositionBorrowBase(account, pos);
         pos.lastUpdateTime = uint64(block.timestamp);
         pos.lastCarryTimestamp = uint64(block.timestamp);
         _endTerminalCurveMutation(account, expectedOldHash);
 
         emit MarginAdded(account, amount);
+    }
+
+    /// @notice Lifts the collateral restriction after the router removes the last pending order.
+    function releaseProtectedTopUp(
+        address account
+    ) external nonReentrant {
+        if (orderRouter.code.length == 0 || IOrderRouterAccounting(orderRouter).pendingOrderCounts(account) != 0) {
+            return;
+        }
+        (uint256 pledgedAssets, uint256 releasedAssets) = clearinghouse.protectedTopUps(account);
+        if (pledgedAssets == 0 && releasedAssets == 0) {
+            return;
+        }
+        StoredPosition storage pos = _positions[account];
+        if (pledgedAssets != 0) {
+            unsettledCarryAssets[account] = _checkpointPositionCarry(account, pos);
+        }
+        clearinghouse.releaseProtectedTopUp(account);
+        if (pledgedAssets != 0) {
+            _syncPositionBorrowBase(account, pos);
+        }
     }
 
     /// @notice Collects available backing toward accrued carry when the clearinghouse changes an account's collateral basis.
@@ -579,7 +600,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         if (pos.lots > 0) {
             uint256 marginAfter = _positionMarginBucketAssets(account);
             _syncTotalSideMargin(pos.side, marginBefore, marginAfter);
-            _syncPositionBorrowBaseToMargin(pos, marginAfter);
+            _syncPositionBorrowBase(account, pos);
         }
 
         traderClaimBalanceAssets[account] -= claimAmountAssets;
@@ -822,17 +843,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         address account,
         StoredPosition storage pos
     ) internal {
-        _syncPositionBorrowBaseToMargin(pos, _positionMarginBucketAssets(account));
-    }
-
-    function _syncPositionBorrowBaseToMargin(
-        StoredPosition storage pos,
-        uint256 marginAssets
-    ) internal {
         if (pos.lots == 0) {
             return;
         }
-        uint256 newBorrowBaseAssets = _positionBorrowBase(pos.maxProfitAssets, marginAssets);
+        uint256 newBorrowBaseAssets =
+            _positionBorrowBase(pos.maxProfitAssets, clearinghouse.eligiblePositionMarginAssets(account));
         _applySideBorrowBaseDelta(pos.side, pos.borrowBaseAssets, newBorrowBaseAssets);
         pos.borrowBaseAssets = newBorrowBaseAssets;
     }
@@ -1253,7 +1268,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             ++positionEpoch[account];
         }
         uint256 newBorrowBaseAssets =
-            _positionBorrowBase(position.maxProfitAssets, _positionMarginBucketAssets(account));
+            _positionBorrowBase(position.maxProfitAssets, clearinghouse.eligiblePositionMarginAssets(account));
         uint256 lots = CfdMath.sizeToLots(position.size);
         if (lots == 0 || lots > type(uint112).max || position.entryCostAssetAtoms > type(uint144).max) {
             revert CfdEngine__InvalidRiskParams();
@@ -1310,7 +1325,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
         StoredPosition storage pos = _positions[delta.account];
         CfdTypes.Side marginSide = pos.side;
-        _realizeCarryFromSettlement(delta.account, pos);
+        _realizeCarryFromSettlement(delta.account, pos, true);
         CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
         settlementSidecar.executeClose(delta, currentPosition, publishTime);
         emit PositionClosed(delta.account, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlAssets);
@@ -1327,7 +1342,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         address keeper
     ) internal returns (uint256 keeperBountyAssets) {
         bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
-        _realizeCarryFromSettlement(delta.account, _positions[delta.account]);
+        _realizeCarryFromSettlement(delta.account, _positions[delta.account], true);
         bool syncKeeper = delta.keeperBountyAssets > 0 && keeper != delta.account && _positions[keeper].lots > 0;
         bytes32 keeperExpectedOldHash;
         if (syncKeeper) {
@@ -1407,6 +1422,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     function _realizeCarryFromSettlement(
         address account,
         StoredPosition storage pos
+    ) internal returns (uint256) {
+        return _realizeCarryFromSettlement(account, pos, false);
+    }
+
+    function _realizeCarryFromSettlement(
+        address account,
+        StoredPosition storage pos,
+        bool includeProtected
     ) internal returns (uint256 realizedCarryAssets) {
         uint256 carryDueAssets = _checkpointPositionCarry(account, pos);
         if (carryDueAssets == 0) {
@@ -1419,13 +1442,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             expectedOldHash = _beginTerminalCurveMutation(account);
         }
         (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets) =
-            clearinghouse.consumeSettlementLoss(account, carryDueAssets, address(this));
+            clearinghouse.consumePositionCarry(account, carryDueAssets, address(this), includeProtected);
         realizedCarryAssets = carryDueAssets - uncoveredAssets;
         unsettledCarryAssets[account] = uncoveredAssets;
 
         if (marginConsumedAssets > 0) {
             _sideState(pos.side).totalMargin -= marginConsumedAssets;
-            _syncPositionBorrowBaseToMargin(pos, marginBefore - marginConsumedAssets);
+            _syncPositionBorrowBase(account, pos);
         }
 
         if (realizedCarryAssets > 0) {

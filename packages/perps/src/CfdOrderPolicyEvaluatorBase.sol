@@ -13,6 +13,7 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
+import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @dev Permissionless Engine read surface used to build policy-evaluation snapshots.
@@ -126,6 +127,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         uint256 currentOraclePrice;
         uint256 poolDepthAssets;
         uint256 executionBountyAssets;
+        bool drainsAccountQueue;
     }
 
     function _assessOrder(
@@ -153,8 +155,14 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory closeDelta =
                 planner.planClose(snapshot, order, context.currentOraclePrice);
-            return
-                _evaluateClose(snapshot, closeDelta, boundsCopy, context.executionBountyAssets, bountyReturnsToAccount);
+            return _evaluateClose(
+                snapshot,
+                closeDelta,
+                boundsCopy,
+                context.executionBountyAssets,
+                bountyReturnsToAccount,
+                context.drainsAccountQueue
+            );
         }
 
         CfdEnginePlanTypes.OpenDelta memory openDelta = planner.planOpen(snapshot, order, context.currentOraclePrice);
@@ -180,12 +188,14 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.CloseDelta memory delta,
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyAssets,
-        bool bountyReturnsToAccount
+        bool bountyReturnsToAccount,
+        bool drainsAccountQueue
     ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidCloseDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
-        assessment =
-            _buildCloseAssessment(snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode);
+        assessment = _buildCloseAssessment(
+            snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode, drainsAccountQueue
+        );
         _enforceBounds(assessment, bounds, executionBountyAssets, delta.deletePosition);
     }
 
@@ -379,7 +389,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             delta.newPosEntryCostAssetAtoms,
             delta.price,
             snapshot.capPrice,
-            assessment.postPositionMarginAssets + assessment.postTraderClaimAssets,
+            assessment.postPositionMarginAssets - snapshot.protectedPositionMarginAssets
+                + assessment.postTraderClaimAssets,
             0
         );
         assessment.postPositionEquityAssets = riskState.equityAssets;
@@ -391,7 +402,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.CloseDelta memory delta,
         uint256 executionBountyAssets,
         bool bountyReturnsToAccount,
-        OrderV3Types.ExecutionMode mode
+        OrderV3Types.ExecutionMode mode,
+        bool drainsAccountQueue
     ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         assessment.mode = mode;
         assessment.close = OrderV3Types.CloseEconomics({
@@ -444,6 +456,17 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         uint256 lockedAfter = delta.posMarginAfter + snapshot.liquidationReserveAssets
             - delta.liquidationReserveReleaseAssets + snapshot.lockedBuckets.committedOrderMarginAssets
             - delta.actionCommittedMarginConsumedAssets + actionReserveAfter;
+        if (!drainsAccountQueue) {
+            uint256 pledgeAfterLoss = snapshot.position.margin
+                - Math.min(snapshot.position.margin, delta.realizedCarryAssets) - delta.pricePnlPledgeConsumedAssets;
+            lockedAfter += snapshot.protectedReleasedMarginAssets
+            + MarginClearinghouseAccountingLib.protectedCloseRelease(
+                pledgeAfterLoss,
+                Math.min(pledgeAfterLoss, snapshot.protectedPositionMarginAssets),
+                delta.safeMarginReleaseAssets,
+                delta.actionChargeFromReleasedMarginAssets
+            );
+        }
         assessment.close.postFreeSettlementAssets = assessment.postSettlementBalanceAssets > lockedAfter
             ? assessment.postSettlementBalanceAssets - lockedAfter
             : 0;
