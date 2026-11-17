@@ -1024,8 +1024,9 @@ and FIFO does not by itself prove fairness [21-22].
 5. The binding, user-uncancellable order becomes the global FIFO head in turn.
 6. For live execution, a keeper supplies Pyth updates and native-token oracle
    fees.
-7. The router resolves the unique historical update in the configured window
-   strictly after commit.
+7. The oracle resolves the first historical update for each feed in the
+   configured settlement window, starting at commit time plus the minimum
+   settlement delay.
 8. Basket components are normalized, confidence is propagated, publish-time
    dispersion is checked, and the side-adverse execution price is capped at
    \(C\).
@@ -1046,10 +1047,9 @@ and FIFO does not by itself prove fairness [21-22].
     receipt preimage for independent reconstruction of what happened.
 
 Pyth's `parsePriceFeedUpdatesUnique` primitive verifies that returned updates are
-the first qualifying feed updates in a specified range [6]. Plether obtains
-"strictly after commit" by setting the lower bound after the commit timestamp,
-not because Pyth globally assigns that semantic. Pyth confidence is an
-uncertainty interval width, not a confidence score [5,23].
+the first qualifying feed updates in a specified range [6]. Plether sets the
+inclusive lower bound to `commitTime + minOrderSettlementDelay`. Pyth
+confidence measures the width of the price uncertainty interval [5,23].
 
 ### 6.2 Basket-specific oracle checks
 

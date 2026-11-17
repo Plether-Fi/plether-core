@@ -23,6 +23,18 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
 
     using stdStorage for StdStorage;
 
+    function test_RouterConfig_RejectsSettlementDelayOutsideWindow() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.minOrderSettlementDelay = 0;
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidStalenessLimit.selector);
+        routerAdmin.proposeRouterConfig(config);
+
+        config.minOrderSettlementDelay = config.orderSettlementWindow + 1;
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidStalenessLimit.selector);
+        routerAdmin.proposeRouterConfig(config);
+        assertEq(routerAdmin.routerConfigActivationTime(), 0);
+    }
+
     function test_RouterConfig_RejectsConfidenceThatCanConsumeWholePrice() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         uint256[3] memory ratios = [uint256(10_000), 4000, type(uint256).max];
@@ -158,7 +170,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
         routerAdmin.finalizeOracleConfig();
     }
 
-    function test_OracleRotation_PreservesAllSixNondefaultPolicyFields() public {
+    function test_OracleRotation_PreservesAllNondefaultPolicyFields() public {
         IPletherOracle.OracleConfig memory policy = _nondefaultPolicy();
         _finalizePolicy(policy);
         PletherOracle candidate = _newOracle();
@@ -188,6 +200,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
             orderExecutionStalenessLimit: 81,
             liquidationStalenessLimit: 41,
             basketMaxConfidenceRatioBps: 271,
+            minOrderSettlementDelay: 6,
             orderSettlementWindow: 49,
             maxComponentPublishTimeDivergence: 7,
             adverseConfidenceMultiplierBps: 15_100
@@ -258,10 +271,11 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
         uint256 activationTime = routerAdmin.oracleConfigActivationTime();
         vm.warp(activationTime);
         uint64 versionBefore = routerAdmin.activeConfigVersion();
-        bytes4[6] memory getters = [
+        bytes4[7] memory getters = [
             IPletherOracle.orderExecutionStalenessLimit.selector,
             IPletherOracle.liquidationStalenessLimit.selector,
             IPletherOracle.basketMaxConfidenceRatioBps.selector,
+            IPletherOracle.minOrderSettlementDelay.selector,
             IPletherOracle.orderSettlementWindow.selector,
             IPletherOracle.maxComponentPublishTimeDivergence.selector,
             IPletherOracle.adverseConfidenceMultiplierBps.selector
@@ -386,6 +400,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
             orderExecutionStalenessLimit: 79,
             liquidationStalenessLimit: 43,
             basketMaxConfidenceRatioBps: 137,
+            minOrderSettlementDelay: 4,
             orderSettlementWindow: 47,
             maxComponentPublishTimeDivergence: 9,
             adverseConfidenceMultiplierBps: 12_345
@@ -405,6 +420,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
         config.orderExecutionStalenessLimit = policy.orderExecutionStalenessLimit;
         config.liquidationStalenessLimit = policy.liquidationStalenessLimit;
         config.basketMaxConfidenceRatioBps = policy.basketMaxConfidenceRatioBps;
+        config.minOrderSettlementDelay = policy.minOrderSettlementDelay;
         config.orderSettlementWindow = policy.orderSettlementWindow;
         config.maxComponentPublishTimeDivergence = policy.maxComponentPublishTimeDivergence;
         config.adverseConfidenceMultiplierBps = policy.adverseConfidenceMultiplierBps;
@@ -417,6 +433,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
             orderExecutionStalenessLimit: oracle.orderExecutionStalenessLimit(),
             liquidationStalenessLimit: oracle.liquidationStalenessLimit(),
             basketMaxConfidenceRatioBps: oracle.basketMaxConfidenceRatioBps(),
+            minOrderSettlementDelay: oracle.minOrderSettlementDelay(),
             orderSettlementWindow: oracle.orderSettlementWindow(),
             maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
             adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
@@ -430,6 +447,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
         assertEq(oracle.orderExecutionStalenessLimit(), expected.orderExecutionStalenessLimit);
         assertEq(oracle.liquidationStalenessLimit(), expected.liquidationStalenessLimit);
         assertEq(oracle.basketMaxConfidenceRatioBps(), expected.basketMaxConfidenceRatioBps);
+        assertEq(oracle.minOrderSettlementDelay(), expected.minOrderSettlementDelay);
         assertEq(oracle.orderSettlementWindow(), expected.orderSettlementWindow);
         assertEq(oracle.maxComponentPublishTimeDivergence(), expected.maxComponentPublishTimeDivergence);
         assertEq(oracle.adverseConfidenceMultiplierBps(), expected.adverseConfidenceMultiplierBps);

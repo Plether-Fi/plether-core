@@ -1080,9 +1080,10 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             return false;
         }
         uint64 commitTime = order.commitTime;
+        uint256 minPublishTime = uint256(commitTime) + oracle.minOrderSettlementDelay();
         if (
-            commitTime < cache.minReusableCommitTime || commitTime >= cache.oldestPublishTime
-                || commitTime >= cache.publishTime
+            commitTime < cache.minReusableCommitTime || cache.oldestPublishTime < minPublishTime
+                || cache.publishTime < minPublishTime
         ) {
             return false;
         }

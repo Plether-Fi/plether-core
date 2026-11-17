@@ -504,6 +504,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                     orderExecutionStalenessLimit: config.orderExecutionStalenessLimit,
                     liquidationStalenessLimit: config.liquidationStalenessLimit,
                     basketMaxConfidenceRatioBps: config.basketMaxConfidenceRatioBps,
+                    minOrderSettlementDelay: config.minOrderSettlementDelay,
                     orderSettlementWindow: config.orderSettlementWindow,
                     maxComponentPublishTimeDivergence: config.maxComponentPublishTimeDivergence,
                     adverseConfidenceMultiplierBps: config.adverseConfidenceMultiplierBps
@@ -531,13 +532,27 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     function _oraclePolicy(
         IPletherOracle oracle
     ) private view returns (IPletherOracle.OracleConfig memory policy) {
+        function() external view returns (uint256)[7] memory getters = [
+            oracle.orderExecutionStalenessLimit,
+            oracle.liquidationStalenessLimit,
+            oracle.basketMaxConfidenceRatioBps,
+            oracle.minOrderSettlementDelay,
+            oracle.orderSettlementWindow,
+            oracle.maxComponentPublishTimeDivergence,
+            oracle.adverseConfidenceMultiplierBps
+        ];
+        uint256[7] memory values;
+        for (uint256 i; i < getters.length; ++i) {
+            values[i] = getters[i]();
+        }
         policy = IPletherOracle.OracleConfig({
-            orderExecutionStalenessLimit: oracle.orderExecutionStalenessLimit(),
-            liquidationStalenessLimit: oracle.liquidationStalenessLimit(),
-            basketMaxConfidenceRatioBps: oracle.basketMaxConfidenceRatioBps(),
-            orderSettlementWindow: oracle.orderSettlementWindow(),
-            maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
-            adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
+            orderExecutionStalenessLimit: values[0],
+            liquidationStalenessLimit: values[1],
+            basketMaxConfidenceRatioBps: values[2],
+            minOrderSettlementDelay: values[3],
+            orderSettlementWindow: values[4],
+            maxComponentPublishTimeDivergence: values[5],
+            adverseConfidenceMultiplierBps: values[6]
         });
     }
 

@@ -69,7 +69,8 @@ submit, then an execution duration measured from commitment.
 A request with `submitBy = 12:02:00` and a 60-second duration committed at `12:01:30` expires after `12:02:30`.
 The submission cutoff no longer controls a committed order. FIFO, oracle, MEV, gas and financial checks still apply.
 Extending execution duration does not extend the Oracle's separate post-commit `orderSettlementWindow`; the signed
-historical price must qualify in that window even if execution happens later. Frozen execution follows the
+historical price must qualify in that window even if execution happens later. The live execution duration should
+cover `minOrderSettlementDelay` so a qualifying tick can arrive before the deadline. Frozen execution follows the
 [stored-mark policy](ORACLE_SYNCHRONIZATION.md#frozen-operation).
 
 Expiry makes an order eligible for cleanup; it does not automatically release reservations. `expireOrder` and

@@ -13,6 +13,7 @@ interface IOrderRouterAdminHost {
     /// @param orderExecutionStalenessLimit Maximum live order-execution price age, in seconds.
     /// @param liquidationStalenessLimit Maximum live liquidation price age, in seconds.
     /// @param basketMaxConfidenceRatioBps Maximum aggregate basket confidence divided by basket price, in basis points.
+    /// @param minOrderSettlementDelay Minimum time after commit before a historical component can qualify, in seconds.
     /// @param orderSettlementWindow Post-commit window searched for a unique historical execution basket, in seconds.
     /// @param maxComponentPublishTimeDivergence Maximum publish-time spread for historical baskets, in seconds.
     /// @param adverseConfidenceMultiplierBps Multiplier applied to basket confidence for account-adverse prices, in bps.
@@ -29,6 +30,7 @@ interface IOrderRouterAdminHost {
         uint256 orderExecutionStalenessLimit;
         uint256 liquidationStalenessLimit;
         uint256 basketMaxConfidenceRatioBps;
+        uint256 minOrderSettlementDelay;
         uint256 orderSettlementWindow;
         uint256 maxComponentPublishTimeDivergence;
         uint256 adverseConfidenceMultiplierBps;

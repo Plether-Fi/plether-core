@@ -83,6 +83,9 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @notice Maximum accepted aggregate basket confidence-to-price ratio, in basis points.
     uint256 public override basketMaxConfidenceRatioBps = 10;
 
+    /// @notice Minimum time after commit before a historical execution component can qualify, in seconds.
+    uint256 public override minOrderSettlementDelay = 1;
+
     /// @notice Post-commit window searched for a unique historical order-execution tick, in seconds.
     uint256 public override orderSettlementWindow = 15;
 
@@ -203,8 +206,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
     /// @notice Resolves and returns the price used for one delayed order execution.
     /// @dev In live and FAD-only markets, pays for Pyth's unique historical parse over
-    ///      `(request.commitTime, request.commitTime + orderSettlementWindow]`, capped at `block.timestamp`. During an
-    ///      oracle-frozen window, replays the Engine mark at zero fee instead. History
+    ///      `[request.commitTime + minOrderSettlementDelay, request.commitTime + orderSettlementWindow]`,
+    ///      capped at `block.timestamp`. During an oracle-frozen window, replays the Engine mark at zero fee. History
     ///      additionally pays for a stored-feed update of the same payload, then verifies component coverage. The base
     ///      basket is capped and then shifted against the requested side using aggregate confidence, except that a
     ///      frozen-oracle voluntary close is left unshifted. This function reports `closeOnly` but does not enforce it,
@@ -227,8 +230,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     }
 
     /// @notice Resolves one delayed-order price and optionally reuses a proven historical basket from the batch cache.
-    /// @dev Cache reuse is available only outside oracle-frozen policy when the cached tick is after this commit, not in
-    ///      the future, within this commit's settlement window, and covered by the cache's minimum commit time. A reused
+    /// @dev Cache reuse is available only outside oracle-frozen policy when all cached component timestamps fall within
+    ///      this order's settlement range and the new commit is covered by the cache's minimum commit time. A reused
     ///      basket first verifies all stored feeds cover its timestamp, pays no Pyth fee, and leaves the cache unchanged;
     ///      caller-supplied cache prices are not authenticated. Any ETH sent with a reused cache remains
     ///      in this contract and is not refunded or credited. Otherwise this follows
@@ -424,10 +427,10 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     }
 
     /// @notice Replaces the mutable oracle policy limits with router-finalized configuration.
-    /// @dev Callable only by `engine.orderRouter()`. Both staleness limits, the settlement window, and component
-    ///      divergence must be nonzero, and divergence cannot exceed the settlement window. Confidence-ratio and
+    /// @dev Callable only by `engine.orderRouter()`. The staleness limits, settlement delay and component divergence
+    ///      must be nonzero. The delay and divergence cannot exceed the settlement window. Confidence-ratio and
     ///      adverse-confidence values may be zero; their product must be below 100,000,000, with individual bounds
-    ///      of 10,000 and 30,000 respectively. The staleness/window/divergence fields use seconds; ratio and
+    ///      of 10,000 and 30,000 respectively. The time fields use seconds; ratio and
     ///      multiplier fields use basis points. No Pyth or engine price state is updated.
     /// @param config Complete replacement policy configuration
     function applyConfig(
@@ -438,7 +441,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         }
         if (
             config.orderExecutionStalenessLimit == 0 || config.liquidationStalenessLimit == 0
-                || config.orderSettlementWindow == 0 || config.maxComponentPublishTimeDivergence == 0
+                || config.minOrderSettlementDelay == 0 || config.minOrderSettlementDelay > config.orderSettlementWindow
+                || config.maxComponentPublishTimeDivergence == 0
                 || config.maxComponentPublishTimeDivergence > config.orderSettlementWindow
         ) {
             revert PletherOracle__InvalidSettlementConfig();
@@ -451,6 +455,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         orderExecutionStalenessLimit = config.orderExecutionStalenessLimit;
         liquidationStalenessLimit = config.liquidationStalenessLimit;
         basketMaxConfidenceRatioBps = config.basketMaxConfidenceRatioBps;
+        minOrderSettlementDelay = config.minOrderSettlementDelay;
         orderSettlementWindow = config.orderSettlementWindow;
         maxComponentPublishTimeDivergence = config.maxComponentPublishTimeDivergence;
         adverseConfidenceMultiplierBps = config.adverseConfidenceMultiplierBps;
@@ -607,39 +612,41 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             revert PletherOracle__InsufficientFee(msg.value, executionFunding);
         }
 
-        uint64 minPublishTime = request.commitTime + 1;
+        uint256 minPublishTime = uint256(request.commitTime) + minOrderSettlementDelay;
         uint256 settlementDeadline = uint256(request.commitTime) + orderSettlementWindow;
         uint64 maxPublishTime = uint64(settlementDeadline < block.timestamp ? settlementDeadline : block.timestamp);
-        try pyth.parsePriceFeedUpdatesUnique{value: pythFee}(
-            pythUpdateData, pythFeedIds, minPublishTime, maxPublishTime
-        ) returns (
-            PythStructs.PriceFeed[] memory parsedFeeds
-        ) {
-            basket = _computeBasketPriceFromFeeds(
-                PriceMode.OrderExecution, parsedFeeds, maxComponentPublishTimeDivergence
-            );
-            // Reverts in the success body are NOT caught by the historical-parse catch below.
-            // Keep the parsed basket as the pricing source even if storage already contains newer prices.
-            pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
-            for (uint256 i; i < parsedFeeds.length; ++i) {
-                _requireStoredFeedCoverage(parsedFeeds[i].id, parsedFeeds[i].price.publishTime);
-            }
-            basket.pythFee = executionFunding;
-            ok = true;
-        } catch (bytes memory reason) {
-            if (reason.length != 4 || bytes4(reason) != IPyth.PriceFeedNotFoundWithinRange.selector) {
-                revert PletherOracle__HistoricalParserFailure(bytes4(reason), reason.length);
-            }
-            if (request.revertOnHistoricalUnavailable) {
-                revert PletherOracle__StalePrice(
-                    PriceMode.OrderExecution, bytes32(0), maxPublishTime, orderExecutionStalenessLimit, block.timestamp
+        if (minPublishTime <= maxPublishTime) {
+            try pyth.parsePriceFeedUpdatesUnique{value: pythFee}(
+                pythUpdateData, pythFeedIds, uint64(minPublishTime), maxPublishTime
+            ) returns (
+                PythStructs.PriceFeed[] memory parsedFeeds
+            ) {
+                basket = _computeBasketPriceFromFeeds(
+                    PriceMode.OrderExecution, parsedFeeds, maxComponentPublishTimeDivergence
                 );
+                // Reverts in the success body are NOT caught by the historical-parse catch below.
+                // Keep the parsed basket as the pricing source even if storage already contains newer prices.
+                pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
+                for (uint256 i; i < parsedFeeds.length; ++i) {
+                    _requireStoredFeedCoverage(parsedFeeds[i].id, parsedFeeds[i].price.publishTime);
+                }
+                basket.pythFee = executionFunding;
+                return (basket, true);
+            } catch (bytes memory reason) {
+                if (reason.length != 4 || bytes4(reason) != IPyth.PriceFeedNotFoundWithinRange.selector) {
+                    revert PletherOracle__HistoricalParserFailure(bytes4(reason), reason.length);
+                }
             }
-            // The reverted parser consumed no ETH; the storage update was never attempted.
-            // Report forwarded funding so the Router does not refund this allocation a second time.
-            basket.pythFee = executionFunding;
-            _refundValue(payable(refundRecipient), executionFunding);
         }
+
+        if (request.revertOnHistoricalUnavailable) {
+            revert PletherOracle__StalePrice(
+                PriceMode.OrderExecution, bytes32(0), maxPublishTime, orderExecutionStalenessLimit, block.timestamp
+            );
+        }
+        // No Pyth fee was consumed. Report the funding allocation so the Router does not refund it a second time.
+        basket.pythFee = executionFunding;
+        _refundValue(payable(refundRecipient), executionFunding);
     }
 
     function _requireStoredFeedCoverage(
@@ -978,9 +985,10 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         if (!cache.hasHistoricalBasket) {
             return false;
         }
+        uint256 minPublishTime = uint256(commitTime) + minOrderSettlementDelay;
         if (
-            commitTime < cache.minReusableCommitTime || commitTime >= cache.oldestPublishTime
-                || commitTime >= cache.publishTime
+            commitTime < cache.minReusableCommitTime || cache.oldestPublishTime < minPublishTime
+                || cache.publishTime < minPublishTime
         ) {
             return false;
         }

@@ -389,6 +389,58 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updates);
     }
 
+    function test_SettlementDelayKeepsOrderPendingUntilFirstEligibleTick() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.minOrderSettlementDelay = 5;
+        _setRouterConfig(config);
+        _advance(uint64(SETUP_TIMESTAMP + 7 days));
+        uint64 commit = uint64(vm.getBlockTimestamp());
+        uint64 id = _commit(ALICE, 0);
+        bytes[] memory early = _payload(commit + 1, commit);
+        uint256 keeperBefore = address(this).balance;
+
+        _advance(commit + 4);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder{value: 2 * FEE}(id, early);
+        assertEq(uint256(result.pendingReason), uint256(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
+        assertEq(baseMockPyth.parseUniqueCallCount(), 0, "empty time range does not call Pyth");
+        assertEq(address(this).balance, keeperBefore);
+
+        _advance(commit + 5);
+        result = router.executeOrder{value: 2 * FEE}(id, early);
+        assertEq(uint256(result.pendingReason), uint256(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
+        assertEq(address(this).balance, keeperBefore);
+
+        result = router.executeOrder{value: 2 * FEE}(id, _payload(commit + 5, commit + 4));
+        assertEq(uint256(result.status), uint256(OrderV3Types.LifecycleStatus.Executed));
+        assertEq(engine.lastMarkTime(), commit + 5);
+        assertEq(address(this).balance, keeperBefore - 2 * FEE);
+    }
+
+    function test_BatchDoesNotReuseBasketWithComponentInsideSettlementDelay() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.minOrderSettlementDelay = 5;
+        _setRouterConfig(config);
+        _advance(uint64(SETUP_TIMESTAMP + 7 days));
+        uint64 firstCommit = uint64(vm.getBlockTimestamp());
+        _commit(ALICE, 0);
+        _advance(firstCommit + 2);
+        _commit(BOB, 0);
+        _advance(firstCommit + 7);
+
+        bytes[] memory data = _payload(firstCommit + 7, firstCommit + 4);
+        MockPyth.FeedUpdate[] memory updates = abi.decode(data[0], (MockPyth.FeedUpdate[]));
+        updates[0].price.publishTime = firstCommit + 5;
+        data[0] = abi.encode(updates);
+        uint256 keeperBefore = address(this).balance;
+
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch{value: 4 * FEE}(2, data);
+        assertEq(result.terminalCount, 1);
+        assertEq(result.nextOrderId, 2);
+        assertEq(uint256(result.stopReason), uint256(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
+        assertEq(address(this).balance, keeperBefore - 2 * FEE, "unavailable basket funding is refunded");
+        assertEq(engine.lastMarkTime(), firstCommit + 7);
+    }
+
     function test_BatchDoesNotReuseBasketWithPreCommitComponent() public {
         uint64 firstCommit = uint64(block.timestamp);
         _commit(ALICE, 0);
