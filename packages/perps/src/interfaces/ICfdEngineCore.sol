@@ -47,9 +47,6 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return Cached engine mark price, or zero before the first mark
     function lastMarkPrice() external view returns (uint256);
 
-    /// @notice Explicit order execution fee rate, in basis points.
-    function executionFeeBps() external view returns (uint256);
-
     /// @notice Returns the engine's active position-risk, VPI, carry, and liquidation-charge parameters.
     /// @return vpiFactor VPI impact factor, scaled by 1e18
     /// @return maxSkewRatio Maximum side skew divided by pool depth. Opens may remain above it only while strictly

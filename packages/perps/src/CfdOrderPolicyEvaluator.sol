@@ -5,20 +5,76 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdOrderPolicyEvaluatorBase, ICfdOrderPolicyEngineView} from "@plether/perps/CfdOrderPolicyEvaluatorBase.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
+import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {OpenOrderFundingLib} from "@plether/perps/libraries/OpenOrderFundingLib.sol";
+import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
+import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
 
 interface ICommittedPolicyRouter {
 
+    function engine() external view returns (ICfdOrderPolicyEngineView);
+    function engineLensForCommit() external view returns (ICfdEngineLens);
+    function pletherOracle() external view returns (IPletherOracle);
     function lifecycleBook() external view returns (IOrderLifecycleBook);
 
 }
 
 /// @notice Public policy evaluator; internal snapshot and assessment logic is shared with read-only lenses.
 contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicyEvaluator {
+
+    /// @inheritdoc ICfdOrderPolicyEvaluator
+    function validateOpenCommit(
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 commitPrice
+    ) external view {
+        ICommittedPolicyRouter router = ICommittedPolicyRouter(msg.sender);
+        ICfdOrderPolicyEngineView engine = router.engine();
+        ICfdEngineTypes.OpenPreview memory preview = router.engineLensForCommit()
+            .previewOpen(account, request.side, request.sizeDelta, request.marginDelta, commitPrice);
+        CfdEnginePlanTypes.OpenRevertCode code = preview.invalidReason;
+        if (code == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED) {
+            revert IOrderRouterErrors.OrderRouter__PredictableOpenInvalid(uint8(code));
+        }
+        // An earlier queued close may remove the opposing position before execution.
+        if (
+            code != CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING
+                && OrderFailurePolicyLib.isPredictablyInvalidOpen(preview.failureCategory)
+        ) {
+            uint64 markTime = engine.lastMarkTime();
+            if (
+                markTime != 0
+                    && !OracleFreshnessPolicyLib.isStale(
+                        markTime, router.pletherOracle().getOrderExecutionPolicy(false).maxStaleness, block.timestamp
+                    )
+            ) {
+                revert IOrderRouterErrors.OrderRouter__PredictableOpenInvalid(uint8(code));
+            }
+        }
+
+        // VPI may be unquoted after an early planner failure. The explicit fee is known at the reference mark.
+        uint256 notionalAssets = request.sizeDelta / CfdTypes.SIZE_QUANTUM * commitPrice;
+        code = OpenOrderFundingLib.validate(
+            engine.riskParams(),
+            engine.isFadWindow(),
+            notionalAssets,
+            notionalAssets * engine.executionFeeBps() / 10_000,
+            preview.vpiAssets,
+            request.marginDelta,
+            request.bounds
+        );
+        if (code != CfdEnginePlanTypes.OpenRevertCode.OK) {
+            revert IOrderRouterErrors.OrderRouter__PredictableOpenInvalid(uint8(code));
+        }
+    }
 
     function assessCommittedOrder(
         address engineAddress,
