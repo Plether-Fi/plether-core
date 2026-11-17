@@ -1716,7 +1716,6 @@ contract PositionProtectionTest is BasePerpTest {
         OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
         request.targetPrice = 105_000_000;
         request.bounds.allowedExecutionModes = 1;
-        request.bounds.executionWindowSeconds = 37;
         request.bounds.maxExecutionBountyAssets = 0;
         request.bounds.maxExecutionNotionalAssets = 12_345e6;
         request.bounds.maxGrossAccountDebitAssets = 678e6;
@@ -1924,6 +1923,17 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
+    function test_CancelAndCommitClose_ShortExecutionWindowRollsBackCancellationAndRefund() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.executionWindowSeconds = 3;
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            request,
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__InvalidExecutionWindow.selector)
+        );
+    }
+
     function test_CancelAndCommitClose_HistoricalReplayAndConflictRollBackCancellation() public {
         _startRecordingLogs();
         _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
@@ -2016,7 +2026,6 @@ contract PositionProtectionTest is BasePerpTest {
         OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
         request.bounds.maxGrossAccountDebitAssets = carry;
         request.bounds.maxActionChargeAssets = carry;
-        request.bounds.executionWindowSeconds = 1;
         vm.prank(ALICE);
         uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
         CfdEnginePlanTypes.CloseCommitment memory commitment = router.lifecycleBook().pendingIntent(orderId).commitment;
@@ -2091,7 +2100,6 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
-        request.bounds.executionWindowSeconds = 1;
         vm.prank(ALICE);
         uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
         OrderV3Types.ExecutionResult memory result = _expireProtectionAttempt(orderId, EXECUTION_KEEPER);
@@ -3058,7 +3066,6 @@ contract PositionProtectionTest is BasePerpTest {
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         request.clientOrderId = keccak256("bounded-protected-parent");
         request.bounds.submitBy = uint64(block.timestamp + 1);
-        request.bounds.executionWindowSeconds = uint32(uint256(uint64(block.timestamp + 1)) - block.timestamp);
         request.bounds.allowedExecutionModes = 1;
 
         vm.prank(ALICE);
@@ -3131,6 +3138,15 @@ contract PositionProtectionTest is BasePerpTest {
                 executionBountyAssets,
                 executionBountyAssets - 1
             )
+        );
+    }
+
+    function test_AttachedOpen_RejectsShortExecutionWindowAndRollsBack() public {
+        OrderV3Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
+        request.bounds.executionWindowSeconds = 2;
+        _expectAttachedOpenCommitRevert(
+            request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__InvalidExecutionWindow.selector)
         );
     }
 
@@ -3348,11 +3364,10 @@ contract PositionProtectionTest is BasePerpTest {
 
         OrderV3Types.OrderRequest memory poisonRequest = _publicBoundedRequest(rawTriggerDigest, true);
         poisonRequest.bounds.submitBy = uint64(block.timestamp + 1);
-        poisonRequest.bounds.executionWindowSeconds = uint32(uint256(uint64(block.timestamp + 1)) - block.timestamp);
         vm.prank(ALICE);
         assertEq(router.commitOrder(poisonRequest), poisonOrderId, "public preclaim order id");
 
-        vm.warp(uint256(poisonRequest.bounds.submitBy) + 1);
+        vm.warp(uint256(router.lifecycleBook().orderTiming(poisonOrderId).executionDeadline) + 1);
         vm.prank(EXECUTION_KEEPER);
         OrderV3Types.ExecutionResult memory poisonResult = router.executeOrder(poisonOrderId, new bytes[](0));
         assertEq(uint8(poisonResult.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));

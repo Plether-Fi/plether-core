@@ -76,15 +76,17 @@ Fresh requests require:
 
 - A nonzero account-scoped `clientOrderId`. The prefix `0x504c455448455221` is reserved for protocol-generated orders.
 - A nonzero, lot-aligned size and nonzero target price.
-- `submitBy >= block.timestamp` and `0 < executionWindowSeconds <= OrderRouter.maxExecutionWindowSeconds()`.
+- `submitBy >= block.timestamp` and `executionWindowSeconds == OrderRouter.maxExecutionWindowSeconds()`.
 - The current nonzero configuration hash, a nonempty valid execution-mode mask, and nonzero `maxPostLeverageBps`.
 - For closes, `marginDelta == 0`, the same side as the account's queued-position projection, and a size no larger
   than that projection. Partial closes also face minimum-notional admission checks.
 
 Committed orders enter a global first-in, first-out (FIFO) queue and cannot be cancelled. `submitBy` limits when a
 fresh commitment may occur; the execution deadline is the actual commitment time plus `executionWindowSeconds`.
-Use deliberate execution windows. Passing a deadline does not remove the order until a cleanup or execution call
-records its terminal outcome.
+The execution duration is fixed by protocol configuration (default 60 seconds); callers must echo it exactly, and a
+mismatch reverts rather than being normalized. `submitBy` cannot shorten that lifetime. Configuration changes do not
+rewrite stored timing, and exact replays retain their original timing. Passing a deadline does not remove the order
+until a cleanup or execution call records its terminal outcome.
 
 ### Financial limits
 
@@ -94,7 +96,7 @@ maximum only when your account policy intentionally permits that exposure.
 | Bound | Meaning |
 | --- | --- |
 | `submitBy` | Last permitted fresh-commit timestamp |
-| `executionWindowSeconds` | Duration from commitment to execution deadline |
+| `executionWindowSeconds` | Fixed duration from commitment to execution deadline; must equal the Router configuration |
 | `allowedExecutionModes` | Mask: Live `1`, Fad `2`, Frozen `4`; combine permitted bits |
 | `expectedConfigHash` | Exact execution configuration accepted by the account |
 | `maxExecutionBountyAssets` | Maximum order bounty reserved at commitment |
@@ -275,7 +277,7 @@ does not cancel its already-queued parent.
 
 Triggering pays the reserved trigger bounty once and queues a zero-bounty close at the global FIFO tail. The
 protocol-generated close permits all execution modes, is intentionally unpinned (`expectedConfigHash == 0`), and
-uses the current maximum execution window. It copies the four retained close limits into each attempt. Other upper
+uses the current configured fixed execution lifetime. It copies the four retained close limits into each attempt. Other upper
 bounds use their type maxima, minimum bounds are zero, and the nonbinding target is `CAP_PRICE` for a LONG close or
 `1` for a SHORT close. Public `commitOrder` cannot use this zero-config exception.
 

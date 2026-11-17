@@ -104,7 +104,7 @@ interface IOrderRouterErrors {
     error OrderRouter__ZeroTargetPrice();
     /// @notice A fresh V3 request supplied an elapsed submission deadline.
     error OrderRouter__InvalidSubmitBy();
-    /// @notice The execution duration is zero or exceeds the configured maximum.
+    /// @notice A fresh request's execution duration differs from the configured fixed lifetime.
     error OrderRouter__InvalidExecutionWindow();
     /// @notice A fresh V3 request supplied no execution mode or included an undefined mode bit.
     error OrderRouter__InvalidExecutionModeMask();
