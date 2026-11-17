@@ -1084,10 +1084,42 @@ library CfdEnginePlanLib {
         uint256 claims =
             delta.existingTraderClaimRemainingAssets + (delta.pricePayoutCreatesClaim ? delta.pricePayoutAssets : 0);
         uint256 bps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
-        return !PositionRiskAccountingLib.buildExactPriceRiskState(
+        PositionRiskAccountingLib.PositionRiskState memory risk = PositionRiskAccountingLib.buildExactPriceRiskState(
             remaining, cs.remainingEntryCostAssetAtoms, delta.price, snap.capPrice, delta.posMarginAfter + claims, bps
-        )
-        .liquidatable;
+        );
+        return !risk.liquidatable
+            && uint256(risk.equityAssets)
+                >= _requiredPartialCloseEquity(snap, delta, cs.remainingSize, risk.maintenanceMarginAssets);
+    }
+
+    /// @dev Claim-funded losses must not release the residual's pre-close equity ratio. At the same price,
+    ///      notional scales with size; round up so a fractional equity atom stays pledged. The snapshot is post-carry.
+    function _requiredPartialCloseEquity(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta,
+        uint256 remainingSize,
+        uint256 maintenanceMarginAssets
+    ) private pure returns (uint256 requiredEquityAssets) {
+        requiredEquityAssets = maintenanceMarginAssets + 1;
+        if (delta.pricePnlClaimConsumedAssets == 0) {
+            return requiredEquityAssets;
+        }
+        PositionRiskAccountingLib.PositionRiskState memory beforeRisk =
+            PositionRiskAccountingLib.buildExactPriceRiskState(
+                snap.position,
+                snap.positionEntryCostAssetAtoms,
+                delta.price,
+                snap.capPrice,
+                snap.position.margin + snap.traderClaimBalanceForAccount,
+                0
+            );
+        if (beforeRisk.equityAssets > 0) {
+            uint256 proportionalEquityAssets =
+                Math.mulDiv(uint256(beforeRisk.equityAssets), remainingSize, snap.position.size, Math.Rounding.Ceil);
+            if (proportionalEquityAssets > requiredEquityAssets) {
+                requiredEquityAssets = proportionalEquityAssets;
+            }
+        }
     }
 
     function _planCloseCashSources(
@@ -1163,7 +1195,12 @@ library CfdEnginePlanLib {
         if (risk.liquidatable) {
             return false;
         }
-        uint256 headroom = uint256(risk.equityAssets) - risk.maintenanceMarginAssets - 1;
+        uint256 requiredEquityAssets =
+            _requiredPartialCloseEquity(snap, delta, cs.remainingSize, risk.maintenanceMarginAssets);
+        if (uint256(risk.equityAssets) < requiredEquityAssets) {
+            return false;
+        }
+        uint256 headroom = uint256(risk.equityAssets) - requiredEquityAssets;
         if (delta.unlockMarginAssets > headroom) {
             delta.unlockMarginAssets = headroom;
         }

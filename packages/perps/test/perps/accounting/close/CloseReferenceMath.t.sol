@@ -7,7 +7,7 @@ import {Test} from "forge-std/Test.sol";
 /// @notice Hand-calculated, fixed-atom close vectors. Production planners and getters do not supply expectations.
 contract CloseReferenceMathTest is Test {
 
-    function test_ClaimNetsFirstAndStrictHealthRetainsAnExtraAtom() public pure {
+    function test_ClaimNetsFirstAndResidualRetainsPreCloseEquityRatio() public pure {
         CloseReferenceMath.Input memory x = _base();
         x.lots = 2;
         x.closeLots = 1;
@@ -19,15 +19,15 @@ contract CloseReferenceMathTest is Test {
         x.allClaims = 100;
         CloseReferenceMath.Values memory v = CloseReferenceMath.calculate(x);
         // Each lot loses 90. The first consumes 90 claim atoms, leaving claim 10 and pledge 100.
-        // The remainder needs 91 collateral for positive equity: retain pledge 81 and release exactly 19.
+        // Pre-close equity is 20. Half the position keeps equity 10: retain pledge 90 and release exactly 10.
         assertTrue(v.valid);
         assertEq(v.closedBasis, 10);
         assertEq(v.claimConsumed, 90);
         assertEq(v.pledgeConsumed, 0);
-        assertEq(v.safeMarginRelease, 19);
-        assertEq(v.remainingMargin, 81);
+        assertEq(v.safeMarginRelease, 10);
+        assertEq(v.remainingMargin, 90);
         assertEq(v.remainingClaim, 10);
-        assertEq(v.remainingEquity, 1);
+        assertEq(v.remainingEquity, 10);
         assertEq(v.preTerminalLpDelta, 180);
         assertEq(v.requiredResidualLpDelta, 90);
         assertEq(v.remainingCash, 100);
@@ -58,9 +58,10 @@ contract CloseReferenceMathTest is Test {
         assertTrue(shortResult.valid);
         assertEq(shortResult.claimConsumed, 1000e6);
         assertEq(shortResult.pledgeConsumed, 1000e6);
-        assertEq(shortResult.safeMarginRelease, 59_999_999);
-        assertEq(shortResult.remainingMargin, 2_040_000_001);
-        assertEq(shortResult.remainingEquity, 40_000_001);
+        // Pre-close equity is $100; the half-sized remainder keeps $50, above its $40 maintenance.
+        assertEq(shortResult.safeMarginRelease, 50e6);
+        assertEq(shortResult.remainingMargin, 2050e6);
+        assertEq(shortResult.remainingEquity, 50e6);
         assertEq(shortResult.treasuryCredit, 1_600_000);
         assertEq(shortResult.remainingLiquidationReserve, 4e6);
         assertEq(shortResult.remainingCash, 2_522_400_000);
