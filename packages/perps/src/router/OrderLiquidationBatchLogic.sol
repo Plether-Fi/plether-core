@@ -7,6 +7,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
+import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -19,6 +20,7 @@ import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
+import {OpenOrderFundingLib} from "@plether/perps/libraries/OpenOrderFundingLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "@plether/perps/libraries/OrderValidationLib.sol";
@@ -235,8 +237,9 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         if (request.isClose) {
             _validateCloseAdmission(host, account, request.side, request.sizeDelta);
         } else {
-            executionBountyAssets =
-                _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
+            executionBountyAssets = _validatedOpenBounty(
+                host, account, request.side, request.sizeDelta, request.marginDelta, request.bounds
+            );
         }
         if (executionBountyAssets > request.bounds.maxExecutionBountyAssets) {
             revert IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound(
@@ -406,7 +409,8 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
-        uint256 marginDelta
+        uint256 marginDelta,
+        OrderV3Types.ExecutionBounds memory bounds
     ) private view returns (uint256 executionBountyAssets) {
         ICfdEngineCore engine = host.engine();
         uint256 commitPrice = _commitReferencePrice(engine);
@@ -427,9 +431,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert OrderRouter__PredictableOpenInvalid(opposingCode);
         }
 
+        ICfdEngineLens lens = host.engineLensForCommit();
+        ICfdEngineTypes.OpenPreview memory combined =
+            lens.previewOpen(account, side, sizeDelta, marginDelta, commitPrice);
         uint64 commitMarkTime = engine.lastMarkTime();
-        uint8 revertCode =
-            host.engineLensForCommit().previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice);
+        uint8 revertCode = uint8(combined.invalidReason);
         if (revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED)) {
             revert OrderRouter__PredictableOpenInvalid(revertCode);
         }
@@ -443,6 +449,21 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                     revert OrderRouter__PredictableOpenInvalid(revertCode);
                 }
             }
+        }
+
+        // Early planner failures may leave VPI unquoted. Admission still checks the exact fee and own
+        // margin requirements; execution checks again with the full planned VPI at its pinned price.
+        CfdEnginePlanTypes.OpenRevertCode fundingCode = OpenOrderFundingLib.validate(
+            ICfdEngineRiskParamsView(address(engine)).riskParams(),
+            engine.isFadWindow(),
+            notionalAssets,
+            (notionalAssets * engine.executionFeeBps()) / 10_000,
+            combined.vpiAssets,
+            marginDelta,
+            bounds
+        );
+        if (fundingCode != CfdEnginePlanTypes.OpenRevertCode.OK) {
+            revert OrderRouter__PredictableOpenInvalid(uint8(fundingCode));
         }
 
         executionBountyAssets = (notionalAssets * host.openOrderExecutionBountyBps()) / 10_000;

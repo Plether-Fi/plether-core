@@ -97,8 +97,8 @@ library LiquidationReferenceMath {
         due -= v.actionReserveConsumed;
         v.freeConsumed = _min(due, x.free + v.vpiReleased);
         due -= v.freeConsumed;
-        v.committedConsumed = _min(due, x.committedMargin);
-        v.carryWaived = due - v.committedConsumed;
+        // Liquidation leaves opening-order margin committed; terminal carry beyond free cash is waived.
+        v.carryWaived = due;
         v.carryCash = x.unpaidCarry - v.carryWithheld - v.carryWaived;
         v.fresh = v.gain - v.vpiWithheld - v.carryWithheld;
         v.allClaimsAfter = x.allClaims - v.claimConsumed;

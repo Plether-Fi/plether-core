@@ -53,15 +53,14 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
             _buildRawSnapshot(engine, planner, order.account, context.poolDepthAssets, context.poolDepthAssets);
-        // Execution releases this order's classification before assessment. A public read projects the same
-        // release; a call inside execution observes zero and does not release it twice.
+        // Execution assesses before releasing this order's reservation. Project that release for planner parity.
         uint256 release = viewOrder.committedMarginAssets;
         snapshot.lockedBuckets.committedOrderMarginAssets -= release;
         snapshot.lockedBuckets.totalLockedMarginAssets -= release;
         snapshot.accountBuckets.otherLockedMarginAssets -= release;
         snapshot.accountBuckets.totalLockedMarginAssets -= release;
         snapshot.accountBuckets.freeSettlementAssets += release;
-        assessment = _assessSnapshot(context, order, pending.bounds, planner, snapshot);
+        assessment = _assessSnapshot(context, order, pending.bounds, planner, snapshot, viewOrder.committedMarginAssets);
         if (order.isClose) {
             _includeCommitment(assessment, pending.commitment, pending.bounds, pending.executionBountyAssets);
         }
@@ -114,7 +113,10 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         CfdEnginePlanTypes.RawSnapshot memory snapshotCopy = snapshot;
         CfdEnginePlanTypes.OpenDelta memory deltaCopy = delta;
         OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
-        return _evaluateOpen(snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false);
+        return
+            _evaluateOpen(
+                snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false, deltaCopy.marginDeltaAssets
+            );
     }
 
     /// @inheritdoc ICfdOrderPolicyEvaluator

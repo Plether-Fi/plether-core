@@ -1245,7 +1245,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             _trade(i, 100, 300e6, false);
         }
         if (_liquidateAt(i, i % 2 == 0 ? 140_000_002 : 60_000_002)) {
-            _withdraw(i, traders[i].cash);
+            _withdraw(i, _free(i));
             _rejectExcessWithdrawal(i);
         }
         assertModel();
@@ -1257,7 +1257,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     /// 6: maintenance-only price loss leaves a surviving old claim and unused liquidation reserve;
     /// 7/8/9: free pool cash is respectively one atom below, equal to, or one atom above the fresh payout;
     /// 10: a small new gain replaces negative-VPI backing, which then pays otherwise uncovered carry;
-    /// 11: terminal carry consumes protected pending-order margin before releasing its unused remainder.
+    /// 11: terminal carry is waived while pending opening-order margin stays reserved.
     /// Environmental cash is restored only after the tested transition, except the explicitly funded immediate
     /// payout/claim-credit branches. No deposit pays the intended unpaid carry before liquidation.
     function exerciseLiquidationHistory(
@@ -1296,8 +1296,12 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         if (scenario == 6) {
             int256 action = _vpi(i, 100, false) + int256(100 * currentPrice * 4 / 10_000);
-            uint256 contribution = (action > 0 ? uint256(action) : 0) + 100 * currentPrice / 1000;
+            uint256 contribution = (action > 0 ? uint256(action) : 0) + 100 * currentPrice / 1000
+                + (100 * currentPrice * 150 / 10_000) + 1;
             _trade(i, 100, contribution, false);
+            // The independent opening margin exceeds normal maintenance; FAD raises the live threshold.
+            vm.warp(1_709_934_000); // Friday 2024-03-08 21:40 UTC, before the frozen window.
+            assertTrue(_isFadReference(vm.getBlockTimestamp()));
             uint256 desiredLoss = traders[i].claim - 50e6;
             uint256 adverseMove = desiredLoss / 100;
             uint256 adversePrice = i % 2 == 0 ? currentPrice + adverseMove : currentPrice - adverseMove;
@@ -1376,9 +1380,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
                 assertGt(lastLiquidation.carryWaived, 0, "remaining carry is waived without consuming claims");
             }
             if (scenario == 11) {
-                assertGt(lastLiquidation.committedConsumed, 0, "terminal carry consumes protected pending margin");
-                assertLt(lastLiquidation.committedConsumed, 1020e6, "unused margin returns to free settlement");
-                assertEq(orders.count(i), 0, "liquidation authenticates and clears the account queue");
+                assertEq(lastLiquidation.committedConsumed, 0, "terminal carry does not consume pending margin");
+                assertEq(orders.count(i), 1, "liquidation retains the opening order");
             }
         }
         if (restoredCash != 0) {
@@ -2761,9 +2764,10 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint64[] memory ids = orders.accountIds(i);
         for (uint256 j; j < ids.length; ++j) {
             PendingOrderReferenceLedger.Order memory o = orders.order(ids[j]);
-            if (o.request.isClose) {
-                ++unpaidCloseLiquidations;
+            if (!o.request.isClose) {
+                continue;
             }
+            ++unpaidCloseLiquidations;
             assertEq(orders.takeBounty(o.id), o.bountyAssets);
             uint256 amount = o.bountyFree;
             forfeitedOrderBounties[ids[j]] = amount;
@@ -2791,6 +2795,9 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint64[] memory ids = orders.accountIds(i);
         for (uint256 j; j < ids.length; ++j) {
             PendingOrderReferenceLedger.Order memory o = orders.order(ids[j]);
+            if (!o.request.isClose) {
+                continue;
+            }
             assertEq(forfeitedOrderBounties[o.id], o.bountyFree);
             _releasePendingMargin(o.id);
             _finishPendingOrder(

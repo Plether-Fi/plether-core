@@ -125,6 +125,11 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                         continue;
                     }
                     uint256 actual = _amount(twin, kind);
+                    if (action == 1 && kind == 8) {
+                        // The increase's equity floor is checked against its own funded pledge as well as
+                        // the combined position. The standalone amount is the tighter boundary.
+                        actual = MARGIN - FEE - NOTIONAL / 1000;
+                    }
                     for (uint8 adjacent; adjacent < 3; adjacent++) {
                         // A zero maximum has no tighter representable limit.
                         if (adjacent == 1 && actual == 0 && !_minimum(kind)) {
@@ -142,6 +147,19 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                             vm.expectRevert(
                                 abi.encodeWithSelector(
                                     IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound.selector,
+                                    actual,
+                                    limit
+                                )
+                            );
+                            vm.prank(ACCOUNT);
+                            router.commitOrder(request);
+                            _assertCommitRollback(before_);
+                        } else if (row.action < 2 && kind >= 8 && adjacent == 1) {
+                            State memory before_ = _state();
+                            vm.expectRevert(
+                                abi.encodeWithSelector(
+                                    ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
+                                    OrderV3Types.ConstraintKind(kind),
                                     actual,
                                     limit
                                 )

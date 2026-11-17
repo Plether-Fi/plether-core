@@ -189,8 +189,8 @@ contract CfdEngineLens is ICfdEngineLens {
     }
 
     /// @notice Previews full liquidation using current pool assets as both accounting depth and available cash.
-    /// @dev The oracle price is capped at `CAP_PRICE`. The lens hypothetically forfeits the account's router execution-
-    ///      bounty reserve before planning, matching terminal liquidation reachability. It performs no oracle freshness,
+    /// @dev The oracle price is capped at `CAP_PRICE`. The lens hypothetically forfeits only close and protection
+    ///      bounties before planning, preserving queued opening bounties. It performs no oracle freshness,
     ///      publish-time, or router authorization validation. An account without a position returns a nonliquidatable
     ///      preview with only the capped oracle price populated. An underfunded negative-VPI reserve makes planning
     ///      revert instead of returning a liquidatable preview. This kernel preview omits risk-off refunds;
@@ -217,7 +217,7 @@ contract CfdEngineLens is ICfdEngineLens {
         }
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, engineContract.pool().totalAssets());
         _applyRouterRiskOffRefunds(snap, preview);
-        _applyLiquidationPreviewForfeiture(snap);
+        _applyLiquidationPreviewForfeiture(snap, preview.riskOffCutoff);
         preview.liquidation = _liquidationPreviewFromSnapshot(snap, oraclePrice);
     }
 
@@ -613,7 +613,7 @@ contract CfdEngineLens is ICfdEngineLens {
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, poolDepthAssets);
-        _applyLiquidationPreviewForfeiture(snap);
+        _applyLiquidationPreviewForfeiture(snap, 0);
         return _liquidationPreviewFromSnapshot(snap, oraclePrice);
     }
 
@@ -751,14 +751,36 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.frozenCloseSpreadBps = engineContract.frozenCloseSpreadBps();
     }
 
-    /// @notice Adjusts a memory snapshot for execution-bounty value forfeited before liquidation settlement.
-    /// @dev Does nothing without a nonzero bounty reserve. The debit and lock release are capped
+    /// @notice Adjusts a memory snapshot for close and protection bounties forfeited before liquidation.
+    /// @dev Excludes opening bounties that survive risk-off cleanup. The debit and lock release are capped
     ///      by the corresponding snapshot buckets and no live state is changed.
     /// @param snap Snapshot mutated in memory before liquidation planning.
+    /// @param riskOffCutoff Opening orders at or below this cutoff were already refunded in the projected snapshot.
     function _applyLiquidationPreviewForfeiture(
-        CfdEnginePlanTypes.RawSnapshot memory snap
-    ) internal pure {
-        uint256 forfeitedAssets = snap.protectedExecutionBountyAssets;
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint64 riskOffCutoff
+    ) internal view {
+        if (snap.protectedExecutionBountyAssets == 0) {
+            return;
+        }
+        ILiquidationPreviewRouter router = ILiquidationPreviewRouter(engineContract.orderRouter());
+        uint256 survivingOpenBounties;
+        uint256 remaining = router.pendingOrderCounts(snap.account);
+        for (uint64 orderId = router.accountHeadOrderId(snap.account); orderId != 0;) {
+            if (remaining == 0) {
+                revert CfdEngineLens__InvalidRouterQueue();
+            }
+            --remaining;
+            (IOrderRouterAccounting.PendingOrderView memory pending, uint64 next) = router.getPendingOrderView(orderId);
+            if (!pending.isClose && (riskOffCutoff == 0 || orderId > riskOffCutoff)) {
+                survivingOpenBounties += pending.executionBountyAssets;
+            }
+            orderId = next;
+        }
+        if (survivingOpenBounties > snap.protectedExecutionBountyAssets) {
+            revert CfdEngineLens__InvalidRouterQueue();
+        }
+        uint256 forfeitedAssets = snap.protectedExecutionBountyAssets - survivingOpenBounties;
         if (forfeitedAssets == 0) {
             return;
         }
@@ -775,7 +797,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.lockedBuckets.totalLockedMarginAssets -= releasedReserveAssets;
         snap.actionReserveAssets =
             snap.actionReserveAssets > releasedReserveAssets ? snap.actionReserveAssets - releasedReserveAssets : 0;
-        snap.protectedExecutionBountyAssets = 0;
+        snap.protectedExecutionBountyAssets = survivingOpenBounties;
         uint256 accountReserveReleaseAssets = releasedReserveAssets;
         if (accountReserveReleaseAssets > snap.accountBuckets.otherLockedMarginAssets) {
             accountReserveReleaseAssets = snap.accountBuckets.otherLockedMarginAssets;

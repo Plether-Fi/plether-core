@@ -767,12 +767,12 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(snapshot.degradedMode, engine.degradedMode(), "House-pool status degraded mode mismatch");
     }
 
-    function _assertInvariant_LiquidationClearsExecutionBounties() internal view {
+    function _assertInvariant_LiquidationClearsStaleCloseReserves() internal view {
         for (uint256 i; i < handler.actorCount(); ++i) {
             address account = _account(handler.actorAt(i));
             (, uint256 liveReserves, uint256 reserved) = handler.liquidatedGenerationExposure(account);
-            assertEq(liveReserves, 0, "Liquidated generations must forfeit all reservations");
-            assertEq(reserved, 0, "Liquidation must forfeit old-generation bounty and margin reserves");
+            assertEq(liveReserves, 0, "Liquidated generations must clear stale close reserves");
+            assertEq(reserved, 0, "Stale closes must not retain bounty or margin reserves");
             assertEq(
                 settlementToken.balanceOf(account),
                 handler.ghost().expectedWalletFromSubmittedFlows(account),
@@ -850,7 +850,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         _assertInvariant_AccountLedgerSnapshotFullySubsumesCompactAndLegacyViews();
         _assertInvariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets();
         _assertInvariant_HousePoolStatusSnapshotMatchesEngineState();
-        _assertInvariant_LiquidationClearsExecutionBounties();
+        _assertInvariant_LiquidationClearsStaleCloseReserves();
         _assertInvariant_ObservedClaimsReconcileWithEngine();
     }
 
