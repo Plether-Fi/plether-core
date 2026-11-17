@@ -12,6 +12,7 @@ import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
 import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
@@ -32,6 +33,7 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
@@ -207,14 +209,20 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
     }
 
     function _mockPythUpdateData() internal returns (bytes[] memory updateData) {
+        return _mockPythUpdateData(1e8);
+    }
+
+    function _mockPythUpdateData(
+        uint256 price
+    ) internal returns (bytes[] memory updateData) {
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
         uint256 publishTime = _mockHistoricalPublishTime();
         mockPyth.setAllUniquePrices(
-            feedIds, int64(100_000_000), 0, int32(-8), publishTime, publishTime == 0 ? 0 : publishTime - 1
+            feedIds, int64(uint64(price)), 0, int32(-8), publishTime, publishTime == 0 ? 0 : publishTime - 1
         );
         updateData = new bytes[](1);
-        updateData[0] = abi.encode(uint256(1e8));
+        updateData[0] = abi.encode(price);
     }
 
     function _mockHistoricalPublishTime() internal view returns (uint256 publishTime) {
@@ -231,9 +239,8 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
         }
     }
 
-    // A stale commit mark defers economic admission to execution. This test only proves queue admission;
-    // it does not prove a rebate can fund the isolated PnL pledge required by the execution-time IMR check.
-    function test_VpiRebateCanSatisfyReachableCollateralProjection() public {
+    // A stale mark does not excuse a new position's invariant reserve-funding requirement.
+    function test_VpiRebateCannotReplaceFreshReserveFundingWithStaleMark() public {
         _startRecordingLogs();
         _fundJunior(bob, 1_000_000e6);
 
@@ -256,29 +263,39 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
 
         assertEq(clearinghouse.balanceAssets(eveAccount), 1e6, "Trader only funds the reserved execution bounty");
 
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED)
+            )
+        );
         vm.prank(eve);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
 
-        assertEq(router.nextCommitId(), 3, "Rebate-backed open should remain committable under the planner");
+        assertEq(router.nextCommitId(), 2, "unfunded reserve must not allocate an order");
+        assertEq(router.pendingOrderCounts(eve), 0);
+        assertEq(clearinghouse.totalBountyReservationsAssets(eve), 0);
+        assertEq(clearinghouse.balanceAssets(eve), 1e6);
     }
 
     function test_TypedUserInvalidOpenPaysClearer() public {
         _startRecordingLogs();
-        uint64 staleMarkTime = uint64(block.timestamp - router.pletherOracle().orderExecutionStalenessLimit() - 1);
+        _fundJunior(bob, 1_000_000e6);
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, staleMarkTime);
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
         address eve = address(0xE223);
         address eveAccount = eve;
 
         vm.startPrank(eve);
-        settlementToken.mint(eve, 1e6);
-        settlementToken.approve(address(clearinghouse), 1e6);
-        clearinghouse.deposit(eveAccount, 1e6);
-        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
+        settlementToken.mint(eve, 20_000e6);
+        settlementToken.approve(address(clearinghouse), 20_000e6);
+        clearinghouse.deposit(eveAccount, 20_000e6);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
         vm.stopPrank();
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        bytes[] memory priceData = _mockPythUpdateData();
+        // This was valid at commitment; a later adverse price raises VPI/fees beyond available collateral.
+        bytes[] memory priceData = _mockPythUpdateData(CAP_PRICE);
         router.executeOrder(1, priceData);
 
         assertEq(
@@ -295,6 +312,7 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), 1);
         assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.PlannerRejected));
+        assertEq(uint8(outcome.failureCategory), uint8(CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid));
         assertEq(
             settlementToken.balanceOf(address(router)),
             0,

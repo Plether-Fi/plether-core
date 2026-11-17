@@ -282,7 +282,9 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
 
     function _stalePoisonQueue() private returns (uint64 poison, uint64 follower, uint256 bounty) {
         vm.warp(block.timestamp + pletherOracle.orderExecutionStalenessLimit() + 1);
-        OrderV3Types.OrderRequest memory poisonRequest = _request(bytes32("original-1e39"), 1e39, 0);
+        // Fund the invariant reserve/fee floor so this original extreme-size scenario reaches the skew guard.
+        _fundTrader(ALICE, 2e17);
+        OrderV3Types.OrderRequest memory poisonRequest = _request(bytes32("original-1e39"), 1e39, 2e17);
         uint256 gasBefore = gasleft();
         poison = _commit(ALICE, poisonRequest);
         uint256 commitGas = gasBefore - gasleft();

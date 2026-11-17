@@ -290,10 +290,11 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
             uint256 snapshot = vm.snapshotState();
             OrderV3Types.OrderRequest memory r = _request();
             if (reason == 0) {
-                r.targetPrice = 2e8;
+                r.targetPrice = 110_000_000;
             }
             if (reason == 1) {
-                r.bounds.maxActionChargeAssets = 0;
+                // A lower-price fill can meet this bound; the actual $1 fill charges $4 and violates it.
+                r.bounds.maxActionChargeAssets = 4e6 - 1;
             }
             if (reason == 2) {
                 r.bounds.allowedExecutionModes = 2;

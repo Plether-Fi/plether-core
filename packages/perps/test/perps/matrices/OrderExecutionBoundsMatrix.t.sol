@@ -137,7 +137,13 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                                 : (_minimum(kind) ? actual - 1 : actual + 1);
                         OrderV3Types.OrderRequest memory request = _request(row);
                         _setLimit(request, kind, limit);
-                        if (kind == 1 && adjacent == 1) {
+                        if (kind == 6 && adjacent == 1 && action < 2) {
+                            State memory before_ = _state();
+                            vm.expectRevert(IOrderRouterErrors.OrderRouter__ImpossibleExecutionRequest.selector);
+                            vm.prank(ACCOUNT);
+                            router.commitOrder(request);
+                            _assertCommitRollback(before_);
+                        } else if (kind == 1 && adjacent == 1) {
                             State memory before_ = _state();
                             vm.expectRevert(
                                 abi.encodeWithSelector(
@@ -244,10 +250,10 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
     ) private view returns (OrderV3Types.OrderRequest memory request) {
         request.clientOrderId = bytes32(uint256(router.nextCommitId()) + 0xB000);
         request.side = row.side;
-        request.targetPrice = MARK;
+        request.isClose = row.action >= 2;
+        request.targetPrice = (row.side == CfdTypes.Side.LONG) != request.isClose ? 1 : CAP_PRICE;
         request.sizeDelta = row.action == 3 ? 2 * SIZE : SIZE;
         request.marginDelta = row.action < 2 ? MARGIN : 0;
-        request.isClose = row.action >= 2;
         request.bounds = OrderV3Types.ExecutionBounds({
             submitBy: uint64(vm.getBlockTimestamp() + 1 hours),
             executionWindowSeconds: 3600,
