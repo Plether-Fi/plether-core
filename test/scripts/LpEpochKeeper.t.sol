@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LpEpochKeeper} from "../../script/LpEpochKeeper.s.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {SettlementMonitorViewTypes} from "@plether/perps/interfaces/SettlementMonitorViewTypes.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -108,6 +109,8 @@ contract MockLpEpochSettlementOracle {
 
     uint256 public fee;
     bytes32 public expectedUpdateDataHash;
+    uint256 public orderFee;
+    bytes32 public expectedOrderDataHash;
 
     function configure(
         bytes[] memory updateData,
@@ -124,6 +127,21 @@ contract MockLpEpochSettlementOracle {
         return fee;
     }
 
+    function configureOrderFee(
+        bytes[] memory orderData,
+        uint256 fee_
+    ) external {
+        expectedOrderDataHash = keccak256(abi.encode(orderData));
+        orderFee = fee_;
+    }
+
+    function getOrderExecutionFee(
+        bytes[] calldata orderData
+    ) external view returns (uint256) {
+        require(keccak256(abi.encode(orderData)) == expectedOrderDataHash, "unexpected order data");
+        return orderFee;
+    }
+
 }
 
 contract MockLpEpochSettlementRouter {
@@ -133,6 +151,13 @@ contract MockLpEpochSettlementRouter {
     uint256 public lastValue;
     bytes32 public lastUpdateDataHash;
     address public lastCaller;
+    uint64 public nextExecuteId = 1;
+    uint64 public globalTailOrderId;
+    uint256 public constant maxPruneOrdersPerCall = 2;
+    uint64 public batchEnd;
+    uint256 public batchValue;
+    address public batchCaller;
+    uint64[] public cleanupIds;
 
     constructor(
         address oracle
@@ -144,6 +169,31 @@ contract MockLpEpochSettlementRouter {
         address oracle
     ) external {
         pletherOracle = oracle;
+    }
+
+    function setQueue(
+        uint64 head,
+        uint64 tail
+    ) external {
+        nextExecuteId = head;
+        globalTailOrderId = tail;
+    }
+
+    function executeOrderBatch(
+        uint64 last,
+        bytes[] calldata
+    ) external payable returns (OrderV3Types.BatchResult memory) {
+        batchEnd = last;
+        batchValue = msg.value;
+        batchCaller = msg.sender;
+        return OrderV3Types.BatchResult(nextExecuteId, 0, OrderV3Types.PendingReason.HistoricalPriceUnavailable);
+    }
+
+    function clearInvalidOrders(
+        uint64[] calldata ids
+    ) external returns (uint256, uint256) {
+        cleanupIds = ids;
+        return (ids.length, 0);
     }
 
     function settleLpEpoch(
@@ -271,6 +321,9 @@ contract LpEpochKeeperTest is Test {
         monitor.setLpEpochSettlementPaused(true);
         monitor.setStatus(SettlementMonitorViewTypes.ExecutionPath.CachedMark, true, 0, 0, CACHED_PRICE, CACHED_TIME);
         _setKeeperEnvironment("not-valid-abi-encoded-bytes");
+        vm.setEnv("ORDER_PYTH_UPDATE_DATA", "not-valid-abi-encoded-bytes");
+        vm.expectRevert(LpEpochKeeper.LpEpochKeeper__LpEpochSettlementPaused.selector);
+        keeper.processOrders();
         vm.expectRevert(LpEpochKeeper.LpEpochKeeper__LpEpochSettlementPaused.selector);
         keeper.run();
 
@@ -313,6 +366,45 @@ contract LpEpochKeeperTest is Test {
         assertEq(router.lastUpdateDataHash(), keccak256(abi.encode(updateData)));
         assertEq(router.lastCaller(), vm.addr(KEEPER_PRIVATE_KEY));
         assertEq(pool.callCount(), 1, "atomic route must not call the Pool after the cached pass");
+
+        _checkOrderPass(updateData, fee);
+    }
+
+    function _checkOrderPass(
+        bytes[] memory updateData,
+        uint256 lpFee
+    ) private {
+        router.setQueue(20, 100);
+        uint256 orderFee = 5 wei;
+        bytes[] memory orderData = new bytes[](1);
+        orderData[0] = hex"9876";
+        oracle.configureOrderFee(orderData, orderFee);
+        vm.setEnv("ORDER_PYTH_UPDATE_DATA", vm.toString(abi.encode(orderData)));
+        address operator = vm.addr(KEEPER_PRIVATE_KEY);
+        vm.deal(operator, 4 * orderFee + lpFee);
+
+        keeper.processOrders();
+        assertEq(router.batchEnd(), 23, "only four consecutive IDs are eligible for the batch");
+        assertEq(router.batchValue(), 4 * orderFee);
+        assertEq(router.batchCaller(), operator);
+        assertEq(router.nextExecuteId(), 20, "the order pass stopped with the head still pending");
+
+        keeper.run();
+        assertEq(router.callCount(), 2, "pending head did not stop atomic LP settlement");
+
+        monitor.setStatus(SettlementMonitorViewTypes.ExecutionPath.CachedMark, true, 0, 0, CACHED_PRICE, CACHED_TIME);
+        vm.setEnv("PYTH_UPDATE_DATA", "0x");
+        keeper.processOrders();
+        assertEq(router.cleanupIds(0), 20);
+        assertEq(router.cleanupIds(1), 21);
+        keeper.run();
+        assertEq(pool.callCount(), 2, "lack of a current basket did not stop cached LP settlement");
+
+        vm.setEnv("ORDER_PYTH_UPDATE_DATA", "0x");
+        vm.setEnv("PYTH_UPDATE_DATA", vm.toString(abi.encode(updateData)));
+        router.setQueue(24, 24);
+        keeper.processOrders();
+        assertEq(router.cleanupIds(0), 24, "missing historical data still allows cleanup");
     }
 
     function _setKeeperEnvironment(
