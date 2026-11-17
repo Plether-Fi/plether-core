@@ -230,9 +230,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FOUNDRY_PROFILE: quick
-      # Smaller compiler batches preserve the same exhaustive test partition.
-      # Both previous attempts lost their runner during shard 2 compilation.
-      PERPS_COVERAGE_SHARDS: 8
+      # Keep compiler batches small enough to leave memory for the hosted runner.
+      PERPS_COVERAGE_SHARDS: 16
       HEARTBEAT_RESOURCE_DIAGNOSTICS: '1'
     steps:
       - uses: actions/checkout@v4
