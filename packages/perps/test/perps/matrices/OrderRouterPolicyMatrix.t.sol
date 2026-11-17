@@ -374,15 +374,13 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
     function test_UserInvalidPaysClearer() public {
         address eve = address(0xE223);
-        address eveAccount = eve;
         address keeperAccount = KEEPER;
-
-        vm.startPrank(eve);
-        settlementToken.mint(eve, 1e6);
-        settlementToken.approve(address(clearinghouse), 1e6);
-        clearinghouse.deposit(eveAccount, 1e6);
-        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
-        vm.stopPrank();
+        _fundTrader(eve, 101e6);
+        vm.warp(vm.getBlockTimestamp() + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(25_000_000, uint64(vm.getBlockTimestamp()));
+        vm.prank(eve);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
         bytes[] memory priceData = _mockPythUpdateData(1e8);

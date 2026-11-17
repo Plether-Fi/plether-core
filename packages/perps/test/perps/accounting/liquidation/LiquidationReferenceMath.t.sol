@@ -107,15 +107,15 @@ contract LiquidationReferenceMathTest is Test {
             assertEq(v.carryWithheld, 1000e6);
             assertEq(v.actionReserveConsumed, 17e6);
             assertEq(v.freeConsumed, 0);
-            assertEq(v.committedConsumed, 23e6);
-            assertEq(v.carryCash, 40e6);
-            assertEq(v.carryWaived, 260e6);
+            assertEq(v.committedConsumed, 0);
+            assertEq(v.carryCash, 17e6);
+            assertEq(v.carryWaived, 283e6);
             assertEq(v.fresh, 0);
             assertEq(v.immediate, 0);
             assertEq(v.deferred, 0);
             assertEq(v.remainingClaim, 500e6, "old claim never funds carry");
-            assertEq(v.retainedCash, side == 0 ? 1e6 : 0, "unused liquidation reserve survives waiver");
-            assertEq(v.poolCashAfter, side == 0 ? 2_045_500_000 : 2044e6);
+            assertEq(v.retainedCash, side == 0 ? 24e6 : 23e6, "committed margin and unused reserve survive waiver");
+            assertEq(v.poolCashAfter, side == 0 ? 2_022_500_000 : 2021e6);
             _assertConservation(x, v);
         }
     }
@@ -138,16 +138,16 @@ contract LiquidationReferenceMathTest is Test {
         assertEq(v.carryWithheld, 0);
         assertEq(v.actionReserveConsumed, 7e6);
         assertEq(v.freeConsumed, 50e6, "released VPI reserve becomes eligible carry cash");
-        assertEq(v.committedConsumed, 11e6);
-        assertEq(v.carryCash, 68e6);
-        assertEq(v.carryWaived, 22e6);
+        assertEq(v.committedConsumed, 0);
+        assertEq(v.carryCash, 57e6);
+        assertEq(v.carryWaived, 33e6);
         assertEq(v.fresh, 0);
         assertEq(v.charge, 11_950_000);
         assertEq(v.keeper, 5_975_000);
         assertEq(v.lpFee, 5_975_000);
-        assertEq(v.retainedCash, 3_050_000, "protected cash and unused liquidation reserve remain");
+        assertEq(v.retainedCash, 14_050_000, "protected cash and unused liquidation reserve remain");
         assertEq(v.remainingClaim, 500e6);
-        assertEq(v.poolCashAfter, 1_103_975_000);
+        assertEq(v.poolCashAfter, 1_092_975_000);
         assertEq(v.allClaimsAfter, 700e6);
         _assertConservation(x, v);
     }
@@ -329,7 +329,7 @@ contract LiquidationReferenceMathTest is Test {
         LiquidationReferenceMath.Values memory v = LiquidationReferenceMath.calculate(x);
         if (v.eligible) {
             _assertConservation(x, v);
-            assertGe(v.retainedCash, 3e6, "terminal settlement preserves protected cash");
+            assertGe(v.retainedCash, 3e6 + x.committedMargin, "terminal settlement preserves protected cash");
         } else {
             assertEq(x.unpaidCarry, 0, "any uncovered carry makes a live position liquidatable");
             assertGt(v.equity, int256(v.maintenance));
@@ -356,7 +356,7 @@ contract LiquidationReferenceMathTest is Test {
         assertLe(v.charge, x.liquidationReserve);
         assertLe(v.actionReserveConsumed, x.actionReserve);
         assertLe(v.freeConsumed, x.free + v.vpiReleased);
-        assertLe(v.committedConsumed, x.committedMargin);
+        assertEq(v.committedConsumed, 0, "queued open margin is reserved");
         if (v.pnl < 0) {
             assertEq(uint256(-v.pnl), v.claimConsumed + v.pledgeConsumed + v.writtenOff, "price loss disposition");
             if (v.pledgeConsumed != 0 || v.writtenOff != 0) {
@@ -376,7 +376,6 @@ contract LiquidationReferenceMathTest is Test {
         if (v.carryWaived != 0) {
             assertEq(v.actionReserveConsumed, x.actionReserve);
             assertEq(v.freeConsumed, x.free + v.vpiReleased);
-            assertEq(v.committedConsumed, x.committedMargin);
         }
     }
 

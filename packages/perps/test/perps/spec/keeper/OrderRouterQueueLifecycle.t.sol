@@ -78,7 +78,7 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 1, head
         vm.prank(other);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false); // order 2, non-head
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true); // order 2, non-head close
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 3, next live order
 

@@ -247,19 +247,23 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         _setRouterConfig(config);
 
         address account = address(0xBA7C0032);
-        _fundTrader(account, 270e6);
+        _fundTrader(account, 302e6);
         _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, NEUTRAL_PRICE);
 
         uint64 firstOrderId = router.nextCommitId();
         vm.startPrank(account);
         for (uint256 i = 0; i < maxPendingOrders; i++) {
-            router.commitOrder(CfdTypes.Side.LONG, 100e18, 2e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 100e18, 3e6, type(uint256).max, false);
         }
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountReservationView memory reservationBefore = router.getAccountReservations(account);
         assertEq(reservationBefore.pendingOrderCount, maxPendingOrders, "setup must reach the configured order cap");
-        assertEq(reservationBefore.committedMarginAssets, 64e6, "setup must reserve every order's committed margin");
+        assertEq(
+            reservationBefore.committedMarginAssets,
+            maxPendingOrders * 3e6,
+            "setup must reserve every order's committed margin"
+        );
         assertGt(reservationBefore.executionBountyAssets, 0, "setup must reserve execution bounties");
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, LIQUIDATION_PRICE);
@@ -292,7 +296,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
                 uint256(IOrderRouterAccounting.OrderStatus.Pending),
                 "every opening order remains pending"
             );
-            assertEq(_remainingCommittedMargin(orderId), 2e6, "every opening margin reservation remains intact");
+            assertEq(_remainingCommittedMargin(orderId), 3e6, "every opening margin reservation remains intact");
             assertGt(_orderRecord(orderId).executionBountyAssets, 0, "every opening bounty remains funded");
         }
         assertEq(

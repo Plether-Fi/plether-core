@@ -356,7 +356,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         if (lots < existing) {
             // Intentional successful partials fund their selected price envelope using actual collateral actions.
-            // The separate deferred-claim history directly exercises zero-pledge claim-backed partial admission.
+            // The separate deferred-claim history directly exercises partial admission with a retained claim.
             _ensurePledge(i, existing * (frozen ? CAP : 5e6));
         }
         if (_free(i) < 10e6) {
@@ -1159,17 +1159,16 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             return;
         }
         _refresh(80_000_002);
-        int256 action = _vpi(0, 100, false) + int256(100 * currentPrice * 4 / 10_000);
-        uint256 contribution = (action > 0 ? uint256(action) : 0) + 100 * currentPrice / 1000;
+        uint256 contribution = 150e6;
         if (_free(0) < contribution + 1e6) {
             _deposit(0, contribution + 100e6);
         }
         _trade(0, 100, contribution, false);
-        assertEq(traders[0].margin, 0, "claim alone backs the reopened position");
+        assertGt(traders[0].margin, 0, "the reopened position funds its own pledge");
         assertEq(traders[0].basis, 100 * currentPrice);
         uint256 claimBefore = traders[0].claim;
         _trade(0, 50, 0, true);
-        assertEq(traders[0].margin, 0, "claim alone backs the live partial remainder");
+        assertGt(traders[0].claim, 0, "the live partial remainder retains its claim");
         assertEq(traders[0].basis, 50 * currentPrice);
         assertGt(claimBefore, 50 * currentPrice / 100, "claim-backed equity exceeds maintenance");
         assertEq(traders[0].claim, claimBefore, "claims are health collateral, never action-fee cash");
@@ -2365,7 +2364,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (o.request.isClose) {
             return _projectClose(i, lots, c).revertCode;
         }
-        return _projectOpen(i, lots, o.request.marginDelta, c).revertCode;
+        uint8 code = _projectOpen(i, lots, o.request.marginDelta, c).revertCode;
+        if (code == 0 && o.remainingMargin < o.request.marginDelta) {
+            return 5;
+        }
+        return code;
     }
 
     function _modelExecutedOrder(
@@ -3320,6 +3323,10 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     function exerciseUnpaidCarryVpiOffsetClose() external {
         assertEq(orders.liveCount(), 0);
         assertEq(traders[0].lots, 50, "existing public claim-backed half position");
+        // Pay accrued carry from the funded pledge before committing the claim-backed close.
+        vm.warp(_nextLiveTime(vm.getBlockTimestamp() + 5200 weeks));
+        _refresh(currentPrice);
+        _deposit(0, 1000e6);
         assertEq(traders[0].margin, 0);
         assertGt(traders[0].claim, 0);
         assertGt(traders[0].vpi, 0);
@@ -3349,11 +3356,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             assertEq(traders[i].lots, 0);
         }
         _refresh(80_000_002);
-        _trade(0, 100, 300e6, false);
-        _trade(1, 500, 30_000e6, false);
-        uint64 closeId = _commitTrade(0, 100, 0, true);
-        uint64 first = _commitTrade(0, 17, 2e6, false);
-        uint64 second = _commitTrade(0, 17, 10e6, false);
+        _trade(0, 600, 1800e6, false);
+        _trade(1, 1100, 30_000e6, false);
+        uint64 closeId = _commitTrade(0, 600, 0, true);
+        uint64 first = _commitTrade(0, 17, 25e6, false);
+        uint64 second = _commitTrade(0, 17, 50e6, false);
         assertEq(orders.head(), closeId);
         _withdraw(0, _free(0));
         _refresh(140_000_002);
@@ -3362,7 +3369,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(traders[0].lots, 0);
         assertEq(orders.order(first).remainingMargin, 0, "oldest committed margin fully consumed");
         assertGt(orders.order(second).remainingMargin, 0, "newer committed margin retains unspent cash");
-        assertLt(orders.order(second).remainingMargin, 10e6, "next reservation partly consumed");
+        assertLt(orders.order(second).remainingMargin, 50e6, "next reservation partly consumed");
         assertEq(uint8(orders.order(first).marginStatus), uint8(PendingOrderReferenceLedger.MarginStatus.Consumed));
         assertEq(orders.order(first).remainingBounty, 136_000);
         assertEq(orders.order(second).remainingBounty, 136_000);

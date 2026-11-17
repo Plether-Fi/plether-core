@@ -282,7 +282,8 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
 
     function _stalePoisonQueue() private returns (uint64 poison, uint64 follower, uint256 bounty) {
         vm.warp(block.timestamp + pletherOracle.orderExecutionStalenessLimit() + 1);
-        OrderV3Types.OrderRequest memory poisonRequest = _request(bytes32("original-1e39"), 1e39, 0);
+        _fundTrader(ALICE, 1e26 + 1e6);
+        OrderV3Types.OrderRequest memory poisonRequest = _request(bytes32("original-1e39"), 1e39, 1e26);
         uint256 gasBefore = gasleft();
         poison = _commit(ALICE, poisonRequest);
         uint256 commitGas = gasBefore - gasleft();
@@ -416,9 +417,9 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
     }
 
     function test_ExactTerminalCollateralCapIncreaseExecutes() public {
-        _positionAtPledge(type(uint144).max);
-        // Added 100 lots at $1: fee=4e6 and liquidation-reserve increase=10e6; P therefore stays unchanged.
-        uint64 orderId = _commit(ALICE, _request(bytes32("cap-equality"), 10_000e18, 14e6));
+        _positionAtPledge(type(uint144).max - 1000e6);
+        // Of the 1014 USDC committed, 4 pay the fee, 10 increase the reserve, and 1000 increase pledge.
+        uint64 orderId = _commit(ALICE, _request(bytes32("cap-equality"), 10_000e18, 1014e6));
         uint256 bounty = book.pendingIntent(orderId).executionBountyAssets;
         uint256 custody = _settlementBalance(ALICE);
         uint256 keeper = _settlementBalance(KEEPER);
@@ -436,8 +437,8 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
     }
 
     function test_OneAtomBeyondTerminalCollateralCapIsTypedAtCommit() public {
-        _positionAtPledge(type(uint144).max);
-        OrderV3Types.OrderRequest memory request = _request(bytes32("cap-plus-one"), 10_000e18, 14e6 + 1);
+        _positionAtPledge(type(uint144).max - 1000e6);
+        OrderV3Types.OrderRequest memory request = _request(bytes32("cap-plus-one"), 10_000e18, 1014e6 + 1);
         uint64 nextId = router.nextCommitId();
         uint256 custody = _settlementBalance(ALICE);
         vm.expectRevert(
@@ -448,13 +449,13 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         assertEq(router.nextCommitId(), nextId);
         assertEq(router.nextExecuteId(), 0);
         assertEq(_settlementBalance(ALICE), custody);
-        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max - 1000e6);
         assertEq(router.pendingOrderCounts(ALICE), 0);
     }
 
     function test_PublicMarginChangeReachesTerminalCapFailureAndBatchContinues() public {
-        _positionAtPledge(uint256(type(uint144).max) - 1);
-        uint64 rejected = _commit(ALICE, _request(bytes32("cap-changed"), 10_000e18, 14e6 + 1));
+        _positionAtPledge(type(uint144).max - 1000e6 - 1);
+        uint64 rejected = _commit(ALICE, _request(bytes32("cap-changed"), 10_000e18, 1014e6 + 1));
         uint64 follower = _commit(BOB, _request(bytes32("cap-follower"), 10_000e18, 1000e6));
         uint256 failedBounty = book.pendingIntent(rejected).executionBountyAssets;
         uint256 totalBounty = failedBounty + book.pendingIntent(follower).executionBountyAssets;
@@ -492,7 +493,7 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         assertEq(receipt.bountyRecipient, KEEPER);
         assertEq(receipt.bounty.bountyPaidAssets, failedBounty);
         assertEq(custody - _settlementBalance(ALICE), failedBounty);
-        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max - 1000e6);
         assertEq(_settlementBalance(KEEPER) - keeper, totalBounty);
         _assertClean(ALICE, rejected);
         _assertExecuted(follower, BOB, 10_000e18);

@@ -579,6 +579,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function _baseOpenDelta() private pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         delta.valid = true;
         delta.openState.notionalAssets = 100e6;
+        delta.marginDeltaAssets = 205e6;
         delta.posSide = CfdTypes.Side.SHORT;
         delta.newPosSize = CfdTypes.SIZE_QUANTUM;
         delta.newPosEntryPrice = PRICE;

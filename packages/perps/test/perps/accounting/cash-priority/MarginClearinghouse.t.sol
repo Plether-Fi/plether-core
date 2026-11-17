@@ -1425,7 +1425,7 @@ contract MarginClearinghouseAccountHealthTest is BasePerpTest {
         _fundTrader(alice, 10_000 * 1e6);
         address account = alice;
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 1600e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 1700e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(address(router));

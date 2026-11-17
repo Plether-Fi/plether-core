@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
-import {OrderRouterDebugLens} from "../../../utils/OrderRouterDebugLens.sol";
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-
-import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
@@ -40,44 +38,18 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
             "setup must leave only the future execution bounty as free settlement"
         );
 
+        uint256 pledge = clearinghouse.pnlPledgeAssets(account);
         vm.prank(trader);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
+            )
+        );
         router.commitOrder(CfdTypes.Side.LONG, sizeDelta, 0, 1e8, false);
-
-        assertLt(
-            _freeSettlementAssets(account),
-            executionBountyAssets,
-            "commit should materially reduce the only free settlement while reserving the execution bounty"
-        );
-
-        uint256 keeperBefore = clearinghouse.balanceAssets(address(this));
-        bytes[] memory empty = _mockPythUpdateData();
-        vm.roll(block.number + 1);
-        router.executeOrder(1, empty);
-
-        (uint256 size,,,,,,) = engine.positions(account);
-        assertEq(
-            size,
-            sizeDelta,
-            "increase should fail rather than consume existing PnL pledge when free settlement is exhausted"
-        );
-        assertEq(
-            _settlementBalance(address(this)) - keeperBefore,
-            executionBountyAssets,
-            "keeper should receive the reserved execution bounty as clearinghouse credit after terminal failure"
-        );
-        assertEq(
-            uint256(OrderRouterDebugLens.loadRawOrderRecord(vm, router, 1).status),
-            uint256(IOrderRouterAccounting.OrderStatus.None),
-            "terminal order should be deleted from Router storage"
-        );
-        OrderV3Types.CompactOutcome memory outcome =
-            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), 1);
-        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
-        assertEq(
-            uint8(outcome.reason),
-            uint8(OrderV3Types.TerminalReason.PlannerRejected),
-            "increase without action-cost backing should finalize as a typed planner rejection"
-        );
+        assertEq(clearinghouse.pnlPledgeAssets(account), pledge);
+        assertEq(_freeSettlementAssets(account), executionBountyAssets);
+        assertEq(router.pendingOrderCounts(account), 0);
     }
 
     function test_MultiPendingOrders_DoNotCorruptLockedMarginOnFail() public {
