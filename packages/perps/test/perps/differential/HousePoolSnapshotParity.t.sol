@@ -372,6 +372,145 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
 
 }
 
+contract HousePoolPendingRevenueReserveParityTest is HousePoolAccountingParityBase {
+
+    using stdStorage for StdStorage;
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _wipePrincipalWithReserve() internal {
+        _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 1000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), 1000e6);
+
+        settlementToken.burn(address(pool), pool.totalAssets() - 1000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), 0);
+        assertEq(pool.unassignedAssets(), 1000e6);
+    }
+
+    function _payTrader(
+        uint256 amount
+    ) internal {
+        vm.prank(address(engine));
+        pool.payOut(address(0xA105), amount);
+    }
+
+    function test_OffsettingReceiptsAndPayoutsPreserveUnassignedReserve() public {
+        _wipePrincipalWithReserve();
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 100e6);
+        _payTrader(100e6);
+
+        _assertPendingAccounting(ExpectedAccounting(0, 0, 1000e6, 1000e6, 0, 0));
+        assertFalse(pool.canAcceptTrancheDeposits(false), "unassigned reserve still blocks new deposits");
+    }
+
+    function testFuzz_OnlyNetRevenueRestoresClaimants(
+        uint256 receipts,
+        uint256 payouts,
+        bool payoutFirst
+    ) public {
+        receipts = bound(receipts, 0, 2000e6);
+        payouts = bound(payouts, 0, 1000e6);
+        _wipePrincipalWithReserve();
+        if (payoutFirst) {
+            _payTrader(payouts);
+        }
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, receipts);
+        if (!payoutFirst) {
+            _payTrader(payouts);
+        }
+
+        uint256 gain = receipts > payouts ? receipts - payouts : 0;
+        uint256 reserve = receipts >= payouts ? 1000e6 : 1000e6 - (payouts - receipts);
+        uint256 senior = gain > 1000e6 ? 1000e6 : gain;
+        _assertPendingAccounting(ExpectedAccounting(senior, gain - senior, 1000e6, reserve, 0, 0));
+    }
+
+    function test_SpentRevenueClearsEvenWhenGrossBucketExceedsPoolCash() public {
+        _wipePrincipalWithReserve();
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 2000e6);
+        _payTrader(2500e6);
+
+        _assertPendingAccounting(ExpectedAccounting(0, 0, 1000e6, 500e6, 0, 0));
+    }
+
+    function test_ClaimLiabilitiesRetainBackedRevenueAfterPayoutWriteoff() public {
+        _wipePrincipalWithReserve();
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 2000e6);
+        _payTrader(500e6);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(uint256(400e6));
+
+        _assertPendingAccounting(ExpectedAccounting(1000e6, 100e6, 1000e6, 1000e6, 0, 400e6));
+
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(uint256(0));
+        _assertPendingAccounting(ExpectedAccounting(1000e6, 500e6, 1000e6, 1000e6, 0, 0));
+    }
+
+    function test_StaleTerminalLossDoesNotWriteOffPhysicallyBackedRevenue() public {
+        _wipePrincipalWithReserve();
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 2000e6);
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
+            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        snapshot.terminalLpPriceDeltaAssets = -3000e6;
+        snapshot.markFreshnessRequired = true;
+        snapshot.maxMarkStaleness = 1;
+        vm.mockCall(
+            address(pool.ENGINE_PROTOCOL_LENS()),
+            abi.encodeWithSelector(engineProtocolLens.getHousePoolInputSnapshot.selector, pool.markStalenessLimit()),
+            abi.encode(snapshot)
+        );
+        vm.mockCall(
+            address(pool.ENGINE_PROTOCOL_LENS()),
+            abi.encodeWithSelector(engineProtocolLens.getHousePoolStatusSnapshot.selector),
+            abi.encode(HousePoolEngineViewTypes.HousePoolStatusSnapshot(0, false, false))
+        );
+
+        _assertPendingAccounting(ExpectedAccounting(0, 0, 1000e6, 1000e6, 0, 2000e6));
+
+        vm.clearMockedCalls();
+        _assertPendingAccounting(ExpectedAccounting(1000e6, 1000e6, 1000e6, 1000e6, 0, 0));
+    }
+
+    function test_PositiveTerminalReceivableStillRestoresClaimantsAfterPayout() public {
+        _wipePrincipalWithReserve();
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 100e6);
+        _payTrader(100e6);
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
+            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        snapshot.terminalLpPriceDeltaAssets = 1500e6;
+        vm.mockCall(
+            address(pool.ENGINE_PROTOCOL_LENS()),
+            abi.encodeWithSelector(engineProtocolLens.getHousePoolInputSnapshot.selector, pool.markStalenessLimit()),
+            abi.encode(snapshot)
+        );
+
+        _assertPendingAccounting(ExpectedAccounting(1000e6, 500e6, 1000e6, 1000e6, 0, 0));
+    }
+
+    function test_PositiveTerminalReceivablePreservesFullRecapitalizationIntent() public {
+        _wipePrincipalWithReserve();
+        _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 2000e6);
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 100e6);
+        _payTrader(2000e6);
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
+            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
+        snapshot.terminalLpPriceDeltaAssets = 2000e6;
+        vm.mockCall(
+            address(pool.ENGINE_PROTOCOL_LENS()),
+            abi.encodeWithSelector(engineProtocolLens.getHousePoolInputSnapshot.selector, pool.markStalenessLimit()),
+            abi.encode(snapshot)
+        );
+
+        _assertPendingAccounting(ExpectedAccounting(2000e6, 100e6, 2000e6, 1000e6, 0, 0));
+    }
+
+}
+
 contract HousePoolSeededClaimReleaseSnapshotParityTest is HousePoolAccountingParityBase {
 
     using stdStorage for StdStorage;

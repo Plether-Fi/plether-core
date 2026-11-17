@@ -185,7 +185,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(redemptionMathSidecar.code.length > 0, "HousePool redemption math sidecar has no code");
         require(
             IHousePoolRedemptionMathSidecar(redemptionMathSidecar).implementationId()
-                == keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
+                == keccak256("Plether.HousePoolRedemptionMathSidecar.v2"),
             "HousePool redemption math sidecar ID mismatch"
         );
     }

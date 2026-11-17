@@ -6,10 +6,13 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 import {HousePoolAsyncTestBase} from "../../shared/HousePoolTestBase.sol";
 
 contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
+
+    using stdStorage for StdStorage;
 
     address alice = address(0x111);
 
@@ -118,13 +121,35 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         pool.recordClaimantInflow(
             3000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        vm.prank(address(engine));
-        pool.payOut(address(0xDEAD), 1000e6);
+        // The revenue still has physical backing, but unpaid trader claims defer part of its settlement.
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(uint256(1000e6));
         assertEq(pool.unassignedAssets(), 0);
 
         vm.expectRevert(IHousePool.HousePool__PendingBootstrap.selector);
         pool.activateTrading();
         assertFalse(pool.isTradingActive());
+    }
+
+    function test_ActivateTradingDiscardsSpentPendingRevenueWithSeedOwners() public {
+        _seedBothTranches();
+        settlementToken.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        settlementToken.mint(address(pool), 3000e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            3000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        vm.prank(address(engine));
+        pool.payOut(address(0xDEAD), 1000e6);
+
+        pool.activateTrading();
+        assertTrue(pool.isTradingActive(), "spent revenue must not leave an unsupported bootstrap reservation");
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.pendingTradingRevenueAssets(), 0, "spent revenue must be written off");
+        assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), 2000e6, "only retained cash may restore LPs");
     }
 
     function test_ActivateTradingAcceptsPendingRevenueWithSeedOwners() public {
