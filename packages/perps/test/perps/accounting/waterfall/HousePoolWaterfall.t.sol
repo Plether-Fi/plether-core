@@ -417,6 +417,32 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         );
     }
 
+    function test_AssignUnassignedAssets_RestoresWipedJuniorWithoutMintingShares() public {
+        _fundJunior(bob, 20_000e6);
+        uint256 unassigned = pool.juniorPrincipal();
+        uint256 supplyBefore = juniorVault.totalSupply();
+        uint256 holderSharesBefore = juniorVault.balanceOf(bob);
+
+        // Fixture: Junior has outstanding shares and all its backing is in the unassigned bucket.
+        stdstore.target(address(pool)).sig("juniorPrincipal()").checked_write(uint256(0));
+        stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(unassigned);
+        assertGt(holderSharesBefore, 0);
+        assertEq(juniorVault.totalAssets(), 0);
+        assertFalse(pool.canAcceptTrancheDeposits(false));
+
+        vm.expectEmit(true, true, false, true, address(pool));
+        emit IHousePool.UnassignedAssetsAssigned(false, alice, unassigned, 0);
+        pool.assignUnassignedAssets(false, alice);
+
+        assertEq(pool.unassignedAssets(), 0);
+        assertEq(pool.juniorPrincipal(), unassigned);
+        assertEq(juniorVault.totalAssets(), unassigned);
+        assertEq(juniorVault.totalSupply(), supplyBefore);
+        assertEq(juniorVault.balanceOf(bob), holderSharesBefore);
+        assertEq(juniorVault.balanceOf(alice), 0);
+        assertTrue(pool.canAcceptTrancheDeposits(false));
+    }
+
     function test_AssignUnassignedAssets_ResetsSeniorHwmWhenSeniorIsEmptyButJuniorStillExists() public {
         uint256 juniorAssets = 20_000e6;
         uint256 strandedAssets = 30_000e6;
