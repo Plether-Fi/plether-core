@@ -34,6 +34,9 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
 
     uint256 internal constant BPS = 10_000;
     uint256 internal constant VIRTUAL_SHARES = 1000;
+    uint256 internal constant MAX_SHARE_SUPPLY = type(uint256).max - VIRTUAL_SHARES;
+    /// @dev One asset atom (0.000001 USDG) per whole nine-decimal Junior share.
+    uint256 internal constant JUNIOR_FLOOR_SHARE_UNITS = 1e9;
 
     uint256 public constant DEPOSIT_COOLDOWN = 1 hours;
     uint256 public constant LP_REQUEST_CUTOFF_DURATION = 5 minutes;
@@ -175,6 +178,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     error TrancheVault__RedeemRefundUnavailable();
     error TrancheVault__EscrowInvariant();
     error TrancheVault__InvalidFee();
+    error TrancheVault__ShareSupplyLimitExceeded();
     error TrancheVault__MaintenanceFeeSeniorUnsupported();
     error TrancheVault__MaintenanceFeeVaultPairNotReady();
     error TrancheVault__NotPoolOwner();
@@ -319,6 +323,9 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (!IS_SENIOR && amount != 0 && (from == address(0) || to == address(0)) && maintenanceFeeAprBps != 0) {
             _checkpointMaintenanceFee();
         }
+        if (!IS_SENIOR && from == address(0) && amount > MAX_SHARE_SUPPLY - totalSupply()) {
+            revert TrancheVault__ShareSupplyLimitExceeded();
+        }
         if (from == seedReceiver && from != address(0) && balanceOf(from) - amount < seedShareFloor) {
             revert TrancheVault__SeedFloorBreached();
         }
@@ -348,7 +355,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
             return 0;
         }
         return JuniorMaintenanceFeeMathLib.pendingFeeShares(
-            rawSupply, maintenanceFeeAprBps, chargeableHours, type(uint256).max - VIRTUAL_SHARES
+            rawSupply, maintenanceFeeAprBps, chargeableHours, MAX_SHARE_SUPPLY
         );
     }
 
@@ -1324,7 +1331,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (IS_SENIOR) {
             return _seniorDepositCapacity();
         }
-        return type(uint256).max;
+        return _juniorEntryAvailable(_depositPricingAssets(), accruedTotalSupply()) ? type(uint256).max : 0;
     }
 
     function maxRequestRedeem(
@@ -1394,21 +1401,71 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     function quoteBootstrapDeposit(
         uint256 assets
     ) external view returns (uint256) {
-        return _convertToSharesUsingAssets(assets, _depositPricingAssets(), Math.Rounding.Floor);
+        // Explicit owner bootstrap may restore backing below the ordinary-entry floor.
+        return _quoteDepositShares(assets, _depositPricingAssets(), accruedTotalSupply(), 0);
     }
 
+    /// @notice Quotes a cumulative deposit, returning zero when its price or share supply is unsafe.
     function quoteDepositFromState(
         uint256 assets,
         uint256 pricingAssets,
         uint256 pricingSupply,
         uint256 feeBps
-    ) public pure returns (uint256 shares) {
+    ) public view returns (uint256 shares) {
         if (feeBps > BPS) {
             revert TrancheVault__InvalidFee();
         }
-        uint256 netAssets = feeBps == 0 ? assets : Math.mulDiv(assets, BPS - feeBps, BPS, Math.Rounding.Floor);
-        uint256 denominator = pricingAssets + assets + 1 - netAssets;
-        shares = Math.mulDiv(netAssets, pricingSupply + VIRTUAL_SHARES, denominator, Math.Rounding.Floor);
+        if (!IS_SENIOR && !_juniorEntryAvailable(pricingAssets, pricingSupply)) {
+            return 0;
+        }
+        return _quoteDepositShares(assets, pricingAssets, pricingSupply, feeBps);
+    }
+
+    function _juniorEntryAvailable(
+        uint256 pricingAssets,
+        uint256 pricingSupply
+    ) private pure returns (bool) {
+        unchecked {
+            // (pricingAssets + 1) * 1e9 >= pricingSupply + 1000, without a product or assets + 1.
+            // Short-circuiting the supply bound makes the virtual offset safe.
+            return pricingSupply < MAX_SHARE_SUPPLY
+                && pricingAssets >= (pricingSupply + VIRTUAL_SHARES - 1) / JUNIOR_FLOOR_SHARE_UNITS;
+        }
+    }
+
+    /// @dev Fee is validated by the public quote, or fixed to zero by owner bootstrap.
+    function _quoteDepositShares(
+        uint256 assets,
+        uint256 pricingAssets,
+        uint256 pricingSupply,
+        uint256 feeBps
+    ) private pure returns (uint256 shares) {
+        if (pricingSupply > MAX_SHARE_SUPPLY) {
+            return 0;
+        }
+        unchecked {
+            // The supply bound makes the virtual offset, headroom subtraction and headroom + 1 safe.
+            uint256 netAssets = feeBps == 0 ? assets : Math.mulDiv(assets, BPS - feeBps, BPS, Math.Rounding.Floor);
+            uint256 retainedAssets = assets - netAssets; // netAssets <= assets for a validated fee.
+            if (pricingAssets >= type(uint256).max - retainedAssets) {
+                return 0;
+            }
+            uint256 denominator = pricingAssets + retainedAssets + 1; // Fits by the retained-assets guard.
+            uint256 adjustedSupply = pricingSupply + VIRTUAL_SHARES;
+            uint256 headroom = MAX_SHARE_SUPPLY - pricingSupply;
+            // If shares can exceed net assets, bound the input before mulDiv's quotient could overflow.
+            // denominator < adjustedSupply proves this inverse quote fits in headroom + 1.
+            if (
+                adjustedSupply > denominator
+                    && netAssets >= Math.mulDiv(headroom + 1, denominator, adjustedSupply, Math.Rounding.Ceil)
+            ) {
+                return 0;
+            }
+            shares = Math.mulDiv(netAssets, adjustedSupply, denominator, Math.Rounding.Floor);
+            if (shares > headroom) {
+                return 0;
+            }
+        }
     }
 
     // ---------------------------------------------------------------------

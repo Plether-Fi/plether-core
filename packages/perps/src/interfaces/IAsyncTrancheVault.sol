@@ -39,7 +39,8 @@ interface IAsyncTrancheVault is IERC7540, IERC7575Share {
     /// @notice Estimates shares for a deposit amount using current pricing without promising a claim result.
     /// @dev ERC-7540 requires `previewDeposit` to revert for an asynchronous deposit flow; integrations should use this
     ///      explicitly nonbinding estimate when presenting current indicative pricing. Returns zero when projected
-    ///      deposit-pricing assets are zero with surviving shares. The request minimum and other admission/settlement
+    ///      deposit-pricing assets are zero with surviving shares, the Junior entry price is below its fixed floor,
+    ///      or the quoted shares would exceed pricing-safe supply. The request minimum and other admission/settlement
     ///      gates are not encoded; a nonzero quote does not imply the amount can be requested, and
     ///      accepted Senior reservations retain an estimate even when new-deposit capacity is exhausted.
     function estimateDepositShares(

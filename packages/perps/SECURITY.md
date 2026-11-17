@@ -1156,6 +1156,23 @@ also blocks new Senior requests and reservations and permits pending Senior comm
 deposit and redemption requests, reconciliation, and funded claims remain live. It has no automatic expiry and only
 the HousePool owner can release it.
 
+### Junior deposit price and share-supply bounds
+
+Ordinary Junior entry requires a price of at least `0.000001 USDG` per whole nine-decimal share, using projected
+deposit NAV, fee-inclusive supply, and the existing virtual offsets. The check is
+`(assets + 1) * 1e9 >= supply + 1000`, evaluated without an overflowing product. Equality and empty seeding are
+permitted; the floor never changes principal, issued balances, or redemption pricing. New Junior requests close below
+the floor or at the pricing-safe supply ceiling.
+
+Ordinary Junior deposit quotes return zero below the floor. Explicit owner bootstrap retains its existing ability
+to restore backing below that floor; its quotes still enforce the same numeric and supply-headroom bounds. Both
+deposit and bootstrap quotes return zero when the cumulative quote would exceed
+`uint256.max - 1000 - pricingSupply`. Unsafe quotes are detected before the quotient can overflow.
+Settlement uses its existing whole-epoch rejection path: escrow stays refundable and other eligible LP work can
+continue. The existing true-zero-NAV deferral rules remain distinct. A final Junior mint check, after accrued fee
+shares are materialized, also covers bootstrap issuance. These checks prevent dust-NAV deposits from geometrically
+pumping share supply into an overflowing settlement, while retaining normal discounted entry above the floor.
+
 ### Junior maintenance-fee dilution
 
 The optional maintenance fee applies only to Junior. The generic Junior constructor permits a zero rate with a zero
@@ -1173,8 +1190,8 @@ activation; pending redemption shares remain exposed until funding burns them.
 Both pending quotes and fee mints are capped at the remaining headroom below `uint256.max - 1000`, preserving room
 for the virtual-share pricing offset. The bound is checked before the nominal fee quotient can overflow. Checkpoints
 still consume elapsed hours when the cap reduces or eliminates the mint, permanently forgiving unmintable fees so
-they cannot block fee disablement or burns. This fee cap does not constrain non-fee mints or prevent dust-NAV supply
-pumping; those deposit paths are separate concerns.
+they cannot block fee disablement or burns. Deposit quotes and non-fee Junior mints separately enforce the entry
+price and supply bounds described above.
 
 Accrual uses completed Unix hours and is bounded to 8,760 charged hours per crystallization, with older backlog
 forgiven. It continues during settlement holds, oracle freezes, losses, and zero NAV. A held, no-progress, or reverted
