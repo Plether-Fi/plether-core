@@ -823,6 +823,13 @@ The protocol distinguishes two states around market closure:
 - `FAD window`: elevated margins and close-only risk policy while markets are still plausibly live,
 - `oracle frozen`: relaxed staleness and relaxed publish-ordering rules once feeds are genuinely offline.
 
+Governance overrides select UTC days. Each selected day keeps FAD active for its full UTC day, but adds frozen-oracle
+policy only from UTC midnight until that day's 17:00 New York boundary (exclusive), following US daylight-saving
+transitions. Recurring weekend freezing still applies, so a Friday override remains frozen through the weekend.
+Adjacent override days each use their own cutoff: outside recurring weekend freezing, the oracle unfreezes at each
+day's boundary and freezes again at the next overridden UTC midnight. Tomorrow's override and the configured runway
+extend FAD only. After reopening, fresh-price and publish-ordering requirements apply even while FAD remains active.
+
 LP actions intentionally stay live across that split:
 
 - `FAD` alone keeps ordinary LP pricing,
@@ -1334,8 +1341,8 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
 - a fixed spread deliberately does not increase with mark staleness inside the permitted frozen window,
 - full-close liveness takes priority over collecting an otherwise uncollectible spread; partial closes retain
   all-or-nothing rules for required charges but do not fail solely on uncollateralized price loss above the PnL cap,
-- the recurring FX calendar follows New York daylight-saving transitions on-chain; unscheduled provider closures and
-  holiday hours still require governance-configured UTC-day overrides,
+- the recurring FX calendar follows New York daylight-saving transitions on-chain; governance-configured UTC-day
+  overrides add freezing only before 17:00 New York and cannot represent arbitrary intraday provider closures,
 - the current post-2007 US daylight-saving rule is compiled into the planner; a future legal or provider schedule
   change at an intraday boundary requires a coordinated engine/planner/oracle deployment,
 - execution remains dependent on fresh keeper infrastructure and oracle publication outside frozen windows.

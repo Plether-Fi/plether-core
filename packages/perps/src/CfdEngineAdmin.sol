@@ -150,7 +150,8 @@ contract CfdEngineAdmin is Ownable2Step {
     /// @dev Callable only by the current owner. Replaces any pending calendar proposal and resets its delay. Only the
     ///      runway is validated: it may be 0..86,400 seconds inclusive, while timestamps may be arbitrary. On engine
     ///      application, timestamps are floored to UTC day numbers and duplicates are ignored; configured days activate
-    ///      both FAD and oracle-frozen mode for that day, while the runway only extends FAD before a configured day.
+    ///      all-day FAD and add oracle-frozen mode only before that day's 17:00 New York boundary. Recurring weekend
+    ///      freezing still applies, while the runway only extends FAD before a configured day.
     /// @param config Full FAD timestamp replacement and runway duration to stage.
     function proposeCalendarConfig(
         ICfdEngineAdminHost.EngineCalendarConfig calldata config

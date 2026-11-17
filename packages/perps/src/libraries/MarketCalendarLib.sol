@@ -20,10 +20,10 @@ library MarketCalendarLib {
     /// @dev New York returns to standard time at 02:00 local daylight time (06:00 UTC).
     uint256 internal constant NEW_YORK_DST_END_UTC = 6 hours;
 
-    /// @notice Returns both recurring market-calendar regimes with one New York boundary calculation.
+    /// @notice Returns recurring market-calendar regimes and governance-configured holiday restrictions.
     /// @param timestamp Timestamp to classify.
-    /// @param todayOverride Whether the timestamp's UTC day is an admin-configured FAD and frozen-oracle day.
-    /// @param tomorrowOverride Whether the following UTC day is an admin-configured FAD and frozen-oracle day.
+    /// @param todayOverride Whether this UTC day has all-day FAD and freezing before 17:00 New York.
+    /// @param tomorrowOverride Whether the following UTC day has an override; affects only the FAD runway.
     /// @param fadRunwaySeconds Look-ahead interval before an overridden following UTC day.
     /// @return fadWindow Whether FAD controls are active.
     /// @return oracleFrozen Whether frozen-oracle policy is active.
@@ -49,7 +49,9 @@ library MarketCalendarLib {
         }
 
         if (todayOverride) {
-            return (true, true);
+            fadWindow = true;
+            // Holiday freezing ends at the FX reopen, while recurring weekend closures remain in force.
+            oracleFrozen = oracleFrozen || secondOfDay < newYorkMarketBoundary(timestamp, dayOfWeek);
         }
         if (!fadWindow && fadRunwaySeconds != 0 && tomorrowOverride) {
             uint256 secondsUntilTomorrow = SECONDS_PER_DAY - secondOfDay;

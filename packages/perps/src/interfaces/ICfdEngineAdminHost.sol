@@ -19,8 +19,9 @@ interface ICfdEngineAdminHost {
     }
 
     /// @notice FAD calendar override timestamps and deleverage runway.
-    /// @param fadDayTimestamps Unix timestamps whose normalized UTC day numbers are configured as all-day FAD and
-    ///        oracle-frozen overrides; duplicate normalized days are ignored by the engine.
+    /// @param fadDayTimestamps Unix timestamps whose normalized UTC day numbers activate all-day FAD and add freezing
+    ///        only before that day's 17:00 New York boundary. Recurring weekend freezing still applies; duplicate
+    ///        normalized days are ignored by the engine.
     /// @param fadRunwaySeconds Look-ahead duration before an override day during which FAD restrictions apply.
     struct EngineCalendarConfig {
         uint256[] fadDayTimestamps;

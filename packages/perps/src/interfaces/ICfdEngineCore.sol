@@ -207,14 +207,15 @@ interface ICfdEngineCore is ICfdEngineTypes {
 
     /// @notice Returns whether a day number is configured as a FAD override.
     /// @param dayNumber Unix day number to inspect
-    /// @return Whether the entire day is configured as FAD and oracle-frozen
+    /// @return Whether the day is configured as all-day FAD with freezing before its 17:00 New York boundary
     function fadDayOverrides(
         uint256 dayNumber
     ) external view returns (bool);
 
-    /// @notice Returns whether the recurring frozen interval or a configured all-day override is active.
+    /// @notice Returns whether the recurring frozen interval or an override's pre-boundary interval is active.
     /// @dev The recurring interval follows Pyth FX hours from Friday 17:00 New York time through Sunday 16:59:59 New
-    ///      York time, including US daylight-saving transitions.
+    ///      York time, including US daylight-saving transitions. UTC-day overrides add freezing only before that
+    ///      day's 17:00 New York boundary; the FAD runway does not extend freezing.
     /// @return Whether frozen-oracle policy is active
     function isOracleFrozen() external view returns (bool);
 

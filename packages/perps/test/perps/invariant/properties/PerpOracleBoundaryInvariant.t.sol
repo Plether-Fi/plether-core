@@ -33,13 +33,14 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         handler = new PerpOracleHandler(settlementToken, mockPyth, engine, clearinghouse, router);
         handler.seedPositions();
 
-        bytes4[] memory selectors = new bytes4[](6);
+        bytes4[] memory selectors = new bytes4[](7);
         selectors[0] = handler.warpToOracleBoundary.selector;
         selectors[1] = handler.warpForward.selector;
         selectors[2] = handler.syncMarkNow.selector;
         selectors[3] = handler.configureFadDayTomorrow.selector;
         selectors[4] = handler.configureFadMaxStaleness.selector;
         selectors[5] = handler.ensureActorPosition.selector;
+        selectors[6] = handler.configureHolidayOverrides.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -144,8 +145,19 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
     }
 
     function test_MarginPolicyProbesCrossEveryOracleBoundary() public {
-        for (uint256 mode; mode < 16; ++mode) {
+        for (uint256 mode; mode < 26; ++mode) {
             handler.warpToOracleBoundary(mode);
+            _assertAllInvariants();
+        }
+    }
+
+    function test_HolidayOverrideProbesCrossReopenBoundaries() public {
+        handler.configureHolidayOverrides();
+        for (uint256 mode = 16; mode < 26; ++mode) {
+            handler.warpToOracleBoundary(mode);
+            bool expectedFrozen = mode == 16 || mode == 19 || mode >= 24;
+            assertEq(engine.isOracleFrozen(), expectedFrozen, "Holiday targets must exercise thaw and re-entry");
+            assertTrue(engine.isFadWindow(), "Holiday FAD must stay active throughout each override date");
             _assertAllInvariants();
         }
     }
@@ -265,7 +277,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         if (dayOfWeek == 0 && secondOfDay < marketBoundary) {
             return true;
         }
-        return engine.fadDayOverrides(timestamp / 86_400);
+        return engine.fadDayOverrides(timestamp / 86_400) && secondOfDay < marketBoundary;
     }
 
     function _expectedFadWindow(

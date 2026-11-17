@@ -133,7 +133,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     /// @notice One-time-configured router authorized to reserve bounties and execute orders and liquidations.
     address public orderRouter;
 
-    /// @notice Whether a Unix day number is configured as an all-day FAD and oracle-frozen override.
+    /// @notice Whether a Unix day number is configured as an all-day FAD override.
+    /// @dev The override adds frozen-oracle policy only before that day's 17:00 New York boundary.
     mapping(uint256 => bool) public fadDayOverrides;
     uint256[] private _fadOverrideDays;
     /// @notice Maximum accepted mark age during an oracle-frozen window, in seconds.
@@ -886,9 +887,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Reports whether the engine is in the oracle-frozen regime where freshness policy can be relaxed.
     /// @dev The recurring window is Friday 17:00 New York time through Sunday 16:59:59 New York time, following the
-    ///      US daylight-saving transition. An admin-configured override freezes its entire UTC day. Unlike FAD, the
-    ///      frozen regime does not include the pre-override runway.
-    /// @return True during the recurring oracle closure or an override day.
+    ///      US daylight-saving transition. An admin-configured override adds freezing from UTC midnight until that
+    ///      day's 17:00 New York boundary (exclusive), while recurring weekend freezing still applies. Unlike FAD,
+    ///      the frozen regime does not include the pre-override runway.
+    /// @return True during the recurring oracle closure or the pre-boundary portion of an override day.
     function isOracleFrozen() public view returns (bool) {
         (, bool oracleFrozen) = _marketStatus();
         return oracleFrozen;
