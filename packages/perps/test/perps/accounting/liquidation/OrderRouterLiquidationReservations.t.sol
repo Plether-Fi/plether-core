@@ -101,7 +101,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, CAP_PRICE, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
@@ -166,7 +166,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, CAP_PRICE, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
@@ -273,7 +273,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, CAP_PRICE, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
@@ -319,14 +319,14 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         _open(traderAccount, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, CAP_PRICE, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, CAP_PRICE, false);
         clearinghouse.withdraw(traderAccount, 70e6);
         vm.stopPrank();
 
         vm.startPrank(otherTrader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, CAP_PRICE, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, CAP_PRICE, false);
         vm.stopPrank();
 
         assertEq(router.pendingOrderCounts(traderAccount), 2, "Liquidated account should start with two queued orders");
@@ -363,8 +363,8 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 5000e18, 0, type(uint256).max, true);
 
         vm.startPrank(otherTrader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, CAP_PRICE, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, CAP_PRICE, false);
         vm.stopPrank();
 
         vm.prank(trader);

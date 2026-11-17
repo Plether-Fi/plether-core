@@ -2045,7 +2045,8 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
-        request.bounds.maxExecutionNotionalAssets = 0;
+        // The bound is feasible at a lower price but violated at the observed execution price.
+        request.bounds.maxExecutionNotionalAssets = (POSITION_SIZE / CfdTypes.SIZE_QUANTUM) * 95_000_000 - 1;
         vm.prank(ALICE);
         uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
         bytes[] memory updateData = _mockPythUpdateData(95_000_000);

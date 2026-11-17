@@ -235,8 +235,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         if (request.isClose) {
             _validateCloseAdmission(host, account, request.side, request.sizeDelta);
         } else {
-            executionBountyAssets =
-                _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
+            executionBountyAssets = _validatedOpenBounty(host, account, request);
         }
         if (executionBountyAssets > request.bounds.maxExecutionBountyAssets) {
             revert IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound(
@@ -299,7 +298,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert OrderRouter__ZeroPostLeverageBound();
         }
 
-        OrderValidationLib.validateBaseCommit(request.sizeDelta, request.marginDelta, request.isClose);
+        host.engineLensForCommit().orderAdmissionValidator().validateRequest(request);
         uint64 head = host.accountHeadOrderId(account);
         if (head != 0 && host.lifecycleBook().pendingPolicy(head).minPostSettlementBalanceAssets != 0) {
             revert OrderRouter__SettlementFloorOrderPending(head);
@@ -348,7 +347,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint256 sizeDelta
     ) private view {
         ICfdEngineCore engine = host.engine();
-        QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
+        QueuedPositionView memory queuedPosition = _queuedPosition(host, account);
         OrderValidationLib.validateCloseCommit(
             queuedPosition.exists, queuedPosition.size, queuedPosition.side, side, sizeDelta
         );
@@ -366,70 +365,48 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
     function _queuedPosition(
         IOrderLiquidationBatchHost host,
-        ICfdEngineCore engine,
         address account
     ) private view returns (QueuedPositionView memory queuedPosition) {
-        (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(account);
-        if (positionSize != 0) {
-            queuedPosition.exists = true;
-            queuedPosition.side = side;
-            queuedPosition.size = positionSize;
-        }
-
-        uint64 riskOffCutoff = IOrderRouterEmergencyAdmin(host.admin()).riskOffOrderCutoff();
-        for (uint64 orderId = host.accountHeadOrderId(account); orderId != 0;) {
-            (IOrderRouterAccounting.PendingOrderView memory pending, uint64 nextOrderId) =
-                host.getPendingOrderView(orderId);
-            if (riskOffCutoff == 0 || orderId > riskOffCutoff || pending.isClose) {
-                if (pending.isClose) {
-                    if (queuedPosition.exists && pending.side == queuedPosition.side) {
-                        queuedPosition.size =
-                            queuedPosition.size > pending.sizeDelta ? queuedPosition.size - pending.sizeDelta : 0;
-                        if (queuedPosition.size == 0) {
-                            queuedPosition.exists = false;
-                        }
-                    }
-                } else if (!queuedPosition.exists) {
-                    queuedPosition.exists = true;
-                    queuedPosition.side = pending.side;
-                    queuedPosition.size = pending.sizeDelta;
-                } else if (pending.side == queuedPosition.side) {
-                    queuedPosition.size += pending.sizeDelta;
-                }
-            }
-            orderId = nextOrderId;
-        }
+        (queuedPosition.exists, queuedPosition.side, queuedPosition.size) =
+            host.engineLensForCommit().orderAdmissionValidator().queuedPosition(account);
     }
 
     function _validatedOpenBounty(
         IOrderLiquidationBatchHost host,
         address account,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta
+        OrderV3Types.OrderRequest calldata request
     ) private view returns (uint256 executionBountyAssets) {
         ICfdEngineCore engine = host.engine();
         uint256 commitPrice = _commitReferencePrice(engine);
-        uint256 lots = sizeDelta / CfdTypes.SIZE_QUANTUM;
-        if (lots > type(uint112).max || marginDelta > uint256(type(int256).max)) {
-            revert OrderRouter__PredictableOpenInvalid(uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
+        {
+            // Quantum and numeric domain were checked before this uint112-lot/uint32-price product.
+            uint256 notionalAssets = (request.sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice;
+            if (notionalAssets < host.minOpenNotionalAssets()) {
+                revert OrderRouter__CommitValidation(11);
+            }
+            executionBountyAssets = (notionalAssets * host.openOrderExecutionBountyBps()) / 10_000;
+            uint256 minimumBountyAssets = host.minOpenOrderExecutionBountyAssets();
+            if (executionBountyAssets < minimumBountyAssets) {
+                executionBountyAssets = minimumBountyAssets;
+            }
+            uint256 maximumBountyAssets = host.maxOpenOrderExecutionBountyAssets();
+            if (executionBountyAssets > maximumBountyAssets) {
+                executionBountyAssets = maximumBountyAssets;
+            }
         }
-        // Quantum was checked at admission. uint112 lots times the uint32-capped mark fits uint144 exactly.
-        uint256 notionalAssets = lots * commitPrice;
-        if (notionalAssets < host.minOpenNotionalAssets()) {
-            revert OrderRouter__CommitValidation(11);
+        if (executionBountyAssets > request.bounds.maxGrossAccountDebitAssets) {
+            revert OrderRouter__ExecutionBountyAboveGrossDebit(
+                executionBountyAssets, request.bounds.maxGrossAccountDebitAssets
+            );
         }
 
-        // Project the live position through earlier account orders before checking the requested side.
-        QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
+        host.engineLensForCommit().orderAdmissionValidator().validateOpen(account, request, executionBountyAssets);
+        uint8 revertCode = host.engineLensForCommit()
+            .previewOpenCommitRevertCode(
+                account, request.side, request.sizeDelta, request.marginDelta, commitPrice, executionBountyAssets
+            );
         uint8 opposingCode = uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING);
-        if (queuedPosition.exists && queuedPosition.side != side) {
-            revert OrderRouter__PredictableOpenInvalid(opposingCode);
-        }
-
         uint64 commitMarkTime = engine.lastMarkTime();
-        uint8 revertCode =
-            host.engineLensForCommit().previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice);
         if (revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED)) {
             revert OrderRouter__PredictableOpenInvalid(revertCode);
         }
@@ -444,14 +421,6 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                 }
             }
         }
-
-        executionBountyAssets = (notionalAssets * host.openOrderExecutionBountyBps()) / 10_000;
-        uint256 minimumBountyAssets = host.minOpenOrderExecutionBountyAssets();
-        if (executionBountyAssets < minimumBountyAssets) {
-            executionBountyAssets = minimumBountyAssets;
-        }
-        uint256 maximumBountyAssets = host.maxOpenOrderExecutionBountyAssets();
-        return executionBountyAssets > maximumBountyAssets ? maximumBountyAssets : executionBountyAssets;
     }
 
     function _commitReferencePrice(

@@ -40,7 +40,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 7900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 7900e6, CAP_PRICE, false);
 
         // Make the terminal action charge large enough to exhaust spendable action reserve and free settlement. This is separate from
         // the adverse price move: only the action slice may reach the queued committed-margin bucket.
@@ -313,7 +313,7 @@ contract EngineCloseBountyReservationsTest is CfdEngineTestBase {
         _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, CAP_PRICE, false);
 
         IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
         assertEq(
