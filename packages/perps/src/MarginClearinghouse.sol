@@ -636,13 +636,15 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 cashChargeAfterVpi,
         uint256 vpiRelease
     ) external onlyOperator {
-        uint256 reserve = _spendableActionReserveAssets(account);
-        uint256 afterReserve = cashChargeAfterVpi > reserve ? cashChargeAfterVpi - reserve : 0;
-        uint256 free = getFreeBuyingPowerAssets(account) + vpiRelease;
-        uint256 needed = afterReserve > free ? afterReserve - free : 0;
-        uint256 expected = needed < safeRelease ? needed : safeRelease;
-        if (fromReleased != expected || netRelease != safeRelease - expected) {
-            revert MarginClearinghouse__ActionReserveMismatch();
+        {
+            uint256 reserve = _spendableActionReserveAssets(account);
+            uint256 afterReserve = cashChargeAfterVpi > reserve ? cashChargeAfterVpi - reserve : 0;
+            uint256 free = getFreeBuyingPowerAssets(account) + vpiRelease;
+            uint256 needed = afterReserve > free ? afterReserve - free : 0;
+            uint256 expected = needed < safeRelease ? needed : safeRelease;
+            if (fromReleased != expected || netRelease != safeRelease - expected) {
+                revert MarginClearinghouse__ActionReserveMismatch();
+            }
         }
         uint256 protectedRelease = MarginClearinghouseAccountingLib.protectedCloseRelease(
             positionMarginAssets[account], protectedTopUps[account].pledgedAssets, safeRelease, fromReleased

@@ -1460,11 +1460,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             );
         }
         emit CarryRealized(
-            account,
-            realizedCarryAssets,
-            freeSettlementConsumedAssets,
-            marginConsumedAssets,
-            unsettledCarryAssets[account]
+            account, realizedCarryAssets, freeSettlementConsumedAssets, marginConsumedAssets, uncoveredAssets
         );
         if (marginBefore > 0) {
             _endTerminalCurveMutation(account, expectedOldHash);

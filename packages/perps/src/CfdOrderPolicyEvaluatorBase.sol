@@ -339,37 +339,39 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         bool bountyReturnsToAccount,
         OrderV3Types.ExecutionMode mode
     ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
-        uint256 positiveTradeCostAssets = 0;
-        uint256 tradeRebateAssets = 0;
-        if (delta.tradeCostAssets >= 0) {
-            positiveTradeCostAssets = uint256(delta.tradeCostAssets);
-        } else {
-            tradeRebateAssets = _negativeMagnitude(delta.tradeCostAssets);
-        }
-
-        // A zero-size snapshot deliberately does not realize an inconsistent stale carry value during Engine apply.
-        // slither-disable-next-line incorrect-equality
-        uint256 realizedCarryAssets = snapshot.position.size == 0 ? 0 : delta.pendingCarryAssets;
-
         assessment.mode = mode;
         assessment.executionNotionalAssets = delta.openState.notionalAssets;
-        assessment.grossAccountDebitAssets = realizedCarryAssets + positiveTradeCostAssets + executionBountyAssets;
-        assessment.actionChargeAssessedAssets = _netOpenActionCharge(realizedCarryAssets, delta.tradeCostAssets);
-        assessment.actionChargeCollectedAssets = realizedCarryAssets + positiveTradeCostAssets;
         assessment.explicitFeesAssets = delta.executionFeeAssets;
         assessment.preSettlementBalanceAssets = snapshot.accountBuckets.settlementBalanceAssets;
+        {
+            uint256 positiveTradeCostAssets = 0;
+            uint256 tradeRebateAssets = 0;
+            if (delta.tradeCostAssets >= 0) {
+                positiveTradeCostAssets = uint256(delta.tradeCostAssets);
+            } else {
+                tradeRebateAssets = _negativeMagnitude(delta.tradeCostAssets);
+            }
 
-        uint256 postSettlementBalanceAssets = assessment.preSettlementBalanceAssets - realizedCarryAssets;
-        if (positiveTradeCostAssets > 0) {
-            postSettlementBalanceAssets -= positiveTradeCostAssets;
-        } else if (tradeRebateAssets > 0) {
-            postSettlementBalanceAssets += tradeRebateAssets;
+            // A zero-size snapshot deliberately does not realize an inconsistent stale carry value during Engine apply.
+            // slither-disable-next-line incorrect-equality
+            uint256 realizedCarryAssets = snapshot.position.size == 0 ? 0 : delta.pendingCarryAssets;
+
+            assessment.grossAccountDebitAssets = realizedCarryAssets + positiveTradeCostAssets + executionBountyAssets;
+            assessment.actionChargeAssessedAssets = _netOpenActionCharge(realizedCarryAssets, delta.tradeCostAssets);
+            assessment.actionChargeCollectedAssets = realizedCarryAssets + positiveTradeCostAssets;
+            assessment.carryAssets = realizedCarryAssets;
+
+            uint256 postSettlementBalanceAssets = assessment.preSettlementBalanceAssets - realizedCarryAssets;
+            if (positiveTradeCostAssets > 0) {
+                postSettlementBalanceAssets -= positiveTradeCostAssets;
+            } else if (tradeRebateAssets > 0) {
+                postSettlementBalanceAssets += tradeRebateAssets;
+            }
+            assessment.postSettlementBalanceAssets =
+                _settlementAfterBounty(postSettlementBalanceAssets, executionBountyAssets, bountyReturnsToAccount);
         }
-        assessment.postSettlementBalanceAssets =
-            _settlementAfterBounty(postSettlementBalanceAssets, executionBountyAssets, bountyReturnsToAccount);
 
         assessment.vpiAssets = delta.posVpiAccruedDelta;
-        assessment.carryAssets = realizedCarryAssets;
         assessment.executionFeeAssets = delta.executionFeeAssets;
         assessment.preTraderClaimAssets = snapshot.traderClaimBalanceForAccount;
         assessment.postTraderClaimAssets = snapshot.traderClaimBalanceForAccount;
