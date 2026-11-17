@@ -34,8 +34,8 @@ contract TrancheVaultMaintenanceFeeGasDriver is TrancheVault {
 contract JuniorMaintenanceFeeGasSizeTest is BasePerpTest {
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
-    // Measured after the token-neutral API rename (solc 0.8.35, via-IR, optimizer runs 200).
-    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_571;
+    // Measured with the impaired Senior ownership floor (solc 0.8.35, via-IR, optimizer runs 200).
+    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_573;
     uint256 internal constant TRANCHE_VAULT_RUNTIME_TARGET = 24_000;
     uint256 internal constant DEFAULT_ZERO_INCREMENTAL_GAS_LIMIT = 5000;
     uint256 internal constant ACTIVE_EPOCH_SETTLEMENT_GAS_LIMIT = 1_000_000;

@@ -109,25 +109,38 @@ library HousePoolWaterfallAccountingLib {
         }
     }
 
-    /// @notice Removes senior principal and the same economic fraction of its high-water-mark entitlement.
-    /// @dev Callers must supply `fundedAssets <= state.seniorPrincipal`. The removed HWM rounds down,
-    ///      preserving remaining protection conservatively. Zero funding preserves even a wiped-out Senior's HWM.
-    ///      Retained fees stay protected, and junior is unchanged.
-    /// @param state Waterfall state before withdrawal.
+    /// @notice Removes senior principal while conservatively preserving remaining high-water-mark entitlement.
+    /// @dev Callers must supply `fundedAssets <= seniorPrincipal` and, for positive funding,
+    ///      `0 < fundedShares <= pricingSupply`.
+    ///      HWM removal follows net principal, capped by funded-share ownership for impaired partial withdrawals.
+    ///      Both removals round down. Zero funding preserves even a wiped-out Senior's HWM; funding all principal
+    ///      clears it. Retained fees stay protected, and junior is unchanged.
+    /// @param seniorPrincipal Senior principal before withdrawal.
+    /// @param seniorHighWaterMark Senior HWM before withdrawal.
     /// @param fundedAssets Net senior principal funded in 6-decimal settlement token.
-    /// @return nextState State with reduced senior principal and HWM entitlement.
+    /// @param fundedShares Aggregate shares burned for this funding phase.
+    /// @param pricingSupply Real senior share supply before any funding-phase burns.
+    /// @return nextPrincipal Senior principal after funding.
+    /// @return nextHighWaterMark Remaining Senior HWM entitlement.
     function scaleSeniorOnWithdraw(
-        WaterfallState memory state,
-        uint256 fundedAssets
-    ) internal pure returns (WaterfallState memory nextState) {
-        nextState = state;
+        uint256 seniorPrincipal,
+        uint256 seniorHighWaterMark,
+        uint256 fundedAssets,
+        uint256 fundedShares,
+        uint256 pricingSupply
+    ) internal pure returns (uint256 nextPrincipal, uint256 nextHighWaterMark) {
         if (fundedAssets == 0) {
-            return nextState;
+            return (seniorPrincipal, seniorHighWaterMark);
         }
-        nextState.seniorHighWaterMark -= Math.mulDiv(
-            state.seniorHighWaterMark, fundedAssets, state.seniorPrincipal, Math.Rounding.Floor
-        );
-        nextState.seniorPrincipal -= fundedAssets;
+        nextPrincipal = seniorPrincipal - fundedAssets;
+        uint256 removedHwm = Math.mulDiv(seniorHighWaterMark, fundedAssets, seniorPrincipal);
+        if (seniorHighWaterMark > seniorPrincipal && nextPrincipal != 0) {
+            removedHwm = Math.min(removedHwm, Math.mulDiv(seniorHighWaterMark, fundedShares, pricingSupply));
+        }
+        // The checked principal debit proves fundedAssets <= seniorPrincipal, so removedHwm <= seniorHighWaterMark.
+        unchecked {
+            nextHighWaterMark = seniorHighWaterMark - removedHwm;
+        }
     }
 
     /// @notice Distributes revenue by restoring impaired senior principal before crediting junior principal.

@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEngineProtocolLens} from "@plether/perps/CfdEngineProtocolLens.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
@@ -845,7 +846,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         RedemptionPhase memory seniorPhase = RedemptionPhase({
             pricingPrincipal: seniorPrincipal,
             pricingSupply: _seniorShareSupply(),
-            budget: _min(freeAssets, seniorPrincipal),
+            budget: Math.min(freeAssets, seniorPrincipal),
             fundedShares: 0,
             fundedAssets: 0,
             processedEpochs: 0,
@@ -855,11 +856,18 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             seniorVault, result.cutoffEpoch, seniorPhase, _settlementFeeBps(true, statusSnapshot.oracleFrozen)
         );
         if (seniorPhase.fundedAssets > 0) {
-            HousePoolWaterfallAccountingLib.WaterfallState memory nextState =
-                HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(_getWaterfallState(), seniorPhase.fundedAssets);
-            _setWaterfallState(nextState);
+            (seniorPrincipal, seniorHighWaterMark) = HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(
+                seniorPhase.pricingPrincipal,
+                seniorHighWaterMark,
+                seniorPhase.fundedAssets,
+                seniorPhase.fundedShares,
+                seniorPhase.pricingSupply
+            );
             accountedAssets -= seniorPhase.fundedAssets;
-            freeAssets -= seniorPhase.fundedAssets;
+            // Canonical redemption math caps aggregate funding by the phase budget, which cannot exceed freeAssets.
+            unchecked {
+                freeAssets -= seniorPhase.fundedAssets;
+            }
         }
         result.seniorFundedShares = seniorPhase.fundedShares;
         result.seniorFundedAssets = seniorPhase.fundedAssets;
@@ -1195,13 +1203,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         );
     }
 
-    function _min(
-        uint256 a,
-        uint256 b
-    ) internal pure returns (uint256) {
-        return a < b ? a : b;
-    }
-
     function _juniorSettlementCapacity(
         uint256 freeAssets,
         HousePoolWaterfallAccountingLib.WaterfallState memory state
@@ -1213,7 +1214,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             reservedSeniorDepositAssets,
             poolConfig.maxSeniorShareBps
         );
-        return _min(freeAssets, _min(state.juniorPrincipal, ratioCap));
+        return Math.min(freeAssets, Math.min(state.juniorPrincipal, ratioCap));
     }
 
     function _saturatingSubtract(
