@@ -1107,6 +1107,13 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (traders[i].claim == 0) {
             return;
         }
+        if (orders.count(i) != 0) {
+            vm.prank(actorAt(i));
+            vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+            engine.settleTraderClaim(actorAt(i));
+            assertModel();
+            return;
+        }
         _collect(i);
         uint256 amount = traders[i].claim;
         assertGe(expectedPoolCash, expectedClaims, "modeled aggregate claim liquidity");

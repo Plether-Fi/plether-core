@@ -675,6 +675,11 @@ contract PerpAccountingHandler is Test {
         try engine.settleTraderClaim(account) {
             _observeTraderClaim(account);
         } catch (bytes memory err) {
+            if (_revertSelector(err) == ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector) {
+                if (engine.traderClaimBalanceAssets(account) == 0 || router.pendingOrderCounts(account) == 0) {
+                    revert UnexpectedActionRevert(RejectionDomain.Claim, err);
+                }
+            }
             _recordCaughtRevert(RejectionDomain.Claim, err);
         }
     }
@@ -822,7 +827,8 @@ contract PerpAccountingHandler is Test {
         if (domain == RejectionDomain.Claim) {
             return err.length == 4
                 && (selector == ICfdEngineTypes.CfdEngine__NoTraderClaim.selector
-                    || selector == ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
+                    || selector == ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector
+                    || selector == ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
         }
         if (domain == RejectionDomain.Withdrawal) {
             return err.length == 4
