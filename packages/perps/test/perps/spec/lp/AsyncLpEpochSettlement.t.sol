@@ -716,6 +716,63 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertEq(juniorVault.balanceOf(ALICE), ownerBalanceBefore - nextShares);
     }
 
+    function test_ZeroSeniorHeadAfterFundingDoesNotDelayJuniorExitAcrossFrozenBoundary() public {
+        (uint256 seniorShares, uint256 juniorShares) = _fundPair(ALICE, 100_000e6, BOB, 300_000e6);
+        vm.prank(ALICE);
+        seniorVault.transfer(CAROL, 1);
+
+        // Friday 2024-03-08 closes at 22:00 UTC, before the US daylight-saving transition.
+        uint256 freezeStart = SATURDAY_FROZEN - 1 days;
+        uint256 requestCutoff = seniorVault.LP_REQUEST_CUTOFF_DURATION();
+        vm.warp(freezeStart - 2 hours - requestCutoff - 1);
+        _refreshMark();
+        uint256 seniorRequestId = _requestRedeem(seniorVault, ALICE, seniorShares - 1, ALICE, ALICE);
+        assertEq(pool.lpEpochStart(seniorRequestId), freezeStart - 2 hours);
+
+        vm.warp(freezeStart - 1 hours - requestCutoff - 1);
+        _refreshMark();
+        uint256 dustRequestId = _requestRedeem(seniorVault, CAROL, 1, CAROL, CAROL);
+        uint256 juniorRequestId = _requestRedeem(juniorVault, BOB, juniorShares, BOB, BOB);
+        uint256 depositId = _requestDeposit(juniorVault, OPERATOR, 1e6);
+        assertGt(dustRequestId, seniorRequestId, "dust must be a separate head after the payable Senior request");
+        assertEq(pool.lpEpochStart(dustRequestId), freezeStart - 1 hours);
+        assertEq(dustRequestId, juniorRequestId);
+        assertEq(depositId, juniorRequestId, "the victim's exit and entrant's deposit must mature together");
+
+        vm.warp(freezeStart - 1);
+        _refreshMark();
+        assertFalse(engine.isOracleFrozen(), "the last live settlement precedes the fee boundary by one second");
+        assertEq(seniorVault.estimateRedeemAssets(1), 0, "the queued Senior share is worthless before the burn");
+        uint256 liveVictimQuote = juniorVault.estimateRedeemAssets(juniorShares);
+        assertGt(liveVictimQuote, 0);
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+
+        assertEq(result.juniorDepositAssets, 1e6, "the same live call must still activate the queued entry");
+        assertEq(result.seniorFundedShares, seniorShares - 1);
+        assertEq(result.seniorProcessedEpochs, 2, "pay the Senior head and refund its worthless successor");
+        assertFalse(result.seniorBacklog);
+        assertEq(seniorVault.estimateRedeemAssets(1), 0, "the refunded share remains worthless after the burn");
+        assertEq(_pendingRedeem(seniorVault, dustRequestId, CAROL), 0);
+        assertEq(_refundableRedeem(seniorVault, dustRequestId, CAROL), 1);
+        assertEq(result.juniorFundedShares, juniorShares, "dust must not defer the eligible Junior exit");
+        assertEq(result.juniorFundedAssets, liveVictimQuote, "the exit must retain its live settlement price");
+        assertFalse(result.juniorBacklog);
+        assertEq(_claimableRedeem(juniorVault, juniorRequestId, BOB), juniorShares);
+        assertEq(_claimableDeposit(juniorVault, depositId, OPERATOR), 1e6);
+
+        vm.warp(freezeStart);
+        assertTrue(engine.isOracleFrozen(), "the next second must enter the scheduled frozen regime");
+        assertEq(pool.juniorFrozenLpFeeBps(), 75);
+        uint256 balanceBefore = settlementToken.balanceOf(BOB);
+        assertEq(_claimRedeem(juniorVault, juniorRequestId, BOB, juniorShares), liveVictimQuote);
+        assertEq(settlementToken.balanceOf(BOB) - balanceBefore, liveVictimQuote, "claiming after freeze adds no fee");
+
+        vm.prank(CAROL);
+        assertEq(_async(seniorVault).claimRedeemRefund(dustRequestId, CAROL, CAROL), 1);
+        assertEq(seniorVault.balanceOf(CAROL), 1, "the worthless request must return its shares without burning them");
+    }
+
     function test_SeniorWorkCapStopsJuniorAndDepositFallthrough() public {
         (uint256 seniorShares, uint256 juniorShares) = _fundPair(ALICE, 340_000e6, BOB, 50_000e6);
         uint256 juniorRequestId = _requestRedeem(juniorVault, BOB, juniorShares / 2, BOB, BOB);
