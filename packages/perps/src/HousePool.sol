@@ -50,7 +50,8 @@ interface ITrancheVaultEpochSettlement {
         uint256 cutoffEpoch
     ) external view returns (uint256 epochId, uint256 assets);
 
-    function quoteDepositFromState(
+    /// @dev Returns zero for a deposit batch that should be rejected.
+    function quoteDepositForSettlement(
         uint256 assets,
         uint256 pricingAssets,
         uint256 pricingSupply,
@@ -1043,7 +1044,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             // Senior capacity was committed at request admission. Later coupon or limit drift closes new admission
             // but must not veto activation of an already accepted epoch.
             // Quote the cumulative batch and mint only its marginal delta so retained-fee pricing is split-neutral.
-            uint256 cumulativeShares = vault.quoteDepositFromState(
+            uint256 cumulativeShares = vault.quoteDepositForSettlement(
                 phase.acceptedAssets + epochAssets, phase.pricingAssets, phase.pricingSupply, feeBps
             );
             uint256 shares = _saturatingSubtract(cumulativeShares, phase.mintedShares);

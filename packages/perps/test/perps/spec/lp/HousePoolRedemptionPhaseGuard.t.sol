@@ -181,7 +181,7 @@ contract SingleHeadDepositQueueMock is ERC20 {
         return (0, 0);
     }
 
-    function quoteDepositFromState(
+    function quoteDepositForSettlement(
         uint256 assets,
         uint256,
         uint256,

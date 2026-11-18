@@ -5,6 +5,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Panic} from "@openzeppelin/contracts/utils/Panic.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import {IAsyncTrancheVaultClaimableRedeem} from "@plether/perps/interfaces/IAsyncTrancheVaultClaimableRedeem.sol";
@@ -34,6 +35,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
 
     uint256 internal constant BPS = 10_000;
     uint256 internal constant VIRTUAL_SHARES = 1000;
+    /// @dev Leave room for virtual shares and future maintenance-fee accrual after Junior deposit mints.
+    uint256 internal constant MAX_JUNIOR_DEPOSIT_SHARE_SUPPLY = type(uint128).max;
 
     uint256 public constant DEPOSIT_COOLDOWN = 1 hours;
     uint256 public constant LP_REQUEST_CUTOFF_DURATION = 5 minutes;
@@ -1412,6 +1415,29 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     // ---------------------------------------------------------------------
     // HousePool settlement hooks
     // ---------------------------------------------------------------------
+
+    /// @dev An unpriceable Junior batch returns zero so the pool can reject it and commit redemption funding.
+    function quoteDepositForSettlement(
+        uint256 assets,
+        uint256 pricingAssets,
+        uint256 pricingSupply,
+        uint256 feeBps
+    ) external view onlyPool returns (uint256) {
+        if (IS_SENIOR) {
+            return quoteDepositFromState(assets, pricingAssets, pricingSupply, feeBps);
+        }
+        if (pricingSupply >= MAX_JUNIOR_DEPOSIT_SHARE_SUPPLY) {
+            return 0;
+        }
+        try this.quoteDepositFromState(assets, pricingAssets, pricingSupply, feeBps) returns (uint256 shares) {
+            return shares <= MAX_JUNIOR_DEPOSIT_SHARE_SUPPLY - pricingSupply ? shares : 0;
+        } catch Panic(uint256 code) {
+            if (code != Panic.UNDER_OVERFLOW) {
+                Panic.panic(code);
+            }
+            return 0;
+        }
+    }
 
     function getMaturedDepositHead(
         uint256 cutoffEpoch

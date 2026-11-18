@@ -8,6 +8,7 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
+import {stdError} from "forge-std/StdError.sol";
 
 /// @notice Focused integration coverage for the synchronized asynchronous LP queue.
 contract AsyncLpEpochSettlementTest is BasePerpTest {
@@ -560,6 +561,14 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertEq(_claimableDeposit(juniorVault, depositId, BOB), 200_000e6);
     }
 
+    function test_JuniorDepositQuoteOverflowAllowsSeniorWithdrawalAndJuniorRefund() public {
+        _assertRejectedJuniorDepositAllowsSeniorExit({quoteReverts: true});
+    }
+
+    function test_JuniorDepositAboveSupplyLimitAllowsSeniorWithdrawalAndJuniorRefund() public {
+        _assertRejectedJuniorDepositAllowsSeniorExit({quoteReverts: false});
+    }
+
     function test_LiquidityOnlySeniorBacklogStillAllowsSameCallJuniorEntry() public {
         (uint256 seniorShares,) = _fundPair(ALICE, 300_000e6, CAROL, 100_000e6);
         uint256 depositId = _requestDeposit(juniorVault, BOB, 200_000e6);
@@ -787,6 +796,42 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertFalse(liveResult.entriesDeferred);
         assertEq(_pendingDeposit(juniorVault, depositId, ALICE), 0);
         assertEq(_claimableDeposit(juniorVault, depositId, ALICE), assets);
+    }
+
+    function _assertRejectedJuniorDepositAllowsSeniorExit(
+        bool quoteReverts
+    ) internal {
+        (uint256 seniorShares,) = _fundPair(ALICE, 100_000e6, BOB, 100_000e6);
+        uint256 depositAssets = 25_000e6;
+        uint256 depositId = _requestDeposit(juniorVault, CAROL, depositAssets);
+        uint256 redeemShares = seniorShares / 2;
+        uint256 redeemId = _requestRedeem(seniorVault, ALICE, redeemShares, ALICE, ALICE);
+        assertEq(depositId, redeemId, "entry and exit must mature together");
+
+        bytes memory quoteSelector = abi.encodeWithSelector(TrancheVault.quoteDepositFromState.selector);
+        if (quoteReverts) {
+            vm.mockCallRevert(address(juniorVault), quoteSelector, stdError.arithmeticError);
+        } else {
+            // The quote fits in uint256, but adding it to the existing shares crosses the deposit supply limit.
+            vm.mockCall(address(juniorVault), quoteSelector, abi.encode(uint256(type(uint128).max)));
+        }
+
+        IHousePool.LpEpochSettlementResult memory result = _settleAt(depositId);
+        assertEq(result.seniorFundedShares, redeemShares);
+        assertGt(result.seniorFundedAssets, 0);
+        assertEq(result.juniorDepositAssets, 0);
+        assertEq(result.juniorDepositShares, 0);
+        assertEq(_async(juniorVault).refundableDepositRequest(depositId, CAROL), depositAssets);
+
+        uint256 seniorBalanceBefore = settlementToken.balanceOf(ALICE);
+        assertEq(_claimRedeem(seniorVault, redeemId, ALICE, redeemShares), result.seniorFundedAssets);
+        assertEq(settlementToken.balanceOf(ALICE) - seniorBalanceBefore, result.seniorFundedAssets);
+
+        uint256 juniorBalanceBefore = settlementToken.balanceOf(CAROL);
+        vm.prank(CAROL);
+        assertEq(_async(juniorVault).cancelPendingDeposit(depositId, CAROL, CAROL), depositAssets);
+        assertEq(settlementToken.balanceOf(CAROL) - juniorBalanceBefore, depositAssets);
+        assertEq(juniorVault.pendingDepositEscrowAssets(), 0);
     }
 
     function _fundPair(
