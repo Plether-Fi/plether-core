@@ -114,14 +114,14 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             );
             liabilityFloor =
                 projectedLiability + SolvencyAccountingLib.settlementBufferTargetAssets(projectedLiability, bufferBps);
+            if (liabilityFloor >= poolAssets) {
+                return liabilityFloor - liveMaxLiability;
+            }
 
             uint256 longLots = longSize / CfdTypes.SIZE_QUANTUM;
             uint256 shortLots = shortSize / CfdTypes.SIZE_QUANTUM;
             worstLongSkew = Math.saturatingSub(longLots + pendingLong, shortLots) * capPrice;
             worstShortSkew = Math.saturatingSub(shortLots + pendingShort, longLots) * capPrice;
-        }
-        if (liabilityFloor >= poolAssets) {
-            return liabilityFloor - liveMaxLiability;
         }
         // A lighter-side open that reduces skew can still execute above the cap. Reserve depth for each pending
         // side that could finish heavier, without assuming that intervening opens on the other side will fill.
