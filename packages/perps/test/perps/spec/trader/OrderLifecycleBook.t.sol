@@ -67,6 +67,34 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         book.registerPending(ACCOUNT, 2, fresh, EXECUTION_BOUNTY_ASSETS);
     }
 
+    function test_UnexpiredOpenLotsAcrossDeadlineBuckets() public {
+        vm.warp(255);
+        OrderV3Types.OrderRequest memory longOpen = _request(bytes32("long-open"));
+        longOpen.side = CfdTypes.Side.LONG;
+        longOpen.sizeDelta = 500e18;
+        longOpen.bounds.executionWindowSeconds = 1 hours;
+        book.registerPending(ACCOUNT, 1, longOpen, EXECUTION_BOUNTY_ASSETS);
+
+        OrderV3Types.OrderRequest memory shortOpen = _request(bytes32("short-open"));
+        shortOpen.bounds.executionWindowSeconds = 1;
+        book.registerPending(OTHER_ACCOUNT, 2, shortOpen, EXECUTION_BOUNTY_ASSETS);
+
+        vm.warp(256);
+        (uint256 longLots, uint256 shortLots) = book.unexpiredOpenLots();
+        assertEq(longLots, 5);
+        assertEq(shortLots, 1, "an order remains eligible at its deadline");
+
+        vm.warp(257);
+        (longLots, shortLots) = book.unexpiredOpenLots();
+        assertEq(longLots, 5, "an earlier order with a later deadline stays reserved");
+        assertEq(shortLots, 0);
+
+        vm.warp(3856);
+        (longLots, shortLots) = book.unexpiredOpenLots();
+        assertEq(longLots, 0);
+        assertEq(shortLots, 0);
+    }
+
     function testFuzz_CompactCommitmentRoundTripsWithoutNarrowingBalances(
         uint128 cash,
         uint128 carry,

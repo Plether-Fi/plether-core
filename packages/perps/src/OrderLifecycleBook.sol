@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -130,6 +131,8 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         StoredCommitment commitment;
         StoredExecutionBounds bounds;
         OrderV3Types.OrderTiming timing;
+        uint112 openLots;
+        CfdTypes.Side openSide;
     }
 
     /// @notice Ephemeral policy and identity required to authenticate terminal settlement.
@@ -141,6 +144,49 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     /// @notice Permanent compact terminal outcomes.
     mapping(uint64 orderId => OrderV3Types.TerminalOutcome terminalOutcome) private _outcomes;
     mapping(uint64 orderId => OrderV3Types.OrderTiming timing) private _terminalTiming;
+
+    // Each successive level covers four buckets of the previous level. Absolute timestamp keys let late cleanup
+    // remove old lots without touching the same relative slot in a later interval.
+    uint256 private constant DEADLINE_LEVELS = 5;
+    uint64 private _latestOpenDeadline;
+    mapping(uint256 bucket => uint256[2] lotsBySide)[DEADLINE_LEVELS] private _openLotsByDeadline;
+
+    /// @notice Pending open lots still eligible under their stored execution deadlines.
+    function unexpiredOpenLots() external view returns (uint256 longLots, uint256 shortLots) {
+        uint256 cursor = block.timestamp;
+        uint256 last = _latestOpenDeadline;
+        if (cursor > last) {
+            return (0, 0);
+        }
+
+        // Include the deadline itself. Sum the buckets before the next aligned boundary at each level, then sum
+        // 256-second buckets up to the latest committed deadline. The Router limits that horizon to one hour.
+        for (uint256 level; level < DEADLINE_LEVELS; ++level) {
+            uint256 end = level + 1 == DEADLINE_LEVELS ? last + 1 : ((cursor + 3) / 4) * 4;
+            for (; cursor < end; ++cursor) {
+                uint256[2] storage lots = _openLotsByDeadline[level][cursor];
+                longLots += lots[0];
+                shortLots += lots[1];
+            }
+            cursor /= 4;
+            last /= 4;
+        }
+    }
+
+    function _updateOpenLots(
+        CfdTypes.Side side,
+        uint112 lots,
+        uint64 deadline,
+        bool add
+    ) private {
+        uint256 sideIndex = uint256(side);
+        uint256 bucket = deadline;
+        for (uint256 level; level < DEADLINE_LEVELS; ++level) {
+            uint256[2] storage totals = _openLotsByDeadline[level][bucket];
+            totals[sideIndex] = add ? totals[sideIndex] + lots : totals[sideIndex] - lots;
+            bucket /= 4;
+        }
+    }
 
     modifier onlyRouter() {
         if (msg.sender != ROUTER) {
@@ -302,6 +348,15 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         pending.intentHash = intentHash;
         pending.executionBountyAssets = executionBountyAssets;
         pending.timing = timing;
+        if (!request.isClose) {
+            pending.openLots = SafeCast.toUint112(request.sizeDelta / CfdTypes.SIZE_QUANTUM);
+            pending.openSide = request.side;
+            _updateOpenLots(request.side, pending.openLots, timing.executionDeadline, true);
+            // Finalized deadlines can remain as an upper bound because their lots have been removed.
+            if (timing.executionDeadline > _latestOpenDeadline) {
+                _latestOpenDeadline = timing.executionDeadline;
+            }
+        }
         pending.bounds = StoredExecutionBounds({
             submitBy: request.bounds.submitBy,
             executionWindowSeconds: request.bounds.executionWindowSeconds,
@@ -449,6 +504,9 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             receiptHash: receiptHash
         });
         _terminalTiming[receipt.orderId] = pending.timing;
+        if (pending.openLots != 0) {
+            _updateOpenLots(pending.openSide, pending.openLots, pending.timing.executionDeadline, false);
+        }
         delete _pendingIntents[receipt.orderId];
         delete _protectionAttempts[receipt.orderId];
 

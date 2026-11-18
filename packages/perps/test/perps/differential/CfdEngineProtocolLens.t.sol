@@ -28,6 +28,7 @@ contract CfdEngineProtocolLensTest is Test {
         _mockSide(CfdTypes.Side.SHORT, 35_000e6, 35_000e18);
         vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceAssets()"), abi.encode(uint256(5000e6)));
         vm.mockCall(ENGINE, abi.encodeWithSignature("settlementBufferBps()"), abi.encode(uint256(125)));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("orderRouter()"), abi.encode(address(0)));
         vm.mockCall(ENGINE, abi.encodeWithSignature("degradedMode()"), abi.encode(false));
         lens = new CfdEngineProtocolLens(ENGINE);
     }

@@ -1238,7 +1238,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
     /// @inheritdoc IHousePool
     /// @dev Reads live side aggregates because the terminal-NAV lens rejects reads during engine settlement.
-    ///      At rest, the same reserve components and withdrawal-snapshot arithmetic back `getFreeAssets()`.
+    ///      Pending-open capacity applies to LP withdrawals. Engine settlement uses the live-position reserve.
     function getSettlementFreeAssets() public view override returns (uint256) {
         (uint256 longMaxProfitAssets,,,) = ENGINE.sides(0);
         (uint256 shortMaxProfitAssets,,,) = ENGINE.sides(1);
