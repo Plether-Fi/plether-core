@@ -29,8 +29,8 @@ interface IPositionProtectionActions {
         PositionProtectionTypes.PositionProtectionParams calldata params
     ) external;
 
-    /// @notice Lets the owner change close limits after a failed attempt relatches, before a fresh retry.
-    /// @dev The trigger and any terminal attempts remain recorded. A live child cannot be changed.
+    /// @notice Lets the owner set limits for future retries of a triggered or latched protection.
+    /// @dev A pending close retains the limits recorded when it was queued.
     function amendLatchedPositionProtectionCloseLimits(
         uint64 protectionId,
         PositionProtectionTypes.CloseFinancialLimits calldata limits

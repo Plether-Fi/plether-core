@@ -991,17 +991,49 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
         _assertPendingCloseLimits(retryOrderId, amendedLimits);
 
-        vm.prank(ALICE);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotLatched.selector);
-        protectionActions.amendLatchedPositionProtectionCloseLimits(protectionId, params.closeLimits);
-        _assertPendingCloseLimits(retryOrderId, amendedLimits);
-
         bytes[] memory executionData = _mockPythUpdateData(LONG_TAKE_PROFIT);
         vm.prank(EXECUTION_KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(retryOrderId, executionData);
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "amended retry must execute");
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
         assertEq(remainingSize, 0, "amended retry must close the protected position");
+    }
+
+    function test_ProtectionCloseLimits_PendingCloseKeepsOriginalLimitsAndRetryUsesAmendment() public {
+        _startRecordingLogs();
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
+        params.closeLimits.maxExecutionNotionalAssets = 1e6;
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(params);
+        uint64 pendingOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+
+        PositionProtectionTypes.CloseFinancialLimits memory amendedLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalAssets: 25_000e6,
+            maxGrossAccountDebitAssets: 20_000e6,
+            maxActionChargeAssets: 15_000e6,
+            maxExplicitFeesAssets: 10_000e6
+        });
+        vm.prank(CAROL);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        protectionActions.amendLatchedPositionProtectionCloseLimits(protectionId, amendedLimits);
+
+        vm.prank(ALICE);
+        protectionActions.amendLatchedPositionProtectionCloseLimits(protectionId, amendedLimits);
+        _assertStoredCloseLimits(protectionId, amendedLimits);
+        _assertPendingCloseLimits(pendingOrderId, params.closeLimits);
+
+        _expireProtectionAttempt(pendingOrderId, EXECUTION_KEEPER);
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+        _assertPendingCloseLimits(retryOrderId, amendedLimits);
+
+        bytes[] memory executionData = _mockPythUpdateData(LONG_TAKE_PROFIT);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(retryOrderId, executionData);
+        assertEq(
+            uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "retry with amended limits executes"
+        );
     }
 
     function test_RetryPositionProtectionClose_StaleOldAttemptCallbacksCannotMutateReplacement() public {

@@ -287,9 +287,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             _requireMatchingPendingParent(account, protection.parentOrderId, protection.side, protection.size);
         } else {
             _requireMatchingPosition(protection);
-            if (IPositionProtectionRouterHost(ROUTER).pendingOrderCounts(account) != 0) {
-                revert OrderRouter__PendingOrdersExist();
-            }
+            _requirePendingOrderCount(account, 0);
         }
 
         (, uint256 currentMarkPrice, uint64 currentPublishTime) = _freshProtectionObservation();
@@ -317,12 +315,16 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         PositionProtectionTypes.CloseFinancialLimits calldata limits
     ) external nonReentrant {
         StoredProtection storage protection = _ownedActiveProtection(protectionId, msg.sender);
-        if (protection.status != PositionProtectionTypes.PositionProtectionStatus.Latched) {
+        uint256 expectedPendingOrders;
+        if (protection.status == PositionProtectionTypes.PositionProtectionStatus.Triggered) {
+            if (IPositionProtectionRouterHost(ROUTER).accountHeadOrderId(msg.sender) != protection.linkedOrderId) {
+                revert OrderRouter__PendingOrdersExist();
+            }
+            expectedPendingOrders = 1;
+        } else if (protection.status != PositionProtectionTypes.PositionProtectionStatus.Latched) {
             revert OrderRouter__ProtectionNotLatched();
         }
-        if (IPositionProtectionRouterHost(ROUTER).pendingOrderCounts(msg.sender) != 0) {
-            revert OrderRouter__PendingOrdersExist();
-        }
+        _requirePendingOrderCount(msg.sender, expectedPendingOrders);
         _setCloseLimits(protection, limits);
         _emitCloseLimitsUpdated(protection);
     }
@@ -354,9 +356,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             revert OrderRouter__PositionChanged();
         }
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
-        if (router.pendingOrderCounts(msg.sender) != 0) {
-            revert OrderRouter__PendingOrdersExist();
-        }
+        _requirePendingOrderCount(msg.sender, 0);
 
         (address refundAccount, uint256 refundAssets) = _cancel(msg.sender, protectionId);
         uint64 expectedOrderId = router.nextCommitId();
@@ -389,9 +389,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         _requireMatchingPosition(protection);
 
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
-        if (router.pendingOrderCounts(protection.account) != 0) {
-            revert OrderRouter__PendingOrdersExist();
-        }
+        _requirePendingOrderCount(protection.account, 0);
 
         if (protection.linkedOrderId == 0 || _attemptProtectionIds[protection.linkedOrderId] != 0) {
             revert PositionProtectionBook__InvalidLinkedOrder();
@@ -529,9 +527,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             revert OrderRouter__TriggerPublishTimeNotAdvanced();
         }
         _requireMatchingPosition(protection);
-        if (IPositionProtectionRouterHost(ROUTER).pendingOrderCounts(protection.account) != 0) {
-            revert OrderRouter__PendingOrdersExist();
-        }
+        _requirePendingOrderCount(protection.account, 0);
 
         leg = _triggeredLeg(protection, markPrice);
         if (leg == PositionProtectionTypes.PositionProtectionTriggerLeg.None) {
@@ -828,6 +824,13 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         if (_activeProtectionIds[account] != 0) {
             revert OrderRouter__ProtectionAlreadyActive();
         }
+        _requirePendingOrderCount(account, expectedPendingOrders);
+    }
+
+    function _requirePendingOrderCount(
+        address account,
+        uint256 expectedPendingOrders
+    ) private view {
         if (IPositionProtectionRouterHost(ROUTER).pendingOrderCounts(account) != expectedPendingOrders) {
             revert OrderRouter__PendingOrdersExist();
         }

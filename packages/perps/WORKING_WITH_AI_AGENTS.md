@@ -262,7 +262,7 @@ with `closeFinancialLimits(protectionId)`; they are separate from `getPositionPr
 | `cancelPositionProtection(id)` | Owner cancels while `PendingOpen` or `Armed`, refunding the unpaid trigger bounty |
 | `cancelPositionProtectionAndCommitClose(id, request)` | Owner atomically cancels matching `Armed` protection and submits a fresh bounded full close |
 | `triggerPositionProtection(id, pythUpdateData)` | Permissionlessly evaluates an `Armed` protection and queues a close if crossed |
-| `amendLatchedPositionProtectionCloseLimits(id, limits)` | Owner changes financial limits after a failed attempt has become `Latched` |
+| `amendLatchedPositionProtectionCloseLimits(id, limits)` | Owner sets limits for future retries while `Latched` with no pending orders or `Triggered` with only the linked close pending |
 | `retryPositionProtectionClose(id)` | Permissionlessly queues a new attempt for `Latched` protection without re-evaluating the trigger |
 
 An attached parent uses the same complete bounded request as ordinary `commitOrder`, including its nonzero target
@@ -281,7 +281,8 @@ bounds use their type maxima, minimum bounds are zero, and the nonbinding target
 
 These limits apply per attempt, including commitment charges, not cumulatively across retries. If commitment would
 exceed a limit, triggering reverts and the owner can replace the `Armed` protection. If a queued close fails and the
-protected side and size still match, protection becomes `Latched`; the owner may amend its limits before retrying.
+protected side and size still match, protection becomes `Latched`. An amendment made while a close is pending
+applies to subsequent retries. The pending close executes under the limits copied at commitment.
 Each retry gets a new id, commitment time, execution deadline, and oracle window. It requires no pending Router
 orders and does not re-test the original trigger. Missing or changed positions end protection as `Failed` instead.
 
