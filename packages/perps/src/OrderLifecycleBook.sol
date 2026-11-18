@@ -182,8 +182,8 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         uint256 sideIndex = uint256(side);
         uint256 bucket = deadline;
         for (uint256 level; level < DEADLINE_LEVELS; ++level) {
-            uint256[2] storage totals = _openLotsByDeadline[level][bucket];
-            totals[sideIndex] = add ? totals[sideIndex] + lots : totals[sideIndex] - lots;
+            uint256 total = _openLotsByDeadline[level][bucket][sideIndex];
+            _openLotsByDeadline[level][bucket][sideIndex] = add ? total + lots : total - lots;
             bucket /= 4;
         }
     }

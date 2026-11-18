@@ -102,24 +102,32 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             return SolvencyAccountingLib.settlementBufferTargetAssets(liveMaxLiability, bufferBps);
         }
 
-        uint256 capPrice = engineContract.CAP_PRICE();
-        (uint256 longLiability, uint256 longSize,,) = engineContract.sides(uint8(CfdTypes.Side.LONG));
-        (uint256 shortLiability, uint256 shortSize,,) = engineContract.sides(uint8(CfdTypes.Side.SHORT));
-        uint256 projectedLiability = SolvencyAccountingLib.getMaxLiability(
-            longLiability + pendingLong * capPrice, shortLiability + pendingShort * capPrice
-        );
-        uint256 liabilityFloor =
-            projectedLiability + SolvencyAccountingLib.settlementBufferTargetAssets(projectedLiability, bufferBps);
+        uint256 liabilityFloor;
+        uint256 worstLongSkew;
+        uint256 worstShortSkew;
+        {
+            uint256 capPrice = engineContract.CAP_PRICE();
+            (uint256 longLiability, uint256 longSize,,) = engineContract.sides(uint8(CfdTypes.Side.LONG));
+            (uint256 shortLiability, uint256 shortSize,,) = engineContract.sides(uint8(CfdTypes.Side.SHORT));
+            uint256 projectedLiability = SolvencyAccountingLib.getMaxLiability(
+                longLiability + pendingLong * capPrice, shortLiability + pendingShort * capPrice
+            );
+            liabilityFloor =
+                projectedLiability + SolvencyAccountingLib.settlementBufferTargetAssets(projectedLiability, bufferBps);
 
-        uint256 longLots = longSize / CfdTypes.SIZE_QUANTUM;
-        uint256 shortLots = shortSize / CfdTypes.SIZE_QUANTUM;
-        uint256 worstLongSkew = Math.saturatingSub(longLots + pendingLong, shortLots) * capPrice;
-        uint256 worstShortSkew = Math.saturatingSub(shortLots + pendingShort, longLots) * capPrice;
+            uint256 longLots = longSize / CfdTypes.SIZE_QUANTUM;
+            uint256 shortLots = shortSize / CfdTypes.SIZE_QUANTUM;
+            worstLongSkew = Math.saturatingSub(longLots + pendingLong, shortLots) * capPrice;
+            worstShortSkew = Math.saturatingSub(shortLots + pendingShort, longLots) * capPrice;
+        }
+        if (liabilityFloor >= poolAssets) {
+            return liabilityFloor - liveMaxLiability;
+        }
         // A lighter-side open that reduces skew can still execute above the cap. Reserve depth for each pending
         // side that could finish heavier, without assuming that intervening opens on the other side will fill.
         uint256 cappedSkew = Math.max(pendingLong == 0 ? 0 : worstLongSkew, pendingShort == 0 ? 0 : worstShortSkew);
         (uint256 vpiFactor, uint256 maxSkewRatio,,,,,,,,) = engineContract.riskParams();
-        uint256 skewDepth;
+        uint256 skewDepth = 0;
         if (maxSkewRatio != 0) {
             skewDepth = cappedSkew > Math.mulDiv(poolAssets, maxSkewRatio, CfdMath.WAD)
                 ? poolAssets
@@ -133,7 +141,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
                 CfdMath.tryGetSkewCost(Math.max(worstLongSkew, worstShortSkew), requiredDepth, vpiFactor);
             requiredDepth = valid ? Math.saturatingAdd(requiredDepth, maxRebate) : poolAssets;
         }
-        return Math.min(requiredDepth, Math.max(liabilityFloor, poolAssets)) - liveMaxLiability;
+        return Math.min(requiredDepth, poolAssets) - liveMaxLiability;
     }
 
     function _unexpiredOpenLots() private view returns (uint256, uint256) {
