@@ -28,19 +28,17 @@ library OrderValidationLib {
     }
 
     /// @notice Validates a close order against the live position remaining after earlier queued closes.
-    /// @param positionExists Whether any live position remains available to close.
     /// @param queuedSize Live position size remaining after earlier same-side closes (18 decimals).
     /// @param queuedSide Side of the live position.
     /// @param requestedSide Side supplied by the close request.
     /// @param sizeDelta Requested reduction in position size (18 decimals).
     function validateCloseCommit(
-        bool positionExists,
         uint256 queuedSize,
         CfdTypes.Side queuedSide,
         CfdTypes.Side requestedSide,
         uint256 sizeDelta
     ) internal pure {
-        if (!positionExists || queuedSize == 0) {
+        if (queuedSize == 0) {
             revert IOrderRouterErrors.OrderRouter__NoQueuedPosition();
         }
         if (queuedSide != requestedSide) {
