@@ -104,6 +104,20 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(pool.unassignedAssets(), 0);
     }
 
+    function test_AssignUnassignedAssets_RevertsWhenVaultQuotesZeroShares() public {
+        uint256 assets = 1000e6;
+        _mintAndAccountPoolExcess(assets);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        vm.mockCall(address(juniorVault), abi.encodeCall(TrancheVault.quoteBootstrapDeposit, (assets)), abi.encode(0));
+        vm.expectRevert(IHousePool.HousePool__BootstrapSharesZero.selector);
+        pool.assignUnassignedAssets(false, alice);
+
+        assertEq(pool.unassignedAssets(), assets);
+        assertEq(juniorVault.balanceOf(alice), 0);
+    }
+
     function test_AssignUnassignedAssets_JuniorWaitsForSeniorRecovery() public {
         settlementToken.mint(address(this), 45_000e6);
         settlementToken.approve(address(pool), 40_000e6);
