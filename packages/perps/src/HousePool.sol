@@ -153,7 +153,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     uint256 public seniorHighWaterMark;
     /// @notice Canonical recognized asset ledger in settlement token (6 decimals); `totalAssets()` also caps it by raw cash.
     uint256 public accountedAssets;
-    /// @notice Canonical assets without a safe share-owner path, reserved until explicit assignment (6 decimals).
+    /// @notice Reserve target for assets awaiting explicit assignment, including any shortfall (6 decimals).
     uint256 public unassignedAssets;
     /// @notice Unsettled claimant recapitalization intent reserved from withdrawals (6-decimal settlement token).
     uint256 public pendingRecapitalizationAssets;
@@ -652,9 +652,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
     /// @notice Explicitly bootstraps quarantined LP assets into a tranche by minting matching shares.
     /// @dev Only the owner may call. Requires non-frozen oracle mode and the applicable mark-freshness policy,
-    ///      reconciles first, assigns the entire resulting `unassignedAssets` balance to the selected tranche,
-    ///      and asks its configured vault to mint matching shares. No settlement token moves and this does not initialize the
-    ///      tranche seed-lifecycle flag. Prevents later LPs from implicitly capturing previously ownerless value.
+    ///      reconciles first, assigns the entire `unassignedAssets` balance if fully backed, and asks the selected vault
+    ///      to mint matching shares. No settlement token moves and the tranche seed-lifecycle flag is not initialized.
+    ///      Prevents later LPs from implicitly capturing previously ownerless value.
     /// @param toSenior True to assign assets to senior, false to junior
     /// @param receiver Account receiving bootstrap tranche shares
     function assignUnassignedAssets(
@@ -665,14 +665,21 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             revert HousePool__ZeroAddress();
         }
 
-        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
-        _requireBootstrapOracleLive(ctx.statusSnapshot);
-        _requireFreshMark(ctx.accountingSnapshot, ctx.statusSnapshot);
-        _reconcile(ctx.accountingSnapshot);
+        (
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
+        ) = _getHousePoolSnapshots();
+        _requireBootstrapOracleLive(statusSnapshot);
+        _requireFreshMark(accountingSnapshot, statusSnapshot);
+        _reconcile(accountingSnapshot, statusSnapshot);
 
         uint256 amount = unassignedAssets;
         if (amount == 0) {
             revert HousePool__NoUnassignedAssets();
+        }
+        uint256 distributable = HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot).distributable;
+        if (distributable < seniorPrincipal + juniorPrincipal + amount) {
+            revert HousePool__UnassignedAssetsUnderbacked();
         }
         if (toSenior) {
             _requireSeniorDepositCapacity(amount, _getWaterfallState());

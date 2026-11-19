@@ -3,6 +3,8 @@ pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
+import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
+import {ICfdEngineProtocolLens} from "@plether/perps/interfaces/ICfdEngineProtocolLens.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
@@ -105,6 +107,45 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
 
         assertEq(pool.juniorPrincipal(), 0, "Junior wiped out");
         assertLt(pool.seniorPrincipal(), 500_000 * 1e6, "Senior absorbs remaining loss");
+    }
+
+    function test_Reconcile_PreservesUnassignedReserveAcrossTemporaryDeficit() public {
+        uint256 reserve = 5000e6;
+        _queueRecapitalization(reserve);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), reserve);
+
+        uint256 cashBefore = settlementToken.balanceOf(address(pool));
+        ICfdEngineProtocolLens lens = pool.ENGINE_PROTOCOL_LENS();
+        uint256 markStalenessLimit = pool.markStalenessLimit();
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
+            lens.getHousePoolInputSnapshot(markStalenessLimit);
+        // The mark leaves only 3,000 USDG of equity against the 5,000 USDG reserve.
+        snapshot.terminalLpPriceDeltaAssets = -4000e6;
+        vm.mockCall(
+            address(lens),
+            abi.encodeCall(ICfdEngineProtocolLens.getHousePoolInputSnapshot, (markStalenessLimit)),
+            abi.encode(snapshot)
+        );
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 0);
+        assertEq(pool.juniorPrincipal(), 0);
+        assertEq(pool.unassignedAssets(), reserve, "Temporary loss must preserve the full reserve target");
+
+        vm.clearMockedCalls();
+        (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, SEEDED_SENIOR);
+        assertEq(pendingJunior, SEEDED_JUNIOR, "Reserve recovery must stay out of Junior NAV");
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR);
+        assertEq(pool.juniorPrincipal(), SEEDED_JUNIOR);
+        assertEq(pool.unassignedAssets(), reserve);
+        assertEq(settlementToken.balanceOf(address(pool)), cashBefore, "Repricing must leave pool cash unchanged");
     }
 
     // ==========================================
@@ -444,6 +485,27 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         assertEq(pool.unassignedAssets(), 0, "Assignment should consume the unassigned bucket");
     }
 
+    function test_AssignUnassignedAssets_RequiresBackingAfterPendingClaimsSettle() public {
+        uint256 reserve = 5000e6;
+        _queueRecapitalization(reserve);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), reserve);
+
+        uint256 pendingRecap = 3000e6;
+        _queueRecapitalization(pendingRecap);
+        // Terminal equity is now 6,000 USDG. Pending recapitalization claims 3,000 USDG of it for Senior.
+        _setTotalTraderClaim(4000e6);
+        (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, pendingRecap);
+
+        vm.expectRevert(IHousePool.HousePool__UnassignedAssetsUnderbacked.selector);
+        pool.assignUnassignedAssets(false, carol);
+        assertEq(pool.unassignedAssets(), reserve);
+        assertEq(pool.pendingRecapitalizationAssets(), pendingRecap);
+        assertEq(juniorVault.balanceOf(carol), 0);
+    }
+
     function test_RecordClaimantRevenue_RestoresCanonicalAssetsAfterRawShortfall() public {
         _fundJunior(bob, 500_000e6);
         vm.prank(address(pool));
@@ -562,6 +624,14 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
 
         assertEq(pool.seniorPrincipal(), 0);
         assertEq(pool.seniorHighWaterMark(), hwmBeforeWipeout, "HWM preserves senior recovery rights after wipeout");
+    }
+
+    function _queueRecapitalization(
+        uint256 amount
+    ) internal {
+        settlementToken.mint(address(this), amount);
+        settlementToken.approve(address(engine), amount);
+        engine.recapitalizePool(amount);
     }
 
 }

@@ -162,6 +162,8 @@ interface IHousePool {
     error HousePool__PendingBootstrap();
     /// @notice Explicit bootstrap assignment was requested when no unassigned assets remain.
     error HousePool__NoUnassignedAssets();
+    /// @notice Terminal equity cannot cover existing tranche principal and the full unassigned reserve.
+    error HousePool__UnassignedAssetsUnderbacked();
     /// @notice Bootstrap or seed pricing produced zero shares, or a seed amount was zero.
     error HousePool__BootstrapSharesZero();
     /// @notice The selected tranche's permanent seed position was already initialized.
@@ -366,8 +368,8 @@ interface IHousePool {
     /// @return Protected senior entitlement in settlement token restored before revenue flows to junior
     function seniorHighWaterMark() external view returns (uint256);
 
-    /// @notice Accounted LP assets currently quarantined pending explicit bootstrap / assignment (6 decimals)
-    /// @return Ownerless canonical assets reserved from ordinary LP withdrawals and deposits
+    /// @notice Reserve for ownerless LP equity awaiting explicit assignment (6 decimals)
+    /// @return Full reserve target, including any shortfall in current backing
     function unassignedAssets() external view returns (uint256);
 
     /// @notice Unsettled recapitalization reserved from discretionary pool payouts.
@@ -406,7 +408,7 @@ interface IHousePool {
 
     /// @notice Explicitly bootstraps quarantined LP assets into a tranche and mints matching shares.
     /// @dev Owner only, outside oracle-frozen mode and with any required mark satisfying active freshness policy.
-    ///      Reconciles, assigns the entire unassigned balance, and asks the selected configured vault to mint shares.
+    ///      Reconciles, assigns the entire unassigned balance if fully backed, and asks the selected vault to mint shares.
     ///      No settlement token moves and the tranche seed-lifecycle flag is not initialized by this action. Senior assignment is
     ///      bounded by the active capacity limits, which are neutral before the first governed configuration.
     /// @param toSenior True to assign assets to senior, false to junior
