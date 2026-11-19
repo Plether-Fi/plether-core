@@ -1332,6 +1332,9 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
 - frozen-oracle windows prioritize close liveness over live-market-style freshness guarantees,
 - oracle-frozen voluntary close/reduce execution applies normal signed VPI plus a fixed LP-owned notional spread; normal live and FAD-only closes apply signed VPI without that spread,
 - a fixed spread deliberately does not increase with mark staleness inside the permitted frozen window,
+- During an oracle freeze, an eligible trader can trigger their own liquidation and receive the keeper reward.
+  This can cost less than a voluntary close. The protocol accepts that pricing difference to keep liquidation
+  available under its existing rules.
 - full-close liveness takes priority over collecting an otherwise uncollectible spread; partial closes retain
   all-or-nothing rules for required charges but do not fail solely on uncollateralized price loss above the PnL cap,
 - the recurring FX calendar follows New York daylight-saving transitions on-chain; unscheduled provider closures and
