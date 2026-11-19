@@ -402,6 +402,32 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updates);
     }
 
+    function test_CacheReuseRejectsMalformedComponentTimes() public {
+        uint64 commit = uint64(vm.getBlockTimestamp());
+        uint64 tick = commit + 2;
+        _advance(tick + 1);
+        IPletherOracle.OrderExecutionRequest memory request = _request(commit, false);
+        IPletherOracle.BatchOrderPriceCache memory cache;
+        (,, cache) = pletherOracle.updateBatchOrderExecutionPrice{value: 2 * FEE}(
+            address(this), _payload(tick, commit), request, cache
+        );
+        bytes[] memory emptyUpdate = new bytes[](0);
+
+        cache.oldestPublishTime = tick - 1;
+        vm.expectRevert(IPletherOracle.PletherOracle__InvalidBatchCacheTimes.selector);
+        pletherOracle.updateBatchOrderExecutionPrice(address(this), emptyUpdate, request, cache);
+
+        cache.oldestPublishTime = tick;
+        cache.publishTime = tick + 1;
+        vm.expectRevert(IPletherOracle.PletherOracle__InvalidBatchCacheTimes.selector);
+        pletherOracle.updateBatchOrderExecutionPrice(address(this), emptyUpdate, request, cache);
+
+        cache.publishTime = tick;
+        cache.componentPublishTimes = new uint256[](0);
+        vm.expectRevert(IPletherOracle.PletherOracle__InvalidBatchCacheTimes.selector);
+        pletherOracle.updateBatchOrderExecutionPrice(address(this), emptyUpdate, request, cache);
+    }
+
     function test_BatchDoesNotReuseBasketWithPreCommitComponent() public {
         uint64 firstCommit = uint64(block.timestamp);
         _commit(ALICE, 0);
