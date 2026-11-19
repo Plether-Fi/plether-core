@@ -1036,6 +1036,36 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
+    function test_ProtectionCloseLimits_TriggeredAmendmentRequiresOnlyTheLinkedOrder() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        PositionProtectionTypes.CloseFinancialLimits memory original =
+            protectionViews.closeFinancialLimits(protectionId);
+        PositionProtectionTypes.CloseFinancialLimits memory proposed = _params(LONG_TAKE_PROFIT, 0).closeLimits;
+        proposed.maxExplicitFeesAssets = 1e6;
+
+        vm.mockCall(
+            address(router),
+            abi.encodeWithSignature("accountHeadOrderId(address)", ALICE),
+            abi.encode(linkedOrderId + 1)
+        );
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__PendingOrdersExist.selector);
+        protectionActions.amendLatchedPositionProtectionCloseLimits(protectionId, proposed);
+        vm.clearMockedCalls();
+
+        vm.mockCall(
+            address(router), abi.encodeWithSignature("pendingOrderCounts(address)", ALICE), abi.encode(uint256(2))
+        );
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__PendingOrdersExist.selector);
+        protectionActions.amendLatchedPositionProtectionCloseLimits(protectionId, proposed);
+        vm.clearMockedCalls();
+
+        _assertStoredCloseLimits(protectionId, original);
+        _assertPendingCloseLimits(linkedOrderId, original);
+    }
+
     function test_RetryPositionProtectionClose_StaleOldAttemptCallbacksCannotMutateReplacement() public {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
