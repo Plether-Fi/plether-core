@@ -78,8 +78,8 @@ Fresh requests require:
 - A nonzero, lot-aligned size and nonzero target price.
 - `submitBy >= block.timestamp` and `0 < executionWindowSeconds <= OrderRouter.maxExecutionWindowSeconds()`.
 - The current nonzero configuration hash, a nonempty valid execution-mode mask, and nonzero `maxPostLeverageBps`.
-- For closes, `marginDelta == 0`, the same side as the account's queued-position projection, and a size no larger
-  than that projection. Partial closes also face minimum-notional admission checks.
+- For closes, `marginDelta == 0`, the same side as the live position, and a size no larger than the live size minus
+  earlier same-side queued closes. Partial closes also face minimum-notional admission checks.
 
 Committed orders enter a global first-in, first-out (FIFO) queue and cannot be cancelled. `submitBy` limits when a
 fresh commitment may occur; the execution deadline is the actual commitment time plus `executionWindowSeconds`.

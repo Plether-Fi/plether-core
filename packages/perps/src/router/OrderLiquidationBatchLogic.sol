@@ -98,7 +98,7 @@ interface IOrderDelegatedLogicRefundAdmin {
 ///      Router's EIP-170 runtime and EIP-3860 creation input.
 abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
-    /// @notice Minimal projected position used by delegated close-commit validation.
+    /// @notice Minimal projected position used by delegated order admission.
     struct QueuedPositionView {
         bool exists;
         CfdTypes.Side side;
@@ -348,17 +348,17 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint256 sizeDelta
     ) private view {
         ICfdEngineCore engine = host.engine();
-        QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
+        // A close may only reduce live exposure left unallocated by earlier closes.
+        QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account, false);
         OrderValidationLib.validateCloseCommit(
             queuedPosition.exists, queuedPosition.size, queuedPosition.side, side, sizeDelta
         );
 
         uint256 commitPrice = _commitReferencePrice(engine);
-        // Admission already checked lot alignment; the projected size is bounded by the Engine's uint112 lots
-        // and the Router's bounded pending-order count, while commitPrice is capped.
+        // A below-minimum close must still flatten the projected position if earlier increases fill.
         if (
-            sizeDelta < queuedPosition.size
-                && (sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice < host.minOpenNotionalAssets()
+            (sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice < host.minOpenNotionalAssets()
+                && sizeDelta < _queuedPosition(host, engine, account, true).size
         ) {
             revert OrderRouter__CommitValidation(11);
         }
@@ -367,7 +367,8 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     function _queuedPosition(
         IOrderLiquidationBatchHost host,
         ICfdEngineCore engine,
-        address account
+        address account,
+        bool includePendingOpens
     ) private view returns (QueuedPositionView memory queuedPosition) {
         (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (positionSize != 0) {
@@ -376,20 +377,20 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             queuedPosition.size = positionSize;
         }
 
-        uint64 riskOffCutoff = IOrderRouterEmergencyAdmin(host.admin()).riskOffOrderCutoff();
+        uint64 riskOffCutoff = includePendingOpens ? IOrderRouterEmergencyAdmin(host.admin()).riskOffOrderCutoff() : 0;
         for (uint64 orderId = host.accountHeadOrderId(account); orderId != 0;) {
             (IOrderRouterAccounting.PendingOrderView memory pending, uint64 nextOrderId) =
                 host.getPendingOrderView(orderId);
-            if (riskOffCutoff == 0 || orderId > riskOffCutoff || pending.isClose) {
-                if (pending.isClose) {
-                    if (queuedPosition.exists && pending.side == queuedPosition.side) {
-                        queuedPosition.size =
-                            queuedPosition.size > pending.sizeDelta ? queuedPosition.size - pending.sizeDelta : 0;
-                        if (queuedPosition.size == 0) {
-                            queuedPosition.exists = false;
-                        }
+            if (pending.isClose) {
+                if (queuedPosition.exists && pending.side == queuedPosition.side) {
+                    queuedPosition.size =
+                        queuedPosition.size > pending.sizeDelta ? queuedPosition.size - pending.sizeDelta : 0;
+                    if (queuedPosition.size == 0) {
+                        queuedPosition.exists = false;
                     }
-                } else if (!queuedPosition.exists) {
+                }
+            } else if (includePendingOpens && orderId > riskOffCutoff) {
+                if (!queuedPosition.exists) {
                     queuedPosition.exists = true;
                     queuedPosition.side = pending.side;
                     queuedPosition.size = pending.sizeDelta;
@@ -421,7 +422,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         // Project the live position through earlier account orders before checking the requested side.
-        QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
+        QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account, true);
         uint8 opposingCode = uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING);
         if (queuedPosition.exists && queuedPosition.side != side) {
             revert OrderRouter__PredictableOpenInvalid(opposingCode);

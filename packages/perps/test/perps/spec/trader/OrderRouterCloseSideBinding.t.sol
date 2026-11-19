@@ -8,6 +8,7 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {Vm} from "forge-std/Vm.sol";
 
@@ -51,7 +52,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         }
     }
 
-    function test_QueuedFlipSucceedsWhenEarlierIntentsExecute() public {
+    function test_CloseOnNewSideRequiresExecutedFlip() public {
         for (uint256 side; side < 2; ++side) {
             uint256 checkpoint = vm.snapshotState();
             CfdTypes.Side original = CfdTypes.Side(side);
@@ -60,13 +61,17 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
             _staleMarkForQueuedFlip();
             uint64 closeId = _bountyCommit(BOUNTY_TRADER, original, true, BOUNTY_SIZE, 0);
             uint64 openId = _bountyCommit(BOUNTY_TRADER, opposite, false, BOUNTY_SIZE, 1000e6);
-            uint64 finalCloseId = _bountyCommit(BOUNTY_TRADER, opposite, true, BOUNTY_SIZE, 0);
+            OrderV3Types.OrderRequest memory request = _bountyRequest(opposite, true, BOUNTY_SIZE, 0);
+            vm.expectRevert(IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector);
+            vm.prank(BOUNTY_TRADER);
+            router.commitOrder(request);
             _bountyExecute(closeId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
             _bountyExecute(openId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
             (uint256 liveSize,,,, CfdTypes.Side liveSide,,) = engine.positions(BOUNTY_TRADER);
             assertEq(liveSize, BOUNTY_SIZE);
             assertEq(uint8(liveSide), uint8(opposite));
             assertEq(engine.positionEpoch(BOUNTY_TRADER), 2);
+            uint64 finalCloseId = _bountyCommit(BOUNTY_TRADER, opposite, true, BOUNTY_SIZE, 0);
             _bountyExecute(finalCloseId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
             (liveSize,,,,,,) = engine.positions(BOUNTY_TRADER);
             assertEq(liveSize, 0);
@@ -285,8 +290,15 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         if (failingSlippage) {
             request.targetPrice = opposite == CfdTypes.Side.LONG ? 1 : CAP_PRICE;
         }
+        // Model a previously admitted wrong-side close so the execution boundary remains covered.
+        vm.mockCall(
+            address(engine),
+            abi.encodeCall(engine.positions, (BOUNTY_TRADER)),
+            abi.encode(BOUNTY_SIZE, 1000e6, BOUNTY_PRICE, 0, opposite, block.timestamp, 0)
+        );
         vm.prank(BOUNTY_TRADER);
         chain.wrongCloseId = router.commitOrder(request);
+        vm.clearMockedCalls();
         _fundTrader(BOUNTY_OTHER, 2000e6);
         chain.followerId = _bountyCommit(BOUNTY_OTHER, original, false, BOUNTY_SIZE, 1000e6);
         assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 3);

@@ -27,10 +27,10 @@ library OrderValidationLib {
         }
     }
 
-    /// @notice Validates a close order against the router's queued-position projection.
-    /// @param positionExists Whether the router's queued-position projection currently exists.
-    /// @param queuedSize Projected position size after earlier queued orders (18 decimals).
-    /// @param queuedSide Projected position side after earlier queued orders.
+    /// @notice Validates a close order against the live position remaining after earlier queued closes.
+    /// @param positionExists Whether any live position remains available to close.
+    /// @param queuedSize Live position size remaining after earlier same-side closes (18 decimals).
+    /// @param queuedSide Side of the live position.
     /// @param requestedSide Side supplied by the close request.
     /// @param sizeDelta Requested reduction in position size (18 decimals).
     function validateCloseCommit(
