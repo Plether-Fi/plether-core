@@ -393,7 +393,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Receivable/cash separation | Positive marked receivables are capped by account PnL pledge and nettable same-account claim, and never increase physical redemption funding before collection |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
 | Bounded new senior exposure | Counted admission exposure (`E + R`) cannot exceed the smaller absolute and senior-share headrooms |
-| Junior covenant | Junior redemption funding retains enough Junior capital to back active protected Senior exposure plus accepted pending Senior reservations (`E + R`) under the configured share limit |
+| Junior covenant | Junior redemption funding retains enough Junior capital to back protected Senior exposure plus accepted pending Senior reservations (`E + R`). The ratio is waived when Senior holds only its locked seed and has no pending reservations |
 | Shared cutoff routing | Both tranches and both request directions use the same five-minute cutoff; exact equality rolls to the later epoch without a cutoff-specific revert |
 | Locked-epoch additions | For boundary `b`, no request at or after `b - 300` may increase locked epoch `e + 1`, including after it matures; cancellation may still shrink it, while requests after `b` may join the new imminent numeric epoch `e + 2` until its own cutoff |
 | Shared accounting inputs | Reconcile, synchronized redemption funding, deposit finalization, and LP status views consume the same canonical engine snapshot |
@@ -1183,7 +1183,9 @@ separate from the lifecycle Book's V5 execution-config and receipt domains.
 
 ### Senior coupon model
 
-Senior coupon is funded from existing junior NAV and capped by available junior principal.
+Senior coupon is funded from existing junior NAV and capped by available junior principal. Coupon accrual pauses
+while only the permanent Senior seed shares remain. The coupon clock continues to checkpoint so later Senior
+deposits do not earn coupon for the seed-only period.
 
 This removes unpaid senior-coupon debt queues while making the cost of the fixed senior product explicit for junior LPs.
 
@@ -1202,8 +1204,10 @@ Junior redemption funding protects `R` as well as active exposure, so it cannot 
 pending Seniors. Integrators should present accepted Senior requests as binding commitments, subject to ordinary
 activation gates and the documented safety and settlement-hold refund paths.
 
-The covenant also limits Junior redemption funding; using committed `E + R`, the pool retains enough projected Junior
-principal that the configured Senior share still holds after the fill.
+The covenant also limits Junior redemption funding. Using committed `E + R`, the pool retains enough projected Junior
+principal that the configured Senior share still holds after the fill. When only the permanent Senior seed shares
+remain and `R = 0`, the ratio is waived. A pending reservation retains backing for the full Senior balance because
+the deposit can activate after Junior withdrawals in the same settlement.
 This is an LP-liquidity restriction, not an extra source of cash or a guarantee that losses cannot impair senior.
 
 Coupon, loss allocation, revenue restoration, and privileged claimant recapitalization remain higher-priority

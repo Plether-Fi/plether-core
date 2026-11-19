@@ -34,6 +34,66 @@ contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
         );
     }
 
+    function test_LastSeniorExitReleasesJuniorInSameSettlementAndStopsCoupon() public {
+        address seniorLp = address(0x111);
+        address juniorLp = address(0x222);
+        _fundSenior(seniorLp, 10_000e6);
+        _fundJunior(juniorLp, 10_000e6);
+        _setSeniorCapacity(100_000e6, 2500);
+        assertEq(pool.getMaxJuniorWithdraw(), 0, "redeemable Senior still requires backing");
+
+        uint256 seniorShares = seniorVault.balanceOf(seniorLp);
+        uint256 juniorShares = juniorVault.balanceOf(juniorLp);
+        uint256 seniorEpoch = _requestAsyncRedeem(seniorVault, seniorLp, seniorShares);
+        uint256 juniorEpoch = _requestAsyncRedeem(juniorVault, juniorLp, juniorShares);
+        assertEq(seniorEpoch, juniorEpoch, "exercise both redemptions in the same settlement");
+
+        IHousePool.LpEpochSettlementResult memory result = _settleAsyncRequest(juniorEpoch, true);
+        assertEq(result.seniorFundedShares, seniorShares);
+        assertEq(seniorVault.totalSupply(), seniorVault.seedShareFloor());
+        assertEq(result.juniorFundedShares, juniorShares, "Junior can fully exit after Senior shares are burned");
+
+        uint256 seniorAfter = pool.seniorPrincipal();
+        uint256 juniorAfter = pool.juniorPrincipal();
+        _warpForward(1 weeks);
+        _refreshMarkForAsyncSettlement();
+        (uint256 pendingSenior, uint256 pendingJunior,, uint256 pendingJuniorCap) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, seniorAfter);
+        assertEq(pendingJunior, juniorAfter, "preview must omit the seed-only coupon");
+        assertEq(pendingJuniorCap, juniorAfter);
+        assertEq(pool.getMaxJuniorWithdraw(), juniorAfter);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), seniorAfter);
+        assertEq(pool.juniorPrincipal(), juniorAfter, "reconcile must omit the seed-only coupon");
+        assertEq(pool.lastSeniorCouponCheckpointTime(), vm.getBlockTimestamp());
+    }
+
+    function test_SeedOnlySeniorKeepsBackingForActivationOfCommittedDeposit() public {
+        address seniorLp = address(0x111);
+        address juniorLp = address(0x222);
+        _fundJunior(juniorLp, 20_000e6);
+        _setSeniorCapacity(100_000e6, 5000);
+        assertEq(pool.getMaxJuniorWithdraw(), 45_000e6);
+
+        uint256 depositEpoch = _requestAsyncDeposit(seniorVault, seniorLp, 20_000e6);
+        assertEq(pool.getMaxJuniorWithdraw(), 15_000e6, "back the balance that the accepted deposit will activate");
+        uint256 redeemEpoch = _requestAsyncRedeem(juniorVault, juniorLp, juniorVault.balanceOf(juniorLp));
+        IHousePool.LpEpochSettlementResult memory result =
+            _settleAsyncRequest(depositEpoch > redeemEpoch ? depositEpoch : redeemEpoch, true);
+        assertEq(result.seniorDepositAssets, 20_000e6, "release the reservation through deposit activation");
+        assertGt(result.juniorFundedAssets, 14_999e6);
+        assertLe(result.juniorFundedAssets, 15_000e6);
+        assertEq(pool.seniorPrincipal(), 30_000e6, "activation must not backfill interest for the seed-only interval");
+        assertGe(pool.juniorPrincipal(), 30_000e6, "the now-active Senior balance must be backed");
+
+        _warpForward(1 weeks);
+        _refreshMarkForAsyncSettlement();
+        (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
+        assertGt(pendingSenior, 30_000e6, "coupon resumes when the deposit shares activate");
+    }
+
     function test_MaxDepositAndMaxMint_ZeroWhenSeniorImpaired() public {
         address alice = address(0x111);
         address bob = address(0x222);

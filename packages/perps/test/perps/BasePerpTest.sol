@@ -354,6 +354,16 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         _fundTrancheAsync(seniorVault, lp, amount);
     }
 
+    /// @dev Adds redeemable Senior shares at the current checkpoint without advancing an LP epoch.
+    function _assignSeniorCapital(
+        uint256 amount
+    ) internal {
+        settlementToken.mint(address(this), amount);
+        settlementToken.approve(address(engine), amount);
+        engine.recapitalizePool(amount);
+        pool.assignUnassignedAssets(true, address(this));
+    }
+
     function _fundTrancheAsync(
         TrancheVault vault,
         address lp,

@@ -209,6 +209,45 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertEq(juniorPriceAfter, juniorPriceBefore, "Senior frozen exit fee must remain tranche-local");
     }
 
+    function test_LastJuniorLpCanExitAfterSeniorSeedRetainsFrozenFee() public {
+        address seniorLp = address(0xA11CE);
+        _setSeniorCapacity(4_000_000e6, 8000);
+        _fundSenior(seniorLp, 2_000_000e6);
+        _enterFrozenWindow();
+
+        {
+            uint256 seniorShares = seniorVault.balanceOf(seniorLp);
+            _prepareFrozenEpoch(_requestRedeem(seniorVault, seniorLp, seniorShares));
+            uint256 seniorAssetsBefore = seniorVault.totalAssets();
+            uint256 seniorGrossAssets = seniorVault.convertToAssets(seniorShares);
+            IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+            assertEq(result.seniorFundedShares, seniorShares);
+            assertLt(result.seniorFundedAssets, seniorGrossAssets, "the last Senior exit pays the frozen fee");
+            assertEq(seniorVault.totalSupply(), seniorVault.seedShareFloor());
+            assertEq(
+                pool.seniorPrincipal(), seniorAssetsBefore - result.seniorFundedAssets, "the fee stays in the seed"
+            );
+        }
+        uint256 seniorSeedAssets = pool.seniorPrincipal();
+
+        vm.warp(SATURDAY_FROZEN + 2 days);
+        assertFalse(engine.isOracleFrozen(), "Junior exits after the oracle reopens");
+        address juniorLp = address(this);
+        uint256 juniorShares = juniorVault.maxRequestRedeem(juniorLp);
+        uint256 juniorRequestId = _requestRedeem(juniorVault, juniorLp, juniorShares);
+        vm.warp(pool.lpEpochStart(juniorRequestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        uint256 juniorAssets = juniorVault.estimateRedeemAssets(juniorShares);
+        IHousePool.LpEpochSettlementResult memory juniorResult = _settleLpEpochForTest();
+
+        assertEq(juniorResult.juniorFundedShares, juniorShares, "the last Junior LP exits in full");
+        assertEq(juniorVault.totalSupply(), juniorVault.seedShareFloor());
+        assertEq(pool.seniorPrincipal(), seniorSeedAssets, "the seed receives no further coupon");
+        vm.prank(juniorLp);
+        assertEq(juniorVault.claimRedeem(juniorRequestId, juniorShares, juniorLp, juniorLp), juniorAssets);
+    }
+
     function test_FrozenWithdrawFee_RemainsJuniorLocal() public {
         address juniorLp = address(0xFADE);
         address seniorLp = address(0xFACE);
