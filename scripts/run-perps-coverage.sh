@@ -22,6 +22,7 @@ forge --version > "${PERPS_ARTIFACT_DIR}/toolchain.txt"
 git -C "${repo_root}" rev-parse HEAD > "${PERPS_ARTIFACT_DIR}/commit.txt"
 coverage_work_dir="$(mktemp -d "${package_root}/.coverage-perps.XXXXXX")"
 shard_count="${PERPS_COVERAGE_SHARDS:-1}"
+batch_size="${PERPS_COVERAGE_BATCH_SIZE:-}"
 
 cleanup() {
     if [[ "${coverage_work_dir}" == "${package_root}"/.coverage-perps.* ]]; then
@@ -35,6 +36,25 @@ if ! [[ "${shard_count}" =~ ^[1-9][0-9]*$ ]]; then
     exit 2
 fi
 
+python3 "${repo_root}/scripts/perps-test-inventory.py" --lane coverage --format paths \
+    > "${coverage_work_dir}/eligible.txt"
+if [ -n "${batch_size}" ]; then
+    if ! [[ "${batch_size}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "PERPS_COVERAGE_BATCH_SIZE must be a positive integer" >&2
+        exit 2
+    fi
+    if [ -n "${PERPS_COVERAGE_SHARDS:-}" ]; then
+        echo "set PERPS_COVERAGE_BATCH_SIZE or PERPS_COVERAGE_SHARDS, not both" >&2
+        exit 2
+    fi
+    entrypoint_count="$(wc -l < "${coverage_work_dir}/eligible.txt" | tr -d ' ')"
+    if [ "${entrypoint_count}" -eq 0 ]; then
+        echo "perps coverage selection is empty" >&2
+        exit 2
+    fi
+    shard_count="$(((entrypoint_count + batch_size - 1) / batch_size))"
+fi
+
 populate_test_shard() {
     local test_dir="$1"
     local shard_index="$2"
@@ -43,8 +63,6 @@ populate_test_shard() {
     : > "${PERPS_ARTIFACT_DIR}/shard-${shard_index}-entrypoints.txt"
     mkdir -p "${test_dir}"
     cp -R "${package_root}/test/." "${test_dir}/"
-    python3 "${repo_root}/scripts/perps-test-inventory.py" --lane coverage --format paths \
-        > "${coverage_work_dir}/eligible.txt"
     # Remove every entrypoint first; copy back the exhaustive selected partition.
     find "${test_dir}" -type f -name '*.t.sol' -delete
     while IFS= read -r relative_file; do
@@ -225,6 +243,9 @@ for ((shard_index = 0; shard_index < shard_count; shard_index++)); do
         ${coverage_args[@]+"${coverage_args[@]}"} --report-file "${shard_report}" "${coverage_remappings[@]}" \
         2>&1 | tee "${PERPS_ARTIFACT_DIR}/shard-${shard_index}.log"
     normalize_lcov "${shard_report}"
+    # Keep the sibling LCOV report, but release compiler outputs before the next
+    # batch so disk use does not grow with the number of small coverage batches.
+    rm -rf -- "${coverage_work_dir}/shard-${shard_index}"
 done
 
 merge_args=()

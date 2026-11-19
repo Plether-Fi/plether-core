@@ -230,9 +230,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FOUNDRY_PROFILE: quick
-      # Smaller compiler batches preserve the same exhaustive test partition.
-      # Both previous attempts lost their runner during shard 2 compilation.
-      PERPS_COVERAGE_SHARDS: 8
+      # Bound compiler input as the suite grows; preserve every eligible test.
+      # Fixed shard counts previously lost their hosted runner during coverage.
+      PERPS_COVERAGE_BATCH_SIZE: 4
       HEARTBEAT_RESOURCE_DIAGNOSTICS: '1'
     steps:
       - uses: actions/checkout@v4
@@ -247,8 +247,11 @@ jobs:
       - name: Install LCOV
         run: sudo apt-get update && sudo apt-get install --yes lcov
 
+      - name: Test coverage runner
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_perps_coverage.py' -v
+
       - name: Run coverage
-        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-coverage.sh --ir-minimum --report lcov --lcov-version 1 --report-file "$GITHUB_WORKSPACE/lcov-perps.raw.info"
+        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-coverage.sh --threads 1 --ir-minimum --report lcov --lcov-version 1 --report-file "$GITHUB_WORKSPACE/lcov-perps.raw.info"
 
       - name: Upload coverage selection and evidence
         if: always()
