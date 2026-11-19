@@ -200,9 +200,12 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         uint256 collectibleCapAssets =
             engineAccountLens.getAccountLedgerSnapshot(account).terminalPriceCollectibleCapAssets;
         uint256 poolAssetsBefore = pool.totalAssets();
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
 
         assertTrue(preview.valid, "Terminal price tail must not block a full close");
         assertLt(preview.realizedPnlAssets, 0, "Setup must realize a terminal price loss");
+        assertLt(preview.vpiDeltaAssets, 0, "Setup must earn a VPI rebate");
+        uint256 poolFundedFeeAssets = uint256(-preview.vpiDeltaAssets);
         uint256 priceLossAssets = uint256(-preview.realizedPnlAssets);
         assertGt(priceLossAssets, collectibleCapAssets, "Setup must exceed the exact price collectible cap");
         assertEq(preview.seizedCollateralAssets, collectibleCapAssets, "Preview must collect the exact price cap only");
@@ -214,8 +217,13 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
 
         assertEq(
             pool.totalAssets() - poolAssetsBefore,
-            collectibleCapAssets,
-            "Only the exact collectible price cap should become LP cash"
+            collectibleCapAssets - poolFundedFeeAssets,
+            "Pool cash should increase by the exact price cap less the rebate-funded fee"
+        );
+        assertEq(
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeAssets + poolFundedFeeAssets,
+            "Treasury should receive the collectible fee and the rebate-funded top-up"
         );
         assertEq(
             terminalNavBook.curveHashOf(account),

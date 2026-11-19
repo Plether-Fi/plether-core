@@ -34,6 +34,7 @@ library CloseReferenceMath {
         uint256 poolCash;
         uint256 poolAccounted;
         uint256 allClaims;
+        uint256 poolLiabilityReserve;
         uint256 maintenanceBps;
     }
 
@@ -317,15 +318,19 @@ library CloseReferenceMath {
         v.rebatePaid = _min(v.rebateAssessed, _unreserved(v.poolCashAfter, v.allClaimsAfter));
         v.rebateWaived = v.rebateAssessed - v.rebatePaid;
         v.poolCashAfter -= v.rebatePaid;
-        v.feeTopUp = _min(feeWithheld, _unreserved(v.poolCashAfter, v.allClaimsAfter));
-        v.poolCashAfter -= v.feeTopUp;
-        v.treasuryCredit = v.feeFromCash + v.feeTopUp;
-        v.remainingCash = x.cash - v.pledgeConsumed - v.actionCash + v.immediatePayout + v.rebatePaid;
         int256 accounted = int256(x.poolAccounted) + int256(v.poolCashAfter) - int256(x.poolCash);
         if (accounted < 0) {
             revert InvalidReferenceInput();
         }
-        v.poolAccountedAfter = uint256(accounted);
+        uint256 rebate = _negative(v.vpi);
+        uint256 otherCharges = v.assessedSpread + x.unpaidCarry;
+        uint256 feeOffset = rebate > otherCharges ? _min(v.assessedFee, rebate - otherCharges) : 0;
+        uint256 backedCash = _min(v.poolCashAfter, uint256(accounted));
+        v.feeTopUp = _min(feeWithheld + feeOffset, _unreserved(backedCash, v.allClaimsAfter + x.poolLiabilityReserve));
+        v.poolCashAfter -= v.feeTopUp;
+        v.poolAccountedAfter = uint256(accounted) - v.feeTopUp;
+        v.treasuryCredit = v.feeFromCash + v.feeTopUp;
+        v.remainingCash = x.cash - v.pledgeConsumed - v.actionCash + v.immediatePayout + v.rebatePaid;
     }
 
     function _pnl(
