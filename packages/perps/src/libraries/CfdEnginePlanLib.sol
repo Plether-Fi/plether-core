@@ -1339,6 +1339,7 @@ library CfdEnginePlanLib {
                 poolDepthAssets: PositionRiskAccountingLib.computeNetPoolDepthAssets(
                     snap.poolAssets, snap.totalTraderClaimBalanceAssets
                 ),
+                degradedMode: snap.degradedMode,
                 vpiFactor: snap.riskParams.vpiFactor,
                 frozenCloseSpreadBps: snap.frozenCloseSpreadBps,
                 oracleFrozen: snap.oracleFrozen,
