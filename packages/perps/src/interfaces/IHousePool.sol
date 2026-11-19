@@ -536,8 +536,7 @@ interface IHousePool {
     function isTradingActive() external view returns (bool);
 
     /// @notice Returns whether the engine reports frozen-oracle mode.
-    /// @dev Uses the engine's canonical calendar: recurring weekend freezing or a UTC-day override before that
-    ///      day's 17:00 New York boundary. The FAD runway does not extend freezing.
+    /// @dev Uses the engine's canonical calendar, including weekends, day overrides and scheduled closures.
     /// @return Whether frozen-oracle policy is active
     function isOracleFrozen() external view returns (bool);
 

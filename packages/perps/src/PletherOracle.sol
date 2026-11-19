@@ -508,8 +508,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @notice Returns whether the market calendar currently enables frozen-oracle policy.
     /// @dev Delegates to the engine's canonical calendar status. The normal frozen interval follows Pyth FX hours from
     ///      Friday 17:00 New York time until Sunday 17:00 New York time (exclusive), including US daylight-saving
-    ///      transitions. A current-day override adds freezing only before that day's 17:00 New York boundary;
-    ///      recurring weekend freezing still applies.
+    ///      transitions. Day overrides and scheduled closure intervals can add freezing.
     /// @return Whether frozen-oracle policy is active at the current timestamp
     function isOracleFrozen() public view override returns (bool) {
         return engine.isOracleFrozen();

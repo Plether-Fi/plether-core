@@ -182,7 +182,7 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @return Maximum supported oracle price
     function CAP_PRICE() external view returns (uint256);
 
-    /// @notice Returns whether recurring FAD, an override day, or the configured pre-override runway is active.
+    /// @notice Returns whether the engine calendar enables FAD, including configured days and closure intervals.
     /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after
     ///      Sunday's 17:00 New York FX open. This window surrounds the narrower frozen-oracle interval.
     /// @return Whether FAD maintenance and risk-increase restrictions are active
@@ -192,10 +192,10 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @return Frozen-market mark age limit in seconds
     function fadMaxStaleness() external view returns (uint256);
 
-    /// @notice Returns whether the recurring frozen interval or an override's pre-boundary interval is active.
+    /// @notice Returns whether the engine calendar enables frozen-oracle policy.
     /// @dev The recurring interval follows Pyth FX hours from Friday 17:00 New York time through Sunday 16:59:59 New
     ///      York time, including US daylight-saving transitions. UTC-day overrides add freezing only before that
-    ///      day's 17:00 New York boundary; the FAD runway does not extend freezing.
+    ///      day's 17:00 New York boundary. Scheduled closures freeze from their start until their end (exclusive).
     /// @return Whether frozen-oracle policy is active
     function isOracleFrozen() external view returns (bool);
 

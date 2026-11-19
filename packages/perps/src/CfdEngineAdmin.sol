@@ -22,6 +22,8 @@ contract CfdEngineAdmin is Ownable2Step {
     uint256 public constant MAX_FROZEN_CLOSE_SPREAD_BPS = 1000;
     /// @notice Maximum protected settlement buffer, in basis points (10%).
     uint256 public constant MAX_SETTLEMENT_BUFFER_BPS = 1000;
+    /// @notice Maximum number of scheduled closures in a calendar configuration.
+    uint256 public constant MAX_MARKET_CLOSURES = 64;
 
     /// @notice Engine host that receives finalized configuration.
     ICfdEngineAdminHost public immutable engine;
@@ -52,6 +54,10 @@ contract CfdEngineAdmin is Ownable2Step {
     error CfdEngineAdmin__ZeroStaleness();
     /// @notice Thrown when the proposed pre-FAD runway exceeds 24 hours.
     error CfdEngineAdmin__RunwayTooLong();
+    /// @notice Thrown when the proposed calendar exceeds the scheduled closure limit.
+    error CfdEngineAdmin__TooManyMarketClosures();
+    /// @notice Thrown when a closure has no positive duration, is out of order, or overlaps its predecessor.
+    error CfdEngineAdmin__InvalidMarketClosure(uint256 index);
     /// @notice Thrown when a risk parameter, frozen-close spread, or settlement buffer violates accepted bounds.
     error CfdEngineAdmin__InvalidRiskParams();
     /// @notice Thrown when the execution fee is zero or exceeds 10,000 basis points.
@@ -67,7 +73,7 @@ contract CfdEngineAdmin is Ownable2Step {
     /// @notice Emitted whenever the owner clears the risk proposal slot, including when it was already empty.
     event RiskConfigCancelled();
     /// @notice Emitted when the current owner stages or replaces the calendar-category proposal.
-    /// @param config Complete staged FAD-day replacement and runway.
+    /// @param config Complete staged calendar configuration.
     /// @param activationTime Earliest Unix timestamp at which it may be finalized.
     event CalendarConfigProposed(ICfdEngineAdminHost.EngineCalendarConfig config, uint256 activationTime);
     /// @notice Emitted after a staged calendar configuration is applied to the engine.
@@ -146,54 +152,66 @@ contract CfdEngineAdmin is Ownable2Step {
         emit RiskConfigCancelled();
     }
 
-    /// @notice Stages a complete replacement set of FAD calendar overrides and a pre-day runway.
-    /// @dev Callable only by the current owner. Replaces any pending calendar proposal and resets its delay. Only the
-    ///      runway is validated: it may be 0..86,400 seconds inclusive, while timestamps may be arbitrary. On engine
-    ///      application, timestamps are floored to UTC day numbers and duplicates are ignored; configured days activate
-    ///      all-day FAD and add oracle-frozen mode only before that day's 17:00 New York boundary. Recurring weekend
-    ///      freezing still applies, while the runway only extends FAD before a configured day.
-    /// @param config Full FAD timestamp replacement and runway duration to stage.
+    /// @notice Stages a complete replacement calendar with day overrides, scheduled closures, and a FAD runway.
+    /// @dev Replaces any pending calendar proposal and resets its delay. The runway may be 0..86,400 seconds.
+    ///      Day override timestamps are floored to UTC day numbers on application. Scheduled closures must have
+    ///      positive duration and appear in chronological order. They may touch at endpoints but cannot overlap.
+    /// @param config Complete calendar configuration to stage.
     function proposeCalendarConfig(
         ICfdEngineAdminHost.EngineCalendarConfig calldata config
     ) external onlyOwner {
         if (config.fadRunwaySeconds > 24 hours) {
             revert CfdEngineAdmin__RunwayTooLong();
         }
+        if (config.marketClosures.length > MAX_MARKET_CLOSURES) {
+            revert CfdEngineAdmin__TooManyMarketClosures();
+        }
         delete _pendingCalendarConfig.fadDayTimestamps;
         _pendingCalendarConfig.fadDayTimestamps = config.fadDayTimestamps;
         _pendingCalendarConfig.fadRunwaySeconds = config.fadRunwaySeconds;
+        delete _pendingCalendarConfig.marketClosures;
+        uint64 previousEnd;
+        for (uint256 i; i < config.marketClosures.length; ++i) {
+            ICfdEngineAdminHost.MarketClosure calldata closure = config.marketClosures[i];
+            if (closure.startTime >= closure.endTime || closure.startTime < previousEnd) {
+                revert CfdEngineAdmin__InvalidMarketClosure(i);
+            }
+            _pendingCalendarConfig.marketClosures.push(closure);
+            previousEnd = closure.endTime;
+        }
         calendarConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit CalendarConfigProposed(config, calendarConfigActivationTime);
     }
 
     /// @notice Applies the pending full calendar replacement once its timelock has elapsed.
-    /// @dev Callable only by the current owner. An empty day list clears all admin overrides but not built-in calendar
-    ///      behavior. This clears the staged timestamp array and activation time before the engine call; a revert rolls
-    ///      everything back. This function does not clear the private staged runway scalar, which is not evidence of an
-    ///      active proposal; `calendarConfigActivationTime` is authoritative.
+    /// @dev Callable only by the current owner. Empty day and closure lists clear the configured entries. This clears
+    ///      both staged arrays and the activation time before the engine call. A revert rolls everything back.
+    ///      `calendarConfigActivationTime` is authoritative even if the staged runway scalar remains nonzero.
     function finalizeCalendarConfig() external onlyOwner {
         _requireTimelockReady(calendarConfigActivationTime);
         ICfdEngineAdminHost.EngineCalendarConfig memory config = _pendingCalendarConfig;
         delete _pendingCalendarConfig.fadDayTimestamps;
+        delete _pendingCalendarConfig.marketClosures;
         calendarConfigActivationTime = 0;
         engine.applyCalendarConfig(config);
         activeConfigVersion += 1;
         emit CalendarConfigFinalized(config);
     }
 
-    /// @notice Immediately clears the staged calendar day array and activation timestamp.
+    /// @notice Immediately clears the staged calendar day and closure arrays and activation timestamp.
     /// @dev Callable only by the current owner. This operation is idempotent and emits even if no proposal exists. The
     ///      staged runway scalar remains observable through `getPendingCalendarConfig`; an activation time of zero means
     ///      there is no active proposal.
     function cancelCalendarConfig() external onlyOwner {
         delete _pendingCalendarConfig.fadDayTimestamps;
+        delete _pendingCalendarConfig.marketClosures;
         calendarConfigActivationTime = 0;
         emit CalendarConfigCancelled();
     }
 
-    /// @notice Returns the staged calendar storage, including its dynamic FAD-day array.
-    /// @dev After finalization or cancellation, the returned day array is empty but the previous runway value can remain;
-    ///      consult `calendarConfigActivationTime` to determine whether the returned value is an active proposal.
+    /// @notice Returns the staged calendar, including its day and closure arrays.
+    /// @dev After finalization or cancellation, both arrays are empty. Use `calendarConfigActivationTime` to check
+    ///      whether a proposal is active because the previous runway value can remain.
     /// @return config Stored calendar proposal data.
     function getPendingCalendarConfig() external view returns (ICfdEngineAdminHost.EngineCalendarConfig memory config) {
         config = _pendingCalendarConfig;
