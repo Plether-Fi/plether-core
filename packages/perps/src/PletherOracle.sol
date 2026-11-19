@@ -229,9 +229,9 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @notice Resolves one delayed-order price and optionally reuses a proven historical basket from the batch cache.
     /// @dev Cache reuse is available only outside oracle-frozen policy when the cached tick is after this commit, not in
     ///      the future, within this commit's settlement window, and covered by the cache's minimum commit time. A reused
-    ///      basket first verifies all stored feeds cover its timestamp, pays no Pyth fee, and leaves the cache unchanged;
-    ///      caller-supplied cache prices are not authenticated. Any ETH sent with a reused cache remains
-    ///      in this contract and is not refunded or credited. Otherwise this follows
+    ///      basket checks each stored feed against its corresponding component time, pays no Pyth fee, and leaves
+    ///      the cache unchanged. Caller-supplied cache prices are not authenticated. Any ETH sent with a reused cache
+    ///      remains in this contract and is not refunded or credited. Otherwise this follows
     ///      `updateOrderExecutionPrice`, including its confidence shift, exact-fee expectation, caller-enforced
     ///      close-only/slippage policy, and unavailable-history refund behavior. A new historical parse and
     ///      successful stored-feed synchronization extend the returned cache; frozen baskets are never cached.
@@ -258,12 +258,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         PolicySnapshot memory policy = _policyForMode(PriceMode.OrderExecution);
 
         BasketPrice memory basket;
-        bool reusedBasket;
         if (!policy.oracleFrozen && _canReuseHistoricalBatchBasket(request.commitTime, cache)) {
-            // Cache contents are caller-supplied; independently prove storage coverage, not price authenticity.
-            for (uint256 i; i < pythFeedIds.length; ++i) {
-                _requireStoredFeedCoverage(pythFeedIds[i], cache.publishTime);
-            }
+            _requireCachedFeedCoverage(cache);
             basket = BasketPrice({
                 price: cache.price,
                 confidence: cache.confidence,
@@ -271,12 +267,27 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
                 oldestPublishTime: cache.oldestPublishTime,
                 pythFee: 0
             });
-            reusedBasket = true;
         } else {
-            (basket, ok) = _resolveOrderExecutionBasket(refundRecipient, pythUpdateData, request, policy);
+            PythStructs.PriceFeed[] memory parsedFeeds;
+            (basket, ok, parsedFeeds) = _resolveOrderExecutionBasket(refundRecipient, pythUpdateData, request, policy);
             if (!ok) {
                 snapshot.updateFee = basket.pythFee;
                 return (false, snapshot, nextCache);
+            }
+            if (!policy.oracleFrozen) {
+                uint256[] memory componentPublishTimes = new uint256[](parsedFeeds.length);
+                for (uint256 i; i < parsedFeeds.length; ++i) {
+                    componentPublishTimes[i] = parsedFeeds[i].price.publishTime;
+                }
+                nextCache = BatchOrderPriceCache({
+                    hasHistoricalBasket: true,
+                    minReusableCommitTime: request.commitTime,
+                    price: basket.price,
+                    confidence: basket.confidence,
+                    publishTime: basket.publishTime,
+                    oldestPublishTime: basket.oldestPublishTime,
+                    componentPublishTimes: componentPublishTimes
+                });
             }
         }
 
@@ -284,16 +295,6 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         snapshot.price = _orderExecutionPrice(request, snapshot.price, basket.confidence, policy.oracleFrozen);
         if (policy.oracleFrozen) {
             _refundExcess(refundRecipient, 0);
-        }
-        if (!policy.oracleFrozen && !reusedBasket) {
-            nextCache = BatchOrderPriceCache({
-                hasHistoricalBasket: true,
-                minReusableCommitTime: request.commitTime,
-                price: basket.price,
-                confidence: basket.confidence,
-                publishTime: basket.publishTime,
-                oldestPublishTime: basket.oldestPublishTime
-            });
         }
         ok = true;
     }
@@ -549,7 +550,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     ) internal returns (bool ok, PriceSnapshot memory snapshot) {
         PolicySnapshot memory policy = _policyForMode(PriceMode.OrderExecution);
         BasketPrice memory basket;
-        (basket, ok) = _resolveOrderExecutionBasket(refundRecipient, pythUpdateData, request, policy);
+        (basket, ok,) = _resolveOrderExecutionBasket(refundRecipient, pythUpdateData, request, policy);
         if (!ok) {
             snapshot.updateFee = basket.pythFee;
             return (false, snapshot);
@@ -584,7 +585,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         bytes[] calldata pythUpdateData,
         OrderExecutionRequest calldata request,
         PolicySnapshot memory policy
-    ) internal returns (BasketPrice memory basket, bool ok) {
+    ) internal returns (BasketPrice memory basket, bool ok, PythStructs.PriceFeed[] memory parsedFeeds) {
         if (!policy.oracleFrozen) {
             return _resolveHistoricalOrderBasket(refundRecipient, pythUpdateData, request);
         }
@@ -597,7 +598,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         address refundRecipient,
         bytes[] calldata pythUpdateData,
         OrderExecutionRequest calldata request
-    ) internal returns (BasketPrice memory basket, bool ok) {
+    ) internal returns (BasketPrice memory basket, bool, PythStructs.PriceFeed[] memory) {
         if (pythUpdateData.length == 0) {
             revert PletherOracle__MissingUpdateData();
         }
@@ -625,7 +626,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
                 _requireStoredFeedCoverage(parsedFeeds[i].id, parsedFeeds[i].price.publishTime);
             }
             basket.pythFee = executionFunding;
-            ok = true;
+            return (basket, true, parsedFeeds);
         } catch (bytes memory reason) {
             if (reason.length != 4 || bytes4(reason) != IPyth.PriceFeedNotFoundWithinRange.selector) {
                 revert PletherOracle__HistoricalParserFailure(bytes4(reason), reason.length);
@@ -639,6 +640,33 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             // Report forwarded funding so the Router does not refund this allocation a second time.
             basket.pythFee = executionFunding;
             _refundValue(payable(refundRecipient), executionFunding);
+        }
+        return (basket, false, new PythStructs.PriceFeed[](0));
+    }
+
+    function _requireCachedFeedCoverage(
+        BatchOrderPriceCache calldata cache
+    ) internal view {
+        uint256 feedCount = pythFeedIds.length;
+        if (cache.componentPublishTimes.length != feedCount) {
+            revert PletherOracle__InvalidBatchCacheTimes();
+        }
+
+        // Cache contents are caller-supplied; check timestamp bounds and coverage independently of the cached price.
+        uint256 oldest = type(uint256).max;
+        uint256 newest;
+        for (uint256 i; i < feedCount; ++i) {
+            uint256 publishTime = cache.componentPublishTimes[i];
+            if (publishTime < oldest) {
+                oldest = publishTime;
+            }
+            if (publishTime > newest) {
+                newest = publishTime;
+            }
+            _requireStoredFeedCoverage(pythFeedIds[i], publishTime);
+        }
+        if (oldest != cache.oldestPublishTime || newest != cache.publishTime) {
+            revert PletherOracle__InvalidBatchCacheTimes();
         }
     }
 
