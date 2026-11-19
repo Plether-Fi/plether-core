@@ -688,10 +688,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (targetVault == address(0)) {
             revert HousePool__ZeroAddress();
         }
-        uint256 shares = ITrancheVaultBootstrap(targetVault).quoteBootstrapDeposit(amount);
-        if (shares == 0) {
-            revert HousePool__BootstrapSharesZero();
-        }
+        uint256 shares = _quoteBootstrapShares(targetVault, amount);
 
         if (toSenior) {
             seniorHighWaterMark = seniorPrincipal == 0 ? amount : seniorHighWaterMark + amount;
@@ -736,10 +733,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         _requireBootstrapOracleLive(statusSnapshot);
         _reconcile(_getHousePoolInputSnapshot());
 
-        uint256 shares = ITrancheVaultBootstrap(targetVault).quoteBootstrapDeposit(amount);
-        if (shares == 0) {
-            revert HousePool__BootstrapSharesZero();
-        }
+        uint256 shares = _quoteBootstrapShares(targetVault, amount);
 
         _checkpointEngineCarryIndexes();
         _checkpointSeniorCouponBeforePrincipalMutation();
@@ -1489,6 +1483,16 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
                 statusSnapshot.lastMarkTime, poolConfig.markStalenessLimit, block.timestamp
             )) {
             revert HousePool__MarkPriceStale();
+        }
+    }
+
+    function _quoteBootstrapShares(
+        address vault,
+        uint256 assets
+    ) private view returns (uint256 shares) {
+        shares = ITrancheVaultBootstrap(vault).quoteBootstrapDeposit(assets);
+        if (shares == 0) {
+            revert HousePool__BootstrapSharesZero();
         }
     }
 
