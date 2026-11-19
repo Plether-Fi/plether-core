@@ -290,18 +290,32 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         if (failingSlippage) {
             request.targetPrice = opposite == CfdTypes.Side.LONG ? 1 : CAP_PRICE;
         }
-        // Model a previously admitted wrong-side close so the execution boundary remains covered.
-        vm.mockCall(
-            address(engine),
-            abi.encodeCall(engine.positions, (BOUNTY_TRADER)),
-            abi.encode(BOUNTY_SIZE, 1000e6, BOUNTY_PRICE, 0, opposite, block.timestamp, 0)
-        );
+        _mockLegacyCloseAdmission(opposite);
         vm.prank(BOUNTY_TRADER);
         chain.wrongCloseId = router.commitOrder(request);
         vm.clearMockedCalls();
         _fundTrader(BOUNTY_OTHER, 2000e6);
         chain.followerId = _bountyCommit(BOUNTY_OTHER, original, false, BOUNTY_SIZE, 1000e6);
         assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 3);
+    }
+
+    function _mockLegacyCloseAdmission(
+        CfdTypes.Side admittedSide
+    ) private {
+        // Give admission the legacy projected side. All subsequent reads use the live position for NAV accounting.
+        (
+            uint256 size,
+            uint256 margin,
+            uint256 price,
+            uint256 maxProfit,
+            CfdTypes.Side liveSide,
+            uint64 updated,
+            int256 vpi
+        ) = engine.positions(BOUNTY_TRADER);
+        bytes[] memory reads = new bytes[](2);
+        reads[0] = abi.encode(size, margin, price, maxProfit, admittedSide, updated, vpi);
+        reads[1] = abi.encode(size, margin, price, maxProfit, liveSide, updated, vpi);
+        vm.mockCalls(address(engine), abi.encodeCall(engine.positions, (BOUNTY_TRADER)), reads);
     }
 
     function _failPredecessors(
