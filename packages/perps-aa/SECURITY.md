@@ -59,3 +59,20 @@ reduce the cost ceiling, and disable the frontend sponsorship flag.
 Before mainnet funding, complete an external review of the paymaster and service, test against the real EntryPoint v0.8
 and selected bundler/account implementation, validate EIP-7702 behavior on the target chain, load-test budget atomics,
 and rehearse pause/signer rotation/deposit withdrawal. Keep the legacy direct-wallet path available during rollout.
+
+## Kernel v4 pilot profile
+
+`PletherKernelVerifyingPaymaster` binds EntryPoint v0.9, the factory, expected Kernel UUPS implementation,
+validator and proxy runtime. It accepts one canonical index-zero ECDSA root initializer using the configured factory.
+It limits sponsored operations to nonce key zero and atomic ERC-7579 single or batch execution. It rejects the
+v0.9 optional paymaster-signature suffix and block-based validity windows. The signature binds the exact operation.
+
+Kernel UUPS accounts can change their implementation and root. The paymaster checks the proxy runtime and the
+configured implementation and validator code hashes. The gateway must independently attest the sender's live
+implementation and beacon slots, root and validator owner at agreed canonical state before issuance and submission.
+The constructor restricts this UUPS pilot to Arbitrum Sepolia. Use controlled accounts, a small dedicated deposit
+and short-lived authorizations. A production profile requires immutable execution or an irreversible upgrade lock
+and qualification under the production bundler validation rules.
+
+ETH-paid operations run without a paymaster, signer approval, or sponsor reservation. Continue checking account
+identity, approved actions, nonce and canonical receipt evidence throughout this path.
