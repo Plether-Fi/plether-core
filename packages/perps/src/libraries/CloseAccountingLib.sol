@@ -21,6 +21,7 @@ library CloseAccountingLib {
     /// @param preSkewAssets Absolute market skew immediately before the close.
     /// @param postSkewAssets Absolute market skew immediately after the close.
     /// @param poolDepthAssets Pool depth used by the VPI curve.
+    /// @param degradedMode Whether the pool is in degraded mode, where fresh close VPI is waived.
     /// @param vpiFactor VPI impact factor, scaled by 1e18.
     /// @param frozenCloseSpreadBps Additional close spread in basis points when the oracle is frozen.
     /// @param oracleFrozen Whether to charge the frozen-market spread.
@@ -34,6 +35,7 @@ library CloseAccountingLib {
         uint256 preSkewAssets;
         uint256 postSkewAssets;
         uint256 poolDepthAssets;
+        bool degradedMode;
         uint256 vpiFactor;
         uint256 frozenCloseSpreadBps;
         bool oracleFrozen;
@@ -102,9 +104,9 @@ library CloseAccountingLib {
 
         state.proportionalAccrualAssets =
             (inputs.position.vpiAccrued * int256(inputs.sizeDelta)) / int256(inputs.position.size);
-        // With no economic depth, keep protective exits live without creating a fresh charge or rebate.
+        // With no economic depth or in degraded mode, keep protective exits live without fresh VPI.
         // The lifetime clamp below still recovers any previously received negative VPI.
-        if (inputs.poolDepthAssets != 0) {
+        if (inputs.poolDepthAssets != 0 && !inputs.degradedMode) {
             state.vpiDeltaAssets = CfdMath.calculateVPI(
                 inputs.preSkewAssets, inputs.postSkewAssets, inputs.poolDepthAssets, inputs.vpiFactor
             );
