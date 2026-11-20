@@ -103,6 +103,11 @@ interface IOrderLifecycleBook {
 
     function CONFIG_SCHEMA_HASH() external view returns (bytes32);
 
+    /// @notice Whether a pending public close qualified at submission only under the full-exit exemption.
+    function closeRequiresFullExit(
+        uint64 orderId
+    ) external view returns (bool);
+
     /// @notice Hashes every mutable execution-critical integration and finalized admin version.
     function currentExecutionConfigHash() external view returns (bytes32 configHash);
 

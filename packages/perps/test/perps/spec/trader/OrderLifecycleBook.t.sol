@@ -51,6 +51,9 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function setUp() public {
         book = new OrderLifecycleBook(address(this), ENGINE, CLEARINGHOUSE, HOUSE_POOL);
         vm.mockCall(ENGINE, abi.encodeWithSignature("terminalNavBook()"), abi.encode(TERMINAL_NAV_BOOK));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("lastMarkPrice()"), abi.encode(uint256(1e8)));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("CAP_PRICE()"), abi.encode(uint256(2e8)));
+        vm.mockCall(address(this), abi.encodeWithSignature("minOpenNotionalAssets()"), abi.encode(uint256(100e6)));
     }
 
     function test_RegisterRejectsUnsetTerminalNavBookButPreservesExactReplay() public {

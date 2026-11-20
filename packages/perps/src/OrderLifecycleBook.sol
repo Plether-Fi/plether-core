@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -21,6 +22,8 @@ interface IOrderLifecycleRouterConfigView {
     function pletherOracle() external view returns (address);
 
     function admin() external view returns (address);
+
+    function minOpenNotionalAssets() external view returns (uint256);
 
 }
 
@@ -124,6 +127,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     /// @dev Packed storage representation expanded into the public PendingIntent tuple on reads.
     struct StoredPendingIntent {
         address account;
+        bool closeRequiresFullExit;
         bytes32 clientOrderId;
         bytes32 intentHash;
         uint256 executionBountyAssets;
@@ -302,6 +306,14 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         pending.intentHash = intentHash;
         pending.executionBountyAssets = executionBountyAssets;
         pending.timing = timing;
+        if (request.isClose && !protocolIntent) {
+            // Public registration follows admission, before any commitment effects. Pin the same capped mark test.
+            uint256 markPrice = ICfdEngineCore(ENGINE).lastMarkPrice();
+            uint256 capPrice = ICfdEngineCore(ENGINE).CAP_PRICE();
+            uint256 commitPrice = markPrice > capPrice ? capPrice : markPrice;
+            pending.closeRequiresFullExit = (request.sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice
+                < IOrderLifecycleRouterConfigView(ROUTER).minOpenNotionalAssets();
+        }
         pending.bounds = StoredExecutionBounds({
             submitBy: request.bounds.submitBy,
             executionWindowSeconds: request.bounds.executionWindowSeconds,
@@ -477,6 +489,13 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         intent.commitment = _expandCommitment(stored.commitment);
         intent.bounds = _expandBounds(stored.bounds);
         intent.timing = stored.timing;
+    }
+
+    /// @inheritdoc IOrderLifecycleBook
+    function closeRequiresFullExit(
+        uint64 orderId
+    ) external view override returns (bool) {
+        return _pendingIntents[orderId].closeRequiresFullExit;
     }
 
     function _expandCommitment(

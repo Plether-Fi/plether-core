@@ -125,7 +125,8 @@ nonzero successor, or `cancelProtocolTreasuryProposal()` to remove a pending suc
 current lock's expiry. At the exact expiry, the latest pending address becomes effective automatically for all
 protocol credits and treasury views, without a confirmation or keeper transaction. With no pending proposal, the
 current treasury remains. A matured proposal cannot be cancelled or replaced retroactively. Ownership transfer
-preserves the schedule; renouncing ownership does not prevent activation.
+preserves the schedule. The Engine and its configuration admin disallow renouncing ownership so governance retains
+recovery and configuration authority.
 
 The proposal's duration determines the successor's lock from the scheduled activation timestamp, even if the next
 interaction occurs much later. A proposal accepts durations from zero to 90 days, inclusive; zero leaves its successor
@@ -650,11 +651,12 @@ Security properties:
 - the neutral pre-cap basket is accepted only when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`; equality passes, each weighted component contribution is floored before summation, and no independent component-confidence ceiling applies,
 - confidence configuration is validated at proposal and oracle application: ratio <= 10,000 bps, multiplier <= 30,000
   bps, and their product < 100,000,000; accepted adjustments cannot consume the entire raw basket value,
-- successful order execution quotes are strictly positive, including historical-cache reuse; a downward adjustment
-  that exhausts the capped execution base reverts the execution call and preserves pending orders and protections,
+- order execution and liquidation shift the raw price before applying the cap, while the neutral mark is capped
+  directly. Successful order quotes are strictly positive, including historical-cache reuse,
 - aggregate basket confidence is included in live/FAD execution and all liquidation prices instead of being treated only as metadata; oracle-frozen voluntary closes retain aggregate confidence-width validation but replace the adverse price shift with the fixed frozen-close spread,
 - FIFO execution prevents later orders from bypassing earlier ones,
-- partial-close size floors prevent dust closes from occupying global FIFO slots,
+- partial-close size floors are evaluated at submission. A close admitted below the floor as a projected full exit
+  can execute only if it fully closes the live position,
 - binding order semantics and the lack of a user cancellation path prevent traders from turning queued intents into
   free options,
 - the stateless evaluator reads a settlement snapshot with the Engine's live `settlementBufferBps` and calls the
@@ -951,10 +953,12 @@ The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
   uses full utilization. Claim creation, consumption, and payment checkpoint both side indexes before changing depth
 - accrual clock: wall-clock time
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
-- claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryAssets`,
+- claim and cross-account bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryAssets`,
   then apply the full incoming credit. The credit can fund retained arrears at a later checkpoint, including at the same
   timestamp; it is not collected or waived in this call. Claim liquidity checks run after collection, and any failure
   rolls back the collection and credit
+- a self-trigger releases the trader's reserved bounty without a carry debit. The linked close applies its execution
+  bounds to carry and records carry in the receipt when the close executes.
 - realization points: open, close, add margin, pool-asset changes, risk-parameter changes, and owner clearinghouse
   `deposit` / `depositMargin` / withdraw paths before the carry base/rate denominator changes. Owner deposits may
   collect realized carry from post-deposit settlement in the same transaction; withdrawals realize carry before

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTreasury} from "@plether/perps/CfdTreasury.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -337,12 +338,14 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         engine.setProtocolTreasury(TREASURY_B);
     }
 
-    function test_TreasuryProposal_ActivationDoesNotRequireAnOwner() public {
+    function test_TreasuryProposal_ActivationUnaffectedByRejectedOwnershipRenunciation() public {
         uint256 expiry = _lockTreasury();
         engine.proposeProtocolTreasury(TREASURY_B, 30 days);
+        address owner = engine.owner();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
         engine.renounceOwnership();
 
-        assertEq(engine.owner(), address(0));
+        assertEq(engine.owner(), owner);
         vm.warp(expiry);
         assertEq(engine.protocolTreasury(), TREASURY_B);
         assertEq(engine.protocolTreasuryLockedUntil(), expiry + 30 days);
