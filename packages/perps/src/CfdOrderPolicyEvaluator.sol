@@ -48,7 +48,8 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
             executor,
             executionPrice,
             IHousePool(engine.pool()).totalAssets(),
-            pending.executionBountyAssets
+            pending.executionBountyAssets,
+            pending.commitment.carryCollectedAssets
         );
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
@@ -61,10 +62,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         snapshot.accountBuckets.otherLockedMarginAssets -= release;
         snapshot.accountBuckets.totalLockedMarginAssets -= release;
         snapshot.accountBuckets.freeSettlementAssets += release;
-        assessment = _assessSnapshot(context, order, pending.bounds, planner, snapshot);
-        if (order.isClose) {
-            _includeCommitment(assessment, pending.commitment, pending.bounds, pending.executionBountyAssets);
-        }
+        return _assessSnapshot(context, order, pending.bounds, planner, snapshot);
     }
 
     function _pending(
@@ -127,7 +125,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         CfdEnginePlanTypes.RawSnapshot memory snapshotCopy = snapshot;
         CfdEnginePlanTypes.CloseDelta memory deltaCopy = delta;
         OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
-        return _evaluateClose(snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false);
+        return _evaluateClose(snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false, 0);
     }
 
 }

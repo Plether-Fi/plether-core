@@ -637,9 +637,11 @@ contract CfdClosePreviewRequestCarryTest is CfdClosePreviewRequestTest {
         OrderV3Types.OrderRequest memory r = _request(CfdTypes.Side.LONG, SIZE);
         CfdClosePreview.ClosePreview memory p = _requestPreview(r, PRICE);
         assertGt(p.commitmentCarryAssets, 0);
+        assertGt(p.assessment.explicitFeesAssets, 0);
         r.bounds.maxActionChargeAssets = p.assessment.actionChargeAssessedAssets;
         _requestPreview(r, PRICE);
         r.bounds.maxActionChargeAssets -= 1;
+        r.bounds.maxExplicitFeesAssets = p.assessment.explicitFeesAssets - 1;
         bytes memory err = abi.encodeWithSelector(
             ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
             OrderV3Types.ConstraintKind.ActionCharge,
@@ -650,6 +652,10 @@ contract CfdClosePreviewRequestCarryTest is CfdClosePreviewRequestTest {
         previewer.previewClose(address(engine), ACCOUNT, r, KEEPER, PRICE);
         vm.expectRevert(err);
         previewer.previewClose(address(engine), _order(r.side, r.sizeDelta), KEEPER, PRICE, r.bounds);
+        vm.prank(ACCOUNT);
+        uint64 id = router.commitOrder(r);
+        vm.expectRevert(err);
+        policyEvaluator.assessCommittedOrder(address(engine), id, KEEPER, PRICE);
     }
 
     function test_RequestUnpaidCarryAllowsFullCloseButRejectsPartialClose() public {

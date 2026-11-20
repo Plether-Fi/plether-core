@@ -126,6 +126,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         uint256 currentOraclePrice;
         uint256 poolDepthAssets;
         uint256 executionBountyAssets;
+        uint256 commitmentCarryAssets;
     }
 
     function _assessOrder(
@@ -153,8 +154,14 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory closeDelta =
                 planner.planClose(snapshot, order, context.currentOraclePrice);
-            return
-                _evaluateClose(snapshot, closeDelta, boundsCopy, context.executionBountyAssets, bountyReturnsToAccount);
+            return _evaluateClose(
+                snapshot,
+                closeDelta,
+                boundsCopy,
+                context.executionBountyAssets,
+                bountyReturnsToAccount,
+                context.commitmentCarryAssets
+            );
         }
 
         CfdEnginePlanTypes.OpenDelta memory openDelta = planner.planOpen(snapshot, order, context.currentOraclePrice);
@@ -180,12 +187,18 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.CloseDelta memory delta,
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyAssets,
-        bool bountyReturnsToAccount
+        bool bountyReturnsToAccount,
+        uint256 commitmentCarryAssets
     ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidCloseDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
         assessment =
             _buildCloseAssessment(snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode);
+        // The snapshot already reflects commitment carry collection. Include it in the order totals before checking bounds.
+        assessment.grossAccountDebitAssets += commitmentCarryAssets;
+        assessment.actionChargeAssessedAssets += commitmentCarryAssets;
+        assessment.actionChargeCollectedAssets += commitmentCarryAssets;
+        assessment.carryAssets += commitmentCarryAssets;
         _enforceBounds(assessment, bounds, executionBountyAssets, delta.deletePosition);
     }
 
@@ -469,21 +482,6 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         );
         assessment.postPositionEquityAssets = riskState.equityAssets;
         assessment.postLeverageBps = _postLeverageBps(riskState.currentNotionalAssets, riskState.equityAssets);
-    }
-
-    function _includeCommitment(
-        OrderV3Types.ExecutionAssessment memory assessment,
-        CfdEnginePlanTypes.CloseCommitment memory effects,
-        OrderV3Types.ExecutionBounds memory bounds,
-        uint256 bounty
-    ) internal pure {
-        assessment.grossAccountDebitAssets += effects.carryCollectedAssets;
-        assessment.actionChargeAssessedAssets += effects.carryCollectedAssets;
-        assessment.actionChargeCollectedAssets += effects.carryCollectedAssets;
-        assessment.carryAssets += effects.carryCollectedAssets;
-        // Zero residual size identifies a full close; strict partial bounds apply to every positive remainder.
-        // slither-disable-next-line incorrect-equality
-        _enforceBounds(assessment, bounds, bounty, assessment.postPositionSize == 0);
     }
 
     /// @dev Bound precedence is deliberately identical to the order of `ConstraintKind` values.

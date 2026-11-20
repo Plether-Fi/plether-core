@@ -19,7 +19,7 @@ contract BountyBackingHarness is CfdOrderPolicyEvaluator {
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 bounty
     ) external pure returns (OrderV3Types.ExecutionAssessment memory) {
-        return _evaluateClose(snapshot, delta, bounds, bounty, true);
+        return _evaluateClose(snapshot, delta, bounds, bounty, true, 0);
     }
 
 }
