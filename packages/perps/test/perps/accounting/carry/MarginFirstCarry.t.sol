@@ -337,9 +337,22 @@ contract MarginFirstCarryTest is BasePerpTest {
     }
 
     function test_TransientNavReadBlockedAndDownstreamRevertRestoresAccounting() public {
+        {
+            CfdTypes.RiskParams memory params = _riskParams();
+            params.vpiFactor = 0.01e18;
+            _setRiskParams(params);
+        }
         _fundTrader(TRADER, 20_000e6);
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
-        vm.warp(block.timestamp + 1 days);
+        _fundTrader(KEEPER, 20_000e6);
+        _open(KEEPER, CfdTypes.Side.SHORT, 50_000e18, 10_000e6, 1e8);
+        (,,,,,, int256 traderVpi) = engine.positions(TRADER);
+        (,,,,,, int256 keeperVpi) = engine.positions(KEEPER);
+        assertGt(traderVpi, 0);
+        assertLt(keeperVpi, 0);
+        _assertVpiSnapshot(uint256(traderVpi), uint256(-keeperVpi));
+
+        vm.warp(vm.getBlockTimestamp() + 1 days);
         uint256 marginBefore = _margin(TRADER);
         uint256 balanceBefore = clearinghouse.balanceAssets(TRADER);
         uint256 poolBefore = pool.totalAssets();
@@ -352,11 +365,22 @@ contract MarginFirstCarryTest is BasePerpTest {
         assertEq(clearinghouse.balanceAssets(TRADER), balanceBefore);
         assertEq(pool.totalAssets(), poolBefore);
         assertEq(keccak256(abi.encode(terminalNavBook.bookState())), bookBefore);
+        _assertVpiSnapshot(uint256(traderVpi), uint256(-keeperVpi));
         CarryNavProbeToken probe = new CarryNavProbeToken(address(engine), false);
         vm.etch(address(settlementToken), address(probe).code);
         _checkpoint(TRADER);
         assertEq(CarryNavProbeToken(address(settlementToken)).blockedReads(), 1);
         _authenticate(TRADER);
+        _assertVpiSnapshot(uint256(traderVpi), uint256(-keeperVpi));
+    }
+
+    function _assertVpiSnapshot(
+        uint256 expectedPositive,
+        uint256 expectedNegative
+    ) private view {
+        (uint256 positive, uint256 negative) = engine.vpiAccountingSnapshot();
+        assertEq(positive, expectedPositive);
+        assertEq(negative, expectedNegative);
     }
 
     function test_TerminalCarryRecoveryAndWaiverConserveWithoutConsumingClaim() public {

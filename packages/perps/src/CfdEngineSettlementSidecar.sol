@@ -58,20 +58,12 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         address account,
         uint256 poolDepthAssets
     ) public view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        if (msg.sender != ENGINE && msg.sender != ICfdEngineAccountActionView(ENGINE).planningReader()) {
+        // Resolve lazily so sidecar deployment does not depend on calling the host.
+        address reader = ICfdEngineAccountActionView(ENGINE).planningReader();
+        if (msg.sender != ENGINE && msg.sender != reader) {
             revert CfdEngineSettlementSidecar__Unauthorized();
         }
-        return _buildRawSnapshot(account, poolDepthAssets, false);
-    }
-
-    /// @dev Resolves the constructor-bound reader lazily so sidecar deployment has no host-call dependency.
-    function _buildRawSnapshot(
-        address account,
-        uint256 poolDepthAssets,
-        bool closeCommit
-    ) private view returns (CfdEnginePlanTypes.RawSnapshot memory) {
-        return CfdEnginePlanningReader(ICfdEngineAccountActionView(ENGINE).planningReader())
-            .buildRawSnapshot(account, poolDepthAssets, closeCommit);
+        return CfdEnginePlanningReader(reader).buildRawSnapshot(account, poolDepthAssets, false);
     }
 
     function _loadRiskParams(
@@ -167,7 +159,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     ) external onlyEngine returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, 0, true);
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            CfdEnginePlanningReader(engine.planningReader()).buildRawSnapshot(account, 0, true);
         effects = ICfdEnginePlanner(engine.planner()).planCloseCommit(snap, sizeDelta);
         host.settlementRealizeCarry(account);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());

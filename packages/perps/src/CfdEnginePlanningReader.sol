@@ -24,7 +24,8 @@ interface ICfdEnginePlanningHost {
 /// @title CfdEnginePlanningReader
 /// @notice Reads the bound engine's canonical snapshot and returns its configured planner's result.
 /// @dev Keeps the large snapshot ABI encoding/decoding outside the engine. All entrypoints are read-only;
-///      ownership, validation of returned deltas, and settlement remain in the engine.
+///      ownership, validation of returned deltas, and settlement remain in the engine. Execution planning sources
+///      snapshots from the configured sidecar, which can delegate construction to this reader.
 contract CfdEnginePlanningReader {
 
     ICfdEnginePlanningHost public immutable ENGINE;
@@ -99,31 +100,24 @@ contract CfdEnginePlanningReader {
         snap.lastMarkPrice = engine.lastMarkPrice();
         snap.lastMarkTime = engine.lastMarkTime();
 
-        // Historical carry uses live assets net of claims, even for commitment or hypothetical trade depth.
+        // Historical carry uses live cash net of claims and refundable positive VPI, even at hypothetical trade depth.
         snap.poolCashAssets = pool.totalAssets();
         uint256 carryDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
             snap.poolCashAssets, snap.totalTraderClaimBalanceAssets, snap.totalPositiveVpiAccruedAssets
         );
+        ICfdEnginePlanner planner = ENGINE.planner();
         // Exact enum dispatch selects the exposed side; this is not a target token-balance equality.
         // slither-disable-next-line incorrect-equality
         if (!closeCommit || snap.position.side == CfdTypes.Side.LONG) {
             snap.longSide = CfdEngineRawSnapshotLib.loadSide(
-                address(ENGINE),
-                ICfdEnginePlanner(engine.planner()),
-                CfdTypes.Side.LONG,
-                carryDepthAssets,
-                snap.riskParams.baseCarryBps
+                address(ENGINE), planner, CfdTypes.Side.LONG, carryDepthAssets, snap.riskParams.baseCarryBps
             );
         }
         // The other exact enum value selects the SHORT borrow-base snapshot.
         // slither-disable-next-line incorrect-equality
         if (!closeCommit || snap.position.side == CfdTypes.Side.SHORT) {
             snap.shortSide = CfdEngineRawSnapshotLib.loadSide(
-                address(ENGINE),
-                ICfdEnginePlanner(engine.planner()),
-                CfdTypes.Side.SHORT,
-                carryDepthAssets,
-                snap.riskParams.baseCarryBps
+                address(ENGINE), planner, CfdTypes.Side.SHORT, carryDepthAssets, snap.riskParams.baseCarryBps
             );
         }
         snap.poolAssets = closeCommit ? snap.poolCashAssets : poolDepthAssets;

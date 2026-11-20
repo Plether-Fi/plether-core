@@ -141,6 +141,42 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         assertEq(keccak256(abi.encode(capped)), keccak256(abi.encode(above)));
     }
 
+    function test_QuoteMaxOpen_NetsRebateAgainstFeeAtSettlementBuffer() public {
+        uint256 price = 1e6;
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        snap.account = address(0x123);
+        snap.capPrice = price;
+        snap.longSide.openInterest = 100 * CfdTypes.SIZE_QUANTUM;
+        snap.longSide.maxProfitAssets = 100e6;
+        snap.poolCashAssets = 100_250_000;
+        snap.poolAssets = snap.poolCashAssets;
+        snap.settlementBufferBps = 25;
+        snap.executionFeeBps = 4;
+        snap.riskParams = _riskParams();
+        snap.riskParams.initMarginBps = 1000;
+        snap.riskParams.minBountyAssets = 1000;
+        snap.riskParams.vpiFactor = 0.0002e18;
+        snap.accountBuckets = MarginClearinghouseAccountingLib.buildIsolatedAccountAssetBuckets(10e6, 0, 0, 0, 0);
+        CfdTypes.Order memory order;
+        order.account = snap.account;
+        order.side = CfdTypes.Side.SHORT;
+        order.marginDelta = 2e6;
+        // At the cap a short adds no payout liability. The strict 10% initial-margin ceiling bounds it to 19 lots.
+        uint256 expectedSize = 19 * CfdTypes.SIZE_QUANTUM;
+        order.sizeDelta = expectedSize;
+        ICfdEnginePlanner planner = engine.planner();
+        CfdEnginePlanTypes.OpenDelta memory expected = planner.planOpen(snap, order, price);
+        assertTrue(expected.valid);
+        assertEq(expected.requiredEffectiveAssetsAfterAssets, snap.poolCashAssets);
+        assertLt(expected.posVpiAccruedDelta, 0);
+        assertGt(expected.tradeCostAssets, 0, "fee absorbs the opening rebate before any cash leaves the pool");
+
+        CfdEngineOpenQuoter quoter = new CfdEngineOpenQuoter();
+        (uint256 actualSize, CfdEnginePlanTypes.OpenDelta memory actual,) = quoter.quote(planner, snap, order, price);
+        assertEq(actualSize, expectedSize, "quote must retain the valid size at the settlement buffer");
+        assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(expected)));
+    }
+
     function test_QuoteMaxOpen_ExistingRebateReserveCanBeReleased() public {
         address maker = address(0xAB01);
         address taker = address(0xAB02);

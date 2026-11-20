@@ -57,7 +57,7 @@ library HousePoolAccountingLib {
 
     /// @notice Builds the single canonical terminal-NAV snapshot shared by LP entry and exit pricing.
     /// @param engineSnapshot Engine accounting inputs.
-    /// @return snapshot Terminal LP equity and explicit deficit after claims and the signed terminal delta.
+    /// @return snapshot Terminal LP equity and explicit deficit after claims, terminal price PnL, and signed accrued VPI.
     function buildReconcileSnapshot(
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {

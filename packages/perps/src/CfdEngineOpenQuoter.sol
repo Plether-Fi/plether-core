@@ -245,7 +245,8 @@ contract CfdEngineOpenQuoter {
     ///      - the VPI extrema come from the min/max absolute skew, including zero when the interval crosses balance;
     ///      - fees, liquidation reserves, margin requirements and added liability are minimized at low;
     ///      - minimum action cost and maximum reserve release overestimate affordable pledge and free cash;
-    ///      - maximum VPI overestimates pool assets, while minimum VPI minimizes the positive accrued reserve.
+    ///      - maximum VPI and the fee ceiling bound cash before any pool-funded fee top-up;
+    ///        minimum VPI minimizes the positive accrued reserve.
     ///      Combining incompatible optimistic extrema can retain extra intervals but cannot discard a valid size.
     ///      Each retained endpoint is tested with the exact canonical planner.
     function _mayContainValid(
@@ -262,7 +263,11 @@ contract CfdEngineOpenQuoter {
         if (maxVpi >= 0) {
             maxCash += uint256(maxVpi);
         } else {
-            uint256 debit = uint256(-maxVpi);
+            // The planner nets the execution fee against the rebate before spending pool cash. A later top-up
+            // can only reduce cash. Use the fee at the upper lot bound to keep this estimate optimistic.
+            uint256 feeCeiling = Math.mulDiv(high * ctx.price, ctx.snap.executionFeeBps, 10_000);
+            uint256 rebate = uint256(-maxVpi);
+            uint256 debit = rebate > feeCeiling ? rebate - feeCeiling : 0;
             maxCash = maxCash > debit ? maxCash - debit : 0;
         }
         uint256 oldPositiveVpi = ctx.snap.position.vpiAccrued > 0 ? uint256(ctx.snap.position.vpiAccrued) : 0;
