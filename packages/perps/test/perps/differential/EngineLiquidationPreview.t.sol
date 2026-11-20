@@ -145,7 +145,7 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, CAP_PRICE, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
@@ -198,7 +198,7 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.LONG, 100e18, 3e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 100e18, 3e6, CAP_PRICE, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();

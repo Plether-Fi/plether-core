@@ -29,6 +29,59 @@ library CfdEnginePlanLib {
     //  HELPERS
     // ──────────────────────────────────────────────
 
+    /// @notice Checks unavoidable OPEN failures independently of an opposing live position or a stale mark.
+    /// @dev The maximum feasible price can disprove minimum size. Funding uses the cheapest planner-valid price
+    ///      and includes fees only when rebates cannot offset them. VPI, carry and existing reserves need a snapshot.
+    function getQueuedOpenRevertCode(
+        uint256 currentSize,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 minimumPrice,
+        uint256 maximumPrice,
+        uint256 unavoidableFeeBps,
+        CfdTypes.RiskParams memory params
+    ) internal pure returns (CfdEnginePlanTypes.OpenRevertCode) {
+        uint256 currentLots = currentSize / CfdTypes.SIZE_QUANTUM;
+        uint256 addedLots = sizeDelta / CfdTypes.SIZE_QUANTUM;
+        uint256 maximumLots = uint256(int256(type(int112).max));
+        if (currentLots > maximumLots || addedLots > maximumLots - currentLots) {
+            return CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
+        }
+        uint256 resultingLots = currentLots + addedLots;
+        if (params.bountyBps != 0) {
+            // The engine rejects prices whose reserve product overflows; preserve any lower valid price.
+            uint256 maximumNumericPrice = type(uint256).max / params.bountyBps / resultingLots;
+            if (maximumNumericPrice < minimumPrice) {
+                return CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
+            }
+            if (maximumPrice > maximumNumericPrice) {
+                maximumPrice = maximumNumericPrice;
+            }
+        }
+        if (
+            OpenAccountingLib.rawLiquidationRequirement(resultingLots, maximumPrice, params.bountyBps)
+                < params.minBountyAssets
+        ) {
+            return CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL;
+        }
+        if (currentSize == 0) {
+            // Only planner-valid fills matter: even the cheapest fill must meet minimum-position policy.
+            uint256 lotBountyBps = addedLots * params.bountyBps;
+            uint256 minimumSizePrice =
+                params.minBountyAssets == 0 ? 0 : Math.ceilDiv(params.minBountyAssets * 10_000, lotBountyBps);
+            if (minimumPrice < minimumSizePrice) {
+                minimumPrice = minimumSizePrice;
+            }
+            uint256 minimumReserve =
+                OpenAccountingLib.rawLiquidationRequirement(addedLots, minimumPrice, params.bountyBps);
+            uint256 minimumFees = (addedLots * minimumPrice * unavoidableFeeBps) / 10_000;
+            if (marginDelta < minimumReserve + minimumFees) {
+                return CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED;
+            }
+        }
+        return CfdEnginePlanTypes.OpenRevertCode.OK;
+    }
+
     /// @notice Replaces one position's post-carry margin inside its aggregate side-margin total.
     /// @dev Subtracts the replaced contribution first, avoiding an artificial signed-intermediate limit. Callers
     ///      supply a consistent aggregate and check headroom for the new contribution.

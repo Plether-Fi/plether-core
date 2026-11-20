@@ -124,45 +124,57 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                         assertTrue(vm.revertToState(startingState));
                         continue;
                     }
-                    uint256 actual = _amount(twin, kind);
-                    for (uint8 adjacent; adjacent < 3; adjacent++) {
-                        // A zero maximum has no tighter representable limit.
-                        if (adjacent == 1 && actual == 0 && !_minimum(kind)) {
-                            continue;
-                        }
-                        uint256 limit = adjacent == 0
-                            ? actual
-                            : adjacent == 1
-                                ? (_minimum(kind) ? actual + 1 : actual - 1)
-                                : (_minimum(kind) ? actual - 1 : actual + 1);
-                        OrderV3Types.OrderRequest memory request = _request(row);
-                        _setLimit(request, kind, limit);
-                        if (kind == 1 && adjacent == 1) {
-                            State memory before_ = _state();
-                            vm.expectRevert(
-                                abi.encodeWithSelector(
-                                    IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound.selector,
-                                    actual,
-                                    limit
-                                )
-                            );
-                            vm.prank(ACCOUNT);
-                            router.commitOrder(request);
-                            _assertCommitRollback(before_);
-                        } else {
-                            OrderV3Types.OrderReceipt memory receipt =
-                                _execute(row, request, adjacent == 1, kind, actual);
-                            if (adjacent != 1) {
-                                _assertGolden(row, receipt);
-                            }
-                        }
-                        assertTrue(vm.revertToState(startingState));
-                    }
+                    _probeBound(row, twin, kind, startingState);
                 }
                 vm.deleteStateSnapshot(startingState);
                 assertTrue(vm.revertToState(scenario));
                 vm.deleteStateSnapshot(scenario);
             }
+        }
+    }
+
+    function _probeBound(
+        Row memory row,
+        OrderV3Types.OrderReceipt memory twin,
+        uint8 kind,
+        uint256 startingState
+    ) private {
+        uint256 actual = _amount(twin, kind);
+        for (uint8 adjacent; adjacent < 3; adjacent++) {
+            // A zero maximum has no tighter representable limit.
+            if (adjacent == 1 && actual == 0 && !_minimum(kind)) {
+                continue;
+            }
+            uint256 limit = adjacent == 0
+                ? actual
+                : adjacent == 1
+                    ? (_minimum(kind) ? actual + 1 : actual - 1)
+                    : (_minimum(kind) ? actual - 1 : actual + 1);
+            OrderV3Types.OrderRequest memory request = _request(row);
+            _setLimit(request, kind, limit);
+            if (kind == 6 && adjacent == 1 && row.action < 2) {
+                State memory before_ = _state();
+                vm.expectRevert(IOrderRouterErrors.OrderRouter__ImpossibleExecutionRequest.selector);
+                vm.prank(ACCOUNT);
+                router.commitOrder(request);
+                _assertCommitRollback(before_);
+            } else if (kind == 1 && adjacent == 1) {
+                State memory before_ = _state();
+                vm.expectRevert(
+                    abi.encodeWithSelector(
+                        IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound.selector, actual, limit
+                    )
+                );
+                vm.prank(ACCOUNT);
+                router.commitOrder(request);
+                _assertCommitRollback(before_);
+            } else {
+                OrderV3Types.OrderReceipt memory receipt = _execute(row, request, adjacent == 1, kind, actual);
+                if (adjacent != 1) {
+                    _assertGolden(row, receipt);
+                }
+            }
+            assertTrue(vm.revertToState(startingState));
         }
     }
 
@@ -244,10 +256,10 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
     ) private view returns (OrderV3Types.OrderRequest memory request) {
         request.clientOrderId = bytes32(uint256(router.nextCommitId()) + 0xB000);
         request.side = row.side;
-        request.targetPrice = MARK;
+        request.isClose = row.action >= 2;
+        request.targetPrice = (row.side == CfdTypes.Side.LONG) != request.isClose ? 1 : CAP_PRICE;
         request.sizeDelta = row.action == 3 ? 2 * SIZE : SIZE;
         request.marginDelta = row.action < 2 ? MARGIN : 0;
-        request.isClose = row.action >= 2;
         request.bounds = OrderV3Types.ExecutionBounds({
             submitBy: uint64(vm.getBlockTimestamp() + 1 hours),
             executionWindowSeconds: 3600,

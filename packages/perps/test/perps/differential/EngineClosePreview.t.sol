@@ -316,7 +316,7 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 100_000e18, 4000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 900e6, CAP_PRICE, false);
 
         uint256 freeSettlementBeforePreview = _freeSettlementAssets(account);
 

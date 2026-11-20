@@ -6,11 +6,13 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineOpenQuoter} from "@plether/perps/CfdEngineOpenQuoter.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdOrderAdmissionValidator} from "@plether/perps/CfdOrderAdmissionValidator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {ICfdOrderAdmissionValidator} from "@plether/perps/interfaces/ICfdOrderAdmissionValidator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
@@ -41,6 +43,8 @@ contract CfdEngineLens is ICfdEngineLens {
 
     /// @notice Stateless search helper, deployed with the lens to isolate its runtime bytecode budget.
     CfdEngineOpenQuoter internal immutable openQuoter;
+    /// @inheritdoc ICfdEngineLens
+    ICfdOrderAdmissionValidator public immutable orderAdmissionValidator;
 
     /// @notice Binds the lens to one engine instance.
     /// @dev Performs no zero-address, code-size, or interface validation. Invalid bindings can deploy successfully but
@@ -51,6 +55,7 @@ contract CfdEngineLens is ICfdEngineLens {
     ) {
         engineContract = CfdEngine(engine_);
         openQuoter = new CfdEngineOpenQuoter();
+        orderAdmissionValidator = new CfdOrderAdmissionValidator(engine_);
     }
 
     /// @notice Returns the engine address inspected by this lens.
@@ -150,6 +155,30 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 oraclePrice
     ) external view returns (uint8 code) {
         return uint8(_previewOpen(account, side, sizeDelta, marginDelta, oraclePrice).invalidReason);
+    }
+
+    /// @inheritdoc ICfdEngineLens
+    function previewOpenCommitRevertCode(
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint256 executionBountyAssets
+    ) external view returns (uint8 code) {
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, engineContract.pool().totalAssets());
+        CfdTypes.Order memory order = CfdTypes.Order({
+            account: account,
+            sizeDelta: sizeDelta,
+            marginDelta: marginDelta,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: side,
+            isClose: false
+        });
+        return engineContract.planner().planOpenCommit(snap, order, oraclePrice, executionBountyAssets);
     }
 
     /// @notice Classifies the same open plan for commit-time and execution-only router failure policy.

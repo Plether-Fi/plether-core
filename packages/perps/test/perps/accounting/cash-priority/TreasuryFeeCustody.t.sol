@@ -78,7 +78,7 @@ contract LiquidationBountyForfeitureTest is BasePerpTest {
         _open(counterAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, CAP_PRICE, false);
 
         uint256 forfeitedBounty = _executionBountyReserve(1);
         uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());

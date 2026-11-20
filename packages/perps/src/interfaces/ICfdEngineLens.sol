@@ -4,11 +4,15 @@ pragma solidity 0.8.35;
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {ICfdOrderAdmissionValidator} from "@plether/perps/interfaces/ICfdOrderAdmissionValidator.sol";
 
 /// @notice Read-only planner and liquidation diagnostics for the CFD engine.
 /// @dev The lens does not ingest Pyth data, validate oracle freshness, or mutate engine state. Callers supply candidate
 ///      prices. settlement token amounts use 6 decimals, prices use 8 decimals, and sizes use 18 decimals.
 interface ICfdEngineLens {
+
+    /// @notice Immutable read-only admission helper bound to the same engine as this lens.
+    function orderAdmissionValidator() external view returns (ICfdOrderAdmissionValidator);
 
     /// @notice The interval budget was exhausted; no approximate or partial maximum is returned.
     error CfdEngineLens__QuoteSearchLimitExceeded();
@@ -108,6 +112,17 @@ interface ICfdEngineLens {
         uint256 sizeDelta,
         uint256 marginDelta,
         uint256 oraclePrice
+    ) external view returns (uint8 code);
+
+    /// @notice Previews OPEN planning after the same order's execution bounty is reserved from free settlement.
+    /// @dev Committed margin remains available, matching its release before execution assessment.
+    function previewOpenCommitRevertCode(
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint256 executionBountyAssets
     ) external view returns (uint8 code);
 
     /// @notice Previews how an open/increase failure would be categorized by router policy.

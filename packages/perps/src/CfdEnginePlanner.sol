@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {CloseCommitmentLib} from "@plether/perps/libraries/CloseCommitmentLib.sol";
 import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
@@ -78,6 +79,28 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         uint256 executionPrice
     ) external pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         return CfdEnginePlanLib.planOpen(snap, order, executionPrice);
+    }
+
+    /// @inheritdoc ICfdEnginePlanner
+    function planOpenCommit(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Order memory order,
+        uint256 executionPrice,
+        uint256 executionBountyAssets
+    ) external pure returns (uint8 code) {
+        // Match the clearinghouse's carry checkpoint before locking reserved settlement.
+        CfdEnginePlanLib.projectCloseCommitCarry(snap);
+        if (snap.accountBuckets.freeSettlementAssets < executionBountyAssets) {
+            revert IOrderRouterErrors.OrderRouter__InsufficientFreeEquity();
+        }
+        snap.accountBuckets.freeSettlementAssets -= executionBountyAssets;
+        snap.accountBuckets.otherLockedMarginAssets += executionBountyAssets;
+        snap.accountBuckets.totalLockedMarginAssets += executionBountyAssets;
+        snap.lockedBuckets.reservedSettlementAssets += executionBountyAssets;
+        snap.lockedBuckets.totalLockedMarginAssets += executionBountyAssets;
+        snap.actionReserveAssets += executionBountyAssets;
+        snap.protectedExecutionBountyAssets += executionBountyAssets;
+        return uint8(CfdEnginePlanLib.planOpen(snap, order, executionPrice).revertCode);
     }
 
     /// @notice Plans a close or same-side decrease without reading or mutating protocol state.

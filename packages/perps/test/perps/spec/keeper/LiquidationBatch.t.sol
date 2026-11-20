@@ -253,7 +253,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         uint64 firstOrderId = router.nextCommitId();
         vm.startPrank(account);
         for (uint256 i = 0; i < maxPendingOrders; i++) {
-            router.commitOrder(CfdTypes.Side.LONG, 100e18, 2e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 100e18, 2e6, CAP_PRICE, false);
         }
         vm.stopPrank();
 

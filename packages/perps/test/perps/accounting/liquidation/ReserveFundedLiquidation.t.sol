@@ -193,7 +193,7 @@ contract PriceAndActionReservePriorityLiquidationTest is BasePerpTest {
         uint64 queuedOrderId = router.nextCommitId();
         uint256 committedMarginAssets = _freeSettlementAssets(account) - 200_000;
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, committedMarginAssets, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, committedMarginAssets, CAP_PRICE, false);
 
         uint256 committedBefore = router.getAccountReservations(account).committedMarginAssets;
         assertEq(_freeSettlementAssets(account), 0, "Setup must shelter all non-bounty free settlement in the queue");

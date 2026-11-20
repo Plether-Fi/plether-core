@@ -161,6 +161,8 @@ interface IOrderRouterErrors {
     /// @notice Commit-time planner preflight identified a predictably invalid open/increase.
     /// @param code Numeric `CfdEnginePlanTypes.OpenRevertCode` returned by the engine lens.
     error OrderRouter__PredictableOpenInvalid(uint8 code);
+    /// @notice The fixed target or financial bounds cannot permit any execution of the requested order.
+    error OrderRouter__ImpossibleExecutionRequest();
     /// @notice A liquidation batch was empty or exceeded the hard 256-account bound.
     error OrderRouter__InvalidLiquidationBatchSize();
 

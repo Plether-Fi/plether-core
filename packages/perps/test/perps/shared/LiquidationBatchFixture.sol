@@ -167,7 +167,7 @@ abstract contract LiquidationBatchTestFixture is BasePerpTest {
     ) internal returns (uint64 orderId) {
         orderId = router.nextCommitId();
         vm.prank(account);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, marginAssets, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, marginAssets, CAP_PRICE, false);
     }
 
     function _positionSize(
