@@ -50,7 +50,7 @@ contract HousePoolRedemptionMathLibTest is Test {
     }
 
     function test_SidecarImplementationIdIsStable() public view {
-        assertEq(sidecar.implementationId(), keccak256("Plether.HousePoolRedemptionMathSidecar.v1"));
+        assertEq(sidecar.implementationId(), keccak256("Plether.HousePoolRedemptionMathSidecar.v2"));
     }
 
     function test_NetAssetsForShares_AppliesBothFloorsInOrder() public view {

@@ -235,7 +235,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         }
         IHousePoolRedemptionMathSidecar redemptionMathSidecar = IHousePoolRedemptionMathSidecar(_redemptionMathSidecar);
         try redemptionMathSidecar.implementationId() returns (bytes32 implementationId) {
-            if (implementationId != keccak256("Plether.HousePoolRedemptionMathSidecar.v1")) {
+            if (implementationId != keccak256("Plether.HousePoolRedemptionMathSidecar.v2")) {
                 revert HousePool__InvalidRedemptionMathSidecar();
             }
         } catch {
@@ -1554,11 +1554,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         bool markFresh = _markIsFreshForReconcile(accountingSnapshot, statusSnapshot);
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot =
             HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets = _getPendingClaimantBuckets();
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets =
-            _settleablePendingClaimantBuckets(reconcileSnapshot, claimantBuckets);
+        (
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets,
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets
+        ) = _getPendingClaimantBucketsForReconcile(accountingSnapshot, reconcileSnapshot);
+        // Receipts already spent on trader payouts cannot remain as future LP revenue reservations.
+        pendingTradingRevenueAssets = claimantBuckets.revenueAssets;
         bool allowRevenueContinuation = seniorPrincipal + juniorPrincipal != 0;
-        HousePoolReconcilePlanLib.ReconcilePlan memory plan = HousePoolReconcilePlanLib.planReconcile(
+        HousePoolReconcilePlanLib.ReconcilePlan memory plan = REDEMPTION_MATH_SIDECAR.planReconcile(
             _currentPendingAccountingState(),
             reconcileSnapshot,
             _pendingClaimantBucketAssets(settleableClaimantBuckets),
@@ -1607,9 +1610,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         ctx.statusSnapshot = statusSnapshot;
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot =
             HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets = _getPendingClaimantBuckets();
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets =
-            _settleablePendingClaimantBuckets(reconcileSnapshot, claimantBuckets);
+        (
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets,
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets
+        ) = _getPendingClaimantBucketsForReconcile(accountingSnapshot, reconcileSnapshot);
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory residualClaimantBuckets =
             HousePoolPendingPreviewLib.subtractClaimantBuckets(claimantBuckets, settleableClaimantBuckets);
         ctx.residualPendingClaimantAssets = _pendingClaimantBucketAssets(residualClaimantBuckets);
@@ -1641,7 +1645,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         bool markFresh = _markIsFreshForReconcile(accountingSnapshot, statusSnapshot);
         uint256 couponElapsed =
             block.timestamp > lastSeniorCouponCheckpointTime ? block.timestamp - lastSeniorCouponCheckpointTime : 0;
-        HousePoolReconcilePlanLib.ReconcilePlan memory plan = HousePoolReconcilePlanLib.planReconcile(
+        HousePoolReconcilePlanLib.ReconcilePlan memory plan = REDEMPTION_MATH_SIDECAR.planReconcile(
             pendingState,
             reconcileSnapshot,
             _pendingClaimantBucketAssets(settleableClaimantBuckets),
@@ -1777,6 +1781,32 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         buckets.revenueAssets = pendingTradingRevenueAssets;
     }
 
+    /// @dev Retires trading receipts no longer backed above the existing ownerless reserve and recap intent.
+    ///      Terminal receivables still back claimant intent; trader claims and terminal payables only defer settlement.
+    ///      The same normalization is used by live reconciliation and every pending-accounting preview.
+    function _getPendingClaimantBucketsForReconcile(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot
+    )
+        internal
+        view
+        returns (
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory buckets,
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableBuckets
+        )
+    {
+        buckets = _getPendingClaimantBuckets();
+        (buckets.revenueAssets, settleableBuckets.recapitalizationAssets, settleableBuckets.revenueAssets) =
+            REDEMPTION_MATH_SIDECAR.capPendingClaimantBuckets(
+                accountingSnapshot.physicalAssets,
+                accountingSnapshot.terminalLpPriceDeltaAssets,
+                reconcileSnapshot.distributable,
+                unassignedAssets,
+                buckets.recapitalizationAssets,
+                buckets.revenueAssets
+            );
+    }
+
     function _decreasePendingClaimantBuckets(
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets
     ) internal {
@@ -1817,13 +1847,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets
     ) internal pure returns (uint256) {
         return HousePoolPendingPreviewLib.claimantBucketAssets(claimantBuckets);
-    }
-
-    function _settleablePendingClaimantBuckets(
-        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot,
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets
-    ) internal pure returns (HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets) {
-        return HousePoolPendingPreviewLib.capClaimantBuckets(claimantBuckets, reconcileSnapshot.distributable);
     }
 
     function _getHousePoolInputSnapshot()

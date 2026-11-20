@@ -247,7 +247,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         );
         require(deployed.terminalNavBook.SIZE_QUANTUM() == 1e20, "Position quantum mismatch");
         require(
-            deployed.redemptionMathSidecar.implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
+            deployed.redemptionMathSidecar.implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v2"),
             "Redemption math implementation mismatch"
         );
 

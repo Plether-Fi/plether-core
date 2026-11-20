@@ -649,6 +649,14 @@ Rules:
 - claimant continuity should prefer seeded ownership paths when available,
 - only value with no safe claimant path belongs in `unassignedAssets`.
 
+Pending trading revenue is capped at canonical physical assets plus collectible terminal receivables, above the
+existing unassigned reserve and the full pending recapitalization intent. Revenue above that backing is written off
+during reconciliation, so trader payouts cannot leave an unbacked gross receipt reserved as future LP income.
+Outstanding trader claims and terminal payables can defer settlement of backed revenue without writing it off.
+Settleable claimant buckets are capped at terminal
+distributable equity above the existing unassigned reserve. Live reconciliation and pending-accounting previews use
+the same caps and residual reservations.
+
 `unassignedAssets` should be exceptional telemetry, not a normal operating bucket.
 
 ## Economic Depth For Carry And Risk Pricing
