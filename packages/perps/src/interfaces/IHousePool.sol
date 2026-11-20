@@ -410,6 +410,7 @@ interface IHousePool {
     ///      Reconciles, assigns the entire unassigned balance, and asks the selected configured vault to mint shares.
     ///      No settlement token moves and the tranche seed-lifecycle flag is not initialized by this action. Senior assignment is
     ///      bounded by the active capacity limits, which are neutral before the first governed configuration.
+    ///      Junior assignment requires Senior principal to be at least its high-water mark after reconciliation.
     /// @param toSenior True to assign assets to senior, false to junior
     /// @param receiver Account receiving bootstrap tranche shares
     function assignUnassignedAssets(

@@ -654,6 +654,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     ///      reconciles first, assigns the entire resulting `unassignedAssets` balance to the selected tranche,
     ///      and asks its configured vault to mint matching shares. No settlement token moves and this does not initialize the
     ///      tranche seed-lifecycle flag. Prevents later LPs from implicitly capturing previously ownerless value.
+    ///      Junior assignment requires Senior principal to be at least its high-water mark after reconciliation.
     /// @param toSenior True to assign assets to senior, false to junior
     /// @param receiver Account receiving bootstrap tranche shares
     function assignUnassignedAssets(
@@ -664,10 +665,13 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             revert HousePool__ZeroAddress();
         }
 
-        HousePoolContext memory ctx = _buildCurrentHousePoolContext();
-        _requireBootstrapOracleLive(ctx.statusSnapshot);
-        _requireFreshMark(ctx.accountingSnapshot, ctx.statusSnapshot);
-        _reconcile(ctx.accountingSnapshot);
+        (
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
+        ) = _getHousePoolSnapshots();
+        _requireBootstrapOracleLive(statusSnapshot);
+        _requireFreshMark(accountingSnapshot, statusSnapshot);
+        _reconcile(accountingSnapshot, statusSnapshot);
 
         uint256 amount = unassignedAssets;
         if (amount == 0) {
@@ -675,25 +679,19 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         }
         if (toSenior) {
             _requireSeniorDepositCapacity(amount, _getWaterfallState());
+        } else if (seniorPrincipal < seniorHighWaterMark) {
+            revert HousePool__SeniorImpaired();
         }
 
         address targetVault = toSenior ? seniorVault : juniorVault;
         if (targetVault == address(0)) {
             revert HousePool__ZeroAddress();
         }
-        uint256 shares = ITrancheVaultBootstrap(targetVault).quoteBootstrapDeposit(amount);
-        if (shares == 0) {
-            revert HousePool__BootstrapSharesZero();
-        }
+        uint256 shares = _quoteBootstrapShares(targetVault, amount);
 
         if (toSenior) {
-            if (seniorPrincipal == 0) {
-                seniorPrincipal = amount;
-                seniorHighWaterMark = amount;
-            } else {
-                seniorPrincipal += amount;
-                seniorHighWaterMark += amount;
-            }
+            seniorHighWaterMark = seniorPrincipal == 0 ? amount : seniorHighWaterMark + amount;
+            seniorPrincipal += amount;
         } else {
             juniorPrincipal += amount;
         }
@@ -734,10 +732,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         _requireBootstrapOracleLive(statusSnapshot);
         _reconcile(_getHousePoolInputSnapshot());
 
-        uint256 shares = ITrancheVaultBootstrap(targetVault).quoteBootstrapDeposit(amount);
-        if (shares == 0) {
-            revert HousePool__BootstrapSharesZero();
-        }
+        uint256 shares = _quoteBootstrapShares(targetVault, amount);
 
         _checkpointSeniorCouponBeforePrincipalMutation();
         if (toSenior) {
@@ -1485,6 +1480,16 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
                 statusSnapshot.lastMarkTime, poolConfig.markStalenessLimit, block.timestamp
             )) {
             revert HousePool__MarkPriceStale();
+        }
+    }
+
+    function _quoteBootstrapShares(
+        address vault,
+        uint256 assets
+    ) private view returns (uint256 shares) {
+        shares = ITrancheVaultBootstrap(vault).quoteBootstrapDeposit(assets);
+        if (shares == 0) {
+            revert HousePool__BootstrapSharesZero();
         }
     }
 
