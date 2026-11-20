@@ -1001,11 +1001,8 @@ contract GasProfileTest is RecordedOrderReceipts {
         assertEq(economics.executionFeeAssets, notional * 4 / 10_000, "trade pays its exact 4-bps fee");
         assertEq(economics.frozenSpreadAssets, 0, "trade sample uses live execution");
         assertGe(economics.carryAssets, 0);
-        uint256 carry = uint256(economics.carryAssets);
-        // Close receipts include commitment-time carry, while this snapshot is taken after commitment.
-        if (beforeTrade.isClose) {
-            carry -= receipt.commitment.carryCollectedAssets;
-        }
+        // Receipts include commitment-time carry for opens and closes; this snapshot is taken after commitment.
+        uint256 carry = uint256(economics.carryAssets) - receipt.commitment.carryCollectedAssets;
         int256 action = economics.vpiAssets + int256(economics.executionFeeAssets);
         uint256 charge = action > 0 ? uint256(action) : 0;
         uint256 expectedMargin;

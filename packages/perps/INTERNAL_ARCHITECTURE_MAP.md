@@ -97,9 +97,11 @@ address but are not recognized Pool assets. [Accounting specification](ACCOUNTIN
    `depositFor` instead credits free settlement without a carry checkpoint or position-margin allocation. Neither
    deposit automatically adds isolated position margin; the owner uses `CfdEngine.addMargin` for that.
 2. **Commit:** the Router validates the request, checkpoints applicable carry, reserves opening margin/bounty or
-   records a zero close bounty, and appends the order to FIFO. The lifecycle Book retains identity, bounds and timing.
+   records a zero close bounty, and appends the order to FIFO. For opens, it records actual carry collection across
+   both reservations and their final custody snapshots. The lifecycle Book retains identity, bounds, timing and carry effects.
 3. **Execute:** the Router resolves the signed execution price, evaluates the pinned financial policy, and calls the
-   Engine. The Engine updates exposure and settles through Clearinghouse/Pool authority. The Book authenticates the
+   Engine. Open and close policy checks count recorded commitment carry once together with execution charges.
+   The Engine updates exposure and settles through Clearinghouse/Pool authority. The Book authenticates the
    terminal receipt. A retryable failure leaves the order pending.
 4. **Settle price P&L:** losses consume same-account claims and PnL pledge up to the collectible cap. Uncollectible
    price loss is reported as a write-off, not a new asset or debt. Profits become Clearinghouse cash or an unpaid

@@ -324,10 +324,52 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         return (proposedOrderId, intentHash, false);
     }
 
+    /// @inheritdoc IOrderLifecycleBook
+    function recordCommitment(
+        uint64 orderId,
+        CfdEnginePlanTypes.CloseCommitment calldata effects,
+        bool isClose
+    ) external onlyRouter {
+        if (isClose) {
+            _recordCommitment(orderId, effects);
+        } else {
+            _recordOpenCommitment(orderId, effects.settlementBeforeAssets);
+        }
+    }
+
+    function _recordOpenCommitment(
+        uint64 orderId,
+        uint256 settlementBeforeAssets
+    ) private {
+        StoredPendingIntent storage pending = _pendingIntents[orderId];
+        if (pending.account == address(0)) {
+            revert OrderLifecycleBook__OrderNotPending(orderId);
+        }
+        IMarginClearinghouse.AccountAssetBuckets memory afterBuckets =
+            IMarginClearinghouse(CLEARINGHOUSE).getAccountAssetBuckets(pending.account);
+        CfdEnginePlanTypes.CloseCommitment memory effects;
+        // Reservations only reclassify custody except for their carry checkpoints. Measure across both hooks,
+        // including a margin-only reservation, and retain the actual final custody classification.
+        effects.carryCollectedAssets = settlementBeforeAssets - afterBuckets.settlementBalanceAssets;
+        effects.carryOutstandingAssets = ICfdEngineCore(ENGINE).unsettledCarryAssets(pending.account);
+        effects.bountyFromFreeAssets = pending.executionBountyAssets;
+        effects.settlementBeforeAssets = settlementBeforeAssets;
+        effects.settlementAfterAssets = afterBuckets.settlementBalanceAssets;
+        effects.freeSettlementAfterAssets = afterBuckets.freeSettlementAssets;
+        _recordCommitment(orderId, effects);
+    }
+
     function recordCommitment(
         uint64 orderId,
         CfdEnginePlanTypes.CloseCommitment calldata effects
     ) external onlyRouter {
+        _recordCommitment(orderId, effects);
+    }
+
+    function _recordCommitment(
+        uint64 orderId,
+        CfdEnginePlanTypes.CloseCommitment memory effects
+    ) private {
         StoredPendingIntent storage pending = _pendingIntents[orderId];
         if (pending.account == address(0)) {
             revert OrderLifecycleBook__OrderNotPending(orderId);

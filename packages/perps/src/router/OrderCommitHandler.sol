@@ -29,8 +29,8 @@ abstract contract OrderCommitHandler is OrderValidation {
         clearinghouse.recordBountyReservation(
             account, IMarginClearinghouse.BountyKind.Order, orderId, executionBountyAssets
         );
-        _onOrderCommitted(order, effects);
         _reserveCommittedMargin(account, orderId, order.isClose, order.marginDelta);
+        _onOrderCommitted(order, effects);
 
         _recordCommittedOrder(order);
     }

@@ -3193,9 +3193,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(bounty.freeFundedAssets, o.bountyFree);
         assertEq(bounty.freeFundedAssets, bounty.amountAssets);
         assertEq(uint8(bounty.state), uint8(IMarginClearinghouse.BountyReservationState.Active));
-        if (o.request.isClose) {
-            assertEq(intent.commitment.carryCollectedAssets, committedCarry[id]);
-        }
+        assertEq(intent.commitment.carryCollectedAssets, committedCarry[id]);
     }
 
     function _assertTerminalOrder(

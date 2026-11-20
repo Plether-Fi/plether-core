@@ -117,11 +117,13 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
             }
             return _reserveCloseExecutionBounty(account, sizeDelta);
         }
+        IMarginClearinghouse.AccountAssetBuckets memory beforeBuckets = clearinghouse.getAccountAssetBuckets(account);
+        effects.settlementBeforeAssets = beforeBuckets.settlementBalanceAssets;
         effects.bountyFromFreeAssets = bounty;
         if (bounty == 0) {
             return effects;
         }
-        if (clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets < bounty) {
+        if (beforeBuckets.freeSettlementAssets < bounty) {
             revert OrderRouter__InsufficientFreeEquity();
         }
         clearinghouse.lockReservedSettlement(account, bounty);
