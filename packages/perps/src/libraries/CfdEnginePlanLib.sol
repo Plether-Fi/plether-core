@@ -541,7 +541,7 @@ library CfdEnginePlanLib {
             && (change >= 0 || previous > type(int256).min - change);
     }
 
-    /// @notice Allocates newly required VPI and liquidation reserves from free cash and new position pledge.
+    /// @notice Funds reserve increases and returns excess liquidation reserve to position pledge.
     function _planOpenReserveFunding(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan,
@@ -549,10 +549,9 @@ library CfdEnginePlanLib {
     ) private pure {
         delta.liquidationReserveBeforeAssets = snap.liquidationReserveAssets;
         delta.liquidationReserveAfterAssets = delta.openState.liquidationReserveTargetAssets;
-        if (delta.liquidationReserveAfterAssets < delta.liquidationReserveBeforeAssets) {
-            delta.liquidationReserveAfterAssets = delta.liquidationReserveBeforeAssets;
-        }
-        uint256 reserveIncreaseAssets = delta.liquidationReserveAfterAssets - delta.liquidationReserveBeforeAssets;
+        uint256 reserveIncreaseAssets = delta.liquidationReserveAfterAssets > delta.liquidationReserveBeforeAssets
+            ? delta.liquidationReserveAfterAssets - delta.liquidationReserveBeforeAssets
+            : 0;
 
         uint256 newPledgeAvailableAssets = openCostPlan.resultingPositionMarginAssets > snap.position.margin
             ? openCostPlan.resultingPositionMarginAssets - snap.position.margin
@@ -576,6 +575,9 @@ library CfdEnginePlanLib {
         }
         delta.positionMarginAfterOpen =
             openCostPlan.resultingPositionMarginAssets - delta.vpiRebateReserveFromPledgeAssets - reserveIncreaseAssets;
+        if (delta.liquidationReserveBeforeAssets > delta.liquidationReserveAfterAssets) {
+            delta.positionMarginAfterOpen += delta.liquidationReserveBeforeAssets - delta.liquidationReserveAfterAssets;
+        }
     }
 
     /// @notice Projects the same size-independent carry collection used by open planning, in place.

@@ -1033,11 +1033,8 @@ contract GasProfileTest is RecordedOrderReceipts {
                 reserve = beforeTrade.liquidationReserve;
             }
         } else {
-            if (reserve < beforeTrade.liquidationReserve) {
-                reserve = beforeTrade.liquidationReserve;
-            }
             expectedMargin = beforeTrade.margin + beforeTrade.marginDelta - carry - charge
-                - (reserve - beforeTrade.liquidationReserve);
+                + beforeTrade.liquidationReserve - reserve;
         }
         int256 expectedCash =
             int256(beforeTrade.balance) - int256(carry) - action + pnl - int256(expectedClaim + receipt.bountyAssets);
