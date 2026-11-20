@@ -1037,16 +1037,13 @@ contract GasProfileTest is RecordedOrderReceipts {
             if (reserve < beforeTrade.liquidationReserve) {
                 reserve = beforeTrade.liquidationReserve;
             }
-            int256 accruedVpiAfter = beforeTrade.accruedVpi + economics.vpiAssets;
-            uint256 vpiReserveBefore = beforeTrade.accruedVpi < 0 ? uint256(-beforeTrade.accruedVpi) : 0;
-            uint256 vpiReserveAfter = accruedVpiAfter < 0 ? uint256(-accruedVpiAfter) : 0;
-            // The order's net rebate covers reserve growth first. Its pledge funds any shortfall.
-            uint256 rebate = action < 0 ? uint256(-action) : 0;
-            uint256 vpiReserveFromPledge =
-                vpiReserveAfter > vpiReserveBefore + rebate ? vpiReserveAfter - vpiReserveBefore - rebate : 0;
             expectedMargin = beforeTrade.margin + beforeTrade.marginDelta - carry - charge
-                - (reserve - beforeTrade.liquidationReserve) - vpiReserveFromPledge;
+                - (reserve - beforeTrade.liquidationReserve);
+            // The order's net rebate covers reserve growth first. Its pledge funds any shortfall.
+            (uint256 vpiReserveAfter, uint256 vpiReserveFromPledge) =
+                _expectedOpenVpiReserve(beforeTrade.accruedVpi, economics.vpiAssets, action);
             assertEq(clearinghouse.vpiRebateReserveAssets(receipt.account), vpiReserveAfter);
+            expectedMargin -= vpiReserveFromPledge;
         }
         int256 expectedCash =
             int256(beforeTrade.balance) - int256(carry) - action + pnl - int256(expectedClaim + receipt.bountyAssets);
@@ -1066,6 +1063,18 @@ contract GasProfileTest is RecordedOrderReceipts {
         assertEq(
             engine.positionEntryCostAssetAtoms(receipt.account), expectedEntryCost, "trade installs exact entry basis"
         );
+    }
+
+    function _expectedOpenVpiReserve(
+        int256 accruedVpi,
+        int256 vpiDelta,
+        int256 action
+    ) private pure returns (uint256 reserveAfter, uint256 reserveFromPledge) {
+        int256 accruedVpiAfter = accruedVpi + vpiDelta;
+        uint256 reserveBefore = accruedVpi < 0 ? uint256(-accruedVpi) : 0;
+        reserveAfter = accruedVpiAfter < 0 ? uint256(-accruedVpiAfter) : 0;
+        uint256 rebate = action < 0 ? uint256(-action) : 0;
+        reserveFromPledge = reserveAfter > reserveBefore + rebate ? reserveAfter - reserveBefore - rebate : 0;
     }
 
     function _assertExecutedPositionAndReservation(
