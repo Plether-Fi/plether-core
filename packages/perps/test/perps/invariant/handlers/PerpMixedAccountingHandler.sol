@@ -1917,11 +1917,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (orders.count(i) == 5 || traders[i].lots == 0) {
             return;
         }
-        uint256 projected = orders.queuedLots(i, traders[i].lots, riskOffCutoff);
-        if (projected == 0) {
+        uint256 closeableLots = _closeableLots(i);
+        if (closeableLots == 0) {
             return;
         }
-        uint256 lots = full ? projected : bound(lotsSeed, 1, projected);
+        uint256 lots = full ? closeableLots : bound(lotsSeed, 1, closeableLots);
         if (lots < traders[i].lots) {
             _ensurePledge(i, traders[i].lots * 60e6);
         }
@@ -2061,8 +2061,20 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             ++rejectedCloseOnlyCommits;
             return 0;
         }
-        uint256 queuedLots = orders.queuedLots(i, traders[i].lots, riskOffCutoff);
-        bool belowMinimum = lots * currentPrice < router.minOpenNotionalAssets() && (!isClose || lots < queuedLots);
+        if (isClose) {
+            uint256 closeableLots = _closeableLots(i);
+            if (lots > closeableLots) {
+                bytes4 selector = closeableLots == 0
+                    ? IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector
+                    : IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector;
+                _rejectCommit(i, request, abi.encodeWithSelector(selector));
+                ++rejectedCloseCommitments;
+                ++rejectedQueuedCloseSize;
+                return 0;
+            }
+        }
+        bool belowMinimum = lots * currentPrice < router.minOpenNotionalAssets()
+            && (!isClose || lots < orders.queuedLots(i, traders[i].lots, riskOffCutoff));
         if (belowMinimum) {
             vm.prank(actorAt(i));
             vm.expectRevert(
@@ -2084,9 +2096,6 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             if (rejection.length != 0) {
                 _rejectCommit(i, request, rejection);
                 ++rejectedCloseCommitments;
-                if (lots > traders[i].lots) {
-                    ++rejectedQueuedCloseSize;
-                }
                 return 0;
             }
         }
@@ -2151,17 +2160,19 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(router.lifecycleBook().clientIntent(actorAt(i), request.clientOrderId).orderId, 0);
     }
 
+    function _closeableLots(
+        uint256 i
+    ) internal view returns (uint256) {
+        uint256 liveLots = traders[i].lots;
+        uint256 pendingCloseLots = orders.pendingCloseLots(i);
+        return liveLots > pendingCloseLots ? liveLots - pendingCloseLots : 0;
+    }
+
     function _closeCommitFailure(
         uint256 i,
         uint256 lots
     ) internal view returns (bytes memory) {
         Trader memory t = traders[i];
-        if (t.lots == 0) {
-            return abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__NoOpenPosition.selector);
-        }
-        if (lots > t.lots) {
-            return abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__CloseSizeExceedsPosition.selector);
-        }
         CarryReferenceLedger.Collection memory c = carry.previewCheckpoint(actorAt(i), vm.getBlockTimestamp());
         uint256 pledge = t.margin - c.fromMargin;
         if (lots == t.lots) {
@@ -3388,7 +3399,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertGt(traders[i].lots, 0);
         _deposit(i, 1);
         _withdraw(i, _free(i));
-        uint64 first = _commitTrade(i, traders[i].lots, 0, true);
+        uint256 firstLots = traders[i].lots / 2;
+        uint64 first = _commitTrade(i, firstLots, 0, true);
         assertGt(first, 0);
         assertEq(orders.order(first).bountyAssets, 0);
         uint256 nextBounty = 17 * currentPrice / 10_000;
@@ -3402,7 +3414,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint64 later = _commitTrade(i, 17, 1020e6, false);
         assertGt(later, first);
         assertEq(_free(i), 0);
-        uint64 last = _commitTrade(i, 17, 0, true);
+        uint64 last = _commitTrade(i, traders[i].lots - firstLots, 0, true);
         assertGt(last, later, "unpaid later close requires no pledge reservation restriction");
         ++closeOpenCloseHistories;
         vm.warp(vm.getBlockTimestamp() + 61);

@@ -1116,9 +1116,10 @@ liquidation-reserve carve-out. It also checks the pool's post-trade settlement b
 skew cap is allowed only when it strictly reduces the existing imbalance without making its own side heavier.
 
 An open must match the position projected through earlier queued orders. A full queued close can project the account
-flat and permit an opposite-side open, but execution rechecks actual state if that earlier close fails. Similarly, a
-queued close must match the live position's side at execution. Unsupported numeric inputs are rejected explicitly
-rather than admitted as orders that can only fail with arithmetic errors.
+flat and permit an opposite-side open. Execution rechecks actual state if that earlier close fails. A new close is
+limited to the live size minus earlier same-side queued closes, and pending opens and increases contribute no size to
+that limit. A queued close must match the live position's side at execution. Admission rejects unsupported numeric
+inputs explicitly.
 
 Preview and execution use the same planner for carry, exact entry basis, rebate credit, reserve funding, collateral
 health, and solvency. [Order timing](CANONICAL_ENTRYPOINTS.md#order-timing) describes admission versus execution rules.

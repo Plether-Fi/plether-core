@@ -98,11 +98,11 @@ interface IOrderDelegatedLogicRefundAdmin {
 ///      Router's EIP-170 runtime and EIP-3860 creation input.
 abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
-    /// @notice Minimal projected position used by delegated close-commit validation.
+    /// @notice Minimal projected position used by delegated order admission.
     struct QueuedPositionView {
-        bool exists;
         CfdTypes.Side side;
         uint256 size;
+        uint256 closeableSize;
     }
 
     /// @notice Dedicated rejection ABI for direct or foreign-context liquidation-batch calls.
@@ -349,13 +349,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) private view {
         ICfdEngineCore engine = host.engine();
         QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
-        OrderValidationLib.validateCloseCommit(
-            queuedPosition.exists, queuedPosition.size, queuedPosition.side, side, sizeDelta
-        );
+        // A positive closeable size means the projected position has never gone flat, so its side is still live.
+        OrderValidationLib.validateCloseCommit(queuedPosition.closeableSize, queuedPosition.side, side, sizeDelta);
 
         uint256 commitPrice = _commitReferencePrice(engine);
-        // Admission already checked lot alignment; the projected size is bounded by the Engine's uint112 lots
-        // and the Router's bounded pending-order count, while commitPrice is capped.
+        // A below-minimum close must still flatten the projected position if earlier increases fill.
         if (
             sizeDelta < queuedPosition.size
                 && (sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice < host.minOpenNotionalAssets()
@@ -370,27 +368,23 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         address account
     ) private view returns (QueuedPositionView memory queuedPosition) {
         (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(account);
-        if (positionSize != 0) {
-            queuedPosition.exists = true;
-            queuedPosition.side = side;
-            queuedPosition.size = positionSize;
-        }
+        queuedPosition.side = side;
+        queuedPosition.size = positionSize;
+        queuedPosition.closeableSize = positionSize;
 
         uint64 riskOffCutoff = IOrderRouterEmergencyAdmin(host.admin()).riskOffOrderCutoff();
         for (uint64 orderId = host.accountHeadOrderId(account); orderId != 0;) {
             (IOrderRouterAccounting.PendingOrderView memory pending, uint64 nextOrderId) =
                 host.getPendingOrderView(orderId);
-            if (riskOffCutoff == 0 || orderId > riskOffCutoff || pending.isClose) {
-                if (pending.isClose) {
-                    if (queuedPosition.exists && pending.side == queuedPosition.side) {
-                        queuedPosition.size =
-                            queuedPosition.size > pending.sizeDelta ? queuedPosition.size - pending.sizeDelta : 0;
-                        if (queuedPosition.size == 0) {
-                            queuedPosition.exists = false;
-                        }
-                    }
-                } else if (!queuedPosition.exists) {
-                    queuedPosition.exists = true;
+            if (pending.isClose) {
+                if (pending.side == side) {
+                    queuedPosition.closeableSize = _reduceSize(queuedPosition.closeableSize, pending.sizeDelta);
+                }
+                if (pending.side == queuedPosition.side) {
+                    queuedPosition.size = _reduceSize(queuedPosition.size, pending.sizeDelta);
+                }
+            } else if (orderId > riskOffCutoff) {
+                if (queuedPosition.size == 0) {
                     queuedPosition.side = pending.side;
                     queuedPosition.size = pending.sizeDelta;
                 } else if (pending.side == queuedPosition.side) {
@@ -399,6 +393,13 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             }
             orderId = nextOrderId;
         }
+    }
+
+    function _reduceSize(
+        uint256 size,
+        uint256 reduction
+    ) private pure returns (uint256) {
+        return size > reduction ? size - reduction : 0;
     }
 
     function _validatedOpenBounty(
@@ -423,7 +424,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         // Project the live position through earlier account orders before checking the requested side.
         QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
         uint8 opposingCode = uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING);
-        if (queuedPosition.exists && queuedPosition.side != side) {
+        if (queuedPosition.size != 0 && queuedPosition.side != side) {
             revert OrderRouter__PredictableOpenInvalid(opposingCode);
         }
 

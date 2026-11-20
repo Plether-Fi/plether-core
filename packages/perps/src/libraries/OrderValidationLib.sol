@@ -27,20 +27,18 @@ library OrderValidationLib {
         }
     }
 
-    /// @notice Validates a close order against the router's queued-position projection.
-    /// @param positionExists Whether the router's queued-position projection currently exists.
-    /// @param queuedSize Projected position size after earlier queued orders (18 decimals).
-    /// @param queuedSide Projected position side after earlier queued orders.
+    /// @notice Validates a close order against the live position remaining after earlier queued closes.
+    /// @param queuedSize Live position size remaining after earlier same-side closes (18 decimals).
+    /// @param queuedSide Side of the live position.
     /// @param requestedSide Side supplied by the close request.
     /// @param sizeDelta Requested reduction in position size (18 decimals).
     function validateCloseCommit(
-        bool positionExists,
         uint256 queuedSize,
         CfdTypes.Side queuedSide,
         CfdTypes.Side requestedSide,
         uint256 sizeDelta
     ) internal pure {
-        if (!positionExists || queuedSize == 0) {
+        if (queuedSize == 0) {
             revert IOrderRouterErrors.OrderRouter__NoQueuedPosition();
         }
         if (queuedSide != requestedSide) {
