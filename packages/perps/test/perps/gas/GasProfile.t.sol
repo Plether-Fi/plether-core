@@ -160,6 +160,7 @@ contract GasProfileTest is RecordedOrderReceipts {
         uint256 balance;
         uint256 entryCost;
         uint256 liquidationReserve;
+        int256 accruedVpi;
         uint256 sizeDelta;
         uint256 marginDelta;
         bool isClose;
@@ -977,7 +978,7 @@ contract GasProfileTest is RecordedOrderReceipts {
     ) internal {
         address account = expectedOrders[orderId].account;
         TradeAccountingSnapshot storage beforeTrade = tradeAccountingBefore[orderId];
-        (beforeTrade.size, beforeTrade.margin,,,,,) = engine.positions(account);
+        (beforeTrade.size, beforeTrade.margin,,,,, beforeTrade.accruedVpi) = engine.positions(account);
         beforeTrade.balance = clearinghouse.balanceAssets(account);
         beforeTrade.entryCost = engine.positionEntryCostAssetAtoms(account);
         beforeTrade.liquidationReserve = clearinghouse.liquidationReserveAssets(account);
@@ -1036,8 +1037,16 @@ contract GasProfileTest is RecordedOrderReceipts {
             if (reserve < beforeTrade.liquidationReserve) {
                 reserve = beforeTrade.liquidationReserve;
             }
+            int256 accruedVpiAfter = beforeTrade.accruedVpi + economics.vpiAssets;
+            uint256 vpiReserveBefore = beforeTrade.accruedVpi < 0 ? uint256(-beforeTrade.accruedVpi) : 0;
+            uint256 vpiReserveAfter = accruedVpiAfter < 0 ? uint256(-accruedVpiAfter) : 0;
+            // The order's net rebate covers reserve growth first. Its pledge funds any shortfall.
+            uint256 rebate = action < 0 ? uint256(-action) : 0;
+            uint256 vpiReserveFromPledge =
+                vpiReserveAfter > vpiReserveBefore + rebate ? vpiReserveAfter - vpiReserveBefore - rebate : 0;
             expectedMargin = beforeTrade.margin + beforeTrade.marginDelta - carry - charge
-                - (reserve - beforeTrade.liquidationReserve);
+                - (reserve - beforeTrade.liquidationReserve) - vpiReserveFromPledge;
+            assertEq(clearinghouse.vpiRebateReserveAssets(receipt.account), vpiReserveAfter);
         }
         int256 expectedCash =
             int256(beforeTrade.balance) - int256(carry) - action + pnl - int256(expectedClaim + receipt.bountyAssets);
