@@ -50,6 +50,7 @@ contract CarryReferenceLedger {
     /// @notice Gross canonical pool assets; claim liabilities never rewrite this cash/accounting quantity.
     uint256 public poolDepth;
     uint256 public totalClaims;
+    uint256 public totalPositiveVpi;
     uint256 public annualBps;
     uint256 public totalNewCarry;
     uint256 public totalCollected;
@@ -149,9 +150,17 @@ contract CarryReferenceLedger {
         poolDepth = newDepth;
     }
 
-    /// @notice Claims remain separate from physical pool assets and reserve capital before any payment occurs.
+    /// @notice Claims and refundable positive VPI reserve economic depth without changing physical pool assets.
     function economicDepth() public view returns (uint256) {
-        return poolDepth > totalClaims ? poolDepth - totalClaims : 0;
+        uint256 afterClaims = poolDepth > totalClaims ? poolDepth - totalClaims : 0;
+        return afterClaims > totalPositiveVpi ? afterClaims - totalPositiveVpi : 0;
+    }
+
+    /// @notice Replace the position-derived positive VPI liability used for economic depth.
+    function changePositiveVpi(
+        uint256 newPositiveVpi
+    ) external {
+        totalPositiveVpi = newPositiveVpi;
     }
 
     /// @notice Book independently derived claim creation or netting after advancing the flat-rate clock.

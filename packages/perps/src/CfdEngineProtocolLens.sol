@@ -7,6 +7,7 @@ import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngin
 import {ICfdEngineProtocolLens} from "@plether/perps/interfaces/ICfdEngineProtocolLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
+import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccountingLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
@@ -33,8 +34,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
     /// @notice Returns the canonical protocol accounting and solvency snapshot.
     /// @dev Maximum liability is the larger side maximum-profit envelope. Withdrawal reserve is that liability plus all
-    ///      trader claims and the liability-scaled settlement buffer; free settlement token is pool assets above the reserve; and
-    ///      effective solvency assets are pool assets net of trader claims. Net physical assets equal canonical pool
+    ///      trader claims, refundable positive lifetime VPI, and the liability-scaled settlement buffer. Free settlement
+    ///      token is pool assets above that reserve; effective solvency assets are pool assets net of trader claims.
+    ///      Net physical assets equal canonical pool
     ///      assets: treasury clearinghouse balances are separate custody and are reported without subtracting them.
     ///      `hasLiveLiability` follows nonzero side maximum-profit envelopes rather than raw open interest.
     /// @return snapshot Protocol-level accounting, liability, claim, and degraded-mode values in 6-decimal settlement token units.
@@ -50,7 +52,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     /// @dev Physical and net physical assets are current pool `totalAssets`; treasury clearinghouse balances are
     ///      outside pool custody. Terminal delta, claims, maximum directional liability, open-position
     ///      status, and book version come from one authenticated Engine snapshot. The supplemental reserve is the
-    ///      liability-scaled settlement buffer and affects withdrawals without changing terminal NAV.
+    ///      liability-scaled settlement buffer and affects withdrawals without changing terminal NAV. A separately
+    ///      authenticated VPI snapshot supplies refundable pool cash and collectible clearinghouse backing for LP NAV.
     ///      Mark freshness is required whenever terminal price exposure exists. When gating is required,
     ///      frozen-market policy uses `fadMaxStaleness`; live policy uses the tighter nonzero engine/pool limit. This
     ///      function selects a limit but does not itself test the cached mark's age.
@@ -70,6 +73,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.terminalLpPriceDeltaAssets = terminalSnapshot.terminalLpPriceDeltaAssets;
         snapshot.terminalNavBookVersion = terminalSnapshot.bookVersion;
         snapshot.traderClaimBalanceAssets = terminalSnapshot.totalTraderClaimsAssets;
+        (snapshot.totalPositiveVpiAccruedAssets, snapshot.totalNegativeVpiAccruedAssets) =
+            engineContract.vpiAccountingSnapshot();
         snapshot.hasOpenPositions = terminalSnapshot.hasOpenPositions;
         snapshot.markFreshnessRequired = terminalSnapshot.hasOpenPositions;
         if (snapshot.markFreshnessRequired) {
@@ -100,6 +105,29 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.degradedMode = engineContract.degradedMode();
     }
 
+    /// @notice Returns physical cash above current engine reserves and the caller's additional pool reservation.
+    /// @dev Uses live aggregate getters rather than authenticated terminal/VPI snapshots so HousePool can query this
+    ///      during engine settlement. Negative lifetime-VPI backing is clearinghouse custody, not available pool cash.
+    ///      This diagnostic does not apply HousePool's zero-principal protocol-fee policy.
+    /// @param reservedPoolAssets Pending claimant and unassigned assets additionally reserved by HousePool.
+    /// @return Unreserved settlement-token cash in six-decimal units.
+    function getSettlementFreeAssets(
+        uint256 reservedPoolAssets
+    ) external view override returns (uint256) {
+        (uint256 longMaxProfitAssets,,,) = engineContract.sides(0);
+        (uint256 shortMaxProfitAssets,,,) = engineContract.sides(1);
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot;
+        snapshot.physicalAssets = engineContract.pool().totalAssets();
+        snapshot.maxLiabilityAssets = SolvencyAccountingLib.getMaxLiability(longMaxProfitAssets, shortMaxProfitAssets);
+        snapshot.traderClaimBalanceAssets = engineContract.totalTraderClaimBalanceAssets();
+        snapshot.totalPositiveVpiAccruedAssets = engineContract.totalPositiveVpiAccruedAssets();
+        snapshot.supplementalReservedAssets = reservedPoolAssets
+            + SolvencyAccountingLib.settlementBufferTargetAssets(
+                snapshot.maxLiabilityAssets, engineContract.settlementBufferBps()
+            );
+        return HousePoolAccountingLib.buildWithdrawalSnapshot(snapshot).freeAssets;
+    }
+
     /// @notice Assembles protocol accounting from pool, clearinghouse, side, claim, and engine status state.
     /// @return snapshot Canonical diagnostic accounting snapshot.
     function _buildProtocolAccountingSnapshot()
@@ -124,7 +152,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         uint256 settlementBufferAssets = SolvencyAccountingLib.settlementBufferTargetAssets(
             maxLiabilityAssets, engineContract.settlementBufferBps()
         );
-        snapshot.withdrawalReservedAssets = solvencyState.withdrawalReservedAssets + settlementBufferAssets;
+        (uint256 positiveVpiAssets,) = engineContract.vpiAccountingSnapshot();
+        snapshot.withdrawalReservedAssets =
+            solvencyState.withdrawalReservedAssets + settlementBufferAssets + positiveVpiAssets;
         snapshot.freeAssets =
             poolAssets > snapshot.withdrawalReservedAssets ? poolAssets - snapshot.withdrawalReservedAssets : 0;
         snapshot.protocolTreasuryBalanceAssets = protocolTreasuryBalanceAssets;

@@ -59,7 +59,13 @@ abstract contract HousePoolAccountingParityBase is BasePerpTest {
         ExpectedAccounting memory expected
     ) internal returns (uint256[4] memory preview) {
         bytes32 beforePreview = _accountingHash();
-        assertEq(pool.getSettlementFreeAssets(), pool.getFreeAssets(), "Settlement cash matches withdrawal reserves");
+        if (pool.seniorPrincipal() + pool.juniorPrincipal() == 0) {
+            assertEq(pool.getSettlementFreeAssets(), 0, "Settlement cash waits for stored LP principal");
+        } else {
+            assertEq(
+                pool.getSettlementFreeAssets(), pool.getFreeAssets(), "Settlement cash matches withdrawal reserves"
+            );
+        }
         uint256 previewGasBefore = gasleft();
         (preview[0], preview[1], preview[2], preview[3]) = pool.getPendingTrancheState();
         emit log_named_uint("pending_tranche_preview_gas", previewGasBefore - gasleft());
@@ -393,6 +399,7 @@ contract HousePoolSeededClaimReleaseSnapshotParityTest is HousePoolAccountingPar
         _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 10e6);
         assertEq(pool.pendingTradingRevenueAssets(), 10e6, "revenue should remain queued until reconcile");
         stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(seededAssets - 20e6);
+        assertEq(pool.getFreeAssets(), 20e6, "released senior claim remains physical free cash");
 
         _assertPendingAccounting(ExpectedAccounting(30e6, 0, 1000e6, 0, 0, 0));
         assertEq(seniorVault.totalAssets(), 30e6, "released claim and revenue should both belong to seeded senior");
@@ -406,6 +413,7 @@ contract HousePoolSeededClaimReleaseSnapshotParityTest is HousePoolAccountingPar
 
         _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 10e6);
         stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(seededAssets - 1020e6);
+        assertEq(pool.getFreeAssets(), 1020e6, "released junior claim remains physical free cash");
 
         _assertPendingAccounting(ExpectedAccounting(1000e6, 30e6, 1000e6, 0, 0, 0));
         assertEq(juniorVault.totalAssets(), 30e6, "released claim and revenue should both belong to seeded junior");

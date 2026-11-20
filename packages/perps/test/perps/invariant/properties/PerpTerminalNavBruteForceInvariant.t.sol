@@ -9,15 +9,22 @@ import {
 import {BasePerpInvariantTest} from "../BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "../handlers/PerpAccountingHandler.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
+import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccountingLib.sol";
 
 /// @notice Differential invariant between the radix NAV book and direct canonical-account enumeration.
 /// @dev Expected values never consume NAV-book records, hashes, coefficients, radix nodes, or account-lens output.
 contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
 
     PerpAccountingHandler internal handler;
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory params) {
+        params = super._riskParams();
+        params.vpiFactor = 0.005e18;
+    }
 
     function setUp() public override {
         super.setUp();
@@ -44,6 +51,8 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         _assertSeedPosition(handler.actorAt(0), CfdTypes.Side.LONG);
         _assertSeedPosition(handler.actorAt(1), CfdTypes.Side.SHORT);
         _assertPartialCloseSeed();
+        assertGt(engine.totalPositiveVpiAccruedAssets(), 0, "Campaign must start with deferred positive VPI");
+        assertGt(engine.totalNegativeVpiAccruedAssets(), 0, "Campaign must start with backed negative VPI");
 
         bytes4[] memory selectors = new bytes4[](15);
         selectors[0] = handler.depositCollateral.selector;
@@ -114,6 +123,18 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
             engine.totalTraderClaimBalanceAssets(),
             "Tracked accounts must exhaust Engine trader claims"
         );
+        (uint256 positiveVpiAssets, uint256 negativeVpiAssets) = engine.vpiAccountingSnapshot();
+        assertEq(
+            positiveVpiAssets,
+            totals.totalPositiveVpiAccruedAssets,
+            "Positive VPI total must equal independently enumerated live accrual"
+        );
+        assertEq(
+            negativeVpiAssets,
+            totals.totalNegativeVpiAccruedAssets,
+            "Negative VPI total must equal independently enumerated live accrual"
+        );
+        _assertDeferredLpEquity(accountStates, totals);
 
         ITerminalNavBookV2 book = engine.terminalNavBook();
         ITerminalNavBookV2.BookState memory bookState = book.bookState();
@@ -185,6 +206,34 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         );
         assertEq(snapshot.bookVersion, bookState.bookVersion, "Snapshot must expose the evaluated book version");
         assertEq(snapshot.degradedMode, engine.degradedMode(), "Snapshot degraded mode must match Engine state");
+    }
+
+    function _assertDeferredLpEquity(
+        TerminalNavBruteForceModel.AccountState[] memory states,
+        TerminalNavBruteForceModel.PortfolioTotals memory totals
+    ) private view {
+        for (uint256 i; i < states.length; ++i) {
+            int256 accrued = states[i].vpiAccruedAssets;
+            if (accrued < 0) {
+                assertGe(
+                    clearinghouse.vpiRebateReserveAssets(states[i].account),
+                    uint256(-(accrued + 1)) + 1,
+                    "Enumerated negative VPI receivables must retain their dedicated backing"
+                );
+            }
+        }
+        (uint256 expectedDistributable, uint256 expectedDeficit) = TerminalNavBruteForceModel.lpEquityAt(
+            states, totals, housePool.totalAssets(), engine.lastMarkPrice(), engine.CAP_PRICE()
+        );
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory inputs =
+            engineProtocolLens.getHousePoolInputSnapshot(housePool.markStalenessLimit());
+        HousePoolAccountingLib.ReconcileSnapshot memory actual = HousePoolAccountingLib.buildReconcileSnapshot(inputs);
+        assertEq(
+            actual.distributable,
+            expectedDistributable,
+            "Full LP equity must include both independently summed VPI signs"
+        );
+        assertEq(actual.deficit, expectedDeficit, "Deferred VPI must be applied before the final equity floor");
     }
 
     function _trackedAccounts() internal view returns (address[] memory accounts) {

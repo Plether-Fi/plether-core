@@ -155,6 +155,7 @@ contract FullCloseActionChargePlanTest is Test {
     function test_FullClose_VpiClawbackAndReleasedBackingAreNotDoubleCounted() public view {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(20e6, 2e6, 0, 0, 7e6);
         snap.position.vpiAccrued = -5e6;
+        snap.totalNegativeVpiAccruedAssets = 5e6;
         snap.vpiRebateReserveAssets = 5e6;
         snap.protectedExecutionBountyAssets = 2e6;
         CfdEnginePlanTypes.CloseDelta memory flat = _plan(snap, PRICE, SIZE);
@@ -176,6 +177,7 @@ contract FullCloseActionChargePlanTest is Test {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(100e6, 10e6, 0, 0, 0);
         snap.riskParams.vpiFactor = 0.1e18;
         snap.position.vpiAccrued = 100e6;
+        snap.totalPositiveVpiAccruedAssets = 100e6;
         CfdEnginePlanTypes.CloseDelta memory reducing = _plan(snap, PRICE, SIZE);
         assertTrue(reducing.valid);
         assertLt(reducing.closeState.vpiDeltaAssets, 0);
