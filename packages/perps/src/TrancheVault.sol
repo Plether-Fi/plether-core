@@ -34,6 +34,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
 
     uint256 internal constant BPS = 10_000;
     uint256 internal constant VIRTUAL_SHARES = 1000;
+    uint256 internal constant MAX_REDEEM_HEAD_SKIPS = 16;
 
     uint256 public constant DEPOSIT_COOLDOWN = 1 hours;
     uint256 public constant LP_REQUEST_CUTOFF_DURATION = 5 minutes;
@@ -611,6 +612,9 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (controller == address(0) || owner == address(0)) {
             revert TrancheVault__ZeroAddress();
         }
+        if (controller != owner) {
+            _requireControllerAuth(controller);
+        }
         if (shares == 0) {
             revert TrancheVault__WithdrawalTooSmall();
         }
@@ -772,30 +776,39 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         uint256 requestId,
         address controller
     ) public view returns (uint256) {
-        RedeemEpoch storage epoch = redeemEpochs[requestId];
-        RedeemPosition storage position = redeemRequests[controller][requestId];
-        if (position.shares == 0 || epoch.shares == 0) {
-            return 0;
-        }
-        uint256 entitled = Math.mulDiv(position.shares, epoch.fundedShares, epoch.shares, Math.Rounding.Floor);
-        return entitled > position.claimedShares ? entitled - position.claimedShares : 0;
+        (uint256 shares,) = _claimableRedeemAmounts(requestId, controller);
+        return shares;
     }
 
     function claimableRedeemAssets(
         uint256 requestId,
         address controller
     ) public view returns (uint256) {
-        RedeemEpoch storage epoch = redeemEpochs[requestId];
+        (, uint256 assets) = _claimableRedeemAmounts(requestId, controller);
+        return assets;
+    }
+
+    function _claimableRedeemAmounts(
+        uint256 requestId,
+        address controller
+    ) internal view returns (uint256 shares, uint256 assets) {
         RedeemPosition storage position = redeemRequests[controller][requestId];
-        if (position.shares == 0 || epoch.shares == 0) {
-            return 0;
+        (uint256 entitledShares, uint256 entitledAssets) = _fundedRedeemEntitlement(redeemEpochs[requestId], position);
+        shares = Math.saturatingSub(entitledShares, position.claimedShares);
+        assets = Math.saturatingSub(entitledAssets, position.claimedAssets);
+    }
+
+    function _fundedRedeemEntitlement(
+        RedeemEpoch storage epoch,
+        RedeemPosition storage position
+    ) internal view returns (uint256 shares, uint256 assets) {
+        if (epoch.shares == 0) {
+            return (0, 0);
         }
-        uint256 entitledShares = Math.mulDiv(position.shares, epoch.fundedShares, epoch.shares, Math.Rounding.Floor);
-        if (entitledShares == 0) {
-            return 0;
+        shares = Math.mulDiv(position.shares, epoch.fundedShares, epoch.shares, Math.Rounding.Floor);
+        if (shares != 0) {
+            assets = Math.mulDiv(position.shares, epoch.fundedAssets, epoch.shares, Math.Rounding.Floor);
         }
-        uint256 entitled = Math.mulDiv(position.shares, epoch.fundedAssets, epoch.shares, Math.Rounding.Floor);
-        return entitled > position.claimedAssets ? entitled - position.claimedAssets : 0;
     }
 
     function refundableRedeemRequest(
@@ -1000,7 +1013,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         address receiver,
         address controller
     ) public override returns (uint256 shares) {
-        return _claimWithdraw(controllerRedeemHead[controller], assets, receiver, controller);
+        (uint256 requestId,,) = _redeemClaimHead(controller);
+        return _claimWithdraw(requestId, assets, receiver, controller);
     }
 
     function redeem(
@@ -1008,7 +1022,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         address receiver,
         address controller
     ) public override returns (uint256 assets) {
-        return _claimRedeem(controllerRedeemHead[controller], shares, receiver, controller);
+        (uint256 requestId,,) = _redeemClaimHead(controller);
+        return _claimRedeem(requestId, shares, receiver, controller);
     }
 
     function claimRedeem(
@@ -1155,8 +1170,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (receiver == address(0)) {
             revert TrancheVault__ZeroAddress();
         }
-        uint256 remainingShares = claimableRedeemRequest(requestId, controller);
-        uint256 remainingAssets = claimableRedeemAssets(requestId, controller);
+        (uint256 remainingShares, uint256 remainingAssets) = _claimableRedeemAmounts(requestId, controller);
         if (shares == 0 || shares > remainingShares) {
             revert ERC4626ExceededMaxRedeem(controller, shares, remainingShares);
         }
@@ -1176,8 +1190,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (receiver == address(0)) {
             revert TrancheVault__ZeroAddress();
         }
-        uint256 remainingShares = claimableRedeemRequest(requestId, controller);
-        uint256 remainingAssets = claimableRedeemAssets(requestId, controller);
+        (uint256 remainingShares, uint256 remainingAssets) = _claimableRedeemAmounts(requestId, controller);
         if (assets == 0 || assets > remainingAssets) {
             revert ERC4626ExceededMaxWithdraw(controller, assets, remainingAssets);
         }
@@ -1236,10 +1249,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
             return;
         }
 
-        uint256 entitledShares = Math.mulDiv(position.shares, epoch.fundedShares, epoch.shares, Math.Rounding.Floor);
-        uint256 entitledAssets = entitledShares == 0
-            ? 0
-            : Math.mulDiv(position.shares, epoch.fundedAssets, epoch.shares, Math.Rounding.Floor);
+        (uint256 entitledShares, uint256 entitledAssets) = _fundedRedeemEntitlement(epoch, position);
         if (position.claimedShares != entitledShares || position.claimedAssets != entitledAssets) {
             return;
         }
@@ -1299,15 +1309,38 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     function maxWithdraw(
         address controller
     ) public view override returns (uint256) {
-        uint256 requestId = controllerRedeemHead[controller];
-        return requestId == 0 ? 0 : claimableRedeemAssets(requestId, controller);
+        (,, uint256 assets) = _redeemClaimHead(controller);
+        return assets;
     }
 
     function maxRedeem(
         address controller
     ) public view override returns (uint256) {
-        uint256 requestId = controllerRedeemHead[controller];
-        return requestId == 0 ? 0 : claimableRedeemRequest(requestId, controller);
+        (, uint256 shares,) = _redeemClaimHead(controller);
+        return shares;
+    }
+
+    /// @dev Skip only terminal entries whose funded claim is exhausted. Refunds remain claimable by request ID.
+    function _redeemClaimHead(
+        address controller
+    ) internal view returns (uint256 requestId, uint256 shares, uint256 assets) {
+        requestId = controllerRedeemHead[controller];
+        uint256 skipped;
+        while (requestId != 0) {
+            (shares, assets) = _claimableRedeemAmounts(requestId, controller);
+            if (shares != 0 || assets != 0 || skipped == MAX_REDEEM_HEAD_SKIPS) {
+                break;
+            }
+            RedeemEpoch storage epoch = redeemEpochs[requestId];
+            if (!epoch.refundEnabled && epoch.fundedShares != epoch.shares) {
+                break;
+            }
+            requestId = redeemRequests[controller][requestId].nextRequestId;
+            unchecked {
+                // The loop checks the skip limit before incrementing.
+                ++skipped;
+            }
+        }
     }
 
     function maxRequestDeposit(

@@ -188,8 +188,11 @@ beneficiary checks, allowance cleanup and fixture limitations are in [Bridge fun
 - Senior and Junior entry is asynchronous through the configured `TrancheVault`: request assets with
   `requestDeposit(assets, controller, owner)`, inspect pending/claimable state, and use ERC-4626 `deposit` or `mint`
   only to claim an activated request.
-- LP exits are asynchronous. A holder calls `requestRedeem(shares, controller, owner)`; funded requests are exposed by
-  `pendingRedeemRequest` / `claimableRedeemRequest` and claimed through ERC-4626 `redeem` or `withdraw`.
+- LP exits are asynchronous. Submit `requestRedeem(shares, controller, owner)` and read `pendingRedeemRequest` or
+  `claimableRedeemRequest`. If the controller differs from the share owner, the controller or its approved operator
+  must submit the request with the share owner's authorization. The standard `maxRedeem`, `maxWithdraw`, `redeem`,
+  and `withdraw` methods look past up to 16 finished requests with no funded claim left. Claim skipped refunds by
+  request ID to recover the shares and advance the stored queue.
 - An activated, unclaimed deposit can route shares directly into redemption through
   `requestRedeemFromClaimableDeposit(depositRequestId,shares,controller)`. Read
   `maxRequestRedeemFromClaimableDeposit(depositRequestId,controller)` first. The controller or its approved operator
