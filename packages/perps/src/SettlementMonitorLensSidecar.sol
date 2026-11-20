@@ -484,7 +484,7 @@ contract SettlementMonitorLensSidecar {
         }
     }
 
-    /// @dev Probes deterministic carry-index and market-calendar operations used by LP settlement. Equal carry
+    /// @dev Checks that the bound planner supports the expected carry-index and market-calendar operations. Equal carry
     ///      timestamps preserve the stored index; a same-day override must activate both calendar flags.
     function _plannerBindingStatus() internal view returns (uint256 status) {
         (bool plannerOk, address planner) = _readAddress(address(ENGINE), bytes4(keccak256("planner()")));

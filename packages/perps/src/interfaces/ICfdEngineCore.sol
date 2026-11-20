@@ -165,8 +165,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
     function lastMarkTime() external view returns (uint64);
 
     /// @notice Pushes a fresh mark price without processing an order.
-    /// @dev Callable only by the router. Caps the price at `CAP_PRICE`, rejects an older publish time, advances carry
-    ///      indexes, and updates the cached mark without realizing account-level carry.
+    /// @dev Callable only by the router. Caps the price at `CAP_PRICE`, rejects an older publish time, advances the
+    ///      global carry index, and updates the cached mark without realizing account-level carry.
     /// @param price New mark price (8 decimals)
     /// @param publishTime Oracle publish timestamp for the price update
     function updateMarkPrice(

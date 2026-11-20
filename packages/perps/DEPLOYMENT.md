@@ -130,6 +130,7 @@ The carry cleanup also changes storage and interfaces: the Engine exposes one `c
 `currentCarryIndex()` projection, and singular `checkpointCarryIndex()`. Position exposure comes directly from
 `maxProfitAssets`; obsolete exposure caches and directional carry getters are removed. The planner's
 `computeCurrentCarryIndex(storedIndex, previousTimestamp, currentTimestamp, baseCarryBps)` takes four arguments.
+Carry amount calculation is internal, so the planner ABI no longer exposes `computeIndexedCarryAssets`.
 The raw planner snapshot carries one global index; directional snapshots contain no carry fields. Deploy and
 verify a fresh internally compatible stack, and regenerate consumer bindings for these interfaces. Existing
 Sepolia contracts and their storage do not acquire this layout through a rate update or an in-place migration.

@@ -211,6 +211,25 @@ contract CarryProjectionTest is BasePerpTest {
         assertEq(hypothetical.poolCashAssets, hypotheticalDepth + expectedCarry);
     }
 
+    function test_AccountLensDoesNotProjectCarryForShortAtCap() public {
+        uint256 capPrice = engine.CAP_PRICE();
+        _fundTrader(ACCOUNT, 10_000e6);
+        _ensureLaterOracleTime();
+        _open(ACCOUNT, CfdTypes.Side.SHORT, 100_000e18, 5000e6, capPrice);
+        _fundTrader(OTHER, 10_000e6);
+        _open(OTHER, CfdTypes.Side.LONG, 100_000e18, 5000e6, capPrice);
+        assertEq(engine.lastMarkPrice(), capPrice);
+        assertEq(_positionMaxProfitAssets(ACCOUNT), 0);
+        assertGt(_positionMaxProfitAssets(OTHER), 0);
+
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        assertGt(engine.currentCarryIndex(), engine.carryIndex(), "the other position keeps carry accruing");
+        assertEq(
+            engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).netEquityAssets,
+            int256(clearinghouse.pnlPledgeAssets(ACCOUNT))
+        );
+    }
+
     function test_WithdrawalAndRiskViewsRetainRawDiagnostics() public {
         _fixture(false);
         _claim(2000e6);

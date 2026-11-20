@@ -559,10 +559,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             revert CfdEngine__NotAccountOwner();
         }
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
-        _advanceCarryIndex(block.timestamp);
         StoredPosition storage pos = _positions[account];
         if (pos.lots > 0) {
             _realizeCarryFromSettlement(account, pos);
+        } else {
+            _advanceCarryIndex(block.timestamp);
         }
 
         uint256 amount = traderClaimBalanceAssets[account];
@@ -619,8 +620,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     }
 
     /// @notice Funds non-dilutive claimant recapitalization from the engine owner's wallet.
-    /// @dev The owner must approve this engine for settlement token. Checkpoints carry before changing pool depth and requires
-    ///      exact receipt before queuing recapitalization. Allocation occurs through normal pool reconciliation;
+    /// @dev The owner must approve this engine for settlement token. Checkpoints the global carry clock before funding
+    ///      and requires exact receipt before queuing recapitalization. Allocation occurs through normal pool reconciliation;
     ///      this call mints no shares and does not clear degraded mode. Funding remains available while paused or frozen.
     /// @param amountAssets Nonzero settlement token amount to transfer directly into the configured pool (6 decimals).
     function recapitalizePool(
@@ -806,7 +807,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         if (_canPayFreshPoolPayout(amountAssets)) {
             _payTraderClaim(account, amountAssets, positionRemainsOpen);
         } else {
-            _advanceCarryIndex(block.timestamp);
             traderClaimBalanceAssets[account] += amountAssets;
             totalTraderClaimBalanceAssets += amountAssets;
             emit TraderClaimRecorded(account, amountAssets);
@@ -1386,7 +1386,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             return;
         }
 
-        _advanceCarryIndex(block.timestamp);
         traderClaimBalanceAssets[account] -= amountAssets;
         totalTraderClaimBalanceAssets -= amountAssets;
     }

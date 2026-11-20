@@ -210,7 +210,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
     /// @notice Builds raw custody fields and, when a position exists, cached-mark terminal risk.
     /// @param account Clearinghouse account to inspect.
-    /// @return snapshot Expanded account snapshot assembled from engine, clearinghouse, router, and pool state.
+    /// @return snapshot Expanded account snapshot assembled from engine, clearinghouse, and router state.
     function _buildAccountLedgerSnapshot(
         address account
     ) internal view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
@@ -349,7 +349,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             candidateCapAssets < maximumCollectibleAssets ? candidateCapAssets : maximumCollectibleAssets;
     }
 
-    /// @notice Reconstructs the current position plus its separately stored carry timestamp.
+    /// @notice Loads the current position fields used by this lens.
     /// @param account Account whose position is loaded.
     /// @return pos Current engine position.
     function _position(
@@ -357,7 +357,6 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ) internal view returns (CfdTypes.Position memory pos) {
         (pos.size, pos.margin, pos.entryPrice, pos.maxProfitAssets, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engineContract.positions(account);
-        (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
     }
 
     /// @notice Computes indexed carry accrued since the position's last global-index checkpoint.
@@ -369,18 +368,15 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         address account,
         CfdTypes.Position memory pos
     ) internal view returns (uint256) {
-        if (pos.size == 0) {
+        if (pos.maxProfitAssets == 0) {
             return 0;
         }
-        (uint256 maxProfitAssets, uint256 startIndex,) = engineContract.positionCarryState(account);
-        if (maxProfitAssets == 0) {
-            return 0;
-        }
+        (, uint256 startIndex,) = engineContract.positionCarryState(account);
         uint256 endIndex = engineContract.currentCarryIndex();
         if (endIndex <= startIndex) {
             return 0;
         }
-        return PositionRiskAccountingLib.computeIndexedCarryAssets(maxProfitAssets, endIndex - startIndex);
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(pos.maxProfitAssets, endIndex - startIndex);
     }
 
     /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.

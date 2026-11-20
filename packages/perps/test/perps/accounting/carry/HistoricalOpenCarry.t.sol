@@ -70,6 +70,36 @@ contract HistoricalOpenCarryTest is BasePerpTest {
         assertEq(engine.positionEpoch(handler.actorAt(0)), 2, "same address starts a new position generation");
     }
 
+    function test_HistoricalOpenRestartsCarryAfterEmptyMarket() public {
+        handler.close(1, 0, true);
+        handler.close(2, 0, true);
+        assertEq(_sideState(CfdTypes.Side.LONG).maxProfitAssets, 0);
+        assertEq(_sideState(CfdTypes.Side.SHORT).maxProfitAssets, 0);
+
+        CarryReferenceLedger ledger = handler.carry();
+        uint256 idleIndex = ledger.carryIndex();
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        handler.commitOpen(0, 17, 80_000_002);
+        handler.refreshMark(120_000_002); // First publication after commitment fixes the fill.
+        vm.warp(vm.getBlockTimestamp() + 5);
+        handler.refreshMark(90_000_002);
+        uint256 retainedMarkTime = vm.getBlockTimestamp();
+        uint256 fillTime = retainedMarkTime + 1;
+        assertEq(engine.carryTimestamp(), retainedMarkTime);
+        assertEq(engine.carryIndex(), idleIndex);
+
+        handler.executeHead(false);
+
+        assertEq(handler.traderState(0).basis, 17 * 120_000_002);
+        assertEq(engine.lastMarkTime(), retainedMarkTime, "historical fill keeps the newer mark");
+        assertEq(engine.carryTimestamp(), fillTime, "the open must close the idle interval itself");
+        assertEq(engine.carryIndex(), idleIndex, "the clock must exclude the idle interval");
+        CarryReferenceLedger.Account memory opened = ledger.accountState(handler.actorAt(0));
+        assertEq(opened.lastIndex, idleIndex);
+        assertEq(opened.totalNewCarry, 0);
+        _nextCheckpoint(ledger, 0, opened, idleIndex);
+    }
+
     function _historicalOpenAndNextCheckpoint(
         uint256 actor
     ) private {

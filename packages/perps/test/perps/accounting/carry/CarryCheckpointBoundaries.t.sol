@@ -355,9 +355,8 @@ contract FlatMaximumProfitCarryTest is BasePerpTest {
         uint256 started = vm.getBlockTimestamp();
 
         vm.warp(started + 365 days / 2);
-        engine.checkpointCarryIndex();
-        assertEq(engine.carryIndex(), 0.025e18, "the only clock has accrued one half-year");
         _open(SHORT_TRADER, CfdTypes.Side.SHORT, 100_000e18, 150_000e6, PRICE);
+        assertEq(engine.carryIndex(), 0.025e18, "opening checkpoints the shared index after one half-year");
         (, uint256 shortStartIndex,) = engine.positionCarryState(SHORT_TRADER);
         assertEq(shortStartIndex, 0.025e18, "a late opposite-side open captures the existing global index");
 
@@ -381,10 +380,9 @@ contract FlatMaximumProfitCarryTest is BasePerpTest {
         assertEq(engine.carryIndex(), 0.025e18);
 
         vm.warp(started + 3 * 365 days / 2);
-        engine.checkpointCarryIndex();
-        assertEq(engine.carryIndex(), 0.025e18, "an empty market does not grow its carry index");
-        assertEq(engine.carryTimestamp(), vm.getBlockTimestamp(), "the idle checkpoint closes the old interval");
+        assertEq(engine.currentCarryIndex(), 0.025e18, "an empty market does not grow its carry index");
         _open(SHORT_TRADER, CfdTypes.Side.SHORT, 100_000e18, 150_000e6, PRICE);
+        assertEq(engine.carryTimestamp(), vm.getBlockTimestamp(), "reopening closes the idle interval");
         (, uint256 reopenedAtIndex,) = engine.positionCarryState(SHORT_TRADER);
         assertEq(reopenedAtIndex, 0.025e18);
 

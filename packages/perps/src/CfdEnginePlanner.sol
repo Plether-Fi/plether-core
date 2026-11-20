@@ -48,14 +48,6 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
     }
 
     /// @inheritdoc ICfdEnginePlanner
-    function computeIndexedCarryAssets(
-        uint256 maxProfitAssets,
-        uint256 carryIndexDelta
-    ) external pure returns (uint256 carryAssets) {
-        return PositionRiskAccountingLib.computeIndexedCarryAssets(maxProfitAssets, carryIndexDelta);
-    }
-
-    /// @inheritdoc ICfdEnginePlanner
     function isExactPriceRiskLiquidatable(
         CfdTypes.Position memory pos,
         uint256 entryCostAssetAtoms,

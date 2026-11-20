@@ -43,12 +43,6 @@ interface ICfdEnginePlanner {
         uint256 baseCarryBps
     ) external pure returns (uint256 index);
 
-    /// @notice Converts a carry-index delta into 6-decimal settlement token carry.
-    function computeIndexedCarryAssets(
-        uint256 maxProfitAssets,
-        uint256 carryIndexDelta
-    ) external pure returns (uint256 carryAssets);
-
     /// @notice Returns the exact lot-based price-risk test used by withdrawal and protection health checks.
     function isExactPriceRiskLiquidatable(
         CfdTypes.Position memory pos,
