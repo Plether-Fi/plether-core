@@ -297,11 +297,18 @@ interface IHousePool {
     function unpauseLpEpochSettlement() external;
 
     /// @notice Transfers settlement token from the pool to a recipient.
-    /// @dev Callable only by the engine or its current settlement sidecar. Decreases canonical accounted assets and
-    ///      transfers the same raw amount atomically.
+    /// @dev Callable only by the engine or its current settlement sidecar. Existing trader claims use
+    ///      `payOutTraderClaim`. Decreases canonical accounted assets and transfers the same raw amount atomically.
     /// @param recipient Address to receive settlement token
     /// @param amount settlement token amount to transfer (6 decimals)
     function payOut(
+        address recipient,
+        uint256 amount
+    ) external;
+
+    /// @notice Pays an existing trader claim and queues retirement of any pending backing it spent.
+    /// @dev Callable only by the engine.
+    function payOutTraderClaim(
         address recipient,
         uint256 amount
     ) external;

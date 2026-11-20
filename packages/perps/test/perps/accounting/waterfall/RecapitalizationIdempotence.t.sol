@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
@@ -87,7 +88,7 @@ contract RecapitalizationIdempotenceTest is HousePoolTestBase {
         assertEq(pool.pendingRecapitalizationAssets(), 1200e6, "recap residual exists before claim payout");
 
         vm.prank(address(engine));
-        pool.payOut(address(0xCA11), 6000e6);
+        pool.payOutTraderClaim(address(0xCA11), 6000e6);
         _setTotalTraderClaim(0);
 
         assertEq(pool.totalAssets(), _bookedAssets(), "remaining cash already backs booked owners");
@@ -107,7 +108,7 @@ contract RecapitalizationIdempotenceTest is HousePoolTestBase {
         _reconcile();
 
         vm.prank(address(engine));
-        pool.payOut(address(0xCA11), 10e6);
+        pool.payOutTraderClaim(address(0xCA11), 10e6);
         _setTotalTraderClaim(5990e6);
         _reconcile();
         assertEq(pool.pendingRecapitalizationAssets(), 1200e6, "recap keeps priority");
@@ -146,7 +147,7 @@ contract RecapitalizationIdempotenceTest is HousePoolTestBase {
     function test_PayoutDebitWaitsForFreshMarkBeforeRetiringIntent() public {
         _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 500e6);
         vm.prank(address(engine));
-        pool.payOut(address(0xCA11), 2000e6);
+        pool.payOutTraderClaim(address(0xCA11), 2000e6);
 
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             pool.ENGINE_PROTOCOL_LENS().getHousePoolInputSnapshot(pool.markStalenessLimit());
@@ -230,6 +231,140 @@ contract RecapitalizationIdempotenceTest is HousePoolTestBase {
         assertEq(pool.seniorPrincipal(), 1000e6);
         assertEq(pool.juniorPrincipal(), 0);
         assertEq(pool.unassignedAssets(), 500e6);
+    }
+
+    function test_PaidClaimCannotReapplySpentRecapToLaterRevenue() public {
+        _wipePool();
+        _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 4000e6);
+        _setTotalTraderClaim(3000e6);
+        _reconcile();
+        assertEq(pool.seniorPrincipal(), 1000e6);
+        assertEq(pool.pendingRecapitalizationAssets(), 3000e6);
+
+        vm.prank(address(engine));
+        pool.payOutTraderClaim(address(0xCA11), 3000e6);
+        _setTotalTraderClaim(0);
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 5000e6);
+        _reconcile();
+
+        assertEq(pool.seniorPrincipal(), 1000e6);
+        assertEq(pool.juniorPrincipal(), 5000e6, "later revenue belongs to Junior");
+        assertEq(pool.unassignedAssets(), 0);
+        assertEq(pool.pendingRecapitalizationAssets(), 0);
+    }
+
+    function test_OrdinaryPayoutDoesNotRetireClaimBackedRecap() public {
+        _wipePool();
+        _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 10_800e6);
+        _setTotalTraderClaim(6000e6);
+        _reconcile();
+        assertEq(pool.seniorPrincipal(), 1000e6);
+        assertEq(pool.unassignedAssets(), 3800e6);
+        assertEq(pool.pendingRecapitalizationAssets(), 6000e6);
+
+        vm.prank(address(engine));
+        pool.payOut(address(0xCA11), 4000e6);
+        _reconcile();
+        assertEq(pool.pendingRecapitalizationAssets(), 6000e6, "ordinary payout cannot retire the claim reserve");
+
+        _setTotalTraderClaim(0);
+        _reconcile();
+        assertEq(pool.seniorPrincipal(), 1000e6);
+        assertEq(pool.juniorPrincipal(), 0, "owner recap cannot become Junior revenue");
+        assertEq(pool.unassignedAssets(), 5800e6);
+        assertEq(pool.pendingRecapitalizationAssets(), 0);
+    }
+
+    function test_TemporaryMarkedLossCannotEraseFreshRecapAfterOrdinaryPayout() public {
+        _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 500e6);
+        vm.prank(address(engine));
+        pool.payOut(address(0xCA11), 1000e6);
+
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
+            pool.ENGINE_PROTOCOL_LENS().getHousePoolInputSnapshot(pool.markStalenessLimit());
+        snapshot.terminalLpPriceDeltaAssets = -int256(1500e6);
+        vm.mockCall(
+            address(pool.ENGINE_PROTOCOL_LENS()),
+            abi.encodeWithSignature("getHousePoolInputSnapshot(uint256)", pool.markStalenessLimit()),
+            abi.encode(snapshot)
+        );
+        _reconcile();
+        assertEq(pool.pendingRecapitalizationAssets(), 500e6, "marked dip cannot retire fresh owner funding");
+
+        vm.clearMockedCalls();
+        _reconcile();
+        assertEq(pool.seniorPrincipal(), 1000e6);
+        assertEq(pool.juniorPrincipal(), 500e6);
+        assertEq(pool.pendingRecapitalizationAssets(), 0);
+    }
+
+}
+
+contract RealClaimPayoutRecoveryTest is HousePoolTestBase {
+
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
+        return 10_000e6;
+    }
+
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
+        return 10_000e6;
+    }
+
+    function test_FreshTraderProfitDoesNotRetireOwnerRecap() public {
+        address trader = address(0x7114);
+        _fundTrader(trader, 20_000e6);
+        _open(trader, CfdTypes.Side.LONG, 10_000e18, 2000e6, 1e8);
+
+        settlementToken.mint(address(this), 500e6);
+        settlementToken.approve(address(engine), 500e6);
+        engine.recapitalizePool(500e6);
+
+        vm.warp(block.timestamp + 1);
+        _close(trader, CfdTypes.Side.LONG, 5000e18, 80_000_000);
+        assertEq(engine.traderClaimBalanceAssets(trader), 0, "fresh profit was paid without recording a claim");
+        _reconcile();
+        assertEq(pool.unassignedAssets(), 500e6, "fresh payout cannot spend owner recap intent");
+    }
+
+    function test_RealTraderClaimCarryCannotResurrectSpentRecap() public {
+        address trader = address(0x7114);
+        _fundTrader(trader, 20_000e6);
+        _open(trader, CfdTypes.Side.LONG, 10_000e18, 2000e6, 1e8);
+        settlementToken.burn(address(pool), pool.rawAssets());
+        vm.warp(block.timestamp + 1);
+        _close(trader, CfdTypes.Side.LONG, 5000e18, 80_000_000);
+        uint256 claim = engine.traderClaimBalanceAssets(trader);
+        assertGt(claim, 0);
+
+        vm.warp(block.timestamp + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        _reconcile();
+        uint256 recap = claim + pool.seniorHighWaterMark();
+        settlementToken.mint(address(this), recap);
+        settlementToken.approve(address(engine), recap);
+        engine.recapitalizePool(recap);
+        _reconcile();
+        uint256 unassignedBefore = pool.unassignedAssets();
+        assertGt(pool.pendingRecapitalizationAssets(), 0);
+
+        vm.warp(block.timestamp + 30 days);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        uint256 assetsBefore = pool.totalAssets();
+        vm.prank(trader);
+        engine.settleTraderClaim(trader);
+        uint256 realizedCarry = pool.totalAssets() + claim - assetsBefore;
+        assertGt(realizedCarry, 0);
+
+        _reconcile();
+        assertEq(pool.unassignedAssets(), unassignedBefore, "spent recap cannot capture realized carry");
+        assertEq(pool.juniorPrincipal(), realizedCarry, "carry belongs to Junior after Senior recovery");
+    }
+
+    function _reconcile() private {
+        vm.prank(address(juniorVault));
+        pool.reconcile();
     }
 
 }

@@ -161,7 +161,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     /// @dev Claimant inflows queued since the last reconcile that applied any pending value. This lets a fresh
     ///      receipt fund its first allocation without reserving value already assigned on a later reconcile.
     uint256 internal freshlyQueuedClaimantAssets;
-    /// @dev Pool payouts since the last reconcile, bounded by pending claimant intent. A fresh canonical snapshot
+    /// @dev Trader-claim payouts since the last reconcile, bounded by pending claimant intent. A fresh canonical snapshot
     ///      decides whether that payout actually consumed backing for a pending claimant bucket.
     uint256 internal pendingClaimantPayoutDebitAssets;
     /// @notice Accepted senior delayed-deposit assets not yet cancelled or finalized (6-decimal settlement token).
@@ -603,7 +603,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
     /// @notice Transfers settlement token from the pool for protocol-authorized settlement.
     /// @dev Callable only by the engine or its current settlement sidecar. Decreases `accountedAssets` by the
-    ///      amount and transfers the same raw settlement token; the operation reverts atomically if either balance is short.
+    ///      amount and transfers the same raw settlement token; existing trader claims use `payOutTraderClaim`.
+    ///      The operation reverts atomically if either balance is short.
     /// @param recipient Address to receive settlement token
     /// @param amount settlement token amount to transfer (6 decimals)
     function payOut(
@@ -613,10 +614,29 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementSidecar()) {
             revert HousePool__Unauthorized();
         }
+        _payOut(recipient, amount);
+    }
+
+    function _payOut(
+        address recipient,
+        uint256 amount
+    ) private {
         accountedAssets -= amount;
         settlementToken.safeTransfer(recipient, amount);
+    }
+
+    /// @notice Pays an existing trader claim from pool cash.
+    /// @dev The Engine alone can identify claim settlement. Retire its pending backing before allocating later gains.
+    function payOutTraderClaim(
+        address recipient,
+        uint256 amount
+    ) external {
+        if (msg.sender != address(ENGINE)) {
+            revert HousePool__Unauthorized();
+        }
+        _payOut(recipient, amount);
         // The Engine may still be inside a terminal-book mutation. Defer ownership clipping until the next stable
-        // reconcile; physical cash alone omits collectible receivables that may still back claimant intent.
+        // reconcile rather than reading a transient claim balance here.
         pendingClaimantPayoutDebitAssets += _min(
             amount, _pendingClaimantBucketAssets() - pendingClaimantPayoutDebitAssets
         );
@@ -1816,7 +1836,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         return HousePoolPendingPreviewLib.claimantBucketAssets(claimantBuckets);
     }
 
-    /// @dev Allocate once, then retire spent unsupported intent from the unallocated remainder.
+    /// @dev Retire paid claims before allocating new value. Keep fresh intent backed by physical cash or a
+    ///      collectible mark even when an unrelated payout temporarily reduces LP equity.
     function _resolvePendingClaimantBuckets(
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot,
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets,
@@ -1829,18 +1850,29 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             HousePoolPendingPreviewLib.ClaimantPendingBuckets memory remainingClaimantBuckets
         )
     {
+        uint256 claimDebit =
+            markValid ? _min(pendingClaimantPayoutDebitAssets, _pendingClaimantBucketAssets(claimantBuckets)) : 0;
+        claimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(
+            claimantBuckets, _pendingClaimantBucketAssets(claimantBuckets) - claimDebit
+        );
+        uint256 freshAssets = _min(freshlyQueuedClaimantAssets, _pendingClaimantBucketAssets(claimantBuckets));
         settleableClaimantBuckets = HousePoolPendingPreviewLib.settleableClaimantBuckets(
             claimantBuckets,
             reconcileSnapshot.distributable,
             seniorPrincipal + juniorPrincipal + unassignedAssets,
-            freshlyQueuedClaimantAssets
+            freshAssets
         );
         remainingClaimantBuckets =
             HousePoolPendingPreviewLib.subtractClaimantBuckets(claimantBuckets, settleableClaimantBuckets);
-        if (markValid) {
+        if (markValid && freshAssets != 0) {
+            uint256 physicalAssets = _min(rawAssets(), accountedAssets);
+            uint256 backingAssets =
+                physicalAssets > reconcileSnapshot.distributable ? physicalAssets : reconcileSnapshot.distributable;
+            // Settled buckets already fit within distributable, so only fresh intent above total backing is lost.
+            uint256 unsupportedFreshAssets = freshAssets > backingAssets ? freshAssets - backingAssets : 0;
             uint256 remainingAssets = _pendingClaimantBucketAssets(remainingClaimantBuckets);
             remainingClaimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(
-                remainingClaimantBuckets, remainingAssets - _min(pendingClaimantPayoutDebitAssets, remainingAssets)
+                remainingClaimantBuckets, remainingAssets - _min(unsupportedFreshAssets, remainingAssets)
             );
         }
     }

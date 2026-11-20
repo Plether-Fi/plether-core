@@ -655,12 +655,13 @@ the engine for USDG; the call checkpoints carry at the old depth, transfers from
 the pool, and verifies exact receipt before recording `Recapitalization` with `CashArrived`. Transfer and recording
 are atomic. Normal reconciliation allocates the queued amount to senior restoration or unassigned assets;
 the funding call mints no LP shares and does not automatically clear degraded mode or lift operator pauses.
-Recapitalization preserves Senior's existing high-water mark. A payout records a bounded debit against pending
-claimant value because the terminal book may still be mid-mutation. The next mark-valid, stable preview/reconcile
-retires at most that debit's unsupported pending amount using canonical terminal backing and allocation capacity.
-With open positions, an expired or future mark retains the debit for a later valid observation; ordinary
-reconciliation and coupon freshness rules remain separate. Physical cash alone cannot determine support:
-collectible terminal receivables may still back claimant intent, while remaining unavailable for cash withdrawals.
+Recapitalization preserves Senior's existing high-water mark. A trader-claim payment records a bounded debit against
+pending claimant value because the terminal book may still be mid-mutation. An ordinary pool payout does not record
+that debit. The next mark-valid preview/reconcile retires paid claim backing before allocating later gains, then
+retires fresh pending intent that has neither physical cash nor distributable equity behind it. With open positions,
+an expired or future mark retains the debit for a later valid observation; ordinary reconciliation and coupon
+freshness rules remain separate. Physical cash alone cannot determine support: collectible terminal receivables may
+still back claimant intent, while remaining unavailable for cash withdrawals.
 
 Rules:
 
