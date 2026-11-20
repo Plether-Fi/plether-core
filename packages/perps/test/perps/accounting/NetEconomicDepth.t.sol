@@ -90,7 +90,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         assertEq(pool.totalAssets(), assets + expectedCarry + uint256(preview.vpiAssets));
     }
 
-    function test_ClaimCreationHookCheckpointsFlatCarryBeforeIncreasingLiability() public {
+    function test_ClaimCreationHookDoesNotChangeFlatCarryRate() public {
         _openTraderPosition();
         uint256 assets = pool.totalAssets();
         uint256 startIndex = engine.carryIndex();
@@ -100,17 +100,17 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         // Authorized sidecar capability test: an unavailable payout becomes a claim without transferring cash.
         vm.prank(address(engine.settlementSidecar()));
         engine.settlementRecordTraderClaim(CLAIMANT, assets + 1, false);
-        uint256 oldIncrement = ONE_DAY_INDEX;
-        assertEq(engine.carryIndex(), startIndex + oldIncrement, "creation checkpoints elapsed flat carry");
+        assertEq(engine.carryIndex(), startIndex, "claim creation does not checkpoint carry");
+        assertEq(engine.currentCarryIndex(), startIndex + ONE_DAY_INDEX, "claim creation preserves projected carry");
         assertEq(pool.totalAssets(), assets);
         assertEq(engine.totalTraderClaimBalanceAssets(), assets + 1);
 
         vm.warp(start + 2 days);
         engine.checkpointCarryIndex();
-        assertEq(engine.carryIndex(), startIndex + oldIncrement + ONE_DAY_INDEX);
+        assertEq(engine.carryIndex(), startIndex + 2 * ONE_DAY_INDEX);
     }
 
-    function test_ClaimConsumptionHookCheckpointsFlatCarryBeforeReducingLiability() public {
+    function test_ClaimConsumptionHookDoesNotChangeFlatCarryRate() public {
         _openTraderPosition();
         uint256 assets = pool.totalAssets();
         uint256 claim = 400_000e6;
@@ -122,12 +122,13 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         // Authorized sidecar capability test of claim netting; no cash leaves the pool.
         vm.prank(address(engine.settlementSidecar()));
         engine.settlementConsumeTraderClaim(CLAIMANT, claim);
-        uint256 oldIncrement = ONE_DAY_INDEX;
-        assertEq(engine.carryIndex(), startIndex + oldIncrement, "consumption checkpoints elapsed flat carry");
+        assertEq(engine.carryIndex(), startIndex, "claim consumption does not checkpoint carry");
+        assertEq(engine.currentCarryIndex(), startIndex + ONE_DAY_INDEX, "claim consumption preserves projected carry");
         assertEq(pool.totalAssets(), assets);
+        assertEq(engine.totalTraderClaimBalanceAssets(), 0);
         vm.warp(start + 2 days);
         engine.checkpointCarryIndex();
-        assertEq(engine.carryIndex(), startIndex + oldIncrement + ONE_DAY_INDEX);
+        assertEq(engine.carryIndex(), startIndex + 2 * ONE_DAY_INDEX);
     }
 
     function testFuzz_ClaimsAtOrAboveAssetsDoNotChangeFlatCarry(
