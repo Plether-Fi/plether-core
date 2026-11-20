@@ -1096,8 +1096,11 @@ pending claimants remain visible even when an epoch's queued assets are zero. Th
 tranche's activation while matured Senior funding can still change principal/HWM rounding. Junior funding protects
 accepted Senior reservations and cannot displace their activation. HousePool rechecks the exact gates after redemption funding.
 Senior HWM scales with net principal removed, so healthy withdrawals cannot create impairment through virtual-offset
-pricing or retained fees; conservative rounding can preserve an existing impairment. The view does not
-quote new-request capacity. The facade constructor rejects a Router whose immutable settlement pool differs from
+pricing or retained fees. For an impaired withdrawal that leaves positive Senior principal, HWM removal is also
+capped by the funded shares' fraction of the phase's real pre-burn share supply. This preserves remaining holders'
+share-proportional recovery floor; conservative rounding and the net-principal bound may retain more protection.
+Zero funding preserves HWM, while funding all principal clears it even if shares remain. The view does not quote
+new-request capacity. The facade constructor rejects a Router whose immutable settlement pool differs from
 `Engine.pool()` and deploys a code-size sidecar whose diagnostic builders accept only the constructor-bound
 facade; its public `MONITOR()` binding remains readable, dependency bindings stay internal, and it has no setter or
 delegatecall path. That
@@ -1433,9 +1436,12 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
   required; insufficient cash or persistent Senior demand can independently defer Junior funding.
 - Terminal allocation dust follows fixed ownership rules: deposit-share dust is burned, funded-asset dust returns to
   HousePool as excess, and refundable-share dust goes to the seed receiver. It is not awarded to the final caller.
-- An impaired Senior withdrawal may retain less than one extra USDG atom of high-water-mark protection per funded
-  pass because of conservative rounding. This can accumulate across passes and does not describe a universal bound
-  on all LP allocation dust.
+- Each floor-rounded HWM-removal calculation retains less than one extra USDG atom relative to its exact fractional
+  result. This rounding residual can accumulate across funded passes. It does not bound the difference between
+  net-principal-based and share-proportional protection: virtual-offset pricing, per-epoch asset rounding, and retained
+  fees can separate those fractions substantially at small principal. Impaired partial withdrawals cap HWM removal
+  by both fractions, but may still retain substantially more than share-proportional protection when the net-principal
+  bound wins. Full-principal funding intentionally clears HWM. These rules do not establish a universal LP dust bound.
 
 ### Rounding limitations
 
