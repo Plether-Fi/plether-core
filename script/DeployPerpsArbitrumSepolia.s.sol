@@ -82,7 +82,7 @@ contract ArbitrumSepoliaReleaseHousePool is HousePool {
 
 }
 
-/// @dev Release-only constructor wrapper for the oracle-backed Router confidence policy. Subsequent policy changes
+/// @dev Release-only constructor wrapper for the Router's oracle policy defaults. Subsequent policy changes
 ///      still flow exclusively through the existing RouterAdmin 72-hour proposal/finalization path.
 contract ArbitrumSepoliaReleaseOracle is PletherOracle {
 
@@ -704,6 +704,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("OrderRecoverySidecar:", deployed.orderExecutionSidecar.recoverySidecar());
         console.log("OrderRouter:", address(deployed.router));
         console.log("MinimumOpenNotionalAssets:", deployed.router.minOpenNotionalAssets());
+        console.log("MinOrderSettlementDelay:", deployed.router.pletherOracle().minOrderSettlementDelay());
         console.log("AdverseConfidenceMultiplierBps:", deployed.router.pletherOracle().adverseConfidenceMultiplierBps());
         console.log("OrderRouterLiquidationBatchSidecar:", address(deployed.liquidationBatchSidecar));
         console.log("PositionProtectionBook:", deployed.positionProtectionBook);

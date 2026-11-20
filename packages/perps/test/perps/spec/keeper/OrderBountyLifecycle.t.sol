@@ -205,6 +205,7 @@ contract PositionFundedCloseBountyTest is BasePerpTest {
             orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.pletherOracle().liquidationStalenessLimit(),
             basketMaxConfidenceRatioBps: router.pletherOracle().basketMaxConfidenceRatioBps(),
+            minOrderSettlementDelay: router.pletherOracle().minOrderSettlementDelay(),
             orderSettlementWindow: router.pletherOracle().orderSettlementWindow(),
             maxComponentPublishTimeDivergence: router.pletherOracle().maxComponentPublishTimeDivergence(),
             adverseConfidenceMultiplierBps: router.pletherOracle().adverseConfidenceMultiplierBps(),

@@ -80,6 +80,7 @@ interface IPletherOracle {
     /// @param orderExecutionStalenessLimit Maximum live order-execution and mark-refresh component age, in seconds.
     /// @param liquidationStalenessLimit Maximum live liquidation component age, in seconds.
     /// @param basketMaxConfidenceRatioBps Maximum accepted aggregate basket confidence-to-price ratio, in basis points.
+    /// @param minOrderSettlementDelay Minimum time after commit before a historical component can qualify, in seconds.
     /// @param orderSettlementWindow Post-commit window for a unique historical execution tick, in seconds.
     /// @param maxComponentPublishTimeDivergence Maximum component-time divergence for a historical basket, in seconds.
     /// @param adverseConfidenceMultiplierBps Basis-point multiplier applied to aggregate confidence for adverse pricing.
@@ -87,13 +88,14 @@ interface IPletherOracle {
         uint256 orderExecutionStalenessLimit;
         uint256 liquidationStalenessLimit;
         uint256 basketMaxConfidenceRatioBps;
+        uint256 minOrderSettlementDelay;
         uint256 orderSettlementWindow;
         uint256 maxComponentPublishTimeDivergence;
         uint256 adverseConfidenceMultiplierBps;
     }
 
     /// @notice Inputs that identify and price one delayed order.
-    /// @param commitTime Order commit time; live execution requires a unique tick strictly after this timestamp.
+    /// @param commitTime Order commit time used to calculate the live historical publish-time window.
     /// @param targetPrice Router-enforced slippage target in 8-decimal units; the oracle does not inspect this field.
     /// @param side Position side used to choose the adverse confidence-shift direction.
     /// @param isClose Whether the order reduces a position; also waives the confidence shift during frozen policy.
@@ -116,7 +118,7 @@ interface IPletherOracle {
     /// @param price Neutral, pre-cap basket price in 8-decimal units.
     /// @param confidence Aggregate basket confidence in 8-decimal price units.
     /// @param publishTime Newest component publish time for the cached basket and Engine mark.
-    /// @param oldestPublishTime Oldest component publish time; a later order can reuse only if this follows its commit.
+    /// @param oldestPublishTime Oldest component publish time, used to check the next order's settlement delay.
     struct BatchOrderPriceCache {
         bool hasHistoricalBasket;
         uint64 minReusableCommitTime;
@@ -257,8 +259,8 @@ interface IPletherOracle {
 
     /// @notice Applies order-execution update data and returns a validated execution price.
     /// @dev Outside frozen-oracle policy, resolves a unique historical basket in
-    ///      `(commitTime, min(commitTime + orderSettlementWindow, block.timestamp)]`. Frozen policy instead replays the
-    ///      Engine mark at zero fee under the frozen age limit. Historical resolution also
+    ///      `[commitTime + minOrderSettlementDelay, min(commitTime + orderSettlementWindow, block.timestamp)]`.
+    ///      Frozen policy replays the Engine mark at zero fee under the frozen age limit. Historical resolution also
     ///      updates storage from the same payload and verifies coverage before returning. `price` is shifted against
     ///      the requested side by aggregate confidence, except for a frozen voluntary close; `markPrice` stays neutral.
     ///      This function reports but does not enforce close-only policy and ignores `request.targetPrice`. Successful
@@ -278,8 +280,8 @@ interface IPletherOracle {
     ) external payable returns (bool ok, PriceSnapshot memory snapshot);
 
     /// @notice Batch variant that can reuse a historical tick already proven unique for later commits.
-    /// @dev Reuse is available only outside frozen policy when the cached publish time is after the new commit, within
-    ///      its settlement window, no later than the current time, and covered by `minReusableCommitTime`. Reuse pays no
+    /// @dev Outside frozen policy, reuse requires all component publish times to fit the new order's settlement range
+    ///      and the new commit to be covered by `minReusableCommitTime`. Reuse pays no
     ///      Pyth fee after checking stored-feed coverage; it does not authenticate cache prices or refund supplied ETH.
     ///      Otherwise, fee handling and price construction
     ///      match `updateOrderExecutionPrice`. Only a successful new parse and synchronization extends `nextCache`; a frozen
@@ -441,6 +443,10 @@ interface IPletherOracle {
     /// @notice Returns the max accepted aggregate basket confidence ratio in basis points.
     /// @return Maximum basket confidence-to-price ratio in basis points.
     function basketMaxConfidenceRatioBps() external view returns (uint256);
+
+    /// @notice Returns the minimum post-commit delay for historical order execution.
+    /// @return Minimum difference in seconds between the commit time and each historical component's publish time.
+    function minOrderSettlementDelay() external view returns (uint256);
 
     /// @notice Returns the post-commit settlement window for historical order execution.
     /// @return Historical execution window in seconds.
