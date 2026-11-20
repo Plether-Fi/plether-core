@@ -649,13 +649,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         emit ClaimantInflowAccounted(msg.sender, kind, cashMode, amount);
     }
 
-    /// @notice Explicitly bootstraps quarantined LP assets into a tranche by minting matching shares.
-    /// @dev Only the owner may call. Requires non-frozen oracle mode and the applicable mark-freshness policy,
-    ///      reconciles first, assigns the entire resulting `unassignedAssets` balance to the selected tranche,
-    ///      and asks its configured vault to mint matching shares. No settlement token moves and this does not initialize the
-    ///      tranche seed-lifecycle flag. Prevents later LPs from implicitly capturing previously ownerless value.
-    /// @param toSenior True to assign assets to senior, false to junior
-    /// @param receiver Account receiving bootstrap tranche shares
+    /// @inheritdoc IHousePool
     function assignUnassignedAssets(
         bool toSenior,
         address receiver
@@ -681,6 +675,13 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (targetVault == address(0)) {
             revert HousePool__ZeroAddress();
         }
+        if (!toSenior && juniorPrincipal == 0 && _juniorShareSupply() != 0) {
+            juniorPrincipal = amount;
+            unassignedAssets = 0;
+            emit UnassignedAssetsAssigned(false, receiver, amount, 0);
+            return;
+        }
+
         uint256 shares = ITrancheVaultBootstrap(targetVault).quoteBootstrapDeposit(amount);
         if (shares == 0) {
             revert HousePool__BootstrapSharesZero();

@@ -417,6 +417,72 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         );
     }
 
+    function test_AssignUnassignedAssets_RestoresWipedJuniorWithoutMintingShares() public {
+        _fundJunior(bob, 20_000e6);
+        uint256 unassigned = pool.juniorPrincipal();
+        uint256 supplyBefore = juniorVault.totalSupply();
+        uint256 holderSharesBefore = juniorVault.balanceOf(bob);
+
+        // Fixture: Junior has outstanding shares and all its backing is in the unassigned bucket.
+        stdstore.target(address(pool)).sig("juniorPrincipal()").checked_write(uint256(0));
+        stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(unassigned);
+        assertGt(holderSharesBefore, 0);
+        assertEq(juniorVault.totalAssets(), 0);
+        assertFalse(pool.canAcceptTrancheDeposits(false));
+
+        vm.expectEmit(true, true, false, true, address(pool));
+        emit IHousePool.UnassignedAssetsAssigned(false, alice, unassigned, 0);
+        pool.assignUnassignedAssets(false, alice);
+
+        assertEq(pool.unassignedAssets(), 0);
+        assertEq(pool.juniorPrincipal(), unassigned);
+        assertEq(juniorVault.totalAssets(), unassigned);
+        assertEq(juniorVault.totalSupply(), supplyBefore);
+        assertEq(juniorVault.balanceOf(bob), holderSharesBefore);
+        assertEq(juniorVault.balanceOf(alice), 0);
+        assertTrue(pool.canAcceptTrancheDeposits(false));
+    }
+
+    function test_AssignUnassignedAssets_PreservesJuniorRecoveryAfterMarkReversal() public {
+        _fundSenior(alice, 500_000e6);
+        _fundJunior(bob, 50_000e6);
+        _fundTrader(carol, 50_000e6);
+        uint256 openingMark = 1e8;
+        _open(carol, CfdTypes.Side.LONG, 200_000e18, 20_000e6, openingMark);
+
+        uint256 holderShares = juniorVault.balanceOf(bob);
+        uint256 supplyBefore = juniorVault.totalSupply();
+        uint256 sharesToRedeem = holderShares / 2;
+        uint256 claimBeforeWipe = juniorVault.convertToAssets(sharesToRedeem);
+        assertGt(claimBeforeWipe, 0);
+
+        // Supply quarantined cash as a fixture. Oracle marks drive the Junior NAV changes.
+        uint256 unassigned = 1000e6;
+        _mintAndAccountPoolExcess(unassigned);
+        stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(unassigned);
+
+        router.updateMarkPrice(_mockPythUpdateData(0.5e8));
+        assertEq(juniorVault.totalAssets(), 0);
+        assertEq(juniorVault.balanceOf(bob), holderShares);
+
+        pool.assignUnassignedAssets(false, alice);
+        assertEq(pool.juniorPrincipal(), unassigned);
+        assertEq(pool.unassignedAssets(), 0);
+        assertEq(juniorVault.totalSupply(), supplyBefore);
+        assertEq(juniorVault.balanceOf(alice), 0);
+
+        _finishAsyncCooldown(juniorVault, bob);
+        uint256 requestId = _requestAsyncRedeem(juniorVault, bob, sharesToRedeem);
+        vm.warp(pool.lpEpochStart(requestId));
+        router.settleLpEpoch(_mockPythUpdateData(openingMark));
+
+        uint256 balanceBefore = settlementToken.balanceOf(bob);
+        (uint256 sharesClaimed, uint256 assetsClaimed) = _claimAsyncRedeem(juniorVault, requestId, bob);
+        assertEq(sharesClaimed, sharesToRedeem);
+        assertGe(assetsClaimed, claimBeforeWipe);
+        assertEq(settlementToken.balanceOf(bob) - balanceBefore, assetsClaimed);
+    }
+
     function test_AssignUnassignedAssets_ResetsSeniorHwmWhenSeniorIsEmptyButJuniorStillExists() public {
         uint256 juniorAssets = 20_000e6;
         uint256 strandedAssets = 30_000e6;
