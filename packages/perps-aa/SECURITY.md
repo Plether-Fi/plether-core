@@ -62,8 +62,12 @@ and rehearse pause/signer rotation/deposit withdrawal. Keep the legacy direct-wa
 
 ## Kernel v4 pilot profile
 
-`PletherKernelVerifyingPaymaster` binds EntryPoint v0.9, the factory, expected Kernel UUPS implementation,
-validator and proxy runtime. It accepts one canonical index-zero ECDSA root initializer using the configured factory.
+`PletherKernelVerifyingPaymaster` binds EntryPoint v0.9, a staked ZeroDev Staker, the underlying KernelFactory,
+expected Kernel UUPS implementation, validator and proxy runtime. It accepts one canonical index-zero ECDSA root
+initializer through `Staker.deployWithFactory(KernelFactory, KernelFactory.deploy(...))`. The Staker must approve that
+factory and maintain at least 1 ETH stake with a one-day unstake delay. The gateway must attest the current approval,
+runtime and stake before issuing a sponsored first deployment; revoking the approval or unlocking stake disables
+new first deployments. The paymaster must also be staked for SafeMode validation of its own storage reads.
 It limits sponsored operations to nonce key zero and atomic ERC-7579 single or batch execution. It rejects the
 v0.9 optional paymaster-signature suffix and block-based validity windows. The signature binds the exact operation.
 

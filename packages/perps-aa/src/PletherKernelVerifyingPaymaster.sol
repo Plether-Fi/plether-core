@@ -11,6 +11,7 @@ import {
     IPaymaster,
     PackedUserOperation
 } from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
+import {Bytes} from "@openzeppelin/contracts/utils/Bytes.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
@@ -75,6 +76,21 @@ interface IKernelV4FactoryProfile {
 
 }
 
+interface IKernelStakerProfile {
+
+    function owner() external view returns (address);
+
+    function approved(
+        address factory
+    ) external view returns (bool);
+
+    function deployWithFactory(
+        address factory,
+        bytes calldata createData
+    ) external payable returns (address);
+
+}
+
 /// @title PletherKernelVerifyingPaymaster
 /// @notice ERC-4337 v0.9 gas sponsorship for the Kernel v4 ECDSA-root UUPS profile on Arbitrum Sepolia.
 /// @dev The policy service verifies the live account implementation, root and owner, decodes the inner calls, and
@@ -96,7 +112,7 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
     uint48 public constant MAX_VALIDITY_WINDOW = 10 minutes;
     uint256 internal constant ARBITRUM_SEPOLIA_CHAIN_ID = 421_614;
     uint256 internal constant VALIDATOR_MODULE_TYPE = 1;
-    uint256 internal constant FACTORY_CALL_LENGTH = 376;
+    uint256 internal constant FACTORY_CALL_LENGTH = 356;
     uint48 internal constant ENTRY_POINT_BLOCK_RANGE_FLAG = 1 << 47;
     bytes4 public constant EXECUTE_SELECTOR = bytes4(keccak256("execute(bytes32,bytes)"));
     bytes32 internal constant SINGLE_ATOMIC_MODE = bytes32(0);
@@ -114,6 +130,8 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
     bytes32 public immutable entryPointCodeHash;
     bytes32 public immutable policyId;
     bytes32 public immutable approvedAccountCodeHash;
+    address public immutable accountStaker;
+    bytes32 public immutable accountStakerCodeHash;
     address public immutable accountFactory;
     bytes32 public immutable accountFactoryCodeHash;
     address public immutable accountImplementation;
@@ -134,6 +152,9 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
     error InvalidAccountCodeHash(bytes32 accountCodeHash);
     error AccountCodeHashMismatch(bytes32 actualCodeHash, bytes32 expectedCodeHash);
     error InvalidAccountFactory(address factory);
+    error InvalidAccountStaker(address staker);
+    error AccountStakerCodeHashMismatch(bytes32 actualCodeHash, bytes32 expectedCodeHash);
+    error StakerFactoryNotApproved(address staker, address factory);
     error InvalidAccountImplementation(address implementation);
     error InvalidRootValidator(address validator);
     error AccountFactoryCodeHashMismatch(bytes32 actualCodeHash, bytes32 expectedCodeHash);
@@ -177,6 +198,7 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
         uint256 maxSponsoredCost_,
         bytes32 policyId_,
         bytes32 approvedAccountCodeHash_,
+        address accountStaker_,
         address accountFactory_,
         address accountImplementation_,
         address rootValidator_
@@ -199,6 +221,16 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
         if (accountFactory_ == address(0) || accountFactory_.code.length == 0) {
             revert InvalidAccountFactory(accountFactory_);
         }
+        if (accountStaker_ == address(0) || accountStaker_.code.length == 0) {
+            revert InvalidAccountStaker(accountStaker_);
+        }
+        try IKernelStakerProfile(accountStaker_).approved(accountFactory_) returns (bool approved) {
+            if (!approved) {
+                revert StakerFactoryNotApproved(accountStaker_, accountFactory_);
+            }
+        } catch {
+            revert InvalidAccountStaker(accountStaker_);
+        }
         if (accountImplementation_ == address(0) || accountImplementation_.code.length == 0) {
             revert InvalidAccountImplementation(accountImplementation_);
         }
@@ -216,6 +248,8 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
         entryPointCodeHash = address(entryPoint_).codehash;
         policyId = policyId_;
         approvedAccountCodeHash = approvedAccountCodeHash_;
+        accountStaker = accountStaker_;
+        accountStakerCodeHash = accountStaker_.codehash;
         accountFactory = accountFactory_;
         accountFactoryCodeHash = accountFactory_.codehash;
         accountImplementation = accountImplementation_;
@@ -388,6 +422,11 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
             revert AccountCodeHashMismatch(actualAccountCodeHash, approvedAccountCodeHash);
         }
 
+        bytes32 actualStakerCodeHash = accountStaker.codehash;
+        if (actualStakerCodeHash != accountStakerCodeHash) {
+            revert AccountStakerCodeHashMismatch(actualStakerCodeHash, accountStakerCodeHash);
+        }
+
         bytes32 actualFactoryCodeHash = accountFactory.codehash;
         if (actualFactoryCodeHash != accountFactoryCodeHash) {
             revert AccountFactoryCodeHashMismatch(actualFactoryCodeHash, accountFactoryCodeHash);
@@ -430,18 +469,24 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
         bytes calldata initCode
     ) internal view {
         address initCodeFactory = initCode.length < 20 ? address(0) : address(bytes20(initCode[0:20]));
-        if (initCodeFactory != accountFactory) {
-            revert InvalidFactoryInInitCode(initCodeFactory, accountFactory);
+        if (initCodeFactory != accountStaker) {
+            revert InvalidFactoryInInitCode(initCodeFactory, accountStaker);
         }
+        if (initCode.length != 504 || bytes4(initCode[20:24]) != IKernelStakerProfile.deployWithFactory.selector) {
+            revert InvalidFactoryCall();
+        }
+        bytes calldata stakerData = initCode[24:];
+        (address nestedFactory, bytes memory factoryCall) = abi.decode(stakerData, (address, bytes));
         if (
-            initCode.length != FACTORY_CALL_LENGTH || bytes4(initCode[20:24]) != IKernelV4FactoryProfile.deploy.selector
+            nestedFactory != accountFactory || factoryCall.length != FACTORY_CALL_LENGTH
+                || bytes4(factoryCall) != IKernelV4FactoryProfile.deploy.selector
+                || keccak256(stakerData) != keccak256(abi.encode(nestedFactory, factoryCall))
         ) {
             revert InvalidFactoryCall();
         }
-        bytes calldata factoryData = initCode[24:];
         // A single static address (left-packed into 20 dynamic bytes), no internal data, and index zero.
         (IKernelV4FactoryProfile.Install[] memory packages, uint256 index) =
-            abi.decode(factoryData, (IKernelV4FactoryProfile.Install[], uint256));
+            abi.decode(Bytes.slice(factoryCall, 4), (IKernelV4FactoryProfile.Install[], uint256));
         if (packages.length != 1 || index != 0) {
             revert InvalidFactoryCall();
         }
@@ -449,7 +494,8 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
         if (
             pkg.moduleType != VALIDATOR_MODULE_TYPE || pkg.module != rootValidator || pkg.moduleData.length != 20
                 || address(bytes20(pkg.moduleData)) == address(0) || pkg.internalData.length != 0
-                || keccak256(factoryData) != keccak256(abi.encode(packages, index))
+                || keccak256(factoryCall)
+                    != keccak256(abi.encodeCall(IKernelV4FactoryProfile.deploy, (packages, index)))
         ) {
             revert InvalidFactoryCall();
         }
