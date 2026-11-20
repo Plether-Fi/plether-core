@@ -977,6 +977,8 @@ library CfdEnginePlanLib {
         delta.freshPayoutCreatesClaim = delta.pricePayoutCreatesClaim;
 
         uint256 feeTopUpAssets = delta.executionFeeAssets - delta.actionProtocolFeeCreditedAssets;
+        // Count the rebate against the fee only after it offsets other action charges.
+        feeTopUpAssets += cs.executionFeeAssets - Math.min(cs.executionFeeAssets, delta.actionChargeAssessedAssets);
         freePoolCashAssets =
             _freePoolCashForProtocolFee(snap, delta, poolCashAfterCollectionsAssets, claimsAfterPriceNettingAssets);
         delta.protocolFeeTopUpAssets = feeTopUpAssets < freePoolCashAssets ? feeTopUpAssets : freePoolCashAssets;

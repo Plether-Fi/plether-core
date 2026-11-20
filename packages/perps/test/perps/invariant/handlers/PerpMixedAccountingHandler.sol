@@ -825,18 +825,26 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 juniorCapital,
         uint256 hwm
     ) internal view returns (uint256) {
-        uint256[2] memory liabilities;
-        for (uint256 i; i < 4; ++i) {
-            liabilities[i % 2] += i % 2 == 0 ? traders[i].basis : traders[i].lots * CAP - traders[i].basis;
-        }
-        uint256 liability = liabilities[0] > liabilities[1] ? liabilities[0] : liabilities[1];
-        uint256 reserve = liability + expectedClaims + (liability * 25 + 9999) / 10_000;
+        uint256 reserve = _bufferedLiability(_sideLiabilities()) + expectedClaims;
         uint256 free = _depth() > reserve ? _depth() - reserve : 0;
         // Fixture governance protects the greater of principal/HWM at a 9999-bps Senior exposure ceiling.
         uint256 seniorExposure = seniorCapital > hwm ? seniorCapital : hwm;
         uint256 requiredJunior = (seniorExposure + 9998) / 9999;
         uint256 ratioBudget = juniorCapital > requiredJunior ? juniorCapital - requiredJunior : 0;
         return free < ratioBudget ? free : ratioBudget;
+    }
+
+    function _sideLiabilities() internal view returns (uint256[2] memory liabilities) {
+        for (uint256 i; i < 4; ++i) {
+            liabilities[i % 2] += i % 2 == 0 ? traders[i].basis : traders[i].lots * CAP - traders[i].basis;
+        }
+    }
+
+    function _bufferedLiability(
+        uint256[2] memory liabilities
+    ) internal pure returns (uint256) {
+        uint256 liability = liabilities[0] > liabilities[1] ? liabilities[0] : liabilities[1];
+        return liability + (liability * 25 + 9999) / 10_000;
     }
 
     function _refreshRedeemEntitlements(
@@ -2981,8 +2989,12 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         input.lifetimeVpi = t.vpi;
         input.closeLots = lots;
         input.price = currentPrice;
-        if (lots <= t.lots) {
+        if (lots != 0 && lots <= t.lots) {
             input.vpiDelta = _vpiAtDepth(i, lots, true, depth);
+            uint256 closedBasis = t.basis * lots / t.lots;
+            uint256[2] memory liabilities = _sideLiabilities();
+            liabilities[i % 2] -= input.isLong ? closedBasis : lots * CAP - closedBasis;
+            input.poolLiabilityReserve = _bufferedLiability(liabilities);
         }
         input.frozen = frozen;
         input.unpaidCarry = c.unpaid;
