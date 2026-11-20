@@ -47,8 +47,19 @@ library CfdEnginePlanLib {
         if (currentLots > maximumLots || addedLots > maximumLots - currentLots) {
             return CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
         }
+        uint256 resultingLots = currentLots + addedLots;
+        if (params.bountyBps != 0) {
+            // The engine rejects prices whose reserve product overflows; preserve any lower valid price.
+            uint256 maximumNumericPrice = type(uint256).max / params.bountyBps / resultingLots;
+            if (maximumNumericPrice < minimumPrice) {
+                return CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
+            }
+            if (maximumPrice > maximumNumericPrice) {
+                maximumPrice = maximumNumericPrice;
+            }
+        }
         if (
-            OpenAccountingLib.rawLiquidationRequirement(currentLots + addedLots, maximumPrice, params.bountyBps)
+            OpenAccountingLib.rawLiquidationRequirement(resultingLots, maximumPrice, params.bountyBps)
                 < params.minBountyAssets
         ) {
             return CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL;
@@ -57,15 +68,12 @@ library CfdEnginePlanLib {
             // Only planner-valid fills matter: even the cheapest fill must meet minimum-position policy.
             uint256 lotBountyBps = addedLots * params.bountyBps;
             uint256 minimumSizePrice =
-                params.minBountyAssets == 0 ? 0 : (params.minBountyAssets * 10_000 + lotBountyBps - 1) / lotBountyBps;
+                params.minBountyAssets == 0 ? 0 : Math.ceilDiv(params.minBountyAssets * 10_000, lotBountyBps);
             if (minimumPrice < minimumSizePrice) {
                 minimumPrice = minimumSizePrice;
             }
             uint256 minimumReserve =
                 OpenAccountingLib.rawLiquidationRequirement(addedLots, minimumPrice, params.bountyBps);
-            if (minimumReserve < params.minBountyAssets) {
-                minimumReserve = params.minBountyAssets;
-            }
             uint256 minimumFees = (addedLots * minimumPrice * unavoidableFeeBps) / 10_000;
             if (marginDelta < minimumReserve + minimumFees) {
                 return CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED;

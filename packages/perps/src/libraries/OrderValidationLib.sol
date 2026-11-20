@@ -16,7 +16,7 @@ library OrderValidationLib {
     }
 
     /// @notice Whether the fixed request permits at least one positive execution price within the engine cap.
-    /// @dev This checks only unavoidable contradictions, not slippage against a cached or future market price.
+    /// @dev OPEN execution requires Live mode; this checks only unavoidable contradictions, not future market prices.
     function isRequestFeasible(
         CfdTypes.Side side,
         bool isClose,
@@ -25,6 +25,9 @@ library OrderValidationLib {
         OrderV3Types.ExecutionBounds memory bounds,
         ExecutionDomain memory domain
     ) internal pure returns (bool) {
+        if (!isClose && bounds.allowedExecutionModes & 1 == 0) {
+            return false;
+        }
         uint256 lots = sizeDelta / CfdTypes.SIZE_QUANTUM;
         // Avoid multiplying an untrusted uint256 lot count outside the engine's numeric domain.
         if (lots == 0 || lots > type(uint112).max || sizeDelta % CfdTypes.SIZE_QUANTUM != 0) {

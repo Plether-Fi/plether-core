@@ -114,6 +114,9 @@ contract OrderAdmissionPriceRangeTest is Test {
         OrderV3Types.ExecutionBounds memory bounds,
         OrderValidationLib.ExecutionDomain memory domain
     ) private pure returns (bool) {
+        if (!close && bounds.allowedExecutionModes & 1 == 0) {
+            return false;
+        }
         if (price > domain.capPrice) {
             return false;
         }
@@ -147,6 +150,7 @@ contract OrderAdmissionPriceRangeTest is Test {
     }
 
     function _unbounded() private pure returns (OrderV3Types.ExecutionBounds memory bounds) {
+        bounds.allowedExecutionModes = 7;
         bounds.maxExecutionNotionalAssets = type(uint256).max;
         bounds.maxExplicitFeesAssets = type(uint256).max;
         bounds.maxActionChargeAssets = type(uint256).max;

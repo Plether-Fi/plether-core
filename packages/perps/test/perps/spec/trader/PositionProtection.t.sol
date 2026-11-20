@@ -3187,37 +3187,35 @@ contract PositionProtectionTest is BasePerpTest {
         _assertAttachedOpenTerminalFailure(parentOrderId, protectionId);
     }
 
-    function test_AttachedOpen_DisallowedExecutionModeFailsParentAndProtection() public {
+    function test_AttachedOpen_WithoutLiveModeRejectsParentAndProtectionAtAdmission() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, 0);
         request.bounds.allowedExecutionModes = 2;
-
-        vm.prank(ALICE);
-        (uint64 parentOrderId, uint64 protectionId) =
-            protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
-
-        vm.roll(block.number + 1);
-        vm.warp(block.timestamp + 1);
-        assertFalse(engine.isFadWindow(), "execution must occur in live mode");
-        bytes[] memory updateData = _mockPythUpdateData(MARK_PRICE);
+        uint64 expectedParentId = router.nextCommitId();
+        uint64 expectedProtectionId = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
+        bytes32 protectionAndIdentityBefore = _manualExitStateHash(expectedProtectionId, request.clientOrderId);
+        bytes32 orderAndCustodyBefore = _protectionRecoveryStateHash(expectedProtectionId, expectedParentId);
         uint256 keeperBefore = clearinghouse.balanceAssets(EXECUTION_KEEPER);
-        uint256 expectedBounty = _orderRecord(parentOrderId).executionBountyAssets;
-        vm.prank(EXECUTION_KEEPER);
-        OrderV3Types.ExecutionResult memory result = router.executeOrder(parentOrderId, updateData);
-        assertEq(clearinghouse.balanceAssets(EXECUTION_KEEPER) - keeperBefore, expectedBounty, "parent cleaner credit");
-        OrderV3Types.CompactOutcome memory outcome =
-            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), parentOrderId);
-        assertEq(outcome.executor, EXECUTION_KEEPER, "parent terminal executor");
-        assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "parent bounty recipient");
 
-        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed), "parent lifecycle");
-        assertEq(
-            uint8(result.terminalReason),
-            uint8(OrderV3Types.TerminalReason.ExecutionModeDisallowed),
-            "parent failure reason"
+        _expectAttachedOpenCommitRevert(
+            request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ImpossibleExecutionRequest.selector)
         );
-        _assertAttachedOpenTerminalFailure(parentOrderId, protectionId);
+
+        assertEq(
+            _manualExitStateHash(expectedProtectionId, request.clientOrderId),
+            protectionAndIdentityBefore,
+            "rejection restores protection, reserves, queue pointers and client identity"
+        );
+        assertEq(
+            _protectionRecoveryStateHash(expectedProtectionId, expectedParentId),
+            orderAndCustodyBefore,
+            "rejection restores custody, pending intent, parent reservation and protection linkage"
+        );
+        assertEq(router.lifecycleBook().terminalOutcome(expectedParentId).receiptHash, bytes32(0));
+        assertEq(clearinghouse.balanceAssets(EXECUTION_KEEPER), keeperBefore, "rejection pays no cleanup bounty");
+        (uint256 liveSize,,,,,,) = engine.positions(ALICE);
+        assertEq(liveSize, 0, "rejected parent must not create position");
     }
 
     function test_AttachedOpen_FinancialBoundFailureFailsParentAndProtection() public {

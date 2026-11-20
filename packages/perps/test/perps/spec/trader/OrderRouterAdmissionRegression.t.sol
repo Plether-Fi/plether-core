@@ -11,6 +11,92 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 
 contract OrderRouterAdmissionRegressionTest is SourceBoundBountyFixture {
 
+    function test_PublicOpenRequiresALiveExecutionMode() public {
+        _fundTrader(BOUNTY_TRADER, 5000e6);
+        OrderV3Types.OrderRequest memory request = _bountyRequest(CfdTypes.Side.LONG, false, BOUNTY_SIZE, 1000e6);
+        for (uint8 modes = 2; modes <= 6; modes += 2) {
+            request.bounds.allowedExecutionModes = modes;
+            _rejectImpossible(request);
+        }
+        request.bounds.allowedExecutionModes = 1;
+        vm.prank(BOUNTY_TRADER);
+        uint64 id = router.commitOrder(request);
+        _bountyExecute(id, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+    }
+
+    function test_PendingIncreaseMustBeFeasibleAsFreshAfterItsPredecessorExpires() public {
+        for (uint256 invalidKind; invalidKind < 2; ++invalidKind) {
+            uint256 saved = vm.snapshotState();
+            _position(CfdTypes.Side.LONG);
+            _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+            OrderV3Types.OrderRequest memory predecessor =
+                _bountyRequest(CfdTypes.Side.SHORT, false, BOUNTY_SIZE, 1000e6);
+            predecessor.bounds.executionWindowSeconds = 1;
+            vm.prank(BOUNTY_TRADER);
+            uint64 predecessorId = router.commitOrder(predecessor);
+            // An increase can rely on the preceding position's size and reserves at submission.
+            uint256 size = invalidKind == 0 ? CfdTypes.SIZE_QUANTUM : BOUNTY_SIZE;
+            uint256 margin = invalidKind == 0 ? 1000e6 : 0;
+            uint64 increase = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, false, size, margin);
+            vm.warp(router.lifecycleBook().orderTiming(predecessorId).executionDeadline + 1);
+            _mark(BOUNTY_PRICE);
+
+            // Once the predecessor expires, this order would need to create a fresh position. Neither an
+            // undersized position nor one unable to fund its initial reserve can supply queued exposure.
+            _reject(
+                _bountyRequest(CfdTypes.Side.SHORT, true, size, 0),
+                abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector)
+            );
+            assertEq(
+                uint8(router.lifecycleBook().lifecycleStatus(increase)), uint8(OrderV3Types.LifecycleStatus.Pending)
+            );
+            assertTrue(vm.revertToStateAndDelete(saved));
+        }
+    }
+
+    function test_FeasiblePendingOpenStillSuppliesExposureAfterItsPredecessorExpires() public {
+        _position(CfdTypes.Side.LONG);
+        _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+        OrderV3Types.OrderRequest memory predecessor = _bountyRequest(CfdTypes.Side.SHORT, false, BOUNTY_SIZE, 1000e6);
+        predecessor.bounds.executionWindowSeconds = 1;
+        vm.prank(BOUNTY_TRADER);
+        uint64 predecessorId = router.commitOrder(predecessor);
+        _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, false, BOUNTY_SIZE, 1000e6);
+        vm.warp(router.lifecycleBook().orderTiming(predecessorId).executionDeadline + 1);
+        _mark(BOUNTY_PRICE);
+        uint64 closeId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, true, BOUNTY_SIZE, 0);
+        assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 4);
+        assertEq(router.accountHeadOrderId(BOUNTY_TRADER), closeId - 3);
+    }
+
+    function test_RecordedCarryLeavesInsufficientCloseActionChargeHeadroom() public {
+        (OrderV3Types.OrderRequest memory request, uint256 carry, uint256 fee) = _closeWithCarry();
+        request.bounds.maxActionChargeAssets = carry + fee - 1;
+        vm.prank(BOUNTY_TRADER);
+        uint64 closeId = router.commitOrder(request);
+        assertEq(router.lifecycleBook().pendingIntent(closeId).commitment.carryCollectedAssets, carry);
+        _rejectOpen(
+            _bountyRequest(CfdTypes.Side.LONG, false, BOUNTY_SIZE, 1000e6),
+            CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING
+        );
+        assertEq(router.accountHeadOrderId(BOUNTY_TRADER), closeId);
+    }
+
+    function test_RecordedCarryWithSufficientCloseHeadroomPreservesQueuedFlip() public {
+        (OrderV3Types.OrderRequest memory request, uint256 carry, uint256 fee) = _closeWithCarry();
+        // Leave headroom for the small carry accrued while obtaining a later execution publication.
+        request.bounds.maxActionChargeAssets = carry + fee + 1e6;
+        vm.prank(BOUNTY_TRADER);
+        uint64 closeId = router.commitOrder(request);
+        assertEq(router.lifecycleBook().pendingIntent(closeId).commitment.carryCollectedAssets, carry);
+        uint64 openId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, false, BOUNTY_SIZE, 1000e6);
+        _bountyExecute(closeId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        _bountyExecute(openId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(BOUNTY_TRADER);
+        assertEq(size, BOUNTY_SIZE);
+        assertEq(uint8(side), uint8(CfdTypes.Side.LONG));
+    }
+
     function test_ExpiredFullCloseCannotAdmitOpposingOpen() public {
         _position(CfdTypes.Side.SHORT);
         uint64 closeId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, true, BOUNTY_SIZE, 0);
@@ -305,6 +391,20 @@ contract OrderRouterAdmissionRegressionTest is SourceBoundBountyFixture {
         uint256 free = clearinghouse.getAccountAssetBuckets(BOUNTY_TRADER).freeSettlementAssets;
         vm.prank(BOUNTY_TRADER);
         clearinghouse.withdraw(BOUNTY_TRADER, free - margin - bounty);
+    }
+
+    function _closeWithCarry() private returns (OrderV3Types.OrderRequest memory request, uint256 carry, uint256 fee) {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.baseCarryBps = 500;
+        _setRiskParams(params);
+        _position(CfdTypes.Side.SHORT);
+        vm.warp(block.timestamp + 1 days);
+        _mark(BOUNTY_PRICE);
+        carry = _expectedIndexedCarryAssets(BOUNTY_TRADER);
+        assertGt(carry, 0, "the close must record real collected carry");
+        fee = (BOUNTY_SIZE / CfdTypes.SIZE_QUANTUM) * BOUNTY_PRICE * engine.executionFeeBps() / 10_000;
+        request = _bountyRequest(CfdTypes.Side.SHORT, true, BOUNTY_SIZE, 0);
+        request.targetPrice = BOUNTY_PRICE;
     }
 
     function _position(

@@ -119,43 +119,85 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
         IOrderLifecycleBook book = router.lifecycleBook();
         bytes32 currentConfigHash = book.currentExecutionConfigHash();
         OrderValidationLib.ExecutionDomain memory domain = _domain(0);
+        CfdTypes.RiskParams memory riskParams = ICfdEngineRiskParamsView(address(engine)).riskParams();
         for (; orderId != 0;) {
             (IOrderRouterAccounting.PendingOrderView memory pending, uint64 nextOrderId) =
                 router.getPendingOrderView(orderId);
             OrderV3Types.PendingIntent memory intent = book.pendingIntent(orderId);
-            domain.executionBountyAssets = intent.executionBountyAssets;
             if (
                 (riskOffCutoff == 0 || orderId > riskOffCutoff || pending.isClose)
                     && block.timestamp <= intent.timing.executionDeadline
                     && (intent.bounds.expectedConfigHash == bytes32(0)
                         || intent.bounds.expectedConfigHash == currentConfigHash)
-                    && OrderValidationLib.isRequestFeasible(
-                        pending.side, pending.isClose, pending.sizeDelta, pending.targetPrice, intent.bounds, domain
-                    )
             ) {
-                if (pending.isClose) {
-                    if (
-                        position.exists && pending.side == position.side && pending.sizeDelta <= position.size
-                            && position.size - pending.sizeDelta <= intent.bounds.maxPostPositionSize
-                            && (position.size == pending.sizeDelta
-                                || intent.bounds.minPostPositionEquityAssets <= uint256(type(int256).max))
-                    ) {
-                        position.size -= pending.sizeDelta;
-                        position.exists = position.size != 0;
-                    }
-                } else if (!position.exists) {
-                    position.exists = true;
-                    position.side = pending.side;
-                    position.size = pending.sizeDelta;
-                } else if (
-                    pending.side == position.side
-                        && position.size <= intent.bounds.maxPostPositionSize - pending.sizeDelta
-                ) {
-                    position.size += pending.sizeDelta;
-                }
+                domain.executionBountyAssets = intent.executionBountyAssets;
+                position = _projectPendingOrder(position, pending, intent, domain, riskParams);
             }
             orderId = nextOrderId;
         }
+    }
+
+    function _projectPendingOrder(
+        QueuedPosition memory position,
+        IOrderRouterAccounting.PendingOrderView memory pending,
+        OrderV3Types.PendingIntent memory intent,
+        OrderValidationLib.ExecutionDomain memory domain,
+        CfdTypes.RiskParams memory riskParams
+    ) private pure returns (QueuedPosition memory) {
+        OrderV3Types.ExecutionBounds memory bounds = intent.bounds;
+        if (pending.isClose) {
+            uint256 carry = intent.commitment.carryCollectedAssets;
+            if (carry > bounds.maxActionChargeAssets) {
+                return position;
+            }
+            if (domain.vpiDisabled) {
+                // The collected carry is added to the assessed action charge at execution.
+                bounds.maxActionChargeAssets -= carry;
+            }
+        }
+        if (!OrderValidationLib.isRequestFeasible(
+                pending.side, pending.isClose, pending.sizeDelta, pending.targetPrice, bounds, domain
+            )) {
+            return position;
+        }
+        if (pending.isClose) {
+            if (
+                position.exists && pending.side == position.side && pending.sizeDelta <= position.size
+                    && position.size - pending.sizeDelta <= bounds.maxPostPositionSize
+                    && (position.size == pending.sizeDelta
+                        || bounds.minPostPositionEquityAssets <= uint256(type(int256).max))
+            ) {
+                position.size -= pending.sizeDelta;
+                position.exists = position.size != 0;
+            }
+            return position;
+        }
+        if (position.exists && pending.side != position.side) {
+            return position;
+        }
+        if (position.size > bounds.maxPostPositionSize - pending.sizeDelta) {
+            return position;
+        }
+        (uint256 minimumPrice, uint256 maximumPrice) = OrderValidationLib.executionPriceRange(
+            pending.side, false, pending.sizeDelta, pending.targetPrice, bounds, domain
+        );
+        if (
+            CfdEnginePlanLib.getQueuedOpenRevertCode(
+                    position.size,
+                    pending.sizeDelta,
+                    pending.marginDelta,
+                    minimumPrice,
+                    maximumPrice,
+                    domain.vpiDisabled ? domain.executionFeeBps : 0,
+                    riskParams
+                ) != CfdEnginePlanTypes.OpenRevertCode.OK
+        ) {
+            return position;
+        }
+        position.exists = true;
+        position.side = pending.side;
+        position.size += pending.sizeDelta;
+        return position;
     }
 
     function _domain(
