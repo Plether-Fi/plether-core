@@ -125,7 +125,8 @@ nonzero successor, or `cancelProtocolTreasuryProposal()` to remove a pending suc
 current lock's expiry. At the exact expiry, the latest pending address becomes effective automatically for all
 protocol credits and treasury views, without a confirmation or keeper transaction. With no pending proposal, the
 current treasury remains. A matured proposal cannot be cancelled or replaced retroactively. Ownership transfer
-preserves the schedule; renouncing ownership does not prevent activation.
+preserves the schedule. The Engine and its configuration admin disallow renouncing ownership so governance retains
+recovery and configuration authority.
 
 The proposal's duration determines the successor's lock from the scheduled activation timestamp, even if the next
 interaction occurs much later. A proposal accepts durations from zero to 90 days, inclusive; zero leaves its successor

@@ -336,6 +336,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         planningReader = new CfdEnginePlanningReader();
     }
 
+    /// @notice Ownership cannot be renounced because governance must retain emergency recovery authority.
+    function renounceOwnership() public view override onlyOwner {
+        revert OwnableInvalidOwner(address(0));
+    }
+
     /// @notice Atomically configures the planner, settlement sidecar, and engine admin exactly once.
     /// @dev Callable only by the owner. The sidecar must be contract code whose `ENGINE()` is this engine, and the
     ///      admin must report this engine from `engine()`. The planner address is stored without an interface probe.
