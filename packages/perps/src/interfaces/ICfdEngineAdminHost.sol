@@ -18,13 +18,25 @@ interface ICfdEngineAdminHost {
         uint256 settlementBufferBps;
     }
 
-    /// @notice FAD calendar override timestamps and deleverage runway.
-    /// @param fadDayTimestamps Unix timestamps whose normalized UTC day numbers are configured as all-day FAD and
-    ///        oracle-frozen overrides; duplicate normalized days are ignored by the engine.
-    /// @param fadRunwaySeconds Look-ahead duration before an override day during which FAD restrictions apply.
+    /// @notice Scheduled market closure as a half-open interval of Unix timestamps.
+    /// @param startTime First second when frozen-oracle policy applies.
+    /// @param endTime First second after the closure, subject to any other active calendar rules.
+    struct MarketClosure {
+        uint64 startTime;
+        uint64 endTime;
+    }
+
+    /// @notice FAD calendar override timestamps, deleverage runway, and scheduled market closures.
+    /// @param fadDayTimestamps Unix timestamps whose normalized UTC day numbers activate all-day FAD and add freezing
+    ///        only before that day's 17:00 New York boundary. Recurring weekend freezing still applies; duplicate
+    ///        normalized days are ignored by the engine.
+    /// @param fadRunwaySeconds Duration of FAD restrictions before an override day or scheduled closure starts.
+    /// @param marketClosures Scheduled closures ordered by start time with no overlaps. FAD also stays active for
+    ///        15 minutes after each closure ends.
     struct EngineCalendarConfig {
         uint256[] fadDayTimestamps;
         uint256 fadRunwaySeconds;
+        MarketClosure[] marketClosures;
     }
 
     /// @notice Mark freshness limits for frozen and live-market policy.
@@ -43,9 +55,9 @@ interface ICfdEngineAdminHost {
         EngineRiskConfig calldata config
     ) external;
 
-    /// @notice Applies finalized FAD calendar overrides.
-    /// @dev Callable only by the configured admin. Replaces the complete override set after normalizing each input to
-    ///      a Unix day number. The admin owns validation and timelock enforcement.
+    /// @notice Applies the finalized FAD calendar and scheduled closures.
+    /// @dev Callable only by the configured admin. Replaces the day overrides and closure intervals. Each day
+    ///      override is normalized to a Unix day number. The admin owns validation and timelock enforcement.
     /// @param config Calendar configuration to apply
     function applyCalendarConfig(
         EngineCalendarConfig calldata config

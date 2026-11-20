@@ -537,7 +537,7 @@ interface IHousePool {
     function isTradingActive() external view returns (bool);
 
     /// @notice Returns whether the engine reports frozen-oracle mode.
-    /// @dev This can be active during the recurring frozen interval or on an admin-configured all-day override.
+    /// @dev Uses the engine's canonical calendar, including weekends, day overrides and scheduled closures.
     /// @return Whether frozen-oracle policy is active
     function isOracleFrozen() external view returns (bool);
 

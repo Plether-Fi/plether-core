@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
@@ -823,6 +824,91 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         assertGt(result.juniorFundedAssets, 0);
         assertEq(result.juniorFundedShares, shares / 2);
         assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
+    }
+
+    function test_HolidayOverride_LpSettlementUsesLiveNavAtSummerReopen() public {
+        _testHolidayOverrideLpSettlement(1_710_288_000, 21 hours); // Wednesday 2024-03-13
+    }
+
+    function test_HolidayOverride_LpSettlementUsesLiveNavAtWinterReopen() public {
+        _testHolidayOverrideLpSettlement(1_709_683_200, 22 hours); // Wednesday 2024-03-06
+    }
+
+    function _testHolidayOverrideLpSettlement(
+        uint256 holidayStart,
+        uint256 boundarySecond
+    ) internal {
+        ICfdEngineAdminHost.EngineCalendarConfig memory config = _engineCalendarConfig();
+        config.fadDayTimestamps = new uint256[](1);
+        config.fadDayTimestamps[0] = holidayStart + 12 hours;
+        _setCalendarConfig(config);
+
+        vm.warp(holidayStart - 1 days + 12 hours);
+        uint256 shares = _seedJuniorLp(ALICE, 100_000e6);
+        _openMarkSensitivePosition();
+        vm.warp(holidayStart - 1 hours);
+        router.updateMarkPrice(_encodedUpdateData(100_000_000));
+        uint64 cachedMarkTime = engine.lastMarkTime();
+
+        uint256 reopen = holidayStart + boundarySecond;
+        vm.warp(reopen - 90 minutes);
+        uint256 redeemShares = shares / 2;
+        uint256 redeemId = _requestJuniorRedeem(ALICE, redeemShares);
+        _warpToEpoch(redeemId);
+        assertLt(block.timestamp, reopen, "the exit must mature before the holiday reopen");
+        assertTrue(engine.isOracleFrozen(), "the holiday must retain frozen settlement before reopening");
+        assertGt(pool.frozenLpFeeBps(true), 0);
+        assertGt(pool.frozenLpFeeBps(false), 0);
+
+        // The same pending request remains eligible for cached settlement while feeds are closed.
+        uint256 branchPoint = vm.snapshotState();
+        uint256 frozenAssets = juniorVault.estimateRedeemAssets(redeemShares);
+        assertLt(frozenAssets, juniorVault.convertToAssets(redeemShares), "frozen exits must retain their surcharge");
+        vm.prank(CAROL);
+        IHousePool.LpEpochSettlementResult memory frozenResult = pool.settleLpEpoch(0, 0);
+        assertEq(frozenResult.juniorFundedShares, redeemShares);
+        assertEq(frozenResult.juniorFundedAssets, frozenAssets);
+        assertEq(engine.lastMarkTime(), cachedMarkTime, "cached settlement must not manufacture a fresh mark");
+        vm.revertToState(branchPoint);
+
+        vm.warp(reopen);
+        assertFalse(engine.isOracleFrozen(), "the holiday freeze must end exactly at the New York reopen");
+        assertTrue(engine.isFadWindow(), "all-day holiday risk restrictions must remain active");
+        assertEq(pool.frozenLpFeeBps(true), 0, "Senior frozen fees must end at reopening");
+        assertEq(pool.frozenLpFeeBps(false), 0, "Junior frozen fees must end at reopening");
+
+        vm.prank(CAROL);
+        vm.expectRevert(IHousePool.HousePool__Unauthorized.selector);
+        pool.settleLpEpoch(0, 0);
+
+        // A tick can satisfy the live age limit and still be too old for this settlement epoch.
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__PoolEpochComponentTooOld.selector);
+        router.settleLpEpoch(_basketData(90_000_000, 0, reopen - 1, reopen - 1));
+        assertEq(engine.lastMarkPrice(), 100_000_000, "failed settlement must preserve the cached mark");
+        assertEq(engine.lastMarkTime(), cachedMarkTime, "failed settlement must preserve the cached timestamp");
+        assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), redeemShares);
+        assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), 0);
+        assertEq(juniorVault.pendingRedeemEscrowShares(), redeemShares);
+        assertEq(juniorVault.withdrawalEscrowAssets(), 0);
+        assertEq(juniorVault.redeemQueueHead(), redeemId);
+
+        uint256 cachedAssets = juniorVault.estimateRedeemAssets(redeemShares);
+        branchPoint = vm.snapshotState();
+        router.updateMarkPrice(_encodedUpdateData(90_000_000));
+        uint256 liveAssets = juniorVault.estimateRedeemAssets(redeemShares);
+        assertLt(liveAssets, cachedAssets, "the reopened price must reduce NAV for the outstanding winning LONG");
+        assertEq(liveAssets, juniorVault.convertToAssets(redeemShares), "the live quote must have no frozen surcharge");
+        vm.revertToState(branchPoint);
+
+        router.settleLpEpoch(_encodedUpdateData(90_000_000));
+
+        assertEq(engine.lastMarkPrice(), 90_000_000, "atomic settlement must install the live gap price");
+        assertEq(engine.lastMarkTime(), reopen, "atomic settlement must install the reopen publication time");
+        assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
+        assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), redeemShares);
+        vm.prank(ALICE);
+        uint256 paidAssets = juniorVault.claimRedeem(redeemId, redeemShares, ALICE, ALICE);
+        assertEq(paidAssets, liveAssets, "the exiting LP must receive the live NAV without a frozen surcharge");
     }
 
     function test_FrozenPosition_StaleMarkFailsClosedUntilReopening() public {

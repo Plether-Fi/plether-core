@@ -92,7 +92,7 @@ size quantum.
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
 | `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseSpreadBps`, `settlementBufferBps`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
-| `EngineCalendarConfig` (`fadDayOverrides`, `fadRunwaySeconds`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
+| `EngineCalendarConfig` (`fadDayTimestamps`, `fadRunwaySeconds`, `marketClosures`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
 | `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 72-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 72-hour timelock |
@@ -823,6 +823,20 @@ The protocol distinguishes two states around market closure:
 - `FAD window`: elevated margins and close-only risk policy while markets are still plausibly live,
 - `oracle frozen`: relaxed staleness and relaxed publish-ordering rules once feeds are genuinely offline.
 
+Governance overrides select UTC days. Each selected day keeps FAD active for its full UTC day, but adds frozen-oracle
+policy only from UTC midnight until that day's 17:00 New York boundary (exclusive), following US daylight-saving
+transitions. Recurring weekend freezing still applies, so a Friday override remains frozen through the weekend.
+Adjacent override days each use their own cutoff: outside recurring weekend freezing, the oracle unfreezes at each
+day's boundary and freezes again at the next overridden UTC midnight. Tomorrow's override and the configured runway
+extend FAD only.
+
+Governance can also configure up to 64 scheduled closures as sorted, non-overlapping Unix timestamp intervals
+`[startTime, endTime)`. The engine freezes pricing at the start and resumes live pricing at the end unless a
+weekend, day override, or another scheduled closure is active. FAD starts `fadRunwaySeconds` before each closure
+and stays active for 15 minutes after it ends. Fresh-price and publish-ordering requirements resume at reopening
+even while FAD remains active. Closures use the same timelocked replacement and configuration version as day
+overrides. Configure them from the basket feeds' published schedule. An absent or stale update does not start a freeze.
+
 LP actions intentionally stay live across that split:
 
 - `FAD` alone keeps ordinary LP pricing,
@@ -1353,10 +1367,8 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
   available under its existing rules.
 - full-close liveness takes priority over collecting an otherwise uncollectible spread; partial closes retain
   all-or-nothing rules for required charges but do not fail solely on uncollateralized price loss above the PnL cap,
-- the recurring FX calendar follows New York daylight-saving transitions on-chain; unscheduled provider closures and
-  holiday hours still require governance-configured UTC-day overrides,
-- the current post-2007 US daylight-saving rule is compiled into the planner; a future legal or provider schedule
-  change at an intraday boundary requires a coordinated engine/planner/oracle deployment,
+- scheduled provider closures require governance to configure the correct interval in advance. The recurring FX
+  calendar and post-2007 US daylight-saving rules are compiled into the planner,
 - execution remains dependent on fresh keeper infrastructure and oracle publication outside frozen windows.
 
 ### Router and keeper limitations

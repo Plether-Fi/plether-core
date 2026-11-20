@@ -179,8 +179,16 @@ Read [Accounting specification](ACCOUNTING_SPEC.md) for fee, reserve, margin, an
 
 The script pins Pyth to `0x0B73614636C855Bf23F342F307FB981A3e47f42B` and configures EUR/USD and GBP/USD directly,
 plus inverted USD/JPY, USD/CAD, USD/SEK, and USD/CHF feeds. Feed IDs, quantities, and base prices are in the deploy
-script. Calendar classification follows 17:00 New York FX close/open, including daylight saving; integrations must
-use the same rule and the Engine's configured overrides.
+script. The Engine calendar combines the 17:00 New York FX weekend schedule, day overrides, and scheduled closures.
+Integrations should use the Engine's canonical calendar status.
+
+For a scheduled provider closure, verify the configured basket feeds' hours and submit the exact UTC start and end
+through `CfdEngineAdmin.proposeCalendarConfig`. The proposal replaces the complete day override and closure lists.
+Supply the other entries that should remain active and remove any day overrides that were approximating the same
+closure. Finalize after the 72-hour timelock and before the closure's FAD runway. Confirm the active intervals
+using `marketClosureCount()` and `marketClosures(index)`. Install a fresh mark before the closure starts.
+Use the release ABI when encoding calendar proposals or decoding their events, since the configuration tuple
+includes the closure array.
 
 ## Preflight and deploy
 
