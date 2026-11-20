@@ -206,8 +206,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     ///      `(request.commitTime, request.commitTime + orderSettlementWindow]`, capped at `block.timestamp`. During an
     ///      oracle-frozen window, replays the Engine mark at zero fee instead. History
     ///      additionally pays for a stored-feed update of the same payload, then verifies component coverage. The base
-    ///      basket is capped and then shifted against the requested side using aggregate confidence, except that a
-    ///      frozen-oracle voluntary close is left unshifted. This function reports `closeOnly` but does not enforce it,
+    ///      raw basket is shifted against the requested side using aggregate confidence and then capped. A frozen-oracle
+    ///      voluntary close uses the unshifted capped mark. This function reports `closeOnly` but does not enforce it,
     ///      and does not use `request.targetPrice`; the router enforces policy and slippage. Send exactly
     ///      `getOrderExecutionFee`: successful historical execution does not refund overpayment; frozen execution does.
     ///      If historical parsing fails and
@@ -281,7 +281,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         }
 
         snapshot = _snapshotFromBasket(basket, policy, false);
-        snapshot.price = _orderExecutionPrice(request, snapshot.price, basket.confidence, policy.oracleFrozen);
+        snapshot.price = _orderExecutionPrice(request, basket.price, basket.confidence, policy.oracleFrozen);
         if (policy.oracleFrozen) {
             _refundExcess(refundRecipient, 0);
         }
@@ -555,7 +555,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             return (false, snapshot);
         }
         snapshot = _snapshotFromBasket(basket, policy, false);
-        snapshot.price = _orderExecutionPrice(request, snapshot.price, basket.confidence, policy.oracleFrozen);
+        snapshot.price = _orderExecutionPrice(request, basket.price, basket.confidence, policy.oracleFrozen);
         if (policy.oracleFrozen) {
             _refundExcess(refundRecipient, 0);
         }
@@ -924,20 +924,20 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
     function _orderExecutionPrice(
         OrderExecutionRequest calldata request,
-        uint256 price,
+        uint256 rawPrice,
         uint256 confidence,
         bool oracleFrozen
     ) internal view returns (uint256) {
-        if (price == 0) {
+        if (rawPrice == 0) {
             revert PletherOracle__ZeroExecutionPrice();
         }
         // The fixed frozen-close spread replaces the Pyth adverse-confidence shift for voluntary
         // close/reduce execution while the oracle is frozen. Basket confidence-width validation still
         // applies when the basket is built, and opens (if called directly) retain the adverse shift.
         if (oracleFrozen && request.isClose) {
-            return price;
+            return _clampToCap(rawPrice);
         }
-        return _clampToCap(_adverseOrderPrice(request, price, confidence));
+        return _clampToCap(_adverseOrderPrice(request, rawPrice, confidence));
     }
 
     function _adverseLiquidationPrice(

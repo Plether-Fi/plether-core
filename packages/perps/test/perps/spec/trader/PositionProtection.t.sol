@@ -355,7 +355,7 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
-    function test_ShortProtection_ZeroAdjustedPricePreservesAttemptAndAllowsExpiryRetry() public {
+    function test_ShortProtection_InvalidConfidencePreservesAttemptAndAllowsExpiryRetry() public {
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.SHORT, SHORT_TAKE_PROFIT, 0);
         uint64 linkedOrderId = _triggerAt(protectionId, SHORT_TAKE_PROFIT);
         CfdTypes.Order memory order = _orderRecord(linkedOrderId).core;
@@ -366,13 +366,13 @@ contract PositionProtectionTest is BasePerpTest {
         vm.warp(uint256(order.commitTime) + 1);
         vm.roll(block.number + 1);
         baseMockPyth.setAllUniquePrices(
-            _basePythFeedIds(), 1_000_000_000_000, 1_000_000_000, -8, order.commitTime + 1, order.commitTime
+            _basePythFeedIds(), 100_000_000, 50_000_000, -8, order.commitTime + 1, order.commitTime
         );
         bytes[] memory data = new bytes[](1);
         data[0] = hex"01";
 
         vm.prank(EXECUTION_KEEPER);
-        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector);
         router.executeOrder(linkedOrderId, data);
 
         assertEq(router.nextExecuteId(), linkedOrderId, "invalid observation leaves the close queued");

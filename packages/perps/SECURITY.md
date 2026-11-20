@@ -651,8 +651,8 @@ Security properties:
 - the neutral pre-cap basket is accepted only when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`; equality passes, each weighted component contribution is floored before summation, and no independent component-confidence ceiling applies,
 - confidence configuration is validated at proposal and oracle application: ratio <= 10,000 bps, multiplier <= 30,000
   bps, and their product < 100,000,000; accepted adjustments cannot consume the entire raw basket value,
-- successful order execution quotes are strictly positive, including historical-cache reuse; a downward adjustment
-  that exhausts the capped execution base reverts the execution call and preserves pending orders and protections,
+- order execution and liquidation shift the raw price before applying the cap, while the neutral mark is capped
+  directly. Successful order quotes are strictly positive, including historical-cache reuse,
 - aggregate basket confidence is included in live/FAD execution and all liquidation prices instead of being treated only as metadata; oracle-frozen voluntary closes retain aggregate confidence-width validation but replace the adverse price shift with the fixed frozen-close spread,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - partial-close size floors prevent dust closes from occupying global FIFO slots,

@@ -496,38 +496,42 @@ contract PletherOracleTest is Test {
         assertEq(snapshot.price, 100_020_000, "live close should retain the adverse confidence shift");
     }
 
-    function test_OrderExecution_RejectsZeroAdjustedPriceInSingleAndFreshBatch() public {
+    function test_OrderExecution_ShiftsRawBasketBeforeCapInSingleAndBatch() public {
         vm.warp(1000);
-        // Default confidence policy passes, but its adjustment consumes the capped execution base.
-        _setHistoricalPricesWithConfidence(1_000_000_000_000, 1_000_000_000);
+        _setHistoricalPricesWithConfidence(200_010_000, 100_000);
         IPletherOracle.OrderExecutionRequest memory request = _orderRequest(CfdTypes.Side.SHORT, true);
         bytes[] memory data = _pythUpdateData();
-        IPletherOracle.BatchOrderPriceCache memory cache;
+        IPletherOracle.BatchOrderPriceCache memory emptyCache;
 
-        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
-        oracle.updateOrderExecutionPrice(address(this), data, request);
-        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
-        oracle.updateBatchOrderExecutionPrice(address(this), data, request, cache);
-        assertEq(pyth.parseUniqueCallCount(), 0, "rejection rolls back parsing");
-        assertEq(pyth.updatePriceFeedsCallCount(), 0, "rejection rolls back synchronization");
+        (bool ok, IPletherOracle.PriceSnapshot memory single) =
+            oracle.updateOrderExecutionPrice(address(this), data, request);
+        (, IPletherOracle.PriceSnapshot memory batch, IPletherOracle.BatchOrderPriceCache memory cache) =
+            oracle.updateBatchOrderExecutionPrice(address(this), data, request, emptyCache);
+        (, IPletherOracle.PriceSnapshot memory reused,) =
+            oracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), request, cache);
 
-        // A larger adjustment must also reject instead of underflowing or producing a zero fill.
-        _setHistoricalPricesWithConfidence(1_000_000_010_000, 1_000_000_010);
-        request = _orderRequest(CfdTypes.Side.LONG, false);
-        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
-        oracle.updateOrderExecutionPrice(address(this), data, request);
+        assertTrue(ok);
+        assertEq(single.markPrice, 200_000_000, "neutral mark is capped");
+        assertEq(single.price, 199_990_000, "downward shift uses the raw price");
+        assertEq(batch.price, single.price, "fresh batch uses the same price");
+        assertEq(reused.price, single.price, "reusing the basket keeps the same price");
+        assertEq(reused.markPrice, single.markPrice, "reusing the basket keeps the same neutral mark");
     }
 
     function test_OrderExecution_ReusedCacheRejectsZeroDownwardPrice() public {
         vm.warp(1000);
         _setHistoricalPricesWithConfidence(1_000_000_000_000, 1_000_000_000);
         IPletherOracle.BatchOrderPriceCache memory emptyCache;
-        // An upward execution can produce a valid cached basket whose downward price is unpriceable.
         (,, IPletherOracle.BatchOrderPriceCache memory cache) = oracle.updateBatchOrderExecutionPrice(
             address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true), emptyCache
         );
         IPletherOracle.OrderExecutionRequest memory request = _orderRequest(CfdTypes.Side.SHORT, true);
 
+        (, IPletherOracle.PriceSnapshot memory reused,) =
+            oracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), request, cache);
+        assertEq(reused.price, 200_000_000, "raw price remains above the cap after the shift");
+
+        cache.confidence = cache.price * 5;
         vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
         oracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), request, cache);
         assertEq(pyth.parseUniqueCallCount(), 1, "cache reuse never parses again");
