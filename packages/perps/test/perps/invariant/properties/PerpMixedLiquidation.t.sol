@@ -30,11 +30,12 @@ contract PerpMixedLiquidationTest is BasePerpTest {
     }
 
     function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
-        return 500_000e6;
+        return 499_999e6;
     }
 
     function setUp() public override {
         super.setUp();
+        _assignSeniorCapital(1e6);
         handler = new PerpMixedAccountingHandler(
             settlementToken,
             baseMockPyth,

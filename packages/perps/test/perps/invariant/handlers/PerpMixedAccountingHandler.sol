@@ -268,9 +268,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         latestAuthoredTick = HistoricalTick({
             componentPrice: 1e8, publishTime: vm.getBlockTimestamp(), previousPublishTime: 0, available: true
         });
-        // These fixtures start from permanent seeds only. Neither seed liquidity nor flat-account deposits
-        // checkpoint the Engine, so the independently authored carry clock starts at its zero storage default.
-        carry = new CarryReferenceLedger(expectedPoolCash, 0, 500);
+        // The fixtures recapitalize before assigning redeemable Senior shares, checkpointing the idle carry clock.
+        carry = new CarryReferenceLedger(expectedPoolCash, vm.getBlockTimestamp(), 500);
         orders = new PendingOrderReferenceLedger();
         vm.deal(address(this), 100_000 ether);
         vm.deal(KEEPER, 100_000 ether);

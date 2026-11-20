@@ -197,6 +197,7 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
 
     function test_StaleMarkPreviewKeepsCouponAccrualWithoutRepricingPrincipal() public {
         address trader = address(0xA103);
+        _fundSenior(address(this), 1e6);
         _fundTrader(trader, 20_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
         vm.prank(address(juniorVault));
