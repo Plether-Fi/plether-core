@@ -1474,6 +1474,13 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
   Integrations must use the supported `deposit`, `depositMargin`, or `depositFor` APIs to fund margin accounts,
 - non-USDG collateral pricing and staleness policy are intentionally out of scope.
 
+## Accepted Risks
+
+- **Incomplete VPI collection on a full close.** A withdrawal of free settlement while a full close is pending
+  can leave part of the positive VPI charge unfunded. Settlement waives the uncollectible portion, reducing pool
+  revenue and potentially lowering Junior redemption payouts. Junior bears this collection risk. The tested round
+  trip lost money overall even with the waiver. Immunefi report #99795 ([Plether Audit Competition](https://immunefi.com/audit-competition/plether/information/)).
+
 ## Emergency Procedures
 
 The canonical operator capability matrix, trigger policy, containment procedure, recovery criteria, and off-chain
