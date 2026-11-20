@@ -655,7 +655,8 @@ Security properties:
   directly. Successful order quotes are strictly positive, including historical-cache reuse,
 - aggregate basket confidence is included in live/FAD execution and all liquidation prices instead of being treated only as metadata; oracle-frozen voluntary closes retain aggregate confidence-width validation but replace the adverse price shift with the fixed frozen-close spread,
 - FIFO execution prevents later orders from bypassing earlier ones,
-- partial-close size floors prevent dust closes from occupying global FIFO slots,
+- partial-close size floors are evaluated at submission. A close admitted below the floor as a projected full exit
+  can execute only if it fully closes the live position,
 - binding order semantics and the lack of a user cancellation path prevent traders from turning queued intents into
   free options,
 - the stateless evaluator reads a settlement snapshot with the Engine's live `settlementBufferBps` and calls the

@@ -268,7 +268,7 @@ library CfdEnginePlanTypes {
         OK,
         /// @notice Requested close size exceeds the snapshot position size.
         CLOSE_SIZE_EXCEEDS,
-        /// @notice Legacy dust-failure value retained for ABI compatibility; the current close planner does not emit it.
+        /// @notice A below-minimum close admitted as a projected full exit would leave a live position.
         DUST_POSITION,
         /// @notice Requested close size is zero or not divisible by the canonical 100-token position quantum.
         INVALID_SIZE_QUANTUM,
