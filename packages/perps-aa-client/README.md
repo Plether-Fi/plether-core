@@ -201,8 +201,9 @@ Committed delayed orders are binding in the current perps protocol; there is no 
 `buildProtectedOpenAction` builds an atomic bounded V3 opening order with TP/SL.
 `buildCreateProtectionAction`, `buildReplaceProtectionAction`, and
 `buildCancelProtectionAction` manage account-owned protection records.
-`buildAmendLatchedProtectionCloseLimitsAction` lets the owner change the close
-limits of a `Latched` protection before a permissionless retry. Every
+`buildAmendLatchedProtectionCloseLimitsAction` lets the owner set close limits for future
+retries while `Latched` with no pending orders or `Triggered` with only the linked close
+pending. A queued close executes under the limits copied at commitment. Every
 builder targets the configured PositionProtectionBook with zero native value;
 the exported `positionProtectionBookAbi` is generated for the current source and must match the target deployment.
 Supply all four `bigint` fields in `params.closeLimits` for create, replace, and

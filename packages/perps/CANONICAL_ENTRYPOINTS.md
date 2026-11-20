@@ -142,10 +142,11 @@ successful cleanup transaction does not by itself establish that the position cl
 - Once a trigger is recorded, neither the owner nor a keeper may replace or cancel it. `Triggered` means one live close
   attempt; `Latched` means the irreversible trigger remains active with no live attempt and may be retried
   permissionlessly.
-- The owner may amend the close ceilings of a `Latched` protection with
-  `PositionProtectionBook.amendLatchedPositionProtectionCloseLimits(uint64,CloseFinancialLimits)` when the account has
-  no pending Router order. This changes the limits used for a future retry; it does not replace or cancel the latched
-  trigger. `PositionProtectionCloseLimitsUpdated` records each creation, replacement, or amendment of these limits.
+- The owner may set close ceilings for future retries with
+  `PositionProtectionBook.amendLatchedPositionProtectionCloseLimits(uint64,CloseFinancialLimits)`. The account must
+  have no pending Router orders while `Latched`, or only the protection's linked close while `Triggered`. A queued
+  close executes under the limits copied at commitment. `PositionProtectionCloseLimitsUpdated` records each creation,
+  replacement, or amendment of the stored ceilings.
 - Only Router-authenticated TP/SL-triggered close attempts use `expectedConfigHash == bytes32(0)` as an internal
   unpinned marker. Protected parent opens and ordinary `OrderRouter.commitOrder(...)` requests require the current
   nonzero configuration hash.
