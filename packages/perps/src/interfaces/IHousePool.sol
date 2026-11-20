@@ -122,7 +122,8 @@ interface IHousePool {
     /// @notice A requested junior withdrawal exceeds the current subordinated junior cap.
     error HousePool__ExceedsMaxJuniorWithdraw();
     /// @notice A permissionless LP settlement call found no queue item it could advance.
-    /// @dev Reverting rolls back reconcile and carry checkpoints so no-op calls cannot alter time-based accounting.
+    /// @dev Reverting rolls back pool reconciliation. On the Router path it also rolls back the preceding mark
+    ///      refresh and its engine carry checkpoint.
     error HousePool__NoLpEpochProgress();
     /// @notice An operation requiring fresh mark-dependent accounting received a stale cached mark.
     error HousePool__MarkPriceStale();
@@ -418,7 +419,7 @@ interface IHousePool {
 
     /// @notice Seeds a tranche with permanent share-backed minimum ownership using real settlement token.
     /// @dev Owner only, once per tranche and outside oracle-frozen mode. Pulls real settlement token from the owner, increases
-    ///      canonical assets and principal, checkpoints engine carry, mints shares, and registers the receiver's
+    ///      canonical assets and principal, mints shares, and registers the receiver's
     ///      permanent share floor. Senior seeding also raises its high-water mark and is bounded by active capacity;
     ///      neutral constructor limits remain permissive, while activation later requires finite compliant limits.
     /// @param toSenior True to seed senior, false to seed junior

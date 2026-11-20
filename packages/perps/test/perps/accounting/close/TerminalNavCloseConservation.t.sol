@@ -114,9 +114,7 @@ contract TerminalNavCloseConservationTest is Test {
             maxProfitAssets: maxProfitAssets,
             openInterest: size,
             entryNotional: entryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
-            totalMargin: pledgeAssets,
-            borrowBaseAssets: 0,
-            carryIndex: 0
+            totalMargin: pledgeAssets
         });
         if (side == CfdTypes.Side.LONG) {
             snap.longSide = selected;

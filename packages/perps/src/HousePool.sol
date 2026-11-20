@@ -566,14 +566,13 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     }
 
     /// @notice Explicitly converts unsolicited settlement token into accounted protocol assets.
-    /// @dev Only the owner may call. Admits the entire current excess, checkpoints engine carry indexes before
-    ///      changing pool depth, and moves no tokens. Reverts when there is no excess.
+    /// @dev Only the owner may call. Admits the entire current excess and moves no tokens. Pool liquidity does not
+    ///      affect flat carry, so this does not checkpoint the engine. Reverts when there is no excess.
     function accountExcess() external onlyOwner {
         uint256 amount = excessAssets();
         if (amount == 0) {
             revert HousePool__NoExcessAssets();
         }
-        _checkpointEngineCarryIndexes();
         accountedAssets += amount;
         emit ExcessAccounted(amount, accountedAssets);
     }
@@ -740,7 +739,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             revert HousePool__BootstrapSharesZero();
         }
 
-        _checkpointEngineCarryIndexes();
         _checkpointSeniorCouponBeforePrincipalMutation();
         if (toSenior) {
             _requireSeniorDepositCapacity(amount, _getWaterfallState());
@@ -833,7 +831,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         _requireFreshMark(accountingSnapshot, statusSnapshot);
 
         _reconcile(accountingSnapshot, statusSnapshot);
-        _checkpointEngineCarryIndexes();
 
         result.cutoffEpoch = cutoffEpoch;
         RedemptionPhase memory juniorPhase;
@@ -1540,10 +1537,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             poolConfig.maxSeniorExposureAssets,
             poolConfig.maxSeniorShareBps
         );
-    }
-
-    function _checkpointEngineCarryIndexes() internal {
-        ENGINE.checkpointCarryIndexes();
     }
 
     function _reconcile(

@@ -222,7 +222,9 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         _openReusableActor();
         handler.liquidate(0, 1.69e8);
         assertEq(handler.ghostSuccessfulLiquidations(), 1);
+        uint256 claimFlowStartedAt = vm.getBlockTimestamp();
         handler.createTraderClaim(0);
+        assertEq(vm.getBlockTimestamp() - claimFlowStartedAt, 2, "claim creation authors one open and one close tick");
         // 10,000 tokens gain $0.50 each; the close withholds $2 (4 bps of $5,000 notional).
         uint256 claim = 4998e6;
         assertEq(engine.traderClaimBalanceAssets(actor), claim, "independent new deferred claim");
@@ -232,7 +234,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         assertEq(settlementToken.balanceOf(actor), 0, "claim settlement credits custody rather than the wallet");
         handler.restoreSolvencyAndClearDegradedMode();
         // $44,999.80 residual - $4 open fee - two $0.20 bounties + $4,998 net claim.
-        uint256 settlement = 49_993_600_000;
+        // The $10,000 maximum-profit envelope also pays 15 atoms for its one second at 5% annually.
+        uint256 settlement = 49_993_599_985;
         assertEq(clearinghouse.balanceAssets(actor), settlement, "independent profit and claim entitlement");
         handler.withdrawCollateral(0, settlement);
         assertEq(settlementToken.balanceOf(actor), settlement);
@@ -244,9 +247,12 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         address actor = handler.actorAt(0);
         _openReusableActor();
         handler.liquidate(0, 1.69e8);
+        uint256 claimFlowStartedAt = vm.getBlockTimestamp();
         handler.createTraderClaim(0);
+        assertEq(vm.getBlockTimestamp() - claimFlowStartedAt, 2, "claim creation authors one open and one close tick");
         assertEq(engine.traderClaimBalanceAssets(actor), 4998e6);
-        assertEq(clearinghouse.balanceAssets(actor), 44_995_600_000);
+        // The fully margined $10,000 envelope still owes 15 atoms of carry during its one-second holding period.
+        assertEq(clearinghouse.balanceAssets(actor), 44_995_599_985);
         // Replenish the mock pool without settling this account's outstanding claim.
         handler.restoreSolvencyAndClearDegradedMode();
         handler.setPoolAssets(1_000_000_000e6);
@@ -255,17 +261,20 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         handler.executeNextOrderModelled();
         (uint256 size,,,,,,) = engine.positions(actor);
         assertEq(size, 1000 * CfdTypes.SIZE_QUANTUM);
+        uint256 reopenedAt = vm.getBlockTimestamp();
         // A $4,200 price loss consumes only the claim, leaving $798. With $344 pledge, equity
         // is $1,142 < $1,242 maintenance. The liquidation charge is capped at the $108 reserve.
         handler.liquidate(0, 1.242e8);
+        assertEq(vm.getBlockTimestamp() - reopenedAt, 1);
         assertEq(handler.ghostSuccessfulLiquidations(), 2);
         assertEq(engine.traderClaimBalanceAssets(actor), 798e6, "claim remainder survives liquidation");
-        assertEq(clearinghouse.balanceAssets(actor), 44_839_400_000, "free cash plus surviving pledge entitlement");
+        // The reopened $120,000 envelope pays another 190 atoms for one second of flat carry.
+        assertEq(clearinghouse.balanceAssets(actor), 44_839_399_795, "free cash plus surviving pledge entitlement");
         handler.settleTraderClaim(0);
         assertEq(engine.traderClaimBalanceAssets(actor), 0);
-        assertEq(clearinghouse.balanceAssets(actor), 45_637_400_000);
-        handler.withdrawCollateral(0, 45_637_400_000);
-        assertEq(settlementToken.balanceOf(actor), 45_637_400_000);
+        assertEq(clearinghouse.balanceAssets(actor), 45_637_399_795);
+        handler.withdrawCollateral(0, 45_637_399_795);
+        assertEq(settlementToken.balanceOf(actor), 45_637_399_795);
         vm.prank(actor);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
         clearinghouse.withdraw(actor, 1);

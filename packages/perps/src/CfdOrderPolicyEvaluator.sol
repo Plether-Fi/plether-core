@@ -52,7 +52,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         );
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
-            _buildRawSnapshot(engine, planner, order.account, context.poolDepthAssets, context.poolDepthAssets);
+            _buildRawSnapshot(engine, order.account, context.poolDepthAssets, context.poolDepthAssets);
         // Execution releases this order's classification before assessment. A public read projects the same
         // release; a call inside execution observes zero and does not release it twice.
         uint256 release = viewOrder.committedMarginAssets;

@@ -81,7 +81,7 @@ These are ordinary `.sol` helpers, not standalone invariant campaigns:
 
 | Helper | Independent expectation | Companion tests |
 | --- | --- | --- |
-| [CarryReferenceLedger](ghost/CarryReferenceLedger.sol) | Side clocks/indexes, account accrual floors, protected funds, collection, arrears and recovery; physical cash is distinguished from withheld gains and VPI offsets | [CarryReferenceLedger.t.sol](../accounting/carry/CarryReferenceLedger.t.sol), [HistoricalOpenCarry.t.sol](../accounting/carry/HistoricalOpenCarry.t.sol) |
+| [CarryReferenceLedger](ghost/CarryReferenceLedger.sol) | One global clock/index, canonical maximum-profit exposure, account accrual floors, protected funds, collection, arrears and recovery; physical cash is distinguished from withheld gains and VPI offsets | [CarryReferenceLedger.t.sol](../accounting/carry/CarryReferenceLedger.t.sol), [HistoricalOpenCarry.t.sol](../accounting/carry/HistoricalOpenCarry.t.sol) |
 | [CloseReferenceMath](ghost/CloseReferenceMath.sol) | Exact basis, claim-first price loss, partial-close residual health, eligible charge sources, rebates and payout destinations | [CloseReferenceMath.t.sol](../accounting/close/CloseReferenceMath.t.sol) |
 | [LiquidationReferenceMath](ghost/LiquidationReferenceMath.sol) | Post-carry health and terminal allocation for the mixed fixture's fixed fee configuration | [LiquidationReferenceMath.t.sol](../accounting/liquidation/LiquidationReferenceMath.t.sol) |
 | [MarketCalendarReference](ghost/MarketCalendarReference.sol) | Gregorian/DST market calendar with no administrative overrides | [MarketCalendarReference.t.sol](../accounting/liquidation/MarketCalendarReference.t.sol) |
@@ -90,8 +90,9 @@ These are ordinary `.sol` helpers, not standalone invariant campaigns:
 
 Carry golden vectors are checked in and generated offline by
 [generate-perps-carry-vectors.py](../../../../../scripts/generate-perps-carry-vectors.py); Solidity tests do not run
-Python or FFI. Model-only arithmetic tests are paired with real Engine or Router histories, whose fixture
-boundaries still apply.
+Python or FFI. The reference carry basis is full maximum-profit exposure, and its flat annual index is independent
+of pledge, claims, and pool depth; collection still follows margin-first cash eligibility. Model-only arithmetic tests
+are paired with real Engine or Router histories, whose fixture boundaries still apply.
 
 ## Reconciliation, policy and parity campaigns
 

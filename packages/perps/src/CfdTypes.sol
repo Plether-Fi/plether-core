@@ -95,7 +95,7 @@ library CfdTypes {
     /// @param maintMarginBps Normal maintenance-margin ratio in basis points.
     /// @param initMarginBps Initial-margin ratio for opens and increases in basis points.
     /// @param fadMarginBps Maintenance-margin ratio used during the FAD window in basis points.
-    /// @param baseCarryBps Annualized rate at full side utilization, in basis points, applied to LP-backed profit exposure.
+    /// @param baseCarryBps Flat annual carry rate in basis points, applied to each position's full maximum-profit exposure.
     /// @param minBountyAssets Minimum liquidation charge/reserve and initial-equity floor in 6-decimal settlement token.
     /// @param bountyBps Variable total liquidation-charge rate applied to notional in basis points.
     /// @param keeperShareBps Keeper share of the collected liquidation charge in basis points.
@@ -107,7 +107,7 @@ library CfdTypes {
         uint256 maintMarginBps; // e.g., 100 (1%)
         uint256 initMarginBps; // e.g., 150 (1.5%)
         uint256 fadMarginBps; // e.g., 300 (3%)
-        uint256 baseCarryBps; // e.g., 500 (5% annualized on LP-backed profit exposure at full utilization)
+        uint256 baseCarryBps; // e.g., 500 (flat 5% annual carry on full maximum-profit exposure)
         uint256 minBountyAssets; // e.g., 1_000_000 ($1 settlementToken total charge floor)
         uint256 bountyBps; // e.g., 10 (0.10% of notional total charge)
         uint256 keeperShareBps; // e.g., 5_000 (50% of the collected charge)
