@@ -437,34 +437,19 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
     function _pendingIndexedCarryAssets(
         address account
     ) internal view returns (uint256) {
-        (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+        (uint256 size,,,,,,) = engine.positions(account);
         if (size == 0) {
             return 0;
         }
-        (uint256 borrowBaseAssets, uint256 startIndex,) = engine.positionCarryState(account);
-        if (borrowBaseAssets == 0) {
+        (uint256 maxProfitAssets, uint256 startIndex,) = engine.positionCarryState(account);
+        if (maxProfitAssets == 0) {
             return 0;
         }
-        uint256 endIndex = _currentSideCarryIndex(side);
+        uint256 endIndex = engine.currentCarryIndex();
         if (endIndex <= startIndex) {
             return 0;
         }
-        return PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, endIndex - startIndex);
-    }
-
-    function _currentSideCarryIndex(
-        CfdTypes.Side side
-    ) internal view returns (uint256 index) {
-        uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,,,) = engine.riskParams();
-        index = PositionRiskAccountingLib.computeCurrentCarryIndex(
-            engine.sideCarryIndex(sideIndex),
-            engine.sideCarryTimestamp(sideIndex),
-            block.timestamp,
-            engine.sideBorrowBaseAssets(sideIndex),
-            pool.totalAssets(),
-            baseCarryBps
-        );
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(maxProfitAssets, endIndex - startIndex);
     }
 
 }

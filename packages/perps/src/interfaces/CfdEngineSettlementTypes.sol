@@ -11,7 +11,7 @@ library CfdEngineSettlementTypes {
     /// @notice Engine-owned position fields produced by a planned settlement.
     /// @dev `size` uses 18 decimals and both entry cost and maximum profit use 6-decimal settlement token atoms.
     ///      Active position margin is maintained separately in the clearinghouse. The host derives the position's
-    ///      borrow base and last carry index rather than accepting them in this payload. Terminal paths call the
+    ///      global carry checkpoint rather than accepting it in this payload. Terminal paths call the
     ///      dedicated position-deletion hook instead.
     /// @param size Post-settlement position size.
     /// @param entryCostAssetAtoms Post-settlement exact entry cost.

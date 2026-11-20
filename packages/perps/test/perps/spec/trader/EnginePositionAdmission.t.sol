@@ -7,8 +7,6 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
-import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
-
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 import {CfdEnginePlanLibHarness, CfdEngineTestBase} from "../../shared/CfdEngineTestBase.sol";
@@ -218,11 +216,11 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         vm.prank(trader);
         engine.addMargin(account, 100e6);
 
-        (, uint256 marginAfter,, uint256 maxProfitAssets,,,) = engine.positions(account);
+        (,,, uint256 maxProfitAssets,,,) = engine.positions(account);
         assertEq(
-            _positionBorrowBaseAssets(account),
-            PositionRiskAccountingLib.computeBorrowBaseAssets(maxProfitAssets, marginAfter),
-            "stale-mark add-margin should reduce future borrow base"
+            _positionMaxProfitAssets(account),
+            maxProfitAssets,
+            "stale-mark add-margin must preserve the full maximum-profit carry basis"
         );
     }
 

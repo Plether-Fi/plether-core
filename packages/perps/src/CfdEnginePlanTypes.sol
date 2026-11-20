@@ -59,15 +59,11 @@ library CfdEnginePlanTypes {
     /// @param openInterest Aggregate synthetic-token size, with 18 decimals.
     /// @param entryNotional Aggregate exact entry cost scaled by `1e20`, with 26-decimal precision.
     /// @param totalMargin Aggregate canonical position margin for the side.
-    /// @param borrowBaseAssets Aggregate LP-backed amount on which side carry accrues.
-    /// @param carryIndex Current cumulative carry index, scaled by 1e18.
     struct SideSnapshot {
         uint256 maxProfitAssets;
         uint256 openInterest;
         uint256 entryNotional;
         uint256 totalMargin;
-        uint256 borrowBaseAssets;
-        uint256 carryIndex;
     }
 
     /// @notice Complete read-only engine input supplied to a planner call.
@@ -81,8 +77,8 @@ library CfdEnginePlanTypes {
     ///        partial-close health. Open, close-execution, and liquidation plans do not read it.
     /// @param lastMarkTime Latest stored mark publish time; close-commitment planning checks that it is nonzero.
     ///        Open, close-execution, and liquidation plans do not read it.
-    /// @param positionBorrowBaseAssets Position carry borrow base.
-    /// @param positionLastCarryIndex Side carry index last checkpointed for the position, scaled by 1e18.
+    /// @param carryIndex Current global cumulative carry index, scaled by 1e18.
+    /// @param positionLastCarryIndex Global carry index last checkpointed for the position, scaled by 1e18.
     /// @param longSide Aggregate LONG-side state.
     /// @param shortSide Aggregate SHORT-side state.
     /// @param poolAssets Gross physical assets used for planning; VPI and skew subtract aggregate trader claims.
@@ -114,7 +110,7 @@ library CfdEnginePlanTypes {
         uint256 currentTimestamp;
         uint256 lastMarkPrice;
         uint64 lastMarkTime;
-        uint256 positionBorrowBaseAssets;
+        uint256 carryIndex;
         uint256 positionLastCarryIndex;
 
         SideSnapshot longSide;
