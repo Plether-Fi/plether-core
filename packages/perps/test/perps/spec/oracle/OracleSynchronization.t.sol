@@ -342,14 +342,20 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         uint64 commit = uint64(block.timestamp);
         uint64 id = _commit(ALICE, 0);
         _advance(commit + 1);
-        baseMockPyth.setAllPrices(_synchronizationFeedIds(), 100_000_000, -8, commit + 1);
+        bytes32[] memory feedIds = _synchronizationFeedIds();
+        baseMockPyth.setAllPrices(feedIds, 100_000_000, -8, commit + 1);
+        uint256[] memory componentPublishTimes = new uint256[](feedIds.length);
+        for (uint256 i; i < feedIds.length; ++i) {
+            componentPublishTimes[i] = commit + 1;
+        }
         IPletherOracle.BatchOrderPriceCache memory forged = IPletherOracle.BatchOrderPriceCache({
             hasHistoricalBasket: true,
             minReusableCommitTime: commit,
             price: 150_000_000,
             confidence: 0,
             publishTime: commit + 1,
-            oldestPublishTime: commit + 1
+            oldestPublishTime: commit + 1,
+            componentPublishTimes: componentPublishTimes
         });
         uint64 beforeMark = engine.lastMarkTime();
         (, IPletherOracle.PriceSnapshot memory supplied,) =
@@ -370,23 +376,56 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
 
     function test_CacheReuseRequiresCoverageAndDoesNotRepair() public {
         uint64 commit = uint64(block.timestamp);
-        _advance(commit + 1);
+        _advance(commit + 2);
+        bytes[] memory historical = _payload(commit + 1, commit);
+        MockPyth.FeedUpdate[] memory feeds = abi.decode(historical[0], (MockPyth.FeedUpdate[]));
+        uint256 lastFeed = feeds.length - 1;
+        feeds[lastFeed].price.publishTime = commit + 2;
+        historical[0] = abi.encode(feeds);
         IPletherOracle.BatchOrderPriceCache memory cache;
         (,, cache) = pletherOracle.updateBatchOrderExecutionPrice{value: 2 * FEE}(
-            address(this), _payload(commit + 1, commit), _request(commit, false), cache
+            address(this), historical, _request(commit, false), cache
         );
         uint256 updates = baseMockPyth.updatePriceFeedsCallCount();
         (, IPletherOracle.PriceSnapshot memory reused,) =
             pletherOracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), _request(commit, false), cache);
         assertEq(reused.updateFee, 0);
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updates);
-        bytes32 lagging = _synchronizationFeedIds()[_synchronizationFeedIds().length - 1];
-        baseMockPyth.setPrice(lagging, 100_000_000, -8, commit);
+        bytes32 lagging = feeds[lastFeed].id;
+        baseMockPyth.setPrice(lagging, 100_000_000, -8, commit + 1);
         vm.expectRevert(
-            abi.encodeWithSelector(IPletherOracle.PletherOracle__StoredFeedBehind.selector, lagging, commit, commit + 1)
+            abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__StoredFeedBehind.selector, lagging, commit + 1, commit + 2
+            )
         );
         pletherOracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), _request(commit, false), cache);
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updates);
+    }
+
+    function test_CacheReuseRejectsMalformedComponentTimes() public {
+        uint64 commit = uint64(vm.getBlockTimestamp());
+        uint64 tick = commit + 2;
+        _advance(tick + 1);
+        IPletherOracle.OrderExecutionRequest memory request = _request(commit, false);
+        IPletherOracle.BatchOrderPriceCache memory cache;
+        (,, cache) = pletherOracle.updateBatchOrderExecutionPrice{value: 2 * FEE}(
+            address(this), _payload(tick, commit), request, cache
+        );
+        bytes[] memory emptyUpdate = new bytes[](0);
+
+        cache.oldestPublishTime = tick - 1;
+        vm.expectRevert(IPletherOracle.PletherOracle__InvalidBatchCacheTimes.selector);
+        pletherOracle.updateBatchOrderExecutionPrice(address(this), emptyUpdate, request, cache);
+
+        cache.oldestPublishTime = tick;
+        cache.publishTime = tick + 1;
+        vm.expectRevert(IPletherOracle.PletherOracle__InvalidBatchCacheTimes.selector);
+        pletherOracle.updateBatchOrderExecutionPrice(address(this), emptyUpdate, request, cache);
+
+        cache.publishTime = tick;
+        cache.componentPublishTimes = new uint256[](0);
+        vm.expectRevert(IPletherOracle.PletherOracle__InvalidBatchCacheTimes.selector);
+        pletherOracle.updateBatchOrderExecutionPrice(address(this), emptyUpdate, request, cache);
     }
 
     function test_BatchDoesNotReuseBasketWithPreCommitComponent() public {
@@ -433,22 +472,30 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
 
     function test_BatchReusesBasketWhenEveryComponentFollowsBothCommits() public {
         uint64 firstCommit = uint64(block.timestamp);
-        _commit(ALICE, 0);
+        uint64 firstId = _commit(ALICE, 0);
         _advance(firstCommit + 3);
-        _commit(BOB, 0);
+        uint64 secondId = _commit(BOB, 0);
         _advance(firstCommit + 6);
 
         bytes[] memory historical = _pricedPayload(firstCommit + 5, firstCommit, 101_000_000);
         MockPyth.FeedUpdate[] memory updates = abi.decode(historical[0], (MockPyth.FeedUpdate[]));
         updates[0].price.publishTime = firstCommit + 4;
         historical[0] = abi.encode(updates);
-        bytes[] memory newer = _pricedPayload(firstCommit + 6, firstCommit + 5, 102_000_000);
-        baseMockPyth.updatePriceFeeds{value: FEE}(newer);
 
-        OrderV3Types.BatchResult memory result = router.executeOrderBatch{value: 2 * FEE}(2, historical);
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch{value: 2 * FEE}(secondId, historical);
         assertEq(result.terminalCount, 2);
         assertEq(result.nextOrderId, 0);
+        assertEq(
+            uint256(router.lifecycleBook().lifecycleStatus(firstId)), uint256(OrderV3Types.LifecycleStatus.Executed)
+        );
+        assertEq(
+            uint256(router.lifecycleBook().lifecycleStatus(secondId)), uint256(OrderV3Types.LifecycleStatus.Executed)
+        );
         assertEq(baseMockPyth.parseUniqueCallCount(), 1, "compatible later order reuses the signed basket");
+        assertEq(baseMockPyth.updatePriceFeedsCallCount(), 1, "reusing the basket skips a second storage update");
+        assertEq(baseMockPyth.getPriceUnsafe(updates[0].id).publishTime, firstCommit + 4);
+        assertEq(baseMockPyth.getPriceUnsafe(updates[1].id).publishTime, firstCommit + 5);
+        assertEq(engine.lastMarkTime(), firstCommit + 5);
         assertEq(engine.lastMarkPrice(), 101_000_000);
     }
 
