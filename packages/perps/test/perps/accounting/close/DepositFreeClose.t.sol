@@ -341,7 +341,6 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
     ) private {
         _fundTrader(follower, 1000e6);
         OrderV3Types.OrderRequest memory abandoned = _request(CfdTypes.Side.LONG, SIZE);
-        abandoned.bounds.executionWindowSeconds = 5;
         vm.prank(ACCOUNT);
         uint64 head = router.commitOrder(abandoned);
         assertEq(router.lifecycleBook().pendingIntent(head).executionBountyAssets, 0);
@@ -354,6 +353,8 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         uint256 keeperBalance = clearinghouse.balanceAssets(KEEPER);
         uint64 next;
         {
+            // Both orders use the configured lifetime; a later commitment keeps the follower live during cleanup.
+            vm.warp(vm.getBlockTimestamp() + 3);
             OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE);
             request.isClose = false;
             request.marginDelta = 250e6;
@@ -391,6 +392,12 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
             assertEq(router.pendingOrderCounts(follower), 1, "expiry does not consume the follower");
         }
         bytes[] memory update = _mockPythUpdateData(PRICE);
+        // Auto-pruning still sees the abandoned head when the generic helper chooses its historical tick.
+        // Supply the follower's own first tick so its execution does not depend on the head's commit time.
+        uint256 publishTime = uint256(router.lifecycleBook().orderTiming(next).commitTimestamp) + 1;
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(int256(PRICE)), 0, int32(-8), publishTime, publishTime - 1
+        );
         vm.recordLogs();
         vm.prank(KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(next, update);
@@ -556,7 +563,6 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         uint256 keeperBefore = clearinghouse.balanceAssets(KEEPER);
         for (uint256 attempt; attempt < 60; ++attempt) {
             OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, 1000e18);
-            request.bounds.executionWindowSeconds = 1;
             vm.prank(ACCOUNT);
             uint64 id = router.commitOrder(request);
             uint256 reservedPledge = clearinghouse.pnlPledgeAssets(ACCOUNT);
@@ -712,9 +718,13 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         // Later unpaid close orders remain legal without free-settlement bounty funding.
 
         request = _request(CfdTypes.Side.LONG, SIZE / 2);
-        request.bounds.executionWindowSeconds -= 1;
         vm.prank(ACCOUNT);
         uint64 second = router.commitOrder(request);
+        assertEq(
+            router.lifecycleBook().orderTiming(first).executionDeadline,
+            router.lifecycleBook().orderTiming(second).executionDeadline,
+            "targeted cleanup does not require a shorter lifetime for the later order"
+        );
         vm.warp(router.lifecycleBook().orderTiming(second).executionDeadline + 1);
         router.expireOrder(second);
         assertEq(router.accountHeadOrderId(ACCOUNT), first);

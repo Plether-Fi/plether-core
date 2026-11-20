@@ -398,6 +398,26 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
 ///      preview, commitment and execution. No grant, deposit or account funding occurs while closing.
 contract CfdClosePreviewRequestTest is CfdClosePreviewTestBase {
 
+    function testFuzz_ShortExecutionWindowMatchesSubmissionRejection(
+        uint32 window
+    ) public {
+        _openNormally(CfdTypes.Side.LONG, 40e6);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
+        request.bounds.executionWindowSeconds = uint32(bound(window, 0, router.maxExecutionWindowSeconds() - 1));
+        uint64 nextOrderId = router.nextCommitId();
+        uint256 balance = clearinghouse.balanceAssets(ACCOUNT);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidExecutionWindow.selector);
+        _requestPreview(request, PRICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidExecutionWindow.selector);
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+
+        assertEq(router.nextCommitId(), nextOrderId);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), balance);
+    }
+
     function test_ConflictingClientIdMatchesSubmissionEvenAfterDeadline() public {
         _openNormally(CfdTypes.Side.LONG, 40e6);
         OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2);

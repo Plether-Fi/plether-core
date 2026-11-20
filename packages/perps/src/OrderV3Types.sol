@@ -134,6 +134,8 @@ library OrderV3Types {
     ///      `minPostSettlementBalanceAssets` refers to total internal settlement custody, including locked value.
     ///      Full closes skip the post-position equity and leverage checks; fresh public requests still require a
     ///      nonzero `maxPostLeverageBps`. Execution modes use bits 1 (Live), 2 (Fad), and 4 (Frozen).
+    ///      Fresh requests must set `executionWindowSeconds` to the Router's configured `maxExecutionWindowSeconds`;
+    ///      mismatches revert rather than being normalized. `submitBy` limits submission independently.
     struct ExecutionBounds {
         uint64 submitBy;
         uint32 executionWindowSeconds;

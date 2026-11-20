@@ -284,7 +284,9 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         if (uint256(bounds.submitBy) < block.timestamp) {
             revert OrderRouter__InvalidSubmitBy();
         }
-        if (bounds.executionWindowSeconds == 0 || bounds.executionWindowSeconds > host.maxExecutionWindowSeconds()) {
+        // Keep every fresh intent binding for the configured lifetime. A shorter trader-selected window would
+        // allow expiry to refund an adverse order before an independent executor can fill it.
+        if (bounds.executionWindowSeconds != host.maxExecutionWindowSeconds()) {
             revert OrderRouter__InvalidExecutionWindow();
         }
         uint8 executionModes = bounds.allowedExecutionModes;
