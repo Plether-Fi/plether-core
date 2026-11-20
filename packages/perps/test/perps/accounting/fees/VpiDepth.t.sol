@@ -141,6 +141,51 @@ contract VpiDepthTest is BasePerpTest {
         assertLe(aliceBalAfter, aliceBalBefore, "Size addition VPI bypass must not be profitable");
     }
 
+    function test_MinorityIncreaseReserveAndPledgeAreIndependentOfFreeCash() public {
+        _fundJunior(bob, 1_000_000e6);
+        _fundTrader(carol, 50_000e6);
+        _fundTrader(alice, 10_000e6);
+        _open(carol, CfdTypes.Side.SHORT, 200_000e18, 40_000e6, 1e8);
+        _open(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
+
+        vm.prank(alice);
+        uint64 increase = router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 2000e6, 1e8, false);
+        uint256 freeCash = _freeSettlementAssets(alice);
+        uint256 reserveBefore = clearinghouse.vpiRebateReserveAssets(alice);
+        uint256 committed = vm.snapshotState();
+
+        (uint256 expectedReserve, uint256 expectedPledge) = _executeMinorityIncrease(increase);
+        assertGt(
+            expectedReserve - reserveBefore, _engineExecutionFeeAssets(20_000e18, 1e8), "increase earns a net rebate"
+        );
+
+        assertTrue(vm.revertToState(committed));
+        vm.prank(alice);
+        clearinghouse.withdraw(alice, freeCash);
+        assertEq(_freeSettlementAssets(alice), 0);
+        (uint256 reserve, uint256 pledge) = _executeMinorityIncrease(increase);
+        assertEq(reserve, expectedReserve);
+        assertEq(pledge, expectedPledge);
+
+        assertTrue(vm.revertToState(committed));
+        uint256 nextMargin = freeCash - _quoteOpenOrderExecutionBountyAssets(1000e18);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 1000e18, nextMargin, 1e8, false);
+        assertEq(_freeSettlementAssets(alice), 0);
+        (reserve, pledge) = _executeMinorityIncrease(increase);
+        assertEq(reserve, expectedReserve);
+        assertEq(pledge, expectedPledge);
+    }
+
+    function _executeMinorityIncrease(
+        uint64 orderId
+    ) private returns (uint256 reserve, uint256 pledge) {
+        router.executeOrder(orderId, _mockPythUpdateData());
+        (uint256 size, uint256 margin,,,,,) = engine.positions(alice);
+        assertEq(size, 30_000e18, "committed increase must execute");
+        return (clearinghouse.vpiRebateReserveAssets(alice), margin);
+    }
+
     function _openNegativeVpiIsolationFixture(
         address skewTrader,
         address rebateTrader,

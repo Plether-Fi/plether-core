@@ -767,8 +767,10 @@ includes settlement value lost or charged, consumed trader-claim value, and the
 reserved execution bounty; post-settlement balance means total internal settlement custody, including locked value.
 An opening order must also cover its own fees, VPI charge, liquidation reserve, initial and active margin thresholds,
 and pinned equity/leverage bounds from its remaining committed margin alone. Existing position pledge, trader claims,
-and free settlement cannot make that independent check pass. Commitment and execution use the same funding
-calculation. Admission uses the stored reference mark, exact execution fee, and any VPI computed by the live planner.
+and free settlement cannot make that independent check pass. An increase in the VPI rebate reserve draws first on
+the order's available net rebate, then on its new pledge. Moving unrelated free settlement therefore leaves that
+allocation unchanged. Commitment and execution use the same funding calculation. Admission uses the stored reference
+mark, exact execution fee, and any VPI computed by the live planner.
 If the planner stops before quoting VPI (for example, while an opposing position awaits a queued close), admission
 checks the fee and own-margin requirements with zero VPI; execution must check the full live VPI at its pinned Pyth
 price. Admission is therefore a necessary funding check, not a guarantee of future execution.

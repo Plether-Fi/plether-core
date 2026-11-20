@@ -800,8 +800,8 @@ actionReserveAssets >= protectedExecutionBountyAssets + vpiRebateReserveAssets
 ```
 
 The second relation is a protected floor: generic action-charge collection may consume only action reserve above it.
-An open/increase that raises the VPI target must fully fund the increase from eligible settlement or newly supplied
-pledge, otherwise planning fails before exposure grows.
+An open/increase that raises the VPI target uses its own available net rebate first. Its newly supplied pledge must
+cover the rest of the increase before funding any additional liquidation reserve. Other free settlement stays available.
 
 After an open/increase, the target liquidation reserve is:
 

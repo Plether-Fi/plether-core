@@ -542,7 +542,16 @@ library CfdEnginePlanLib {
             && (change >= 0 || previous > type(int256).min - change);
     }
 
-    /// @notice Allocates newly required VPI and liquidation reserves from free cash and new position pledge.
+    /// @notice Returns the reserve increase left for new pledge after using this order's available net rebate.
+    function vpiReserveFromNewPledge(
+        MarginClearinghouseAccountingLib.OpenCostPlan memory cost,
+        uint256 vpiReserveIncreaseAssets
+    ) internal pure returns (uint256) {
+        uint256 availableRebateAssets = Math.min(cost.settlementCreditAssets, cost.resultingFreeSettlementAssets);
+        return vpiReserveIncreaseAssets - Math.min(vpiReserveIncreaseAssets, availableRebateAssets);
+    }
+
+    /// @notice Allocates newly required VPI and liquidation reserves from the order's net rebate and new pledge.
     function _planOpenReserveFunding(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan,
@@ -561,10 +570,7 @@ library CfdEnginePlanLib {
         uint256 vpiReserveIncreaseAssets = delta.vpiRebateReserveAfterAssets > delta.vpiRebateReserveBeforeAssets
             ? delta.vpiRebateReserveAfterAssets - delta.vpiRebateReserveBeforeAssets
             : 0;
-        uint256 vpiReserveFromFreeAssets = vpiReserveIncreaseAssets < openCostPlan.resultingFreeSettlementAssets
-            ? vpiReserveIncreaseAssets
-            : openCostPlan.resultingFreeSettlementAssets;
-        delta.vpiRebateReserveFromPledgeAssets = vpiReserveIncreaseAssets - vpiReserveFromFreeAssets;
+        delta.vpiRebateReserveFromPledgeAssets = vpiReserveFromNewPledge(openCostPlan, vpiReserveIncreaseAssets);
         if (delta.vpiRebateReserveFromPledgeAssets > newPledgeAvailableAssets) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED;
             return;

@@ -327,9 +327,7 @@ contract CfdEngineOpenQuoter {
 
         uint256 minVpiIncrease =
             minVpiReserve > ctx.snap.vpiRebateReserveAssets ? minVpiReserve - ctx.snap.vpiRebateReserveAssets : 0;
-        uint256 minVpiFromPledge = minVpiIncrease > cost.resultingFreeSettlementAssets
-            ? minVpiIncrease - cost.resultingFreeSettlementAssets
-            : 0;
+        uint256 minVpiFromPledge = CfdEnginePlanLib.vpiReserveFromNewPledge(cost, minVpiIncrease);
         totalNotionalFloor = (ctx.currentLots + low) * ctx.price;
         uint256 minLiquidationReserve = Math.max(
             Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.bountyBps, 10_000), ctx.snap.riskParams.minBountyAssets

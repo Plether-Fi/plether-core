@@ -2920,9 +2920,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (x.oldVpiReserve > x.nextVpiReserve) {
             x.available += x.oldVpiReserve - x.nextVpiReserve;
         }
-        if (x.cost < 0) {
-            x.available += uint256(-x.cost);
-        }
+        uint256 rebateCredit = x.cost < 0 ? uint256(-x.cost) : 0;
+        x.available += rebateCredit;
         if (contribution > x.available || (x.cost > 0 && uint256(x.cost) > t.margin + contribution)) {
             v.revertCode = 5;
             return v;
@@ -2930,7 +2929,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         v.margin = t.margin + contribution - (x.cost > 0 ? uint256(x.cost) : 0);
         x.available -= contribution;
         x.extraVpi = x.nextVpiReserve > x.oldVpiReserve ? x.nextVpiReserve - x.oldVpiReserve : 0;
-        x.vpiFromPledge = x.extraVpi > x.available ? x.extraVpi - x.available : 0;
+        uint256 availableRebate = rebateCredit < x.available ? rebateCredit : x.available;
+        x.vpiFromPledge = x.extraVpi > availableRebate ? x.extraVpi - availableRebate : 0;
         x.newPledge = v.margin > t.margin ? v.margin - t.margin : 0;
         if (x.vpiFromPledge > x.newPledge) {
             v.revertCode = 10;
