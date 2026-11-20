@@ -32,10 +32,10 @@ library HousePoolReconcilePlanLib {
     /// @notice Plans coupon transfer, reservation-aware distributable value, and waterfall revenue or loss.
     /// @dev Coupon processing can occur even when `markFresh` is false, but only when `couponElapsed > 0` and junior
     ///      share supply is nonzero. A stale mark then returns without changing unassigned assets or repricing principal.
-    ///      With a fresh mark, settleable pending-bucket assets are reserved first and unassigned assets are capped to
-    ///      remaining distributable value. If claimed principal is zero, remaining distributable value is seeded via
-    ///      the pending-revenue routing rules. Otherwise the waterfall is reconciled against distributable value net of
-    ///      unassigned assets. Subtractions saturate at zero; coupon arithmetic rounds down.
+    ///      With a fresh mark, settleable pending-bucket assets and the full unassigned reserve target are deducted
+    ///      from distributable value. If claimed principal is zero, the remainder is seeded via the pending-revenue
+    ///      routing rules. Otherwise the waterfall is reconciled against the remainder. Subtractions saturate at zero;
+    ///      coupon arithmetic rounds down.
     /// @param state Current waterfall principal, unassigned assets, and senior/junior share supplies.
     /// @param snapshot Terminal distributable assets and deficit derived from physical assets, claims, and price PnL.
     /// @param pendingBucketAssets Settleable pending claimant assets already represented in `snapshot.distributable` and
@@ -70,20 +70,15 @@ library HousePoolReconcilePlanLib {
                 snapshot.distributable > pendingBucketAssets ? snapshot.distributable - pendingBucketAssets : 0;
         }
 
-        plan.state.unassignedAssets =
-            state.unassignedAssets > snapshot.distributable ? snapshot.distributable : state.unassignedAssets;
-
-        if (plan.claimedEquityZero) {
-            uint256 seededDistributableToClaims = snapshot.distributable > plan.state.unassignedAssets
-                ? snapshot.distributable - plan.state.unassignedAssets
-                : 0;
-            HousePoolPendingPreviewLib.applyRevenueIntent(plan.state, seededDistributableToClaims);
-            return plan;
-        }
-
         uint256 distributableToClaims = snapshot.distributable > plan.state.unassignedAssets
             ? snapshot.distributable - plan.state.unassignedAssets
             : 0;
+
+        if (plan.claimedEquityZero) {
+            HousePoolPendingPreviewLib.applyRevenueIntent(plan.state, distributableToClaims);
+            return plan;
+        }
+
         HousePoolWaterfallAccountingLib.ReconcilePlan memory waterfallPlan =
             HousePoolWaterfallAccountingLib.planReconcile(
                 plan.state.waterfall.seniorPrincipal, plan.state.waterfall.juniorPrincipal, distributableToClaims

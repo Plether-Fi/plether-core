@@ -197,12 +197,10 @@ contract PerpWaterfallReferenceHandler is Test {
     }
 
     function _reconcileReference() private {
-        if (expectedUnassigned > expectedCash) {
-            expectedUnassigned = expectedCash;
-        }
+        uint256 claimantCash = expectedCash > expectedUnassigned ? expectedCash - expectedUnassigned : 0;
         WaterfallReferenceMath.Result memory result = WaterfallReferenceMath.reconcile(
             WaterfallReferenceMath.State(expectedSenior, expectedJunior, expectedHwm, expectedCheckpoint),
-            expectedCash - expectedUnassigned,
+            claimantCash,
             800,
             block.timestamp
         );
