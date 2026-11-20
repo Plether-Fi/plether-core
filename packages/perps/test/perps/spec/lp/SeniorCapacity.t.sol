@@ -704,6 +704,13 @@ contract SeniorCapacityTest is BasePerpTest {
 
     function test_PrivilegedRecapitalizationMayRestoreAboveAbsoluteLimitWithoutMintingShares() public {
         _configureAndReconcile(1100e6, 9999);
+        _setSeniorCapacity(500e6, 9999);
+        _refreshMark();
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+        uint256 survivingHighWaterMark = pool.seniorHighWaterMark();
+        assertGt(survivingHighWaterMark, pool.maxSeniorExposureAssets(), "governance cap is below existing entitlement");
+        assertLt(survivingHighWaterMark, 1200e6, "recapitalization must include owner surplus");
         uint256 seniorSupplyBefore = seniorVault.totalSupply();
 
         settlementToken.burn(address(pool), pool.rawAssets());
@@ -719,8 +726,11 @@ contract SeniorCapacityTest is BasePerpTest {
         vm.prank(address(seniorVault));
         pool.reconcile();
 
-        assertEq(pool.seniorPrincipal(), 1200e6);
-        assertEq(pool.seniorHighWaterMark(), 1200e6);
+        assertEq(pool.seniorPrincipal(), survivingHighWaterMark);
+        assertEq(pool.seniorHighWaterMark(), survivingHighWaterMark);
+        assertEq(
+            pool.unassignedAssets(), 1200e6 - survivingHighWaterMark, "surplus cannot create new Senior entitlement"
+        );
         assertGt(_protectedSenior(), pool.maxSeniorExposureAssets());
         assertEq(pool.getSeniorDepositCapacity(), 0);
         assertEq(seniorVault.totalSupply(), seniorSupplyBefore, "recapitalization must not mint senior LP shares");

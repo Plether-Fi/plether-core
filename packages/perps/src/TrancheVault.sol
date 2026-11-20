@@ -11,6 +11,12 @@ import {IAsyncTrancheVaultClaimableRedeem} from "@plether/perps/interfaces/IAsyn
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {JuniorMaintenanceFeeMathLib} from "@plether/perps/libraries/JuniorMaintenanceFeeMathLib.sol";
 
+interface IHousePoolPauseView {
+
+    function paused() external view returns (bool);
+
+}
+
 interface IHousePoolMaintenanceFeeAdminView {
 
     function owner() external view returns (address);
@@ -850,8 +856,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         }
         if (
             (IS_SENIOR || currentLpEpoch() >= requestId) && !queueState.rejected
-                && (!IS_SENIOR || !POOL.lpEpochSettlementPaused()) && !_projectedTerminalWipe()
-                && !POOL.isSeniorImpairedAfterPendingDepositReconcile()
+                && !IHousePoolPauseView(address(POOL)).paused() && (!IS_SENIOR || !POOL.lpEpochSettlementPaused())
+                && !_projectedTerminalWipe() && !POOL.isSeniorImpairedAfterPendingDepositReconcile()
         ) {
             if (IS_SENIOR) {
                 revert TrancheVault__SeniorDepositCommitted();

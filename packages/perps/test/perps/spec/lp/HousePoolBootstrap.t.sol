@@ -320,7 +320,7 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal(), 10_000e6);
-        assertEq(pool.seniorHighWaterMark(), 10_000e6);
+        assertEq(pool.seniorHighWaterMark(), seedAssets, "recapitalization must preserve the pre-wipe recovery target");
     }
 
     function test_GetPendingTrancheState_ProjectedRecapitalizationDoesNotDoubleReserveCreditedSeniorAssets() public {
