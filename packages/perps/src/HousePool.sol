@@ -951,15 +951,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
                 break;
             }
 
-            uint256 fullHeadAssets = REDEMPTION_MATH_SIDECAR.netAssetsForShares(
-                remainingShares, phase.pricingPrincipal, phase.pricingSupply, 1, 1000, feeBps
-            );
-            if (fullHeadAssets == 0) {
-                // A prior burn can make the next head valuable under the canonical post-burn state even when the
-                // phase's frozen quote rounds to zero. Leave it queued for a fresh settlement rather than refunding it.
-                if (phase.fundedShares != 0) {
-                    break;
-                }
+            // Burns at the phase snapshot price cannot lower the post-burn share price. Refund only heads that
+            // still pay zero there. Funding below retains the snapshot quote, deferring heads newly worth something.
+            uint256 supplyBefore = vault.accruedTotalSupply();
+            if (
+                REDEMPTION_MATH_SIDECAR.netAssetsForShares(
+                        remainingShares, phase.pricingPrincipal - phase.fundedAssets, supplyBefore, 1, 1000, feeBps
+                    ) == 0
+            ) {
                 uint256 supplyBeforeRefund = IERC20(vaultAddress).totalSupply();
                 uint256 escrowSharesBeforeRefund = IERC20(vaultAddress).balanceOf(vaultAddress);
                 uint256 poolAssetsBeforeRefund = rawAssets();
@@ -979,7 +978,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
                 if (settlementToken.balanceOf(vaultAddress) != vaultAssetsBeforeRefund) {
                     revert HousePool__VaultSettlementInvariant();
                 }
-                phase.processedEpochs += 1;
+                unchecked {
+                    // The loop bounds this counter below MAX_LP_EPOCHS_PER_PHASE.
+                    ++phase.processedEpochs;
+                }
                 continue;
             }
             if (phase.fundedAssets >= phase.budget) {
@@ -999,7 +1001,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
                 break;
             }
 
-            uint256 supplyBefore = vault.accruedTotalSupply();
             uint256 escrowAssetsBefore = settlementToken.balanceOf(vaultAddress);
             settlementToken.safeTransfer(vaultAddress, fundedAssets);
             vault.fundRedeemEpoch(epochId, fundedShares, fundedAssets);
@@ -1015,7 +1016,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             }
             phase.fundedShares += fundedShares;
             phase.fundedAssets += fundedAssets;
-            phase.processedEpochs += 1;
+            unchecked {
+                // The loop bounds this counter below MAX_LP_EPOCHS_PER_PHASE.
+                ++phase.processedEpochs;
+            }
             if (fundedShares < remainingShares) {
                 break;
             }
