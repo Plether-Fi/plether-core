@@ -12,7 +12,6 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {CfdEngineRawSnapshotLib} from "@plether/perps/libraries/CfdEngineRawSnapshotLib.sol";
-import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 interface ICfdEnginePlanningHost {
 
@@ -100,25 +99,16 @@ contract CfdEnginePlanningReader {
         snap.lastMarkPrice = engine.lastMarkPrice();
         snap.lastMarkTime = engine.lastMarkTime();
 
-        // Historical carry uses live cash net of claims and refundable positive VPI, even at hypothetical trade depth.
         snap.poolCashAssets = pool.totalAssets();
-        uint256 carryDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
-            snap.poolCashAssets, snap.totalTraderClaimBalanceAssets, snap.totalPositiveVpiAccruedAssets
-        );
-        ICfdEnginePlanner planner = ENGINE.planner();
         // Exact enum dispatch selects the exposed side; this is not a target token-balance equality.
         // slither-disable-next-line incorrect-equality
         if (!closeCommit || snap.position.side == CfdTypes.Side.LONG) {
-            snap.longSide = CfdEngineRawSnapshotLib.loadSide(
-                address(ENGINE), planner, CfdTypes.Side.LONG, carryDepthAssets, snap.riskParams.baseCarryBps
-            );
+            snap.longSide = CfdEngineRawSnapshotLib.loadSideState(address(ENGINE), CfdTypes.Side.LONG);
         }
-        // The other exact enum value selects the SHORT borrow-base snapshot.
+        // The other exact enum value selects the SHORT aggregate snapshot.
         // slither-disable-next-line incorrect-equality
         if (!closeCommit || snap.position.side == CfdTypes.Side.SHORT) {
-            snap.shortSide = CfdEngineRawSnapshotLib.loadSide(
-                address(ENGINE), planner, CfdTypes.Side.SHORT, carryDepthAssets, snap.riskParams.baseCarryBps
-            );
+            snap.shortSide = CfdEngineRawSnapshotLib.loadSideState(address(ENGINE), CfdTypes.Side.SHORT);
         }
         snap.poolAssets = closeCommit ? snap.poolCashAssets : poolDepthAssets;
 

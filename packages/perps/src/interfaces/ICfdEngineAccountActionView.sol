@@ -29,23 +29,13 @@ interface ICfdEngineAccountActionView {
 
     function positionCarryState(
         address account
-    ) external view returns (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
+    ) external view returns (uint256 maxProfitAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
 
     function sides(
         uint256 index
     ) external view returns (uint256 maxProfitAssets, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
 
-    function sideBorrowBaseAssets(
-        uint256 index
-    ) external view returns (uint256);
-
-    function sideCarryIndex(
-        uint256 index
-    ) external view returns (uint256);
-
-    function sideCarryTimestamp(
-        uint256 index
-    ) external view returns (uint64);
+    function currentCarryIndex() external view returns (uint256);
 
     function planner() external view returns (address);
 

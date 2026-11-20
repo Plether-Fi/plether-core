@@ -42,8 +42,8 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         address account,
         uint256 amount
     ) private {
-        // Synthetic claims must retain the production ordering: close the old net-depth carry interval first.
-        engine.checkpointCarryIndexes();
+        // Synthetic claims must retain the production ordering: preserve the same carry checkpoint ordering as claim creation.
+        engine.checkpointCarryIndex();
         bytes32 oldHash = terminalNavBook.curveHashOf(account);
         uint256 total = engine.totalTraderClaimBalanceAssets() - engine.traderClaimBalanceAssets(account) + amount;
         stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(account)
@@ -185,7 +185,7 @@ contract CarryCreditCheckpointTest is BasePerpTest {
             "only outer bracket changes the curve"
         );
         assertEq(_sideState(CfdTypes.Side.LONG).totalMargin, clearinghouse.pnlPledgeAssets(ACCOUNT));
-        assertEq(engine.sideBorrowBaseAssets(0), _positionBorrowBaseAssets(ACCOUNT));
+        assertEq(_sideState(CfdTypes.Side.LONG).maxProfitAssets, _positionMaxProfitAssets(ACCOUNT));
         _authenticate(ACCOUNT);
         if (claim) {
             assertFalse(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).liquidatable);
@@ -225,7 +225,7 @@ contract CarryCreditCheckpointTest is BasePerpTest {
                     assertTrue(engine.isOracleFrozen());
                 }
                 uint64 markTime = engine.lastMarkTime();
-                uint256 expectedIndex = _currentSideCarryIndex(CfdTypes.Side.LONG);
+                uint256 expectedIndex = _currentCarryIndex();
                 uint256 due = _expectedIndexedCarryAssets(ACCOUNT);
                 uint256 margin = clearinghouse.pnlPledgeAssets(ACCOUNT);
                 if (route == 0) {
@@ -236,7 +236,9 @@ contract CarryCreditCheckpointTest is BasePerpTest {
                     engine.creditBounty(SOURCE, ACCOUNT, 10e6, 1e8, markTime);
                 }
                 assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), margin - due + (route == 0 ? 2000e6 : 0));
-                assertEq(engine.sideCarryIndex(0), expectedIndex, "old borrow base and pool depth");
+                assertEq(
+                    engine.carryIndex(), expectedIndex, "elapsed flat-rate interval is checkpointed before the credit"
+                );
                 assertEq(_lastCarryTimestamp(ACCOUNT), block.timestamp);
                 assertEq(engine.lastMarkTime(), markTime, "credit must not invent a fresh mark");
                 _authenticate(ACCOUNT);
@@ -249,12 +251,12 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         _fixture();
         _claim(SOURCE, 1000e6);
         vm.warp(block.timestamp + 30 days);
-        uint256 index = _currentSideCarryIndex(CfdTypes.Side.LONG);
+        uint256 index = _currentCarryIndex();
         uint256 margin = clearinghouse.pnlPledgeAssets(ACCOUNT);
         uint256 assets = pool.totalAssets();
         vm.prank(SOURCE);
         engine.settleTraderClaim(SOURCE);
-        assertEq(engine.sideCarryIndex(0), index);
+        assertEq(engine.carryIndex(), index);
         assertEq(pool.totalAssets(), assets - 1000e6);
         assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), margin);
         assertEq(_freeSettlementAssets(SOURCE), 1000e6);
@@ -437,7 +439,7 @@ contract CarryCreditCheckpointTest is BasePerpTest {
                 freeCollected += f;
             }
             assertEq(startingArrears + accrued, marginCollected + freeCollected + engine.unsettledCarryAssets(ACCOUNT));
-            assertEq(engine.sideBorrowBaseAssets(0), _positionBorrowBaseAssets(ACCOUNT));
+            assertEq(_sideState(CfdTypes.Side.LONG).maxProfitAssets, _positionMaxProfitAssets(ACCOUNT));
             _authenticate(ACCOUNT);
         }
     }
@@ -462,12 +464,8 @@ contract CarryCreditCheckpointTest is BasePerpTest {
             abi.encode(
                 _sideState(CfdTypes.Side.LONG),
                 _sideState(CfdTypes.Side.SHORT),
-                engine.sideCarryIndex(0),
-                engine.sideCarryIndex(1),
-                engine.sideCarryTimestamp(0),
-                engine.sideCarryTimestamp(1),
-                engine.sideBorrowBaseAssets(0),
-                engine.sideBorrowBaseAssets(1)
+                engine.carryIndex(),
+                engine.carryTimestamp()
             )
         );
         bytes32 custodyHash = keccak256(

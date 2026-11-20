@@ -6,7 +6,6 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanningReader} from "@plether/perps/CfdEnginePlanningReader.sol";
 import {CfdOrderPolicyEvaluatorBase, ICfdOrderPolicyEngineView} from "@plether/perps/CfdOrderPolicyEvaluatorBase.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -33,7 +32,7 @@ contract RawSnapshotPolicyHarness is CfdOrderPolicyEvaluatorBase {
         uint256 depth
     ) external view returns (CfdEnginePlanTypes.RawSnapshot memory) {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
-        return _buildRawSnapshot(engine, ICfdEnginePlanner(engine.planner()), account, depth);
+        return _buildRawSnapshot(engine, account, depth);
     }
 
     function buildWithCash(
@@ -43,19 +42,17 @@ contract RawSnapshotPolicyHarness is CfdOrderPolicyEvaluatorBase {
         uint256 cash
     ) external view returns (CfdEnginePlanTypes.RawSnapshot memory) {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
-        return _buildRawSnapshot(engine, ICfdEnginePlanner(engine.planner()), account, depth, cash);
+        return _buildRawSnapshot(engine, account, depth, cash);
     }
 
 }
 
-/// @dev Synthetic getter observations isolate snapshot assembly, including deliberately stale Engine margin and
-///      a configured planner whose carry projection differs from the Lens's local arithmetic.
+/// @dev Synthetic getter observations isolate snapshot assembly, including deliberately stale Engine margin.
 contract CfdRawSnapshotParityTest is Test {
 
     address private constant ENGINE = address(0xE11);
     address private constant POOL = address(0xB001);
     address private constant CLEARINGHOUSE = address(0xC1EA);
-    address private constant PLANNER = address(0xB1A4);
     address private constant SIDECAR = address(0x51DE);
     address private constant ACCOUNT = address(0xA11CE);
     uint256 private constant NOW = 1_700_000_000;
@@ -74,7 +71,7 @@ contract CfdRawSnapshotParityTest is Test {
 
         _mockUint(ENGINE, "pool()", uint256(uint160(POOL)));
         _mockUint(ENGINE, "clearinghouse()", uint256(uint160(CLEARINGHOUSE)));
-        _mockUint(ENGINE, "planner()", uint256(uint160(PLANNER)));
+        _mockUint(ENGINE, "currentCarryIndex()", 61e18);
         _mockUint(ENGINE, "settlementSidecar()", uint256(uint160(SIDECAR)));
         _mockPosition(CfdTypes.Side.LONG);
         vm.mockCall(ENGINE, abi.encodeWithSignature("positionEntryCostAssetAtoms(address)", ACCOUNT), abi.encode(16e6));
@@ -112,8 +109,8 @@ contract CfdRawSnapshotParityTest is Test {
         _mockUint(ENGINE, "totalTraderClaimBalanceAssets()", 44e6);
         _mockUint(ENGINE, "totalPositiveVpiAccruedAssets()", 45e6);
         _mockUint(ENGINE, "totalNegativeVpiAccruedAssets()", 63e6);
-        _mockSide(0, 46e6, 47e20, 48e26, 49e6, 50e6, 51e18, NOW - 37, 61e18);
-        _mockSide(1, 56e6, 57e20, 58e26, 59e6, 60e6, 52e18, NOW - 38, 62e18);
+        _mockSide(0, 46e6, 47e20, 48e26, 49e6);
+        _mockSide(1, 56e6, 57e20, 58e26, 59e6);
         _mockCollateral();
         vm.mockCall(ENGINE, abi.encodeWithSignature("unsettledCarryAssets(address)", ACCOUNT), abi.encode(65e6));
         vm.mockCall(ENGINE, abi.encodeWithSignature("traderClaimBalanceAssets(address)", ACCOUNT), abi.encode(64e6));
@@ -149,16 +146,11 @@ contract CfdRawSnapshotParityTest is Test {
                 bytes("Lens keeps legacy collateral reads")
             );
 
-            // Lens simulations retain hypothetical cash, absent commitment marks, the Engine tuple's margin,
-            // and local carry arithmetic rather than the configured planner's projection.
+            // Lens simulations retain hypothetical cash, absent commitment marks, and the Engine tuple's margin.
             expected.poolCashAssets = DEPTH;
             expected.lastMarkPrice = 0;
             expected.lastMarkTime = 0;
             expected.position.margin = 12e6;
-            expected.longSide.carryIndex =
-                51e18 + 539 * (uint256(50e6) * 10_000 / 1911e6) * 1e18 * 37 / (365 days * 10_000 * 10_000);
-            expected.shortSide.carryIndex =
-                52e18 + 539 * (uint256(60e6) * 10_000 / 1911e6) * 1e18 * 38 / (365 days * 10_000 * 10_000);
             assertEq(
                 abi.encode(lens.build(ACCOUNT, DEPTH)), abi.encode(expected), "Lens fields and intentional context"
             );
@@ -188,9 +180,6 @@ contract CfdRawSnapshotParityTest is Test {
         uint256 omittedSide = side == CfdTypes.Side.LONG ? 1 : 0;
         bytes memory omittedRead = bytes("execution-only or opposite-side read");
         vm.mockCallRevert(ENGINE, abi.encodeWithSignature("sides(uint256)", omittedSide), omittedRead);
-        vm.mockCallRevert(ENGINE, abi.encodeWithSignature("sideBorrowBaseAssets(uint256)", omittedSide), omittedRead);
-        vm.mockCallRevert(ENGINE, abi.encodeWithSignature("sideCarryIndex(uint256)", omittedSide), omittedRead);
-        vm.mockCallRevert(ENGINE, abi.encodeWithSignature("sideCarryTimestamp(uint256)", omittedSide), omittedRead);
         vm.mockCallRevert(ENGINE, abi.encodeWithSignature("degradedMode()"), omittedRead);
         vm.mockCallRevert(ENGINE, abi.encodeWithSignature("executionFeeBps()"), omittedRead);
         vm.mockCallRevert(ENGINE, abi.encodeWithSignature("settlementBufferBps()"), omittedRead);
@@ -239,23 +228,13 @@ contract CfdRawSnapshotParityTest is Test {
             currentTimestamp: NOW,
             lastMarkPrice: 90_000_022,
             lastMarkTime: uint64(NOW - 29),
-            positionBorrowBaseAssets: 19e6,
             positionLastCarryIndex: 20e18,
+            carryIndex: 61e18,
             longSide: CfdEnginePlanTypes.SideSnapshot({
-                maxProfitAssets: 46e6,
-                openInterest: 47e20,
-                entryNotional: 48e26,
-                totalMargin: 49e6,
-                borrowBaseAssets: 50e6,
-                carryIndex: 61e18
+                maxProfitAssets: 46e6, openInterest: 47e20, entryNotional: 48e26, totalMargin: 49e6
             }),
             shortSide: CfdEnginePlanTypes.SideSnapshot({
-                maxProfitAssets: 56e6,
-                openInterest: 57e20,
-                entryNotional: 58e26,
-                totalMargin: 59e6,
-                borrowBaseAssets: 60e6,
-                carryIndex: 62e18
+                maxProfitAssets: 56e6, openInterest: 57e20, entryNotional: 58e26, totalMargin: 59e6
             }),
             poolAssets: DEPTH,
             poolCashAssets: 2000e6,
@@ -322,27 +301,12 @@ contract CfdRawSnapshotParityTest is Test {
         uint256 maxProfit,
         uint256 openInterest,
         uint256 entryNotional,
-        uint256 margin,
-        uint256 borrowBase,
-        uint256 storedIndex,
-        uint256 timestamp,
-        uint256 projectedIndex
+        uint256 margin
     ) private {
         vm.mockCall(
             ENGINE,
             abi.encodeWithSignature("sides(uint256)", side),
             abi.encode(maxProfit, openInterest, entryNotional, margin)
-        );
-        vm.mockCall(ENGINE, abi.encodeWithSignature("sideBorrowBaseAssets(uint256)", side), abi.encode(borrowBase));
-        vm.mockCall(ENGINE, abi.encodeWithSignature("sideCarryIndex(uint256)", side), abi.encode(storedIndex));
-        vm.mockCall(ENGINE, abi.encodeWithSignature("sideCarryTimestamp(uint256)", side), abi.encode(uint64(timestamp)));
-        vm.mockCall(
-            PLANNER,
-            abi.encodeCall(
-                ICfdEnginePlanner.computeCurrentCarryIndex,
-                (storedIndex, uint64(timestamp), NOW, borrowBase, 1911e6, 539)
-            ),
-            abi.encode(projectedIndex)
         );
     }
 

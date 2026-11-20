@@ -129,13 +129,13 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
     function _withdrawalAccountingDigest(
         address account
     ) internal view returns (bytes32) {
-        (uint256 borrowBase, uint256 carryIndex, uint64 carryTimestamp) = engine.positionCarryState(account);
+        (uint256 maxProfitExposure, uint256 carryIndex, uint64 carryTimestamp) = engine.positionCarryState(account);
         return keccak256(
             abi.encode(
                 clearinghouse.getAccountAssetBuckets(account),
                 clearinghouse.totalBountyReservationsAssets(account),
                 engine.unsettledCarryAssets(account),
-                borrowBase,
+                maxProfitExposure,
                 carryIndex,
                 carryTimestamp,
                 _lastCarryTimestamp(account),
@@ -183,7 +183,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         );
     }
 
-    function test_NoSideCarryRealization_KeepsClearinghouseMarginInSync() public {
+    function test_CarryRealizationKeepsClearinghouseMarginInSync() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(1));
         _fundTrader(account, 20_000 * 1e6);
@@ -306,7 +306,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
     function test_DepositMargin_CanRescueAccountWhenIncomingCashCoversCarry() public {
         address trader = address(0xABD1);
         address account = trader;
-        uint256 rescueDeposit = 50_000e6;
+        uint256 rescueDeposit = 100_000e6;
         uint256 carryElapsed = 365 days * 3;
 
         _fundTrader(trader, 10_000e6);
@@ -670,7 +670,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         engine.updateMarkPrice(price, uint64(block.timestamp));
         vm.warp(block.timestamp + carryTimeDelta);
 
-        uint256 borrowBaseBefore = _positionBorrowBaseAssets(account);
+        uint256 maxProfitBefore = _positionMaxProfitAssets(account);
         uint256 expectedCarry = _expectedIndexedCarry(account);
         uint256 settlementBefore = clearinghouse.balanceAssets(account);
         uint256 pnlPledgeBefore = clearinghouse.pnlPledgeAssets(account);
@@ -682,9 +682,9 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
 
         assertEq(engine.unsettledCarryAssets(account), 0, "Reservation should realize indexed carry first");
         assertEq(
-            _positionBorrowBaseAssets(account),
-            borrowBaseBefore + expectedCarry,
-            "Margin-funded carry increases the borrow base only after historical carry is assessed"
+            _positionMaxProfitAssets(account),
+            maxProfitBefore,
+            "Margin-funded carry must leave maximum-profit exposure unchanged"
         );
         assertEq(
             clearinghouse.balanceAssets(account),

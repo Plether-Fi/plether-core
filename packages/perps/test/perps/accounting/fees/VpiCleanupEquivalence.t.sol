@@ -192,9 +192,8 @@ contract VpiCleanupEquivalenceTest is Test {
         snap.capPrice = 2e8;
         snap.position = CfdTypes.Position(SIZE, PLEDGE, PRICE, 10_000e6, CfdTypes.Side.LONG, 1, 1, c.accrual);
         snap.positionEntryCostAssetAtoms = CfdMath.sizeToLots(SIZE) * PRICE;
-        snap.positionBorrowBaseAssets = 8000e6;
         snap.longSide = CfdEnginePlanTypes.SideSnapshot(
-            10_000e6, SIZE, snap.positionEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE, PLEDGE, 8000e6, 0
+            10_000e6, SIZE, snap.positionEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE, PLEDGE
         );
         if (c.worsensSkew) {
             snap.shortSide.maxProfitAssets = 20_000e6;
