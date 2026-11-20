@@ -33,8 +33,8 @@ contract TerminalNavCloseConservationTest is Test {
         assertEq(firstHalf.priceLossAssets, 90, "first half must realize its exact basis loss");
         assertEq(firstHalf.pricePnlClaimConsumedAssets, 90, "same-account claim must net first");
         assertEq(firstHalf.pricePnlPledgeConsumedAssets, 0, "claim fully covers first-half loss");
-        assertEq(firstHalf.posMarginAfter, 81, "strict residual health retains one additional atom");
-        assertEq(firstHalf.unlockMarginAssets, 19, "only surplus pledge above strict health may unlock");
+        assertEq(firstHalf.posMarginAfter, 90, "half-sized remainder retains half the pre-close equity");
+        assertEq(firstHalf.unlockMarginAssets, 10, "only surplus pledge above the preserved ratio may unlock");
 
         uint256 splitRecovery = firstHalf.pricePnlClaimConsumedAssets + firstHalf.pricePnlPledgeConsumedAssets
             + _postTerminalLoss(firstHalf);
