@@ -699,7 +699,7 @@ Rules:
   carry is not an independent delinquency, but its margin debit can cause a maintenance breach,
 - any uncovered carry remainder means both margin and free settlement are exhausted; it blocks withdrawal and
   independently makes the account liquidatable. A trader claim cannot pay that remainder,
-- claim payments and keeper bounty credits first collect all available margin and free settlement toward carry,
+- claim payments and cross-account bounty credits first collect all available margin and free settlement toward carry,
   retaining any unpaid remainder. Then the full credit is applied: paid claims become pledge for live positions,
   bounties become free settlement. No second collection pass or waiver occurs; a later checkpoint can collect that
   credit even at the same timestamp, without reassessing elapsed carry,

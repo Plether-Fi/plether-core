@@ -953,10 +953,12 @@ The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
   uses full utilization. Claim creation, consumption, and payment checkpoint both side indexes before changing depth
 - accrual clock: wall-clock time
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
-- claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryAssets`,
+- claim and cross-account bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryAssets`,
   then apply the full incoming credit. The credit can fund retained arrears at a later checkpoint, including at the same
   timestamp; it is not collected or waived in this call. Claim liquidity checks run after collection, and any failure
   rolls back the collection and credit
+- a self-trigger releases the trader's reserved bounty without a carry debit. The linked close applies its execution
+  bounds to carry and records carry in the receipt when the close executes.
 - realization points: open, close, add margin, pool-asset changes, risk-parameter changes, and owner clearinghouse
   `deposit` / `depositMargin` / withdraw paths before the carry base/rate denominator changes. Owner deposits may
   collect realized carry from post-deposit settlement in the same transaction; withdrawals realize carry before

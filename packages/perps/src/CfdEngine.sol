@@ -463,10 +463,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     }
 
     /// @notice Transfers reserved bounty value from a source account into a beneficiary clearinghouse account.
-    /// @dev Callable only by the router. For a beneficiary with an open position, carry is checkpointed before the
-    ///      settlement credit changes reachable collateral. Available margin and free settlement pay carry, and the
-    ///      unpaid remainder stays in `unsettledCarryAssets`. The incoming bounty is not collected in this call.
-    ///      A strictly newer mark is capped at `CAP_PRICE` and cached.
+    /// @dev Callable only by the router. A same-account credit releases the reserve without collecting carry.
+    ///      For a transfer to another account with an open position, carry is checkpointed before the settlement
+    ///      credit changes reachable collateral. Available margin and free settlement pay carry, and the unpaid
+    ///      remainder stays in `unsettledCarryAssets`. The incoming bounty is not collected in this call.
+    ///      A cross-account credit caches a strictly newer mark after capping it at `CAP_PRICE`.
     ///      The engine relies on the router to validate the supplied mark. A zero amount is a complete no-op.
     /// @param sourceAccount Account whose reserved settlement bounty funds the credit.
     /// @param beneficiary Account receiving the clearinghouse settlement credit.
@@ -484,12 +485,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             return;
         }
 
+        bool paysAnotherAccount = sourceAccount != beneficiary;
         bytes32 expectedOldHash;
-        bool syncCurve = _positions[beneficiary].lots > 0;
+        bool syncCurve = paysAnotherAccount && _positions[beneficiary].lots > 0;
         if (syncCurve) {
             expectedOldHash = _beginTerminalCurveMutation(beneficiary);
         }
-        _checkpointBountyRecipient(beneficiary, price, publishTime);
+        if (paysAnotherAccount) {
+            _checkpointBountyRecipient(beneficiary, price, publishTime);
+        }
         clearinghouse.transferReservedSettlement(sourceAccount, beneficiary, amountAssets);
         if (syncCurve) {
             _endTerminalCurveMutation(beneficiary, expectedOldHash);

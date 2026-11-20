@@ -272,17 +272,18 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         assertEq(_stateHash(), beforeState);
     }
 
-    function test_SelfBountyProtectsReserveThenReleasesFullCredit() public {
+    function test_SelfBountyReleasesReserveAndDefersCarryCollection() public {
         _fixture();
         uint256 available = clearinghouse.pnlPledgeAssets(ACCOUNT) + _freeSettlementAssets(ACCOUNT);
         _arrears(available + 30e6);
         uint256 beforeBalance = clearinghouse.balanceAssets(ACCOUNT);
+        uint256 beforeFree = _freeSettlementAssets(ACCOUNT);
         vm.prank(address(router));
         engine.creditBounty(ACCOUNT, ACCOUNT, 10e6, 1e8, uint64(block.timestamp));
-        assertEq(clearinghouse.balanceAssets(ACCOUNT), beforeBalance - available);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), beforeBalance);
         assertEq(clearinghouse.actionReserveAssets(ACCOUNT), 20e6);
-        assertEq(_freeSettlementAssets(ACCOUNT), 10e6);
-        assertEq(engine.unsettledCarryAssets(ACCOUNT), 30e6);
+        assertEq(_freeSettlementAssets(ACCOUNT), beforeFree + 10e6);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), available + 30e6);
         _checkpoint();
         assertEq(engine.unsettledCarryAssets(ACCOUNT), 20e6);
         _authenticate(ACCOUNT);
