@@ -331,14 +331,14 @@ contract RealClaimPayoutRecoveryTest is HousePoolTestBase {
         _fundTrader(trader, 20_000e6);
         _open(trader, CfdTypes.Side.LONG, 10_000e18, 2000e6, 1e8);
         settlementToken.burn(address(pool), pool.rawAssets());
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         _close(trader, CfdTypes.Side.LONG, 5000e18, 80_000_000);
         uint256 claim = engine.traderClaimBalanceAssets(trader);
         assertGt(claim, 0);
 
-        vm.warp(block.timestamp + 1);
+        vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1e8, uint64(vm.getBlockTimestamp()));
         _reconcile();
         uint256 recap = claim + pool.seniorHighWaterMark();
         settlementToken.mint(address(this), recap);
@@ -348,9 +348,9 @@ contract RealClaimPayoutRecoveryTest is HousePoolTestBase {
         uint256 unassignedBefore = pool.unassignedAssets();
         assertGt(pool.pendingRecapitalizationAssets(), 0);
 
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1e8, uint64(vm.getBlockTimestamp()));
         uint256 assetsBefore = pool.totalAssets();
         vm.prank(trader);
         engine.settleTraderClaim(trader);
