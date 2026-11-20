@@ -703,17 +703,17 @@ contract PerpsForkTest is ForkTrancheFunding {
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should exist");
 
-        uint256 longIndexBefore = engine.sideCarryIndex(uint8(CfdTypes.Side.LONG));
+        uint256 carryIndexBefore = engine.carryIndex();
         uint256 snapshot = vm.snapshotState();
         this._commitAndExecute(alice, CfdTypes.Side.LONG, size, 0, 0, int64(100_000_000), true);
         uint256 immediateCloseBalance = clearinghouse.balanceAssets(aliceAccount);
         assertTrue(vm.revertToState(snapshot));
 
         // Same position and price, with only elapsed time changed: realized carry must
-        // increase the long-side index and reduce settlement proceeds relative to the control.
+        // increase the global index and reduce settlement proceeds relative to the control.
         vm.warp(t0 + 90 days + 60);
         this._commitAndExecute(alice, CfdTypes.Side.LONG, size, 0, 0, int64(100_000_000), true);
-        assertGt(engine.sideCarryIndex(uint8(CfdTypes.Side.LONG)), longIndexBefore);
+        assertGt(engine.carryIndex(), carryIndexBefore);
         assertLt(clearinghouse.balanceAssets(aliceAccount), immediateCloseBalance);
         (size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "carry must be realized by a completed close");
@@ -799,7 +799,9 @@ contract PerpsForkTest is ForkTrancheFunding {
             "Pre-claim clearinghouse balance should still reflect close bounty and carry realization"
         );
         assertEq(
-            chBefore - chAfterClose, 1011, "Seven seconds of 5% annual carry on the 91k borrow basis; no close bounty"
+            chBefore - chAfterClose,
+            1109,
+            "Seven seconds of flat 5% annual carry on the full 100k maximum profit; no close bounty"
         );
 
         deal(settlementToken, address(pool), IERC20(settlementToken).balanceOf(address(pool)) + traderClaim);

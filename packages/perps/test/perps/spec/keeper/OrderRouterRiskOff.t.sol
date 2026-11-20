@@ -444,7 +444,10 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         _open(RESTORED, CfdTypes.Side.LONG, 10_000e18, 250e6, MARK_PRICE);
         uint64 invalidOpenId = _commitOpen(RESTORED, CfdTypes.Side.LONG, 100e18, 49e6);
         routerAdmin.pause();
-        vm.warp(block.timestamp + 365 days);
+        // $10,000 maximum profit at 5% annually accrues $1.369863 in one day.
+        // Together with the seeded $20 shortfall, this is covered by the $49 margin refund.
+        vm.warp(block.timestamp + 1 days);
+        assertEq(_expectedIndexedCarryAssets(RESTORED), 1_369_863);
         _seedCarryDelinquencyWithPriceClaim();
 
         assertTrue(
@@ -514,7 +517,10 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         _open(RESTORED, CfdTypes.Side.LONG, 10_000e18, 250e6, MARK_PRICE);
         uint64 invalidOpenId = _commitOpen(RESTORED, CfdTypes.Side.LONG, 100e18, 49e6);
         routerAdmin.pause();
-        vm.warp(block.timestamp + 365 days);
+        // $10,000 maximum profit at 5% annually accrues $1.369863 in one day.
+        // Together with the seeded $20 shortfall, this is covered by the $49 margin refund.
+        vm.warp(block.timestamp + 1 days);
+        assertEq(_expectedIndexedCarryAssets(RESTORED), 1_369_863);
         _seedCarryDelinquencyWithPriceClaim();
 
         assertTrue(
@@ -621,17 +627,15 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     function _carryHash(
         address account
     ) internal view returns (bytes32) {
-        (uint256 borrowBase, uint256 carryIndex, uint64 carryTimestamp) = engine.positionCarryState(account);
+        (uint256 maxProfitAssets, uint256 carryIndex, uint64 carryTimestamp) = engine.positionCarryState(account);
         return keccak256(
             abi.encode(
-                borrowBase,
+                maxProfitAssets,
                 carryIndex,
                 carryTimestamp,
                 engine.unsettledCarryAssets(account),
-                engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)),
-                engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG)),
-                engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)),
-                engine.sideCarryTimestamp(uint256(CfdTypes.Side.SHORT))
+                engine.carryIndex(),
+                engine.carryTimestamp()
             )
         );
     }
