@@ -120,7 +120,7 @@ contract EngineRecapitalizationTest is BasePerpTest {
         _fundRecapitalization(amount);
         uint256 cashBefore = settlementToken.balanceOf(address(pool));
         uint256 accountedBefore = pool.accountedAssets();
-        uint256 carryTimestamp = engine.sideCarryTimestamp(0);
+        uint256 carryTimestamp = engine.carryTimestamp();
         vm.warp(block.timestamp + 1 hours);
         vm.mockCallRevert(
             address(pool),
@@ -137,28 +137,26 @@ contract EngineRecapitalizationTest is BasePerpTest {
         assertEq(settlementToken.allowance(address(this), address(engine)), amount);
         assertEq(pool.accountedAssets(), accountedBefore);
         assertEq(pool.pendingRecapitalizationAssets(), 0);
-        assertEq(engine.sideCarryTimestamp(0), carryTimestamp);
+        assertEq(engine.carryTimestamp(), carryTimestamp);
     }
 
     function test_RecapitalizePool_CheckpointsCarryBeforeFundingWithStaleMark() public {
         address trader = address(0xA11CE);
         _fundTrader(trader, 10_000e6);
         _open(trader, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
-        // With raw cash below accounted assets, even the token transfer changes effective carry depth.
+        // Cash can change while the same flat carry clock is checkpointed.
         settlementToken.burn(address(pool), 50_000e6);
         vm.warp(block.timestamp + 1 hours);
         uint256 snapshot = vm.snapshotState();
-        engine.checkpointCarryIndexes();
-        uint256 expectedLongIndex = engine.sideCarryIndex(0);
-        uint256 expectedShortIndex = engine.sideCarryIndex(1);
+        engine.checkpointCarryIndex();
+        uint256 expectedCarryIndex = engine.carryIndex();
         assertTrue(vm.revertToState(snapshot));
         vm.deleteStateSnapshot(snapshot);
 
         _fundRecapitalization(100_000e6);
         engine.recapitalizePool(100_000e6);
-        assertEq(engine.sideCarryIndex(0), expectedLongIndex);
-        assertEq(engine.sideCarryIndex(1), expectedShortIndex);
-        assertEq(engine.sideCarryTimestamp(0), block.timestamp);
+        assertEq(engine.carryIndex(), expectedCarryIndex);
+        assertEq(engine.carryTimestamp(), block.timestamp);
         assertEq(pool.pendingRecapitalizationAssets(), 100_000e6);
     }
 

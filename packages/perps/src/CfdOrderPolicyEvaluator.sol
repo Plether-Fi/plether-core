@@ -108,7 +108,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         );
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
-            _buildRawSnapshot(engine, planner, order.account, context.poolDepthAssets, context.poolDepthAssets);
+            _buildRawSnapshot(engine, order.account, context.poolDepthAssets, context.poolDepthAssets);
         // Execution assesses before releasing this order's reservation. Project that release for planner parity.
         uint256 release = viewOrder.committedMarginAssets;
         snapshot.lockedBuckets.committedOrderMarginAssets -= release;

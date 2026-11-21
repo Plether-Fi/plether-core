@@ -46,14 +46,8 @@ contract FullCloseActionChargePlanTest is Test {
         snap.capPrice = 2e8;
         snap.position = CfdTypes.Position(SIZE, pledge, PRICE, 10_000e6, CfdTypes.Side.LONG, 1, 1, 0);
         snap.positionEntryCostAssetAtoms = CfdMath.sizeToLots(SIZE) * PRICE;
-        snap.positionBorrowBaseAssets = pledge < 10_000e6 ? 10_000e6 - pledge : 0;
         snap.longSide = CfdEnginePlanTypes.SideSnapshot(
-            10_000e6,
-            SIZE,
-            snap.positionEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
-            pledge,
-            snap.positionBorrowBaseAssets,
-            0
+            10_000e6, SIZE, snap.positionEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE, pledge
         );
         snap.poolAssets = 1_000_000e6;
         snap.poolCashAssets = snap.poolAssets;

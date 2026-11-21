@@ -86,19 +86,14 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(claimAssets);
 
         vm.warp(block.timestamp + 30 days);
-        uint256 expectedCarryIndex = _currentSideCarryIndex(CfdTypes.Side.LONG);
+        uint256 expectedCarryIndex = _currentCarryIndex();
         uint256 poolAssetsBefore = pool.totalAssets();
 
         vm.prank(claimant);
         engine.settleTraderClaim(claimant);
 
-        uint256 sideIndex = uint256(CfdTypes.Side.LONG);
-        assertEq(
-            engine.sideCarryIndex(sideIndex),
-            expectedCarryIndex,
-            "Claim payout should checkpoint carry with the pre-payout net denominator"
-        );
-        assertEq(engine.sideCarryTimestamp(sideIndex), block.timestamp, "Claim payout should advance carry timestamp");
+        assertEq(engine.carryIndex(), expectedCarryIndex, "Claim payout should checkpoint the global flat carry index");
+        assertEq(engine.carryTimestamp(), block.timestamp, "Claim payout should advance carry timestamp");
         assertEq(
             pool.totalAssets(), poolAssetsBefore - claimAssets, "Setup should reduce pool assets after claim service"
         );
