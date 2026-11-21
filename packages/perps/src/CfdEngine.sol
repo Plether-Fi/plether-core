@@ -496,7 +496,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     /// @notice Adds isolated margin to an existing open position without changing size.
     /// @dev The caller must equal `account`. Collectible accrued carry is realized first and any uncovered amount
     ///      remains unsettled; then clearinghouse free settlement is locked as active position margin and aggregate
-    ///      side margin and borrow-base accounting are refreshed. A zero amount reverts with `CfdEngine__ZeroAmount`.
+    ///      side margin and borrow-base accounting are refreshed. A top-up while orders are pending is protected
+    ///      from queued increase orders and excluded from the borrow base until the queue drains.
+    ///      A zero amount reverts with `CfdEngine__ZeroAmount`.
     /// @param account Position owner and required caller.
     /// @param amount Nonzero amount to move from free settlement into position margin, in 6-decimal settlement token units.
     function addMargin(
@@ -1251,9 +1253,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Writes the post-settlement position state and refreshes side borrow-base accounting.
     /// @dev Callable only by the configured settlement sidecar. Removes the prior side borrow-base contribution,
-    ///      copies engine-owned fields, recomputes borrow base from the current clearinghouse position-margin bucket,
-    ///      stores the current side carry index, and adds the new side contribution. Margin itself is not stored here,
-    ///      and deletion uses `settlementDeletePosition`.
+    ///      copies engine-owned fields, recomputes borrow base using eligible clearinghouse position margin,
+    ///      stores the current side carry index, and adds the new side contribution. The clearinghouse owns margin
+    ///      custody, and deletion uses `settlementDeletePosition`.
     /// @param account Position account to overwrite.
     /// @param position New engine-owned position fields supplied by the settlement sidecar.
     function settlementWritePosition(

@@ -458,16 +458,11 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         uint256 lockedAfter = delta.posMarginAfter + snapshot.liquidationReserveAssets
             - delta.liquidationReserveReleaseAssets + snapshot.lockedBuckets.committedOrderMarginAssets
             - delta.actionCommittedMarginConsumedAssets + actionReserveAfter;
-        if (!drainsAccountQueue) {
-            uint256 pledgeAfterLoss = snapshot.position.margin
-                - Math.min(snapshot.position.margin, delta.realizedCarryAssets) - delta.pricePnlPledgeConsumedAssets;
-            lockedAfter += snapshot.protectedReleasedMarginAssets
-            + MarginClearinghouseAccountingLib.protectedCloseRelease(
-                pledgeAfterLoss,
-                Math.min(pledgeAfterLoss, snapshot.protectedPositionMarginAssets),
-                delta.safeMarginReleaseAssets,
-                delta.actionChargeFromReleasedMarginAssets
-            );
+        if (
+            !drainsAccountQueue
+                && (snapshot.protectedPositionMarginAssets != 0 || snapshot.protectedReleasedMarginAssets != 0)
+        ) {
+            lockedAfter += _protectedReleasedAfterClose(snapshot, delta);
         }
         assessment.close.postFreeSettlementAssets = assessment.postSettlementBalanceAssets > lockedAfter
             ? assessment.postSettlementBalanceAssets - lockedAfter
@@ -494,6 +489,41 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         );
         assessment.postPositionEquityAssets = riskState.equityAssets;
         assessment.postLeverageBps = _postLeverageBps(riskState.currentNotionalAssets, riskState.equityAssets);
+    }
+
+    /// @dev Reconciles the released balance using the plan's collected amounts, then adds any newly released protection.
+    function _protectedReleasedAfterClose(
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        CfdEnginePlanTypes.CloseDelta memory delta
+    ) private pure returns (uint256) {
+        uint256 carryFromPledge = Math.min(snapshot.position.margin, delta.realizedCarryAssets);
+        uint256 releasedRemaining;
+        {
+            uint256 carryAfterPledge = delta.realizedCarryAssets - carryFromPledge;
+            uint256 freeBefore = snapshot.accountBuckets.freeSettlementAssets;
+            uint256 carryFromFree = Math.min(freeBefore, carryAfterPledge);
+            releasedRemaining = snapshot.protectedReleasedMarginAssets - (carryAfterPledge - carryFromFree);
+
+            uint256 releasedVpi = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
+                - delta.vpiRebateReserveConsumedAssets;
+            uint256 freeForAction = freeBefore - carryFromFree + releasedVpi;
+            if (delta.deletePosition) {
+                freeForAction += delta.liquidationReserveReleaseAssets;
+            }
+            uint256 actionFromFreeAndProtected = delta.actionChargeCollectedAssets
+                - delta.vpiRebateReserveConsumedAssets - delta.actionReserveConsumedAssets
+                - delta.actionCommittedMarginConsumedAssets - delta.actionChargeFromReleasedMarginAssets;
+            releasedRemaining -= Math.saturatingSub(actionFromFreeAndProtected, freeForAction);
+        }
+
+        uint256 pledgeAfterLoss = snapshot.position.margin - carryFromPledge - delta.pricePnlPledgeConsumedAssets;
+        return releasedRemaining
+            + MarginClearinghouseAccountingLib.protectedCloseRelease(
+            pledgeAfterLoss,
+            Math.min(pledgeAfterLoss, snapshot.protectedPositionMarginAssets),
+            delta.safeMarginReleaseAssets,
+            delta.actionChargeFromReleasedMarginAssets
+        );
     }
 
     function _includeCommitment(

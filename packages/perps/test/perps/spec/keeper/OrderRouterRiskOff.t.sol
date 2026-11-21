@@ -395,6 +395,36 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         assertEq(engine.traderClaimBalanceAssets(ALICE), preview.liquidation.traderClaimBalanceAssets);
     }
 
+    function test_RouterPreviewMatchesCleanupOfBothProtectedBalances() public {
+        _open(ALICE, CfdTypes.Side.LONG, 100_000e18, 2000e6, MARK_PRICE);
+        uint64 closeId = _commitClose(ALICE, CfdTypes.Side.LONG, 50_000e18);
+        uint64 openId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
+        vm.prank(ALICE);
+        engine.addMargin(ALICE, 12_000e6);
+        bytes[] memory closeUpdate = _mockPythUpdateData(MARK_PRICE);
+        vm.prank(KEEPER);
+        router.executeOrder(closeId, closeUpdate);
+        assertEq(_positionSize(ALICE), 50_000e18);
+
+        (uint256 pledged, uint256 released) = clearinghouse.protectedTopUps(ALICE);
+        assertGt(pledged, 0);
+        assertGt(released, 0);
+        routerAdmin.pause();
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        ICfdEngineLens.RouterLiquidationPreview memory preview =
+            engineLens.previewRouterLiquidation(ALICE, UNSAFE_LONG_PRICE);
+        assertEq(preview.refundedOrderCount, 1);
+        assertTrue(preview.liquidation.liquidatable);
+
+        router.clearRiskOffOrder(openId);
+        (pledged, released) = clearinghouse.protectedTopUps(ALICE);
+        assertEq(pledged + released, 0);
+        assertEq(
+            keccak256(abi.encode(preview.liquidation)),
+            keccak256(abi.encode(engineLens.previewLiquidation(ALICE, UNSAFE_LONG_PRICE)))
+        );
+    }
+
     function test_RouterPreviewIncludesPendingProtectionRefundInSyntheticPositionState() public {
         router.updateMarkPrice(_mockPythUpdateData(MARK_PRICE));
         OrderV3Types.OrderRequest memory request;

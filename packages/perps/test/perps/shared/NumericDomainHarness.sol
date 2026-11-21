@@ -45,8 +45,8 @@ contract NumericDomainLensHarness is CfdEngineLens {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.OpenDelta memory delta,
         ICfdEnginePlanner planner
-    ) external pure returns (ICfdEngineTypes.OpenPreview memory) {
-        return _openPreviewFromPlan(snap, delta, 0, planner);
+    ) external pure returns (ICfdEngineTypes.OpenPreview memory preview) {
+        (preview,) = _openPreviewFromPlan(snap, delta, 0, planner);
     }
 
 }

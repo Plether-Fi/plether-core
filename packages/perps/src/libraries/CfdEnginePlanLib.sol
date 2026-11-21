@@ -610,7 +610,8 @@ library CfdEnginePlanLib {
     ///      pool depth. Uncovered carry remains available for existing terminal recovery/waiver rules.
     /// @param snap Canonical, internally consistent snapshot to mutate.
     /// @param pendingCarryAssets Carry requested for realization.
-    /// @return realizedCarryAssets Carry covered by active position margin and free settlement.
+    /// @param includeProtected Whether reducing settlement can collect from protected pledge and released top-ups.
+    /// @return realizedCarryAssets Carry covered by the eligible custody buckets.
     function _applyPendingCarryRealizationToSnapshot(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 pendingCarryAssets,
@@ -623,9 +624,13 @@ library CfdEnginePlanLib {
             MarginClearinghouseAccountingLib.SettlementConsumption memory consumption,
             IMarginClearinghouse.AccountAssetBuckets memory afterBuckets
         ) = MarginClearinghouseAccountingLib.projectCarryLoss(
-            snap.accountBuckets, pendingCarryAssets, includeProtected ? 0 : snap.protectedPositionMarginAssets
+            snap.accountBuckets,
+            pendingCarryAssets,
+            includeProtected ? 0 : snap.protectedPositionMarginAssets,
+            includeProtected ? snap.protectedReleasedMarginAssets : 0
         );
         realizedCarryAssets = consumption.totalConsumedAssets;
+        snap.protectedReleasedMarginAssets -= consumption.otherLockedMarginConsumedAssets;
         snap.accountBuckets = afterBuckets;
         snap.position.margin = afterBuckets.activePositionMarginAssets;
         snap.lockedBuckets.positionMarginAssets = afterBuckets.activePositionMarginAssets;
@@ -1129,16 +1134,15 @@ library CfdEnginePlanLib {
             ? actionChargeAfterFreeAssets
             : delta.unlockMarginAssets;
         actionChargeAfterFreeAssets -= delta.actionChargeFromReleasedMarginAssets;
+        actionChargeAfterFreeAssets -= Math.min(actionChargeAfterFreeAssets, snap.protectedReleasedMarginAssets);
         if (terminal) {
             delta.actionCommittedMarginConsumedAssets = actionChargeAfterFreeAssets
                 < snap.lockedBuckets.committedOrderMarginAssets
                 ? actionChargeAfterFreeAssets
                 : snap.lockedBuckets.committedOrderMarginAssets;
         }
-        delta.actionChargeCollectedAssets = delta.vpiRebateReserveConsumedAssets + delta.actionReserveConsumedAssets
-            + freeConsumedAssets + delta.actionChargeFromReleasedMarginAssets
-            + delta.actionCommittedMarginConsumedAssets;
-        delta.actionChargeWaivedAssets = delta.actionChargeToCollectAssets - delta.actionChargeCollectedAssets;
+        delta.actionChargeWaivedAssets = actionChargeAfterFreeAssets - delta.actionCommittedMarginConsumedAssets;
+        delta.actionChargeCollectedAssets = delta.actionChargeToCollectAssets - delta.actionChargeWaivedAssets;
     }
 
     /// @dev Claims are health collateral, never cash funding. Net gains contribute once whether paid or deferred.
@@ -1484,7 +1488,7 @@ library CfdEnginePlanLib {
     /// @dev Price loss consumes only the same-account claim and PnL pledge; excess is a diagnostic write-off. The
     ///      keeper/protocol/LP charge is capped by `liquidationReserveAssets`. Still-unpaid carry and negative lifetime VPI
     ///      are action charges recovered from new price gain first, dedicated VPI backing for its clawback, spendable
-    ///      action reserve, pre-existing free settlement (including released VPI backing), then committed order margin.
+    ///      action reserve, free settlement (including released VPI backing), released top-ups, then committed order margin.
     ///      Any remainder is waived. These action charges cannot consume PnL pledge, liquidation reserve, or protected
     ///      execution-bounty reserves, and no shortfall becomes protocol debt.
     /// @param snap Account, pool cash, claims, risk parameters, and aggregate side snapshot.
@@ -1583,38 +1587,20 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.LiquidationDelta memory delta
     ) private pure {
-        uint256 remainingActionChargeToCollectAssets =
-            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
-        {
-            uint256 protectedActionReserveAssets = snap.protectedExecutionBountyAssets + snap.vpiRebateReserveAssets;
-            uint256 spendableActionReserveAssets = snap.actionReserveAssets > protectedActionReserveAssets
-                ? snap.actionReserveAssets - protectedActionReserveAssets
-                : 0;
-            delta.actionReserveConsumedAssets = remainingActionChargeToCollectAssets < spendableActionReserveAssets
-                ? remainingActionChargeToCollectAssets
-                : spendableActionReserveAssets;
-        }
-        uint256 actionChargeAfterReserveAssets =
-            remainingActionChargeToCollectAssets - delta.actionReserveConsumedAssets;
-        uint256 freeConsumedAssets;
-        {
-            uint256 releasedVpiReserveAssets = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
-                - delta.vpiRebateReserveConsumedAssets;
-            uint256 collectibleFreeSettlementAssets =
-                snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets;
-            freeConsumedAssets = actionChargeAfterReserveAssets;
-            if (freeConsumedAssets > collectibleFreeSettlementAssets) {
-                freeConsumedAssets = collectibleFreeSettlementAssets;
-            }
-        }
-        uint256 actionChargeAfterFreeAssets = actionChargeAfterReserveAssets - freeConsumedAssets;
-        delta.actionCommittedMarginConsumedAssets = actionChargeAfterFreeAssets
-            < snap.lockedBuckets.committedOrderMarginAssets
-            ? actionChargeAfterFreeAssets
-            : snap.lockedBuckets.committedOrderMarginAssets;
-        delta.actionChargeCollectedAssets = delta.vpiRebateReserveConsumedAssets + delta.actionReserveConsumedAssets
-            + freeConsumedAssets + delta.actionCommittedMarginConsumedAssets;
-        delta.actionChargeWaivedAssets = delta.actionChargeToCollectAssets - delta.actionChargeCollectedAssets;
+        uint256 chargeExcludingVpi = delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
+        uint256 protectedActionReserveAssets = snap.protectedExecutionBountyAssets + snap.vpiRebateReserveAssets;
+        delta.actionReserveConsumedAssets =
+            Math.min(chargeExcludingVpi, Math.saturatingSub(snap.actionReserveAssets, protectedActionReserveAssets));
+        uint256 releasedVpiReserveAssets = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
+            - delta.vpiRebateReserveConsumedAssets;
+        uint256 chargeAfterCash = Math.saturatingSub(
+            chargeExcludingVpi - delta.actionReserveConsumedAssets,
+            snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets + snap.protectedReleasedMarginAssets
+        );
+        delta.actionCommittedMarginConsumedAssets =
+            Math.min(chargeAfterCash, snap.lockedBuckets.committedOrderMarginAssets);
+        delta.actionChargeWaivedAssets = chargeAfterCash - delta.actionCommittedMarginConsumedAssets;
+        delta.actionChargeCollectedAssets = delta.actionChargeToCollectAssets - delta.actionChargeWaivedAssets;
     }
 
     function _buildLiquidationState(

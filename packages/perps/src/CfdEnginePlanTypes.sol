@@ -95,6 +95,9 @@ library CfdEnginePlanTypes {
     /// @param actionReserveAssets Aggregate action reserve, including VPI backing and protected execution bounties.
     /// @param vpiRebateReserveAssets Dedicated backing for negative lifetime VPI, included in `actionReserveAssets`.
     /// @param protectedExecutionBountyAssets Execution-bounty reservations excluded from action-charge collection.
+    /// @param protectedPositionMarginAssets Portion of active pledge protected from increases until the queue clears.
+    /// @param protectedReleasedMarginAssets Released top-ups still encumbered for the pending queue and available
+    ///        for carry and action charges on closes and liquidation.
     /// @param unsettledCarryAssets Carry already checkpointed but not yet collected for `account`.
     /// @param totalTraderClaimBalanceAssets Aggregate outstanding trader-claim liability.
     /// @param traderClaimBalanceForAccount Outstanding trader claim owned by `account`.

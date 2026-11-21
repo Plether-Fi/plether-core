@@ -171,6 +171,33 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         );
     }
 
+    function testFuzz_PartialClosePreservesProtectedTopUpUntilQueueDrains(
+        uint256 topUpSeed
+    ) public {
+        address trader = BOUNTY_TRADER;
+        _openFunded(CfdTypes.Side.LONG);
+        uint64 first = _bountyCommit(trader, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
+        uint64 last = _bountyCommit(trader, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
+        uint256 topUp = bound(topUpSeed, 3000e6, 5000e6);
+        vm.prank(trader);
+        engine.addMargin(trader, topUp);
+
+        OrderV3Types.OrderReceipt memory receipt =
+            _bountyExecute(first, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        (uint256 pledged, uint256 released) = clearinghouse.protectedTopUps(trader);
+        assertGt(pledged, 0);
+        assertGt(released, 0);
+        assertEq(pledged + released, topUp);
+        assertLe(pledged, clearinghouse.pnlPledgeAssets(trader));
+        uint256 freeBeforeDrain = clearinghouse.getFreeBuyingPowerAssets(trader);
+        assertEq(receipt.economics.close.postFreeSettlementAssets, freeBeforeDrain);
+
+        _bountyExpire(last, BOUNTY_KEEPER);
+        (pledged,) = clearinghouse.protectedTopUps(trader);
+        assertEq(pledged, 0);
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(trader), freeBeforeDrain + released);
+    }
+
     function test_RouterRejectsIncreaseWithInsufficientEligibleMargin() public {
         address trader = BOUNTY_TRADER;
         _openFunded(CfdTypes.Side.LONG);
