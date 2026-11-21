@@ -4,7 +4,6 @@ pragma solidity 0.8.35;
 import {ERC4337Utils} from "@openzeppelin/contracts/account/utils/draft-ERC4337Utils.sol";
 import {IEntryPoint, PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {
-    IKernelStakerProfile,
     IKernelV4FactoryProfile,
     PletherKernelVerifyingPaymaster
 } from "@plether/perps-aa/PletherKernelVerifyingPaymaster.sol";
@@ -34,34 +33,6 @@ contract MockKernelV4Factory {
 
 }
 
-contract MockKernelStaker {
-
-    mapping(address factory => bool) public approved;
-
-    constructor(
-        address factory
-    ) {
-        approved[factory] = true;
-    }
-
-    function setApproved(
-        address factory,
-        bool value
-    ) external {
-        approved[factory] = value;
-    }
-
-    function deployWithFactory(
-        address factory,
-        bytes calldata createData
-    ) external payable returns (address) {
-        (bool success, bytes memory result) = factory.call{value: msg.value}(createData);
-        require(success);
-        return abi.decode(result, (address));
-    }
-
-}
-
 contract PletherKernelVerifyingPaymasterTest is Test {
 
     uint256 internal constant SIGNER_KEY = 0xa19;
@@ -77,7 +48,6 @@ contract PletherKernelVerifyingPaymasterTest is Test {
     address internal signer;
     address internal rootValidator;
     address internal factory;
-    address internal staker;
     address internal implementation;
     address internal account;
     PletherKernelVerifyingPaymaster internal paymaster;
@@ -93,7 +63,6 @@ contract PletherKernelVerifyingPaymasterTest is Test {
         vm.etch(implementation, hex"60016000f3");
         vm.etch(account, hex"60026000f3");
         factory = address(new MockKernelV4Factory(implementation));
-        staker = address(new MockKernelStaker(factory));
         paymaster = _deploy();
         assertTrue(paymaster.paused());
         paymaster.unpause();
@@ -127,19 +96,6 @@ contract PletherKernelVerifyingPaymasterTest is Test {
         vm.expectRevert(PletherKernelVerifyingPaymaster.InvalidFactoryCall.selector);
         _validate(op);
 
-        IKernelV4FactoryProfile.Install[] memory packages = new IKernelV4FactoryProfile.Install[](1);
-        packages[0] = IKernelV4FactoryProfile.Install(1, rootValidator, abi.encodePacked(signer), "");
-        op.initCode = abi.encodePacked(
-            staker,
-            abi.encodeCall(
-                IKernelStakerProfile.deployWithFactory,
-                (implementation, abi.encodeCall(IKernelV4FactoryProfile.deploy, (packages, 0)))
-            )
-        );
-        op = _signed(op, VALID_AFTER, VALID_UNTIL);
-        vm.expectRevert(PletherKernelVerifyingPaymaster.InvalidFactoryCall.selector);
-        _validate(op);
-
         op.initCode = abi.encodePacked(_initCode(rootValidator, 0), bytes32(0));
         op = _signed(op, VALID_AFTER, VALID_UNTIL);
         vm.expectRevert(PletherKernelVerifyingPaymaster.InvalidFactoryCall.selector);
@@ -151,25 +107,69 @@ contract PletherKernelVerifyingPaymasterTest is Test {
         _validate(op);
     }
 
-    function testRejectsDirectFactoryAndStakerRuntimeDrift() public {
-        IKernelV4FactoryProfile.Install[] memory packages = new IKernelV4FactoryProfile.Install[](1);
-        packages[0] = IKernelV4FactoryProfile.Install(1, rootValidator, abi.encodePacked(signer), "");
+    function testRejectsNoncanonicalFactoryPaddingAndUnexpectedInitializer() public {
         PackedUserOperation memory op = _operation(bytes32(0));
+        op.initCode = _initCode(rootValidator, 0);
+        // The last byte in the twenty-byte owner address's word must be zero padding.
+        op.initCode[op.initCode.length - 33] = bytes1(uint8(1));
+        op = _signed(op, VALID_AFTER, VALID_UNTIL);
+        vm.expectRevert(PletherKernelVerifyingPaymaster.InvalidFactoryCall.selector);
+        _validate(op);
+
+        IKernelV4FactoryProfile.Install[] memory packages = new IKernelV4FactoryProfile.Install[](1);
+        packages[0] = IKernelV4FactoryProfile.Install(1, rootValidator, abi.encodePacked(address(0)), "");
         op.initCode = abi.encodePacked(factory, abi.encodeCall(IKernelV4FactoryProfile.deploy, (packages, 0)));
         op = _signed(op, VALID_AFTER, VALID_UNTIL);
+        vm.expectRevert(PletherKernelVerifyingPaymaster.InvalidFactoryCall.selector);
+        _validate(op);
+    }
+
+    function testRejectsFormerStakerWrapper() public {
+        PackedUserOperation memory op = _operation(bytes32(0));
+        address oldStaker = makeAddr("former Staker");
+        op.initCode = abi.encodePacked(
+            oldStaker,
+            abi.encodeWithSignature("deployWithFactory(address,bytes)", factory, _factoryCall(rootValidator, 0))
+        );
+        op = _signed(op, VALID_AFTER, VALID_UNTIL);
         vm.expectRevert(
-            abi.encodeWithSelector(PletherKernelVerifyingPaymaster.InvalidFactoryInInitCode.selector, factory, staker)
+            abi.encodeWithSelector(
+                PletherKernelVerifyingPaymaster.InvalidFactoryInInitCode.selector, oldStaker, factory
+            )
+        );
+        _validate(op);
+    }
+
+    function testRejectsNonzeroPostOpGasLimit() public {
+        PackedUserOperation memory op = _signed(_operation(bytes32(0)), VALID_AFTER, VALID_UNTIL);
+        op.paymasterAndData[51] = bytes1(uint8(1));
+        vm.expectRevert(
+            abi.encodeWithSelector(PletherKernelVerifyingPaymaster.InvalidPaymasterPostOpGasLimit.selector, uint128(1))
+        );
+        _validate(op);
+    }
+
+    function testRejectsUnexpectedFactoryAndFactoryRuntimeDrift() public {
+        PackedUserOperation memory op = _operation(bytes32(0));
+        bytes memory direct = _initCode(rootValidator, 0);
+        assertEq(direct.length, 376);
+        op.initCode = bytes.concat(bytes20(implementation), _factoryCall(rootValidator, 0));
+        op = _signed(op, VALID_AFTER, VALID_UNTIL);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PletherKernelVerifyingPaymaster.InvalidFactoryInInitCode.selector, implementation, factory
+            )
         );
         _validate(op);
 
-        op.initCode = _initCode(rootValidator, 0);
+        op.initCode = direct;
         op = _signed(op, VALID_AFTER, VALID_UNTIL);
-        bytes32 expectedCodeHash = paymaster.accountStakerCodeHash();
-        vm.etch(staker, hex"00");
+        bytes32 expectedCodeHash = paymaster.accountFactoryCodeHash();
+        vm.etch(factory, hex"00");
         vm.expectRevert(
             abi.encodeWithSelector(
-                PletherKernelVerifyingPaymaster.AccountStakerCodeHashMismatch.selector,
-                staker.codehash,
+                PletherKernelVerifyingPaymaster.AccountFactoryCodeHashMismatch.selector,
+                factory.codehash,
                 expectedCodeHash
             )
         );
@@ -231,20 +231,12 @@ contract PletherKernelVerifyingPaymasterTest is Test {
         vm.chainId(421_614);
         address otherImplementation = rootValidator;
         factory = address(new MockKernelV4Factory(otherImplementation));
-        MockKernelStaker(staker).setApproved(factory, true);
         vm.expectRevert(
             abi.encodeWithSelector(
                 PletherKernelVerifyingPaymaster.AccountFactoryImplementationMismatch.selector,
                 otherImplementation,
                 implementation
             )
-        );
-        _deploy();
-
-        factory = address(new MockKernelV4Factory(implementation));
-        MockKernelStaker(staker).setApproved(factory, false);
-        vm.expectRevert(
-            abi.encodeWithSelector(PletherKernelVerifyingPaymaster.StakerFactoryNotApproved.selector, staker, factory)
         );
         _deploy();
     }
@@ -279,7 +271,6 @@ contract PletherKernelVerifyingPaymasterTest is Test {
             MAX_COST,
             POLICY,
             account.codehash,
-            staker,
             factory,
             implementation,
             rootValidator
@@ -329,15 +320,16 @@ contract PletherKernelVerifyingPaymasterTest is Test {
         address validator,
         uint256 index
     ) internal view returns (bytes memory) {
+        return abi.encodePacked(factory, _factoryCall(validator, index));
+    }
+
+    function _factoryCall(
+        address validator,
+        uint256 index
+    ) internal view returns (bytes memory) {
         IKernelV4FactoryProfile.Install[] memory packages = new IKernelV4FactoryProfile.Install[](1);
         packages[0] = IKernelV4FactoryProfile.Install(1, validator, abi.encodePacked(signer), "");
-        return abi.encodePacked(
-            staker,
-            abi.encodeCall(
-                IKernelStakerProfile.deployWithFactory,
-                (factory, abi.encodeCall(IKernelV4FactoryProfile.deploy, (packages, index)))
-            )
-        );
+        return abi.encodeCall(IKernelV4FactoryProfile.deploy, (packages, index));
     }
 
     struct KernelCall {

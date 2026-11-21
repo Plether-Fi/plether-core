@@ -103,11 +103,11 @@ address, ownership, deposit, stake, and readback evidence.
 EntryPoint v0.9 and nonce key zero. The backend validates the reviewed profile, proof of ownership and inner Perps
 calls. The same Kernel account can pay with ETH by submitting an operation without any paymaster data.
 
-The EntryPoint factory is ZeroDev's staked `Staker`. Its `deployWithFactory` call must contain the exact
-`KernelFactory.deploy` initializer for the approved index-zero ECDSA root. This keeps the account address derived
-from `KernelFactory.getAddress` while satisfying the SafeMode factory storage rule. Deploy a Plether-owned Staker,
-approve the pinned KernelFactory, and lock at least 1 test ETH with an unstake delay of at least one day before
-deploying this paymaster. The Staker owner controls future factory approval and stake withdrawal.
+A first operation calls the pinned `KernelFactory.deploy` directly with the canonical index-zero ECDSA root
+initializer. The same factory, UUPS implementation and initializer produce the same account address as the
+previous Staker route. This Sepolia profile uses a private bundler with normal UserOperation validation and
+Alto SafeMode disabled. Neither the factory nor the paymaster needs a separate stake for this profile. The
+paymaster still needs a spending deposit. Its validation returns empty context and requires zero post-op gas.
 
 The Kernel verifier uses the same 209-byte envelope and EIP-712 domain name and version as the v0.8 verifier, with
 the Kernel paymaster address and EntryPoint v0.9 in the signed digest. The 65-byte sponsor signature stays inside
@@ -123,7 +123,6 @@ evidence:
 | Variable | Reviewed input |
 | --- | --- |
 | `KERNEL_ENTRY_POINT_CODE_HASH` | Runtime hash at EntryPoint v0.9 `0x433709009B8330FDa32311DF1C2AFA402eD8D009` |
-| `KERNEL_STAKER`, `KERNEL_STAKER_CODE_HASH`, `KERNEL_STAKER_OWNER` | Plether-owned ZeroDev Staker address, runtime hash and intended owner, approved for the pinned KernelFactory and staked at EntryPoint v0.9 |
 | `KERNEL_FACTORY`, `KERNEL_FACTORY_CODE_HASH` | Kernel v4 factory and runtime hash |
 | `KERNEL_IMPLEMENTATION`, `KERNEL_IMPLEMENTATION_CODE_HASH` | Factory's Kernel v4 UUPS implementation and runtime hash |
 | `KERNEL_ROOT_VALIDATOR`, `KERNEL_ROOT_VALIDATOR_CODE_HASH` | ECDSA root module and runtime hash |
@@ -131,8 +130,6 @@ evidence:
 
 The script derives the sample account from the factory, then checks its runtime, implementation slot, beacon slot,
 root and registered owner. It deploys the paymaster paused. Attest its configuration to the gateway and initialize
-canonical reconciliation from the verified paymaster deployment block before funding and enabling the canary. The
-paymaster owner must then call `addStake(86400)` with at least 1 test ETH and fund its EntryPoint deposit separately.
-Run `verifyPaymasterStake(address)` in the deployment script against the actual paymaster address after staking.
-Keep the paymaster paused and the gateway sponsorship flag off until the stake, deposit, SafeMode validation and
-signed UserOperation checks all pass.
+canonical reconciliation from the verified paymaster deployment block before funding and enabling the canary. Fund the new
+paymaster deposit separately. Keep the paymaster paused and gateway issuance off until the pinned deployment,
+funded signed UserOperations in both gas modes, and invalid-signature rejection pass with normal validation.

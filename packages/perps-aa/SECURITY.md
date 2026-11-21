@@ -62,12 +62,14 @@ and rehearse pause/signer rotation/deposit withdrawal. Keep the legacy direct-wa
 
 ## Kernel v4 pilot profile
 
-`PletherKernelVerifyingPaymaster` binds EntryPoint v0.9, a staked ZeroDev Staker, the underlying KernelFactory,
-expected Kernel UUPS implementation, validator and proxy runtime. It accepts one canonical index-zero ECDSA root
-initializer through `Staker.deployWithFactory(KernelFactory, KernelFactory.deploy(...))`. The Staker must approve that
-factory and maintain at least 1 ETH stake with a one-day unstake delay. The gateway must attest the current approval,
-runtime and stake before issuing a sponsored first deployment; revoking the approval or unlocking stake disables
-new first deployments. The paymaster must also be staked for SafeMode validation of its own storage reads.
+`PletherKernelVerifyingPaymaster` binds EntryPoint v0.9, the pinned KernelFactory, the expected Kernel UUPS
+implementation, validator and proxy runtime. It accepts one canonical index-zero ECDSA root initializer
+through a direct factory call. This Sepolia pilot uses a private, allowlisted Alto service with SafeMode
+disabled and normal UserOperation validation enabled. Canonical ERC-7562 storage restrictions are outside
+this private pilot's validation profile. Direct first deployment and the paymaster's validation-time storage reads
+require separate qualification before using a canonical ERC-7562 mempool. The paymaster spends its EntryPoint
+deposit and returns empty context with zero post-op gas.
+
 It limits sponsored operations to nonce key zero and atomic ERC-7579 single or batch execution. It rejects the
 v0.9 optional paymaster-signature suffix and block-based validity windows. The signature binds the exact operation.
 
