@@ -2,8 +2,8 @@
 """Generate offline carry goldens using exact rational arithmetic, never Solidity output.
 
 Run from any directory. --check verifies the checked-in fixture without rewriting it.
-The bps utilization, global index increment and account assessment each have their
-own specified floor. Keeping those three rounding boundaries is intentional.
+The flat annual index increment and account assessment each have their own specified
+floor. One global index depends only on the annual rate and elapsed time.
 """
 
 from __future__ import annotations
@@ -24,73 +24,70 @@ def floor(value: Fraction) -> int:
     return value.numerator // value.denominator
 
 
-def vector(name: str, base: int, depth: int, rate: int, elapsed: int,
-           position_base: int | None = None, stored: int = 0, last: int = 0) -> tuple:
-    utilization = 0 if base == 0 else BPS if depth == 0 else min(BPS, floor(Fraction(base, depth) * BPS))
-    increment = floor(Fraction(rate, BPS) * Fraction(utilization, BPS) * Fraction(elapsed, YEAR) * SCALE)
+def vector(name: str, exposure: int, rate: int, elapsed: int,
+           stored: int = 0, last: int = 0) -> tuple:
+    increment = floor(Fraction(rate, BPS) * Fraction(elapsed, YEAR) * SCALE)
     index = stored + increment
-    position_base = base if position_base is None else position_base
-    amount = floor(Fraction(position_base, SCALE) * (index - last))
-    return name, base, depth, rate, elapsed, position_base, stored, last, utilization, index, amount
+    amount = floor(Fraction(exposure, SCALE) * (index - last))
+    return name, exposure, rate, elapsed, stored, last, index, amount
 
 
 def vectors() -> list[tuple]:
     cases = [
-        vector("zero-base", 0, 0, 500, YEAR),
-        vector("zero-rate", 10**12, 2 * 10**12, 0, YEAR),
-        vector("zero-time", 10**12, 2 * 10**12, 500, 0),
-        vector("zero-depth-saturates", 10**12, 0, 500, YEAR),
-        vector("exact-saturation", 10**12, 10**12, 500, YEAR),
-        vector("above-saturation", 10**12 + 1, 10**12, 500, YEAR),
-        vector("half-utilization", 90_000 * 10**6, 180_000 * 10**6, 500, YEAR),
-        vector("below-one-bp", 999_999, 10**10, 500, YEAR),
-        vector("exact-one-bp", 1_000_000, 10**10, 500, YEAR),
-        vector("above-one-bp", 1_000_001, 10**10, 500, YEAR),
-        vector("single-pass-retains-fractional-rate", 10**12, 3 * 10**12, 1, YEAR),
-        vector("one-second-dust", 1, 1, 1, 1),
-        vector("amount-below-one-atom", SCALE - 1, SCALE - 1, 0, 0, stored=1),
-        vector("amount-exact-one-atom", SCALE, SCALE, 0, 0, stored=1),
-        vector("amount-above-one-atom", SCALE + 1, SCALE + 1, 0, 0, stored=1),
-        vector("stored-index-is-not-recharged", 333_333_333, 999_999_999, 777, 86_401,
+        vector("zero-exposure", 0, 500, YEAR),
+        vector("zero-rate", 10**12, 0, YEAR),
+        vector("zero-time", 10**12, 500, 0),
+        vector("one-year-flat-rate", 10**12, 500, YEAR),
+        vector("thousand-unit-exposure", 10**9, 500, YEAR),
+        vector("non-round-exposure", 10**12 + 1, 500, YEAR),
+        vector("ninety-thousand-units", 90_000 * 10**6, 500, YEAR),
+        vector("below-one-unit", 999_999, 500, YEAR),
+        vector("exact-one-unit", 1_000_000, 500, YEAR),
+        vector("above-one-unit", 1_000_001, 500, YEAR),
+        vector("one-bp-annual-flat-rate", 10**12, 1, YEAR),
+        vector("one-second-dust", 1, 1, 1),
+        vector("amount-below-one-atom", SCALE - 1, 0, 0, stored=1),
+        vector("amount-exact-one-atom", SCALE, 0, 0, stored=1),
+        vector("amount-above-one-atom", SCALE + 1, 0, 0, stored=1),
+        vector("stored-index-is-not-recharged", 333_333_333, 777, 86_401,
                stored=123456789012345678, last=123456789012345678),
-        vector("prior-uncollected-index", 333_333_333, 999_999_999, 777, 86_401,
+        vector("prior-uncollected-index", 333_333_333, 777, 86_401,
                stored=123456789012345678, last=123456780000000000),
-        vector("maximum-governable-rate", 10**24, 3 * 10**24, 100_000, 73 * YEAR, 10**23),
-        vector("long-idle-high-depth", 10**30, 10**30 + 1, 99_999, 250 * YEAR, 10**29),
+        vector("maximum-governable-rate", 10**23, 100_000, 73 * YEAR),
+        vector("long-interval", 10**29, 99_999, 250 * YEAR),
     ]
     rng = random.Random(0xCA771ED)
     for i in range(24):
-        base = rng.randrange(1, 10**24)
-        depth = rng.randrange(1, 2 * 10**24)
+        exposure = rng.randrange(1, 10**24)
         stored = rng.randrange(SCALE)
-        cases.append(vector(f"fraction-{i:02d}", base, depth, rng.randrange(100_001),
-                            rng.randrange(250 * YEAR), rng.randrange(base + 1), stored, rng.randrange(stored + 1)))
+        cases.append(vector(f"fraction-{i:02d}", exposure, rng.randrange(100_001),
+                            rng.randrange(250 * YEAR), stored, rng.randrange(stored + 1)))
     return cases
 
 
 def recovery_vectors() -> list[tuple]:
     """Terminal carry recovery after an ordinary collection: economic recovery is not necessarily cash."""
     inputs = [
-        ("all-withheld", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 77, 0),
-        ("all-waived", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 77),
-        ("physical-withheld-and-waived", 90, 100, 10, 3, 7, 10_000, YEAR, 7, 50, 20),
+        ("all-withheld", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 87, 0),
+        ("all-waived", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 87),
+        ("physical-withheld-and-waived", 90, 100, 10, 3, 7, 10_000, YEAR, 7, 50, 30),
         ("partial-resolution-retains-arrears", 90, 100, 10, 3, 7, 10_000, YEAR, 7, 11, 13),
-        ("utilization-floor-and-mixed-recovery", 333, 217, 17, 2, 11, 10_000, YEAR, 11, 83, 7),
-        ("half-year-account-floor", 300, 101, 1, 0, 0, 10_000, YEAR // 2, 0, 14, 1),
+        ("flat-rate-and-mixed-recovery", 333, 217, 17, 2, 11, 10_000, YEAR, 11, 180, 7),
+        ("half-year-account-floor", 300, 101, 1, 0, 0, 10_000, YEAR // 2, 0, 48, 1),
         ("zero-recovery-preserves-arrears", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 0),
         ("zero-time-no-assessment", 90, 100, 10, 3, 7, 10_000, 0, 0, 0, 0),
-        ("physical-only-compatibility", 90, 100, 10, 3, 77, 10_000, YEAR, 77, 0, 0),
+        ("physical-only-compatibility", 90, 100, 10, 3, 87, 10_000, YEAR, 87, 0, 0),
     ]
     inputs = [(*row[:-1], 0, row[-1]) for row in inputs]
     inputs += [
-        ("all-vpi-offset-no-gain-or-cash", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 77, 0),
-        ("partial-vpi-offset-and-waiver", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 6, 71),
-        ("all-three-recoveries-plus-waiver", 90, 100, 10, 3, 7, 10_000, YEAR, 7, 11, 13, 46),
+        ("all-vpi-offset-no-gain-or-cash", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 87, 0),
+        ("partial-vpi-offset-and-waiver", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 6, 81),
+        ("all-three-recoveries-plus-waiver", 90, 100, 10, 3, 7, 10_000, YEAR, 7, 11, 13, 56),
         ("partial-vpi-offset-retains-arrears", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 19, 0),
     ]
     rows = []
     for name, depth, maximum, pledge, free, protected, rate, elapsed, physical, withheld, offset, waived in inputs:
-        ordinary = vector(name, maximum - pledge, depth, rate, elapsed)
+        ordinary = vector(name, maximum, rate, elapsed)
         index, new_carry = ordinary[-2:]
         margin_paid = min(pledge, new_carry)
         free_paid = min(free, new_carry - margin_paid)
@@ -98,25 +95,25 @@ def recovery_vectors() -> list[tuple]:
         assert remaining >= 0 and physical <= protected
         rows.append((name, depth, maximum, pledge, free, protected, rate, elapsed, physical, withheld, offset, waived,
                      new_carry, remaining, depth + margin_paid + free_paid + physical,
-                     margin_paid + free_paid + physical + withheld + offset, maximum - pledge + margin_paid, index))
+                     margin_paid + free_paid + physical + withheld + offset, maximum, index))
     return rows
 
 
 def passive_depth_vectors() -> list[tuple]:
-    """A cash change without checkpointing alters the depth observed at the later assessment."""
+    """Cash changes without checkpointing do not change the flat rate observed at later assessment."""
     inputs = [
         ("passive-cash-increases-depth", 1000, 2000, 500, 700, 500, YEAR),
-        ("passive-loss-increases-utilization", 2000, 999, 500, 700, 500, YEAR),
-        ("cash-shortage-saturates-both-sides", 1000, 0, 500, 700, 500, YEAR),
+        ("passive-loss-preserves-flat-rate", 2000, 999, 500, 700, 500, YEAR),
+        ("cash-shortage-preserves-both-rates", 1000, 0, 500, 700, 500, YEAR),
         ("dust-changes-floor-boundary", 10_001, 10_000, 1, 9999, 10_000, YEAR),
         ("one-second-rounding", 300, 333, 200, 101, 777, 1),
     ]
     rows = []
-    for name, initial, final, long_base, short_base, rate, elapsed in inputs:
-        long = vector(name, long_base, final, rate, elapsed)
-        short = vector(name, short_base, final, rate, elapsed)
-        rows.append((name, initial, final, long_base, short_base, rate, elapsed,
-                     long[-2], short[-2], long[-1], short[-1]))
+    for name, initial, final, long_exposure, short_exposure, rate, elapsed in inputs:
+        long = vector(name, long_exposure, rate, elapsed)
+        short = vector(name, short_exposure, rate, elapsed)
+        rows.append((name, initial, final, long_exposure, short_exposure, rate, elapsed,
+                     long[-2], long[-1], short[-1]))
     return rows
 
 
@@ -145,14 +142,11 @@ def render() -> str:
         "library CarryReferenceVectors {",
         "",
         "    struct Vector {",
-        "        uint256 sideBorrowBase;",
-        "        uint256 poolDepth;",
+        "        uint256 maxProfitExposure;",
         "        uint256 annualBps;",
         "        uint256 elapsed;",
-        "        uint256 positionBorrowBase;",
         "        uint256 storedIndex;",
         "        uint256 lastPositionIndex;",
-        "        uint256 expectedUtilization;",
         "        uint256 expectedIndex;",
         "        uint256 expectedAmount;",
         "    }",
@@ -160,8 +154,8 @@ def render() -> str:
         "    function all() internal pure returns (Vector[] memory result) {",
         f"        result = new Vector[]({len(rows)});",
     ]
-    fields = ("sideBorrowBase", "poolDepth", "annualBps", "elapsed", "positionBorrowBase", "storedIndex",
-              "lastPositionIndex", "expectedUtilization", "expectedIndex", "expectedAmount")
+    fields = ("maxProfitExposure", "annualBps", "elapsed", "storedIndex", "lastPositionIndex",
+              "expectedIndex", "expectedAmount")
     for i, (name, *values) in enumerate(rows):
         lines.append(f"        // {name}")
         for field, value in zip(fields, values):
@@ -171,10 +165,10 @@ def render() -> str:
     lines += render_extra("RecoveryVector", "recoveries", recovery_vectors(),
                           ("initialDepth", "maxProfit", "pledge", "free", "protectedFunds", "annualBps", "elapsed",
                            "physicalPaid", "gainWithheld", "vpiOffset", "waived", "expectedNewCarry", "expectedRemainingArrears",
-                           "expectedPoolDepth", "expectedCollected", "expectedBorrowBase", "expectedIndex"))
+                           "expectedPoolDepth", "expectedCollected", "expectedMaxProfitExposure", "expectedIndex"))
     lines += render_extra("PassiveDepthVector", "passiveDepths", passive_depth_vectors(),
-                          ("initialDepth", "finalDepth", "longBase", "shortBase", "annualBps", "elapsed",
-                           "expectedLongIndex", "expectedShortIndex", "expectedLongCarry", "expectedShortCarry"))
+                          ("initialDepth", "finalDepth", "longMaxProfit", "shortMaxProfit", "annualBps", "elapsed",
+                           "expectedIndex", "expectedLongCarry", "expectedShortCarry"))
     lines += ["", "}", ""]
     return "\n".join(lines)
 

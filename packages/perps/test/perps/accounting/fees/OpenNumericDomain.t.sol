@@ -411,8 +411,8 @@ contract OpenNumericDomainTest is Test {
         order.isClose = true;
         order.side = CfdTypes.Side.SHORT;
         snap.position.size = order.sizeDelta;
-        snap.positionBorrowBaseAssets = type(uint256).max;
-        snap.longSide.carryIndex = type(uint256).max; // proves mismatch cannot touch even an unusable carry snapshot.
+        snap.position.maxProfitAssets = type(uint256).max;
+        snap.carryIndex = type(uint256).max; // proves mismatch cannot touch even an unusable carry snapshot.
         CfdEnginePlanTypes.CloseDelta memory delta = CfdEnginePlanLib.planClose(snap, order, 1e8);
         assertEq(uint8(delta.revertCode), 7);
         assertEq(delta.pendingCarryAssets, 0);

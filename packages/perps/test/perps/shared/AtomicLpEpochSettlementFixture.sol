@@ -57,8 +57,8 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
         uint256 pythEth;
         uint256 markPrice;
         uint64 markTime;
-        uint256 longCarryIndex;
-        uint256 shortCarryIndex;
+        uint256 carryIndex;
+        uint64 carryTimestamp;
         uint256 lastReconcileTime;
         uint256 lastSeniorCouponCheckpointTime;
         uint256 seniorPrincipal;
@@ -102,8 +102,8 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
     // Measured after the token-neutral API rename (solc 0.8.35, via-IR, optimizer runs 200).
     uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_571;
     uint256 internal constant REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT = 1200;
-    // Production runtime with treasury scheduling, the immutable planning reader, and pending-claim guard.
-    uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 23_321;
+    // Production runtime with plain Solidity treasury scheduling and the immutable planning reader.
+    uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 23_137;
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
@@ -352,8 +352,8 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
         snapshot.pythEth = address(baseMockPyth).balance;
         snapshot.markPrice = engine.lastMarkPrice();
         snapshot.markTime = engine.lastMarkTime();
-        snapshot.longCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.LONG));
-        snapshot.shortCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT));
+        snapshot.carryIndex = engine.carryIndex();
+        snapshot.carryTimestamp = engine.carryTimestamp();
         snapshot.lastReconcileTime = pool.lastReconcileTime();
         snapshot.lastSeniorCouponCheckpointTime = pool.lastSeniorCouponCheckpointTime();
         snapshot.seniorPrincipal = pool.seniorPrincipal();
@@ -395,12 +395,8 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
         assertEq(address(baseMockPyth).balance, expected.pythEth, "Pyth ETH must roll back");
         assertEq(engine.lastMarkPrice(), expected.markPrice, "Engine price must roll back");
         assertEq(engine.lastMarkTime(), expected.markTime, "Engine timestamp must roll back");
-        assertEq(
-            engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), expected.longCarryIndex, "long carry must roll back"
-        );
-        assertEq(
-            engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)), expected.shortCarryIndex, "short carry must roll back"
-        );
+        assertEq(engine.carryIndex(), expected.carryIndex, "carry index must roll back");
+        assertEq(engine.carryTimestamp(), expected.carryTimestamp, "carry timestamp must roll back");
         assertEq(pool.lastReconcileTime(), expected.lastReconcileTime, "reconcile checkpoint must roll back");
         assertEq(
             pool.lastSeniorCouponCheckpointTime(),

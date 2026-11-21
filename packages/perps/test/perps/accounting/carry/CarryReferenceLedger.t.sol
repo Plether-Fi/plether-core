@@ -23,32 +23,21 @@ contract CarryReferenceArithmeticTest is Test {
         for (uint256 i; i < vectors.length; ++i) {
             CarryReferenceVectors.Vector memory v = vectors[i];
             assertEq(
-                referenceLedger.utilization(v.sideBorrowBase, v.poolDepth),
-                v.expectedUtilization,
-                "reference utilization"
-            );
-            assertEq(
-                referenceLedger.indexIncrement(v.sideBorrowBase, v.poolDepth, v.annualBps, v.elapsed) + v.storedIndex,
+                referenceLedger.indexIncrement(v.annualBps, v.elapsed) + v.storedIndex,
                 v.expectedIndex,
                 "reference index vs offline Fraction"
             );
             assertEq(
-                referenceLedger.amountFromIndex(v.positionBorrowBase, v.expectedIndex - v.lastPositionIndex),
+                referenceLedger.amountFromIndex(v.maxProfitExposure, v.expectedIndex - v.lastPositionIndex),
                 v.expectedAmount,
                 "reference assessment vs offline Fraction"
             );
-            assertEq(
-                PositionRiskAccountingLib.computeBorrowUtilizationBps(v.sideBorrowBase, v.poolDepth),
-                v.expectedUtilization,
-                "production utilization vs offline Fraction"
-            );
-            uint256 actualIndex = PositionRiskAccountingLib.computeCurrentCarryIndex(
-                v.storedIndex, 0, v.elapsed, v.sideBorrowBase, v.poolDepth, v.annualBps
-            );
+            uint256 actualIndex =
+                PositionRiskAccountingLib.computeCurrentCarryIndex(v.storedIndex, 0, v.elapsed, v.annualBps);
             assertEq(actualIndex, v.expectedIndex, "production index vs offline Fraction");
             assertEq(
                 PositionRiskAccountingLib.computeIndexedCarryAssets(
-                    v.positionBorrowBase, actualIndex - v.lastPositionIndex
+                    v.maxProfitExposure, actualIndex - v.lastPositionIndex
                 ),
                 v.expectedAmount,
                 "production assessment vs offline Fraction"
@@ -57,25 +46,61 @@ contract CarryReferenceArithmeticTest is Test {
     }
 
     function testFuzz_RationalCarryAtGovernableRates(
-        uint256 baseSeed,
-        uint256 depthSeed,
+        uint256 exposureSeed,
         uint256 rateSeed,
-        uint256 timeSeed,
-        uint256 positionSeed
+        uint256 timeSeed
     ) public view {
-        uint256 base = bound(baseSeed, 0, 1e24);
-        uint256 depth = bound(depthSeed, 0, 2e24);
+        uint256 exposure = bound(exposureSeed, 0, 1e24);
         uint256 rate = bound(rateSeed, 0, 100_000);
         uint256 elapsed = bound(timeSeed, 0, 250 * 365 days);
-        uint256 positionBase = bound(positionSeed, 0, base);
-        uint256 expectedIndex = referenceLedger.indexIncrement(base, depth, rate, elapsed);
-        uint256 actualIndex = PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, elapsed, base, depth, rate);
+        uint256 expectedIndex = referenceLedger.indexIncrement(rate, elapsed);
+        uint256 actualIndex = PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, elapsed, rate);
         assertEq(actualIndex, expectedIndex, "independent reduced-rational index");
         assertEq(
-            PositionRiskAccountingLib.computeIndexedCarryAssets(positionBase, actualIndex),
-            referenceLedger.amountFromIndex(positionBase, expectedIndex),
+            PositionRiskAccountingLib.computeIndexedCarryAssets(exposure, actualIndex),
+            referenceLedger.amountFromIndex(exposure, expectedIndex),
             "independent reduced-rational assessment"
         );
+    }
+
+    function test_GlobalIndexPreservesIdleTimeAndLateOppositeSideEntry() public {
+        CarryReferenceLedger ledger = new CarryReferenceLedger(0, 0, 500);
+        ledger.advance(365 days);
+        assertEq(ledger.carryIndex(), 0, "an empty market accrues no interest index");
+        assertEq(ledger.carryTimestamp(), 365 days);
+
+        ledger.initializeAccount(address(1), 0, 10_000e6, 2000e6, 0, 0, 365 days);
+        ledger.advance(2 * 365 days);
+        ledger.initializeAccount(address(2), 1, 10_000e6, 2000e6, 0, 0, 2 * 365 days);
+        assertEq(ledger.accountState(address(2)).lastIndex, 0.05e18, "the new side starts at the existing global index");
+        assertEq(ledger.checkpoint(address(1), 3 * 365 days).newCarry, 1000e6, "the first account held two years");
+        assertEq(ledger.checkpoint(address(2), 3 * 365 days).newCarry, 500e6, "the late account held only one year");
+
+        ledger.applyPosition(address(1), 0, 0, 0, 1000e6, 0, false, 3 * 365 days);
+        ledger.applyPosition(address(2), 1, 0, 0, 1500e6, 0, false, 3 * 365 days);
+        ledger.advance(4 * 365 days);
+        assertEq(ledger.carryIndex(), 0.1e18, "closing all exposure idles the same global index");
+        ledger.initializeAccount(address(3), 1, 10_000e6, 2000e6, 0, 0, 4 * 365 days);
+        assertEq(
+            ledger.checkpoint(address(3), 5 * 365 days).newCarry,
+            500e6,
+            "reopening cannot inherit idle or historical carry"
+        );
+        assertEq(ledger.carryIndex(), 0.15e18);
+    }
+
+    function test_FivePercentChargesFullAndOverMarginedExposureAtAnyDepth() public {
+        CarryReferenceLedger ledger = new CarryReferenceLedger(0, 0, 500);
+        ledger.initializeAccount(address(1), 0, 10_000e6, 10_000e6, 0, 0, 0);
+        ledger.initializeAccount(address(2), 1, 10_000e6, 20_000e6, 0, 0, 0);
+        ledger.changeDepth(1_000_000e6, 365 days / 2);
+        ledger.changeClaims(2_000_000e6, 365 days / 2);
+        CarryReferenceLedger.Collection memory fullyMargined = ledger.checkpoint(address(1), 365 days);
+        CarryReferenceLedger.Collection memory overMargined = ledger.checkpoint(address(2), 365 days);
+        assertEq(fullyMargined.newCarry, 500e6, "ten thousand max profit costs five hundred per year");
+        assertEq(overMargined.newCarry, 500e6, "extra pledge provides no carry discount");
+        assertEq(ledger.accountState(address(1)).maxProfit, 10_000e6);
+        assertEq(ledger.accountState(address(2)).maxProfit, 10_000e6);
     }
 
     function test_CreditOrderingRetainsArrearsAndNeverSpendsProtectedFunds() public {
@@ -83,27 +108,27 @@ contract CarryReferenceArithmeticTest is Test {
         address account = address(1);
         ledger.initializeAccount(account, 0, 100, 10, 3, 7, 0);
         CarryReferenceLedger.Collection memory first = ledger.checkpoint(account, 365 days);
-        assertEq(first.newCarry, 90);
+        assertEq(first.newCarry, 100);
         assertEq(first.fromMargin, 10);
         assertEq(first.fromFree, 3);
-        assertEq(first.unpaid, 77);
+        assertEq(first.unpaid, 87);
 
         ledger.creditFree(account, 5, 365 days);
-        assertEq(ledger.accountState(account).arrears, 77, "bounty remains intact during its credit call");
+        assertEq(ledger.accountState(account).arrears, 87, "bounty remains intact during its credit call");
         assertEq(ledger.accountState(account).free, 5);
         CarryReferenceLedger.Collection memory sameTime = ledger.checkpoint(account, 365 days);
         assertEq(sameTime.newCarry, 0, "elapsed time is not charged twice");
-        assertEq(sameTime.unpaid, 72);
+        assertEq(sameTime.unpaid, 82);
 
         ledger.deposit(account, 5, 365 days);
         assertEq(ledger.accountState(account).free, 0, "deposit can pay arrears immediately");
-        assertEq(ledger.accountState(account).arrears, 67);
+        assertEq(ledger.accountState(account).arrears, 77);
         ledger.changeClaims(20, 365 days);
         ledger.creditClaim(account, 20, 20, 365 days);
         assertEq(ledger.accountState(account).pledge, 20, "claim becomes pledge without a second collection pass");
-        assertEq(ledger.accountState(account).arrears, 67);
+        assertEq(ledger.accountState(account).arrears, 77);
         ledger.checkpoint(account, 365 days);
-        assertEq(ledger.accountState(account).arrears, 47);
+        assertEq(ledger.accountState(account).arrears, 57);
         assertEq(ledger.accountState(account).protectedFunds, 7);
         assertEq(ledger.totalNewCarry(), ledger.totalCollected() + ledger.accountState(account).arrears);
     }
@@ -114,34 +139,33 @@ contract CarryReferenceArithmeticTest is Test {
         ledger.initializeFlatAccount(address(2), 0, 0, 0);
         ledger.changeClaims(25, 0);
         ledger.deposit(address(2), 20, 365 days);
-        assertEq(ledger.sideState(0).timestamp, 0, "flat deposit does not checkpoint global clocks");
+        assertEq(ledger.carryTimestamp(), 0, "flat deposit does not checkpoint the global clock");
         ledger.creditClaim(address(2), 25, 25, 365 days);
         assertEq(ledger.accountState(address(2)).free, 45);
         assertEq(ledger.accountState(address(2)).pledge, 0);
-        assertEq(ledger.sideState(0).timestamp, 365 days, "claim service does checkpoint global clocks");
+        assertEq(ledger.carryTimestamp(), 365 days, "claim service does checkpoint the global clock");
     }
 
     function test_ChangingDepthBasisAndRateDoesNotRepriceOldTime() public {
-        CarryReferenceLedger ledger = new CarryReferenceLedger(300e6, 0, 10_000);
+        CarryReferenceLedger ledger = new CarryReferenceLedger(300e6, 0, 500);
         ledger.initializeAccount(address(1), 0, 100e6, 20e6, 10e6, 2e6, 0);
         ledger.initializeAccount(address(2), 1, 200e6, 50e6, 10e6, 2e6, 0);
         ledger.checkpoint(address(1), 365 days);
-        assertEq(ledger.sideState(0).index, 0.2666e18);
-        assertEq(ledger.sideState(1).index, 0.5e18, "both sides use old depth before collection");
-        assertEq(ledger.accountState(address(1)).free, 8_672_000);
-        assertEq(ledger.poolDepth(), 321_328_000);
+        assertEq(ledger.carryIndex(), 0.05e18);
+        assertEq(ledger.accountState(address(1)).pledge, 15e6);
+        assertEq(ledger.accountState(address(1)).free, 10e6);
+        assertEq(ledger.poolDepth(), 305e6);
 
         ledger.changeDepth(600e6, 365 days);
         ledger.addMargin(address(1), 5e6, 365 days);
-        ledger.changeRate(500, 365 days);
+        ledger.changeRate(1000, 365 days);
         ledger.advance(2 * 365 days);
-        assertEq(ledger.sideState(0).index, 0.274515e18);
-        assertEq(ledger.sideState(1).index, 0.5125e18);
-        assertEq(ledger.accountState(address(1)).borrowBase, 95e6);
-        assertEq(ledger.accountState(address(2)).borrowBase, 150e6);
+        assertEq(ledger.carryIndex(), 0.15e18);
+        assertEq(ledger.accountState(address(1)).maxProfit, 100e6, "margin changes do not change carry exposure");
+        assertEq(ledger.accountState(address(2)).maxProfit, 200e6);
     }
 
-    function test_ClaimCreationAndNettingCloseBothOldDepthIntervals() public {
+    function test_ClaimCreationAndNettingPreserveFlatCarry() public {
         CarryReferenceLedger ledger = new CarryReferenceLedger(1000e6, 0, 10_000);
         ledger.initializeAccount(address(1), 0, 300e6, 0, 0, 0, 0);
         ledger.initializeAccount(address(2), 1, 150e6, 0, 0, 0, 0);
@@ -149,16 +173,13 @@ contract CarryReferenceArithmeticTest is Test {
         ledger.changeClaims(400e6, 365 days);
         assertEq(ledger.poolDepth(), 1000e6, "claim creation does not fabricate a pool transfer");
         assertEq(ledger.economicDepth(), 600e6);
-        assertEq(ledger.sideState(0).index, 0.3e18, "old claim-free long interval");
-        assertEq(ledger.sideState(1).index, 0.15e18, "old claim-free short interval");
+        assertEq(ledger.carryIndex(), 1e18, "flat long interval before claims");
 
         ledger.changeClaims(250e6, 2 * 365 days);
         assertEq(ledger.economicDepth(), 750e6, "netting releases claim-reserved capital");
-        assertEq(ledger.sideState(0).index, 0.8e18, "claimed interval uses 50 percent utilization");
-        assertEq(ledger.sideState(1).index, 0.4e18, "claimed interval uses 25 percent utilization");
+        assertEq(ledger.carryIndex(), 2e18, "claim creation leaves the rate unchanged");
         ledger.advance(3 * 365 days);
-        assertEq(ledger.sideState(0).index, 1.2e18);
-        assertEq(ledger.sideState(1).index, 0.6e18);
+        assertEq(ledger.carryIndex(), 3e18);
     }
 
     function test_FlatClaimPaymentPreservesEconomicDepthAndFutureCarry() public {
@@ -170,21 +191,23 @@ contract CarryReferenceArithmeticTest is Test {
         assertEq(ledger.poolDepth(), 600e6);
         assertEq(ledger.totalClaims(), 0);
         assertEq(ledger.economicDepth(), 600e6);
-        assertEq(ledger.sideState(0).index, 0.5e18);
+        assertEq(ledger.carryIndex(), 1e18);
         ledger.advance(2 * 365 days);
-        assertEq(ledger.sideState(0).index, 1e18, "payment cannot change the next interval's utilization");
+        assertEq(ledger.carryIndex(), 2e18, "payment cannot change the flat rate");
     }
 
-    function test_ClaimsAtOrAboveAssetsSaturateCarryWithoutUnderflow() public {
+    function test_ClaimsAtOrAboveAssetsDoNotChangeFlatCarry() public {
         CarryReferenceLedger ledger = new CarryReferenceLedger(1000e6, 0, 10_000);
         ledger.initializeAccount(address(1), 0, 300e6, 0, 0, 0, 0);
         ledger.changeClaims(1000e6, 0);
         ledger.changeClaims(1500e6, 365 days);
         assertEq(ledger.economicDepth(), 0);
-        assertEq(ledger.sideState(0).index, 1e18);
+        assertEq(ledger.carryIndex(), 1e18);
         ledger.advance(2 * 365 days);
-        assertEq(ledger.sideState(0).index, 2e18);
-        assertEq(ledger.sideState(1).index, 0, "empty side still accrues no carry");
+        assertEq(ledger.carryIndex(), 2e18);
+        assertEq(
+            ledger.sideState(1).maxProfitExposure, 0, "the opposite side can remain empty while the global index grows"
+        );
         assertEq(ledger.poolDepth(), 1000e6, "claims do not overwrite gross assets");
     }
 
@@ -194,32 +217,29 @@ contract CarryReferenceArithmeticTest is Test {
             CarryReferenceVectors.RecoveryVector memory v = vectors[i];
             CarryReferenceLedger ledger = _recover(v);
             _assertRecovery(ledger, v);
-            assertEq(ledger.sideState(0).timestamp, v.elapsed, "terminal recovery preserves checkpoint clock");
-            assertEq(ledger.sideState(0).index, v.expectedIndex, "terminal recovery preserves checkpoint index");
+            assertEq(ledger.carryTimestamp(), v.elapsed, "terminal recovery preserves checkpoint clock");
+            assertEq(ledger.carryIndex(), v.expectedIndex, "terminal recovery preserves checkpoint index");
             assertEq(ledger.accountState(address(1)).protectedFunds, v.protectedFunds - v.physicalPaid);
         }
     }
 
-    function test_OfflinePassiveDepthVectorsPreserveBothClocksUntilAssessment() public {
+    function test_OfflinePassiveDepthVectorsPreserveGlobalClockUntilAssessment() public {
         CarryReferenceVectors.PassiveDepthVector[] memory vectors = CarryReferenceVectors.passiveDepths();
         for (uint256 i; i < vectors.length; ++i) {
             CarryReferenceVectors.PassiveDepthVector memory v = vectors[i];
             CarryReferenceLedger ledger = new CarryReferenceLedger(v.initialDepth, 0, v.annualBps);
-            ledger.initializeAccount(address(1), 0, v.longBase, 0, 0, 0, 0);
-            ledger.initializeAccount(address(2), 1, v.shortBase, 0, 0, 0, 0);
+            ledger.initializeAccount(address(1), 0, v.longMaxProfit, 0, 0, 0, 0);
+            ledger.initializeAccount(address(2), 1, v.shortMaxProfit, 0, 0, 0, 0);
             ledger.changeDepthWithoutCheckpoint(v.finalDepth);
-            assertEq(ledger.sideState(0).timestamp, 0, "passive cash change must not checkpoint Long");
-            assertEq(ledger.sideState(1).timestamp, 0, "passive cash change must not checkpoint Short");
-            assertEq(ledger.sideState(0).index, 0);
-            assertEq(ledger.sideState(1).index, 0);
+            assertEq(ledger.carryTimestamp(), 0, "passive cash change must not checkpoint the global clock");
+            assertEq(ledger.carryIndex(), 0);
             bytes32 beforePreview = _ledgerDigest(ledger);
             assertEq(ledger.previewCheckpoint(address(1), v.elapsed).newCarry, v.expectedLongCarry);
             assertEq(ledger.previewCheckpoint(address(2), v.elapsed).newCarry, v.expectedShortCarry);
             assertEq(_ledgerDigest(ledger), beforePreview, "independent projection is read-only");
             assertEq(ledger.checkpoint(address(1), v.elapsed).newCarry, v.expectedLongCarry);
             assertEq(ledger.checkpoint(address(2), v.elapsed).newCarry, v.expectedShortCarry);
-            assertEq(ledger.sideState(0).index, v.expectedLongIndex);
-            assertEq(ledger.sideState(1).index, v.expectedShortIndex);
+            assertEq(ledger.carryIndex(), v.expectedIndex);
             assertEq(ledger.poolDepth(), v.finalDepth, "unpaid carry creates no cash");
         }
     }
@@ -230,20 +250,20 @@ contract CarryReferenceArithmeticTest is Test {
         ledger.checkpoint(address(1), 365 days);
         ledger.changeClaims(100, 365 days);
         ledger.creditClaim(address(1), 100, 100, 365 days);
-        assertEq(ledger.accountState(address(1)).arrears, 77, "claim credit preserves old arrears");
+        assertEq(ledger.accountState(address(1)).arrears, 87, "claim credit preserves old arrears");
         assertEq(ledger.accountState(address(1)).pledge, 100, "new claim credit remains available");
         bytes32 beforePreview = _ledgerDigest(ledger);
         CarryReferenceLedger.Collection memory projected = ledger.previewCheckpoint(address(1), 365 days);
         assertEq(projected.newCarry, 0);
-        assertEq(projected.assessed, 77);
-        assertEq(projected.fromMargin, 77);
+        assertEq(projected.assessed, 87);
+        assertEq(projected.fromMargin, 87);
         assertEq(projected.fromFree, 0);
         assertEq(projected.unpaid, 0, "stored arrears alone do not prove uncovered carry");
         assertEq(_ledgerDigest(ledger), beforePreview, "health projection cannot collect or advance carry");
         CarryReferenceLedger.Collection memory actual = ledger.checkpoint(address(1), 365 days);
         assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(projected)));
-        assertEq(ledger.accountState(address(1)).pledge, 23);
-        assertEq(ledger.poolDepth(), 80);
+        assertEq(ledger.accountState(address(1)).pledge, 13);
+        assertEq(ledger.poolDepth(), 90);
     }
 
     function test_ReservationReclassificationPreservesClocksArrearsAndEconomicCollections() public {
@@ -254,20 +274,20 @@ contract CarryReferenceArithmeticTest is Test {
         ledger.creditClaim(address(1), 40, 40, 365 days);
         ledger.creditFree(address(1), 9, 365 days);
         // The bounty credit collected the existing pledge before preserving its own newly credited free cash.
-        assertEq(ledger.accountState(address(1)).arrears, 37);
+        assertEq(ledger.accountState(address(1)).arrears, 47);
         ledger.changeClaims(20, 365 days);
         ledger.creditClaim(address(1), 20, 20, 365 days);
-        assertEq(ledger.accountState(address(1)).arrears, 28);
+        assertEq(ledger.accountState(address(1)).arrears, 38);
         assertEq(ledger.accountState(address(1)).pledge, 20);
         ledger.creditFree(address(1), 9, 365 days);
-        assertEq(ledger.accountState(address(1)).arrears, 8);
+        assertEq(ledger.accountState(address(1)).arrears, 18);
         // New backing may coexist with stored arrears. Classification-only cleanup must preserve that distinction.
         ledger.releaseToPledgeWithoutCheckpoint(address(1), 5);
         ledger.reserveBountyWithoutCheckpoint(address(1), 7, 3);
         assertEq(ledger.accountState(address(1)).pledge, 2);
         assertEq(ledger.accountState(address(1)).free, 2);
         assertEq(ledger.accountState(address(1)).protectedFunds, 12);
-        assertEq(ledger.accountState(address(1)).borrowBase, 98);
+        assertEq(ledger.accountState(address(1)).maxProfit, 100);
         ledger.releaseProtectedWithoutCheckpoint(address(1), 4);
         ledger.releaseToPledgeWithoutCheckpoint(address(1), 3);
         ledger.consumeProtectedWithoutCheckpoint(address(1), 2);
@@ -275,15 +295,15 @@ contract CarryReferenceArithmeticTest is Test {
         assertEq(state.pledge, 5);
         assertEq(state.free, 6);
         assertEq(state.protectedFunds, 3);
-        assertEq(state.borrowBase, 95);
-        assertEq(state.arrears, 8, "reservations and cleanup do not collect retained arrears");
-        assertEq(state.totalNewCarry, 90);
+        assertEq(state.maxProfit, 100);
+        assertEq(state.arrears, 18, "reservations and cleanup do not collect retained arrears");
+        assertEq(state.totalNewCarry, 100);
         assertEq(state.totalCollected, 82);
         assertEq(state.lastTime, 365 days);
         assertEq(state.lastIndex, 1e18);
-        assertEq(ledger.sideState(0).timestamp, 365 days);
-        assertEq(ledger.sideState(0).index, 1e18);
-        assertEq(ledger.sideState(0).borrowBase, 95);
+        assertEq(ledger.carryTimestamp(), 365 days);
+        assertEq(ledger.carryIndex(), 1e18);
+        assertEq(ledger.sideState(0).maxProfitExposure, 100);
     }
 
     function test_ExcessReservationAndRecoveryRevertWithoutLosingEconomicHistory() public {
@@ -304,9 +324,9 @@ contract CarryReferenceArithmeticTest is Test {
         ledger.checkpoint(address(1), 365 days);
         before = _ledgerDigest(ledger);
         vm.expectRevert(CarryReferenceLedger.InvalidArrearsSettlement.selector);
-        ledger.settleActionArrears(address(1), 7, 50, 21);
+        ledger.settleActionArrears(address(1), 7, 50, 31);
         assertEq(_ledgerDigest(ledger), before, "over-recovery cannot erase or duplicate arrears");
-        ledger.settleActionArrears(address(1), 7, 50, 20);
+        ledger.settleActionArrears(address(1), 7, 50, 30);
         before = _ledgerDigest(ledger);
         vm.expectRevert(CarryReferenceLedger.InvalidArrearsSettlement.selector);
         ledger.settleActionArrears(address(1), 0, 1, 0);
@@ -336,10 +356,10 @@ contract CarryReferenceArithmeticTest is Test {
         CarryReferenceVectors.RecoveryVector memory v = CarryReferenceVectors.recoveries()[9];
         CarryReferenceLedger ledger = _recover(v);
         this.assertRecoveryGolden(ledger, v);
-        assertEq(ledger.totalVpiOffset(), 77, "rebate credit independently discharges all terminal arrears");
+        assertEq(ledger.totalVpiOffset(), 87, "rebate credit independently discharges all terminal arrears");
         assertEq(ledger.totalWithheld(), 0, "no fresh price gain was withheld");
         assertEq(ledger.poolDepth(), 103, "only the ordinary thirteen-atom carry collection enters pool cash");
-        assertEq(ledger.totalCollected(), 90, "ordinary cash plus noncash offset conserves economic carry");
+        assertEq(ledger.totalCollected(), 100, "ordinary cash plus noncash offset conserves economic carry");
         vm.mockCall(address(ledger), abi.encodeCall(ledger.totalVpiOffset, ()), abi.encode(uint256(0)));
         vm.expectRevert();
         this.assertRecoveryGolden(ledger, v);
@@ -382,21 +402,26 @@ contract CarryReferenceArithmeticTest is Test {
         assertEq(state.totalWithheld, v.gainWithheld);
         assertEq(state.totalVpiOffset, v.vpiOffset);
         assertEq(state.arrears, v.expectedRemainingArrears);
-        assertEq(state.borrowBase, v.expectedBorrowBase);
+        assertEq(state.maxProfit, v.expectedMaxProfitExposure);
         assertEq(ledger.totalNewCarry(), ledger.totalCollected() + ledger.totalWaived() + state.arrears);
     }
 
     function _ledgerDigest(
         CarryReferenceLedger ledger
     ) private view returns (bytes32) {
-        return keccak256(
+        bytes32 accounts = keccak256(
             abi.encode(
                 ledger.accountState(address(1)),
                 ledger.accountState(address(2)),
                 ledger.sideState(0),
-                ledger.sideState(1),
-                ledger.poolDepth(),
-                ledger.totalClaims(),
+                ledger.sideState(1)
+            )
+        );
+        bytes32 clockAndAssets = keccak256(
+            abi.encode(ledger.carryIndex(), ledger.carryTimestamp(), ledger.poolDepth(), ledger.totalClaims())
+        );
+        bytes32 totals = keccak256(
+            abi.encode(
                 ledger.totalNewCarry(),
                 ledger.totalCollected(),
                 ledger.totalWithheld(),
@@ -404,6 +429,7 @@ contract CarryReferenceArithmeticTest is Test {
                 ledger.totalWaived()
             )
         );
+        return keccak256(abi.encode(accounts, clockAndAssets, totals));
     }
 
 }
@@ -434,7 +460,7 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         _assertSystem();
     }
 
-    function testFuzz_TwoSideCheckpointsAndChangingBasisMatchIndependentLedger(
+    function testFuzz_AccountCheckpointsAndChangingCollateralMatchIndependentLedger(
         uint256 firstInterval,
         uint256 secondInterval,
         uint256 depositSeed
@@ -453,10 +479,14 @@ contract CarryReferenceExecutionTest is BasePerpTest {
 
         vm.warp(vm.getBlockTimestamp() + bound(secondInterval, 1, 365 days));
         uint256 expectedDepthAfterDonation = referenceLedger.poolDepth() + 50_000e6;
-        // accountExcess checkpoints the old effective assets before booking this external donation.
+        uint256 indexBeforeDonation = engine.carryIndex();
+        uint64 clockBeforeDonation = engine.carryTimestamp();
+        // Admitting external liquidity changes the pool balance without changing the carry clock.
         settlementToken.mint(address(pool), 50_000e6);
         pool.accountExcess();
-        referenceLedger.changeDepth(expectedDepthAfterDonation, vm.getBlockTimestamp());
+        referenceLedger.changeDepthWithoutCheckpoint(expectedDepthAfterDonation);
+        assertEq(engine.carryIndex(), indexBeforeDonation, "excess accounting cannot checkpoint carry");
+        assertEq(engine.carryTimestamp(), clockBeforeDonation);
         _assertSystem();
         _collect(BOB);
         _collect(ALICE);
@@ -548,7 +578,7 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         _collect(BOB);
     }
 
-    function test_FlatBountyOnlyAdvancesIndexesForFreshMarkAndZeroCreditDoesNothing() public {
+    function test_FlatBountyOnlyAdvancesIndexForFreshMarkAndZeroCreditDoesNothing() public {
         address recipient = address(0xCA770104);
         referenceLedger.initializeFlatAccount(recipient, 0, 0, vm.getBlockTimestamp());
         _fundTrader(SOURCE, 100e6);
@@ -575,7 +605,7 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         referenceLedger.creditFree(recipient, 25e6, vm.getBlockTimestamp());
         _assertSystem();
         assertEq(_freeSettlementAssets(recipient), 100e6);
-        assertEq(engine.sideCarryTimestamp(0), publication, "flat old-mark credit leaves carry clocks alone");
+        assertEq(engine.carryTimestamp(), publication, "flat old-mark credit leaves carry clocks alone");
     }
 
     function test_FailedWithdrawalRollsBackCarryAndRetryUsesOriginalHistory() public {
@@ -652,10 +682,11 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         _assertAccount(BOB);
         for (uint8 side; side < 2; ++side) {
             CarryReferenceLedger.Side memory expected = referenceLedger.sideState(side);
-            assertEq(engine.sideBorrowBaseAssets(side), expected.borrowBase, "independent aggregate borrow base");
-            assertEq(engine.sideCarryIndex(side), expected.index, "independent directional index");
-            assertEq(engine.sideCarryTimestamp(side), expected.timestamp, "directional accrual clock");
+            (uint256 maxProfitAssets,,,) = engine.sides(side);
+            assertEq(maxProfitAssets, expected.maxProfitExposure, "independent aggregate maximum profit");
         }
+        assertEq(engine.carryIndex(), referenceLedger.carryIndex(), "independent global index");
+        assertEq(engine.carryTimestamp(), referenceLedger.carryTimestamp(), "global accrual clock");
         assertEq(pool.totalAssets(), referenceLedger.poolDepth(), "independent effective pool depth");
         assertEq(
             settlementToken.balanceOf(address(pool)),
@@ -675,7 +706,7 @@ contract CarryReferenceExecutionTest is BasePerpTest {
     ) private view {
         CarryReferenceLedger.Account memory expected = referenceLedger.accountState(account);
         (uint256 base, uint256 index, uint64 timestamp) = engine.positionCarryState(account);
-        assertEq(base, expected.borrowBase, "independent position borrow base");
+        assertEq(base, expected.maxProfit, "independent position maximum-profit exposure");
         assertEq(index, expected.lastIndex, "position checkpoint index");
         assertEq(timestamp, expected.lastTime, "position checkpoint time");
         assertEq(clearinghouse.pnlPledgeAssets(account), expected.pledge, "margin-first carry collection");
@@ -695,6 +726,8 @@ contract CarryReferenceExecutionTest is BasePerpTest {
                 referenceLedger.accountState(BOB),
                 referenceLedger.sideState(0),
                 referenceLedger.sideState(1),
+                referenceLedger.carryIndex(),
+                referenceLedger.carryTimestamp(),
                 referenceLedger.poolDepth(),
                 referenceLedger.totalNewCarry(),
                 referenceLedger.totalCollected()
@@ -710,8 +743,8 @@ contract CarryReferenceExecutionTest is BasePerpTest {
                 _productionCarryDigest(ALICE),
                 _productionCarryDigest(BOB),
                 engine.unsettledCarryAssets(ALICE),
-                engine.sideCarryIndex(0),
-                engine.sideCarryIndex(1),
+                engine.carryIndex(),
+                engine.carryTimestamp(),
                 pool.totalAssets(),
                 pool.accountedAssets(),
                 terminalNavBook.curveHashOf(ALICE)

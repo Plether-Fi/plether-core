@@ -423,12 +423,19 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         uint256 custody = _settlementBalance(ALICE);
         uint256 keeper = _settlementBalance(KEEPER);
         bytes[] memory updates = _mockPythUpdateData();
+        // The fully margined $10,000 envelope owes 15 atoms during the one-second execution tick.
+        // A public top-up collects that carry and restores the exact uint144 pledge boundary before execution.
+        uint256 beforeTopUp = _settlementBalance(ALICE);
+        vm.prank(ALICE);
+        engine.addMargin(ALICE, 15);
+        assertEq(beforeTopUp - _settlementBalance(ALICE), 15);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max);
         vm.prank(KEEPER);
         router.executeOrder(orderId, updates);
         _assertExecuted(orderId, ALICE, 20_000e18);
         assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max);
         assertEq(engine.positionEntryCostAssetAtoms(ALICE), 20_000e6);
-        assertEq(custody - _settlementBalance(ALICE), 4e6 + bounty);
+        assertEq(custody - _settlementBalance(ALICE), 4e6 + bounty + 15);
         assertEq(_settlementBalance(KEEPER) - keeper, bounty);
         assertEq(router.nextExecuteId(), 0);
         vm.prank(address(engine));
@@ -458,11 +465,16 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         uint64 follower = _commit(BOB, _request(bytes32("cap-follower"), 10_000e18, 1000e6));
         uint256 failedBounty = book.pendingIntent(rejected).executionBountyAssets;
         uint256 totalBounty = failedBounty + book.pendingIntent(follower).executionBountyAssets;
-        vm.prank(ALICE);
-        engine.addMargin(ALICE, 1);
-        uint256 custody = _settlementBalance(ALICE);
         uint256 keeper = _settlementBalance(KEEPER);
         bytes[] memory updates = _mockPythUpdateData();
+        // One second of flat carry costs 15 atoms. Collect it, then add 16 atoms to move the
+        // original cap-minus-one pledge to the cap, making the pending one-atom increase invalid.
+        uint256 beforeTopUp = _settlementBalance(ALICE);
+        vm.prank(ALICE);
+        engine.addMargin(ALICE, 16);
+        assertEq(beforeTopUp - _settlementBalance(ALICE), 15);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max);
+        uint256 custody = _settlementBalance(ALICE);
         vm.prank(KEEPER);
         OrderV3Types.BatchResult memory result = router.executeOrderBatch(follower, updates);
         assertEq(result.terminalCount, 2);
