@@ -46,7 +46,7 @@ Additional focused suites cover:
   checked VPI arithmetic against the supported original floor sequence and independent in-domain vectors.
 - [OrderRouterNumericDomain.t.sol](spec/keeper/OrderRouterNumericDomain.t.sol)::`test_PublicMarginChangeReachesTerminalCapFailureAndBatchContinues`:
   public collateral changes reach the terminal NAV pledge cap; exact typed failure preserves follower execution.
-  Companion cases cover equality, commitment rejection, stale extreme orders and aggregate numeric bounds.
+  Companion cases cover equality, stale-mark skew rejection, queue preservation, and aggregate numeric bounds.
 - [OrderRouterCloseSideBinding.t.sol](spec/trader/OrderRouterCloseSideBinding.t.sol)::`test_WrongSidePrecedesSlippageAndDoesNotReachPolicyEvaluator`:
   direction validation occurs before policy evaluation.
 - [OrderSettlementFloor.t.sol](spec/trader/OrderSettlementFloor.t.sol)::`testFuzz_WithdrawalFloorBothApis`:

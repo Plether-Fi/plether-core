@@ -98,7 +98,28 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         router.commitOrder(CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 5000e6, 1e8, false);
     }
 
-    function test_CommitOrder_DoesNotUseStaleCachedMarkForPredictableOpenPrefilter() public {
+    function test_CommitOrder_RejectsOpenAboveSkewLimitWithStaleMark() public {
+        CfdTypes.RiskParams memory risk = _riskParams();
+        risk.maxSkewRatio = 0.005e18;
+        _setRiskParams(risk);
+        vm.warp(4 days); // Monday, outside the close-only window.
+        assertGt(vm.getBlockTimestamp() - engine.lastMarkTime(), router.pletherOracle().orderExecutionStalenessLimit());
+
+        uint8 skewTooHigh = uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH);
+        assertEq(engineLens.previewOpenRevertCode(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8), skewTooHigh);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector, skewTooHigh)
+        );
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
+        assertEq(router.pendingOrderCounts(alice), 0, "Rejected open must stay out of the queue");
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 2000e18, 1000e6, 1e8, false);
+        assertEq(router.pendingOrderCounts(alice), 1, "Backed open within the skew limit should still queue");
+    }
+
+    function test_CommitOrder_DefersCollateralChecksWithStaleMark() public {
         _startRecordingLogs();
         address eve = address(0xE112);
         address eveAccount = eve;
@@ -110,7 +131,7 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 100e6, 1e8, false);
 
         IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(eveAccount);
-        assertEq(pending.length, 1, "Stale cached marks should skip commit-time predictable-open rejection");
+        assertEq(pending.length, 1, "Stale cached marks should defer collateral checks");
         assertEq(pending[0].sizeDelta, 100_000e18, "Queued order should preserve the requested open intent");
     }
 

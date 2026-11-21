@@ -1610,6 +1610,12 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     function test_AdversarialStarvedBatchesSettleFailuresAndBountiesWithoutSuccessfulExecution() public {
         handler.starveLiquidity(pool.totalAssets() - 10e6);
         assertEq(pool.totalAssets(), 10e6);
+        // Bypass only the admission preview so the real execution planner sees the starved pool.
+        vm.mockCall(
+            router.engineLensForCommit(),
+            abi.encodeWithSelector(CfdEngineLens.previewOpenRevertCode.selector),
+            abi.encode(uint8(CfdEnginePlanTypes.OpenRevertCode.OK))
+        );
         uint256 custodyBefore = settlementToken.balanceOf(address(clearinghouse));
         uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint256[4] memory balancesBefore;
@@ -1617,9 +1623,6 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             balancesBefore[i] = clearinghouse.balanceAssets(handler.actors(i));
         }
         for (uint256 i; i < 33; ++i) {
-            // Stale marks defer predictable-open validation to execution. Each batch refreshes the mark, so age it
-            // again before the next admitted attempt; the pool remains starved throughout all 33 batches.
-            vm.warp(vm.getBlockTimestamp() + router.pletherOracle().getOrderExecutionPolicy(false).maxStaleness + 1);
             handler.processBatch(1, 1e8);
             assertEq(
                 uint8(router.lifecycleBook().terminalOutcome(uint64(i + 1)).reason),

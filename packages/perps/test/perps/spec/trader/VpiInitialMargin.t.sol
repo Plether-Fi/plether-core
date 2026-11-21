@@ -274,7 +274,8 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
         settlementToken.mint(eve, 1e6);
         settlementToken.approve(address(clearinghouse), 1e6);
         clearinghouse.deposit(eveAccount, 1e6);
-        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
+        // Stay within the pool's skew limit so execution reaches the account-level collateral check.
+        router.commitOrder(CfdTypes.Side.LONG, 500e18, 0, 1e8, false);
         vm.stopPrank();
 
         uint256 keeperBefore = _settlementBalance(address(this));
@@ -283,7 +284,7 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
 
         assertEq(
             clearinghouse.balanceAssets(address(this)) - keeperBefore,
-            200_000,
+            50_000,
             "Typed user-invalid open should pay the clearer as clearinghouse credit"
         );
         assertEq(

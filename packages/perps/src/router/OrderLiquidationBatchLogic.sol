@@ -18,7 +18,6 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
-import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "@plether/perps/libraries/OrderValidationLib.sol";
@@ -428,20 +427,23 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         uint64 commitMarkTime = engine.lastMarkTime();
-        uint8 revertCode =
-            host.engineLensForCommit().previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice);
-        if (revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED)) {
+        uint8 revertCode = uint8(
+            CfdEnginePlanTypes.OpenRevertCode(
+                host.engineLensForCommit().previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice)
+            )
+        );
+        // Pending opens reserve pool capacity immediately. Enforce pool-risk failures even on a stale mark.
+        if (OrderFailurePolicyLib.isPredictablyInvalidOpen(revertCode, false)) {
             revert OrderRouter__PredictableOpenInvalid(revertCode);
         }
         // A queued close can remove an opposing live position before this open reaches the FIFO head.
-        if (commitMarkTime != 0 && revertCode != opposingCode) {
+        if (
+            commitMarkTime != 0 && revertCode != opposingCode
+                && OrderFailurePolicyLib.isPredictablyInvalidOpen(revertCode, true)
+        ) {
             IPletherOracle.PolicySnapshot memory policy = host.pletherOracle().getOrderExecutionPolicy(false);
             if (!OracleFreshnessPolicyLib.isStale(commitMarkTime, policy.maxStaleness, block.timestamp)) {
-                CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory =
-                    CfdEnginePlanLib.getOpenFailurePolicyCategory(CfdEnginePlanTypes.OpenRevertCode(revertCode));
-                if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
-                    revert OrderRouter__PredictableOpenInvalid(revertCode);
-                }
+                revert OrderRouter__PredictableOpenInvalid(revertCode);
             }
         }
 

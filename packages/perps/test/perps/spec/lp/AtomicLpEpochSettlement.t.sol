@@ -99,6 +99,104 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         assertEq(juniorVault.claimableDepositRequest(depositId, BOB), depositAssets);
     }
 
+    function test_AtomicSettlement_RedemptionPreservesPendingOpenCapacity() public {
+        (uint256 redeemId, uint64 orderId) = _queueRedemptionAndOpen();
+
+        router.settleLpEpoch(_emptyUpdateData());
+        assertGt(juniorVault.claimableRedeemRequest(redeemId, ALICE), 0, "unreserved cash should fund part of the exit");
+        assertGt(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0, "the rest should stay queued");
+        // At the price cap the combined long size needs 42,000 of depth to pass the skew and solvency checks.
+        assertApproxEqAbs(pool.totalAssets(), 42_000e6, 1, "redemption must retain the open's backing");
+
+        bytes[] memory pinnedUpdate = _mockPythUpdateData(95_000_000);
+        router.executeOrder(orderId, pinnedUpdate);
+
+        (uint256 openedSize,, uint256 entryPrice,,,,) = engine.positions(BOB);
+        assertEq(openedSize, 20_000e18, "the keeper can fill the open after LP settlement");
+        assertEq(entryPrice, 95_000_000, "the fill uses the pinned Pyth tick");
+        assertGt(pool.getFreeAssets(), 20_000e6, "unused backing becomes withdrawable on terminal settlement");
+    }
+
+    function test_AtomicSettlement_QueuedOpposingClosePreservesPendingOpenCapacity() public {
+        CfdTypes.RiskParams memory risk = _riskParams();
+        risk.maxSkewRatio = 0.4e18;
+        risk.vpiFactor = 0.01e18;
+        _setRiskParams(risk);
+
+        uint256 shares = _seedJuniorLp(ALICE, 100_000e6);
+        vm.warp(juniorVault.lastDepositTime(ALICE) + juniorVault.DEPOSIT_COOLDOWN());
+        _fundTrader(TRADER, 2000e6);
+        _fundTrader(CAROL, 2000e6);
+        _fundTrader(BOB, 2000e6);
+        _open(TRADER, CfdTypes.Side.LONG, 8000e18, 1000e6, 1e8);
+        _open(CAROL, CfdTypes.Side.SHORT, 10_000e18, 1000e6, 1e8);
+
+        uint256 redeemId = _requestJuniorRedeem(ALICE, shares);
+        _warpToEpoch(redeemId);
+        _setBasket(1e8, 0, vm.getBlockTimestamp());
+        router.updateMarkPrice(_emptyUpdateData());
+
+        vm.prank(CAROL);
+        uint64 closeId = router.commitOrder(CfdTypes.Side.SHORT, 10_000e18, 0, 95_000_000, true);
+        bytes[] memory closeUpdate = _mockPythUpdateData(1e8);
+        vm.prank(BOB);
+        uint64 openId = router.commitOrder(CfdTypes.Side.LONG, 3000e18, 500e6, 95_000_000, false);
+
+        _setBasket(1e8, 0, vm.getBlockTimestamp());
+        router.settleLpEpoch(_emptyUpdateData());
+        assertGt(juniorVault.claimableRedeemRequest(redeemId, ALICE), 0, "the LP receives unreserved cash");
+        assertGt(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0, "the rest remains queued");
+
+        router.executeOrder(closeId, closeUpdate);
+        (uint256 remainingShort,,,,,,) = engine.positions(CAROL);
+        assertEq(remainingShort, 0, "the opposing close executes first");
+
+        router.executeOrder(openId, _mockPythUpdateData(97_000_000));
+        (uint256 openedSize,, uint256 entryPrice,,,,) = engine.positions(BOB);
+        assertEq(openedSize, 3000e18, "the open still passes the skew check after the close");
+        assertEq(entryPrice, 97_000_000, "the open uses its pinned Pyth tick");
+    }
+
+    function test_AtomicSettlement_ExpiredOpenReleasesLpCapacityBeforeCleanup() public {
+        (uint256 redeemId, uint64 orderId) = _queueRedemptionAndOpen();
+        uint256 deadline = router.lifecycleBook().orderTiming(orderId).executionDeadline;
+        vm.warp(deadline);
+        _setBasket(100_000_000, 0, deadline);
+        vm.prank(ALICE);
+        router.settleLpEpoch(_emptyUpdateData());
+
+        uint256 fundedShares = juniorVault.claimableRedeemRequest(redeemId, ALICE);
+        assertApproxEqAbs(pool.totalAssets(), 42_000e6, 1, "the exact deadline must still protect the open's backing");
+
+        vm.warp(deadline + 1);
+        assertEq(pool.currentLpEpoch(), redeemId, "the retry should remain in the same LP epoch");
+        _setBasket(100_000_000, 0, deadline + 1);
+        vm.prank(ALICE);
+        router.settleLpEpoch(_emptyUpdateData());
+
+        assertGt(juniorVault.claimableRedeemRequest(redeemId, ALICE), fundedShares, "the retry should fund more shares");
+        assertEq(router.nextExecuteId(), orderId, "the expired order should still be at the queue head");
+
+        uint256 freeAssetsAfterRetry = pool.getFreeAssets();
+        router.expireOrder(orderId);
+        assertEq(
+            pool.getFreeAssets(), freeAssetsAfterRetry, "cleanup should leave LP capacity at its post-expiry value"
+        );
+    }
+
+    function _queueRedemptionAndOpen() private returns (uint256 redeemId, uint64 orderId) {
+        uint256 shares = _seedJuniorLp(ALICE, 100_000e6);
+        vm.warp(juniorVault.lastDepositTime(ALICE) + juniorVault.DEPOSIT_COOLDOWN());
+        _openMarkSensitivePosition();
+        _fundTrader(BOB, 2000e6);
+
+        redeemId = _requestJuniorRedeem(ALICE, shares);
+        _warpToEpoch(redeemId);
+        _setBasket(100_000_000, 0, vm.getBlockTimestamp());
+        vm.prank(BOB);
+        orderId = router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 1000e6, 95_000_000, false);
+    }
+
     function test_AtomicSettlement_RejectsFreshPreBoundaryMarkThenAcceptsBoundaryMark() public {
         _openMarkSensitivePosition();
         uint256 assets = 10_000e6;

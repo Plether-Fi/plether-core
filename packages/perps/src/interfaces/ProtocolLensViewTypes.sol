@@ -12,8 +12,8 @@ library ProtocolLensViewTypes {
     ///        separately in the clearinghouse and must not be subtracted again; trader claims are also separate.
     /// @param maxLiabilityAssets Larger of the long-side and short-side maximum-profit envelopes.
     /// @param effectiveSolvencyAssets Pool assets after aggregate trader claims, floored at zero.
-    /// @param withdrawalReservedAssets Maximum position liability, aggregate trader claims, and settlement buffer.
-    /// @param freeAssets Pool assets above maximum position liability, aggregate trader claims, and settlement buffer.
+    /// @param withdrawalReservedAssets Position liability, trader claims, settlement buffer, and pending-open capacity.
+    /// @param freeAssets Pool assets above the withdrawal reserve.
     /// @param protocolTreasuryBalanceAssets Settlement credited to the protocol treasury in the clearinghouse.
     /// @param totalTraderClaimBalanceAssets Aggregate unpaid trader claims.
     /// @param degradedMode Whether the engine has entered insolvency-protection mode.
