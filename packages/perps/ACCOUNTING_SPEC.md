@@ -821,8 +821,8 @@ actionReserveAssets >= protectedExecutionBountyAssets + vpiRebateReserveAssets
 ```
 
 The second relation is a protected floor: generic action-charge collection may consume only action reserve above it.
-An open/increase that raises the VPI target must fully fund the increase from eligible settlement or newly supplied
-pledge, otherwise planning fails before exposure grows.
+An open/increase that raises the VPI target uses its own available net rebate first. Its newly supplied pledge must
+cover the rest of the increase before funding any additional liquidation reserve. Other free settlement stays available.
 
 After an open/increase, the target liquidation reserve is:
 
@@ -1085,7 +1085,7 @@ Required properties:
 - anticipated carry, VPI, fees, spreads, and other action economics stay outside terminal `K`; the book is synchronized
   only to actually installed PnL pledge and same-account claim state after settlement. The VPI reserve therefore does
   not inflate marked LP receivables or symmetric LP NAV,
-- a user must not shield otherwise reachable settlement by parking it in queued committed margin right before terminal settlement,
+- a user must not shield full-close action charges by parking otherwise reachable settlement in queued committed margin,
 - carry-adjusted close loss must be planned once and consumed live from that same canonical loss amount,
 - price-gain-withheld or cash-collected frozen spread becomes LP revenue and never treasury margin; same-account claim
   netting remains exclusive to exact price loss,
@@ -1174,9 +1174,10 @@ Liquidation must:
 6. re-evaluate degraded-mode containment.
 
 Risk-off refunds and their existing early health check occur first. A separate inner rollback frame then authenticates
-pending reservations, forfeits unpaid opening bounties where applicable, settles zero close records, invokes the
-Engine liquidation health/settlement path, and finalizes account-local queue cleanup. If the account is healthy,
-roll back this entire inner frame: its pending orders remain and no liquidation bounty is earned. Previously completed
+pending reservations, forfeits unpaid protection-trigger bounties, invokes the Engine liquidation health/settlement
+path, and terminalizes stale closes. Valid opening orders retain their queue position, committed margin, and execution
+bounty. A healthy-account result rolls back this entire inner frame: its pending orders remain and no liquidation
+bounty is earned. Previously completed
 outer risk-off refunds persist. Without such outer work, the single-call
 solvent revert and batch skipped-solvent behavior are preserved. Only the exact direct Engine solvent failure receives
 that classification; unrelated errors do not become healthy outcomes. Other accounts retain their relative FIFO order.
@@ -1207,6 +1208,8 @@ Required property:
 - the keeper/protocol charge is capped by its dedicated reserve and other explicitly eligible charge funds; it must
   never raid PnL pledge needed by price settlement,
 - an uncollectible terminal action charge is waived rather than reclassified as protocol debt or price loss,
+- liquidation action charges do not consume committed margin reserved for surviving opening orders; the shortfall is
+  waived after the other eligible sources are exhausted,
 - liquidation does not assess `frozenCloseSpreadBps`, including while `oracleFrozen`,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 

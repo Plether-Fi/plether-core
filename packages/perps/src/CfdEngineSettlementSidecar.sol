@@ -781,8 +781,9 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (vpiReserveReleaseAssets > 0) {
             clearinghouse.releaseVpiRebateReserve(delta.account, vpiReserveReleaseAssets);
         }
+        // The unpaid remainder is waived without collecting committed margin from surviving opening orders.
         uint256 genericActionChargeToCollectAssets =
-            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
+            delta.actionChargeCollectedAssets - delta.vpiRebateReserveConsumedAssets;
         if (genericActionChargeToCollectAssets > 0) {
             (uint256 collectedAssets, uint256 protocolCreditedAssets) = clearinghouse.consumeActionCharge(
                 delta.account,

@@ -13,6 +13,14 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 ///      position sizes use 18 decimals.
 interface ICfdOrderPolicyEvaluator {
 
+    /// @notice Checks the live planner result and the opening order's own funding at the Router's reference mark.
+    /// @dev Called by the Router, which supplies its configured engine, lens and oracle through its getters.
+    function validateOpenCommit(
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 commitPrice
+    ) external view;
+
     error CfdOrderPolicyEvaluator__CommittedPolicyChanged(uint64 orderId);
 
     error CfdOrderPolicyEvaluator__ReservationMismatch(uint64 orderId);

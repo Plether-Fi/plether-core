@@ -134,18 +134,18 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         );
     }
 
-    function test_PreviewLiquidation_StagesForfeitureLikeLiveLiquidation() public {
+    function test_PreviewLiquidation_PreservesOpeningReservationsLikeLiveLiquidation() public {
         address trader = address(0xAB1405);
         address keeper = address(0xAB1406);
         address account = trader;
 
-        _fundTrader(trader, 900e6);
+        _fundTrader(trader, 1500e6);
         _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 200e6, type(uint256).max, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
@@ -164,28 +164,26 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory afterSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
-        assertGe(
-            observed.protocolLiquidationFeeAssets,
-            reservationBefore.executionBountyAssets,
-            "Treasury inflow should include the forfeited execution reservation"
-        );
-        observed.protocolLiquidationFeeAssets -= reservationBefore.executionBountyAssets;
+        IOrderRouterAccounting.AccountReservationView memory reservationAfter = router.getAccountReservations(account);
+        assertGt(reservationBefore.executionBountyAssets, 0);
+        assertEq(reservationAfter.executionBountyAssets, reservationBefore.executionBountyAssets);
+        assertEq(reservationAfter.committedMarginAssets, reservationBefore.committedMarginAssets);
         _assertLiquidationPreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
 
         assertEq(
             engine.traderClaimBalanceAssets(account),
             preview.traderClaimBalanceAssets,
-            "Preview trader claim should match live liquidation after staged forfeiture"
+            "Preview trader claim should match live liquidation with retained opening reservations"
         );
         assertEq(
             afterSnapshot.protocolTreasuryBalanceAssets - beforeSnapshot.protocol.protocolTreasuryBalanceAssets,
-            reservationBefore.executionBountyAssets + preview.protocolLiquidationFeeAssets,
-            "Live liquidation should book forfeited reservations and the configured protocol liquidation fee"
+            preview.protocolLiquidationFeeAssets,
+            "Only the configured protocol liquidation fee reaches the treasury"
         );
         assertEq(
             observed.effectiveAssetsAfterAssets,
             preview.effectiveAssetsAfterAssets,
-            "Preview solvency should match live liquidation after staged forfeiture"
+            "Preview solvency should match live liquidation with retained opening reservations"
         );
     }
 

@@ -249,7 +249,8 @@ predictable amount of progress matters.
 Opening orders may reserve a bounty. Successful self-execution releases it to the account's free settlement;
 external execution credits the keeper's Clearinghouse account. Ordinary and protection-generated closes have zero
 order bounty, including failed-close cleanup. Risk-off cleanup refunds remaining margin and bounty to internal
-settlement and pays no cleaner. Liquidation can forfeit unpaid opening and protection-trigger bounties. Interpret
+settlement and pays no cleaner. Liquidation preserves valid opening-order bounties and can forfeit unpaid
+protection-trigger bounties. Interpret
 actual receipt amounts rather than assuming every terminal outcome paid a keeper.
 
 ## Take-profit and stop-loss protection

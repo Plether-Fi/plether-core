@@ -1326,17 +1326,12 @@ contract PerpAccountingHandler is Test {
     ) internal {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             if (ghostOrderOwner[orderId] == account && ghostOrderState[orderId] == GHOST_ORDER_PENDING) {
-                _finalizeGhostOrder(orderId, GHOST_ORDER_LIQUIDATED);
+                if (_orderRecord(orderId).status != IOrderRouterAccounting.OrderStatus.Pending) {
+                    _finalizeGhostOrder(orderId, GHOST_ORDER_LIQUIDATED);
+                }
             }
         }
-
-        uint256 committedAfter = _trackedCommittedMargin(account);
-        if (committedBefore > committedAfter) {
-            uint256 observedReduction = committedBefore - committedAfter;
-            if (observedReduction > 0 && committedAfter > 0) {
-                _consumeCommittedMarginFromAccount(account, observedReduction);
-            }
-        }
+        assertEq(_trackedCommittedMargin(account), committedBefore, "Liquidation preserves queued opening margin");
     }
 
     function _snapshotTrackedCommittedMargin() internal view returns (uint256[4] memory committedMarginByActor) {
@@ -1430,8 +1425,8 @@ contract PerpAccountingHandler is Test {
         return actor;
     }
 
-    /// @notice Historical cleanup remains checked after an account deposits, trades and liquidates again.
-    /// @dev New-generation orders are deliberately excluded; old orders can never become live again.
+    /// @notice Historical stale-close cleanup remains checked after an account trades and liquidates again.
+    /// @dev Valid opening orders may span generations, so only stale closes count as cleanup exposure.
     function liquidatedGenerationExposure(
         address account
     ) external view returns (uint256 pendingOrders, uint256 liveReserves, uint256 reservedAssets) {
@@ -1446,6 +1441,9 @@ contract PerpAccountingHandler is Test {
                 break;
             }
             OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
+            if (!record.core.isClose) {
+                continue;
+            }
             if (record.status == IOrderRouterAccounting.OrderStatus.Pending) {
                 pendingOrders++;
             }

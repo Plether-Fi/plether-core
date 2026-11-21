@@ -6,8 +6,8 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
-import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
@@ -18,9 +18,6 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
-import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
-import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
-import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "@plether/perps/libraries/OrderValidationLib.sol";
 
 /// @notice Router getters and isolated item entrypoints used by delegated keeper logic.
@@ -34,7 +31,7 @@ interface IOrderLiquidationBatchHost {
 
     function lifecycleBook() external view returns (IOrderLifecycleBook);
 
-    function engineLensForCommit() external view returns (ICfdEngineLens);
+    function policyEvaluator() external view returns (ICfdOrderPolicyEvaluator);
 
     function nextCommitId() external view returns (uint64);
 
@@ -235,8 +232,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         if (request.isClose) {
             _validateCloseAdmission(host, account, request.side, request.sizeDelta);
         } else {
-            executionBountyAssets =
-                _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
+            executionBountyAssets = _validatedOpenBounty(host, account, request);
         }
         if (executionBountyAssets > request.bounds.maxExecutionBountyAssets) {
             revert IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound(
@@ -404,14 +400,12 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     function _validatedOpenBounty(
         IOrderLiquidationBatchHost host,
         address account,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta
+        OrderV3Types.OrderRequest calldata request
     ) private view returns (uint256 executionBountyAssets) {
         ICfdEngineCore engine = host.engine();
         uint256 commitPrice = _commitReferencePrice(engine);
-        uint256 lots = sizeDelta / CfdTypes.SIZE_QUANTUM;
-        if (lots > type(uint112).max || marginDelta > uint256(type(int256).max)) {
+        uint256 lots = request.sizeDelta / CfdTypes.SIZE_QUANTUM;
+        if (lots > type(uint112).max || request.marginDelta > uint256(type(int256).max)) {
             revert OrderRouter__PredictableOpenInvalid(uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
         }
         // Quantum was checked at admission. uint112 lots times the uint32-capped mark fits uint144 exactly.
@@ -423,27 +417,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         // Project the live position through earlier account orders before checking the requested side.
         QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
         uint8 opposingCode = uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING);
-        if (queuedPosition.exists && queuedPosition.side != side) {
+        if (queuedPosition.exists && queuedPosition.side != request.side) {
             revert OrderRouter__PredictableOpenInvalid(opposingCode);
         }
 
-        uint64 commitMarkTime = engine.lastMarkTime();
-        uint8 revertCode =
-            host.engineLensForCommit().previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice);
-        if (revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED)) {
-            revert OrderRouter__PredictableOpenInvalid(revertCode);
-        }
-        // A queued close can remove an opposing live position before this open reaches the FIFO head.
-        if (commitMarkTime != 0 && revertCode != opposingCode) {
-            IPletherOracle.PolicySnapshot memory policy = host.pletherOracle().getOrderExecutionPolicy(false);
-            if (!OracleFreshnessPolicyLib.isStale(commitMarkTime, policy.maxStaleness, block.timestamp)) {
-                CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory =
-                    CfdEnginePlanLib.getOpenFailurePolicyCategory(CfdEnginePlanTypes.OpenRevertCode(revertCode));
-                if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
-                    revert OrderRouter__PredictableOpenInvalid(revertCode);
-                }
-            }
-        }
+        host.policyEvaluator().validateOpenCommit(account, request, commitPrice);
 
         executionBountyAssets = (notionalAssets * host.openOrderExecutionBountyBps()) / 10_000;
         uint256 minimumBountyAssets = host.minOpenOrderExecutionBountyAssets();

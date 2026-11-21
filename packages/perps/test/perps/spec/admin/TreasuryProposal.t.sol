@@ -5,6 +5,8 @@ import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTreasury} from "@plether/perps/CfdTreasury.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 import {CfdEngineTestBase} from "../../shared/CfdEngineTestBase.sol";
 
@@ -389,14 +391,19 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         vm.warp(SETUP_TIMESTAMP + 1 days + 2 hours);
         uint256 expiry = _lockTreasury();
         engine.proposeProtocolTreasury(TREASURY_B, 30 days);
-        vm.warp(expiry - 1);
+        vm.warp(expiry - 2);
+        router.updateMarkPrice(_mockPythUpdateData(1e8));
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 100_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
         _open(counterparty, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
+        // Liquidation forfeits the unpaid protection trigger bounty to the active treasury.
+        IPositionProtectionActions protection = IPositionProtectionActions(address(router.positionProtectionBook()));
+        PositionProtectionTypes.PositionProtectionParams memory params;
+        params.stopLossTriggerPrice = 110_000_000;
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
-        uint256 forfeitedBounty = _executionBountyReserve(1);
+        protection.createPositionProtection(params);
+        uint256 forfeitedBounty = clearinghouse.totalBountyReservationsAssets(trader);
         assertGt(forfeitedBounty, 0);
         uint256 oldTreasuryBalance = clearinghouse.balanceAssets(TREASURY_A);
         assertEq(clearinghouse.balanceAssets(TREASURY_B), 0);

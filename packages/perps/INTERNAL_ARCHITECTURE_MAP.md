@@ -109,8 +109,9 @@ address but are not recognized Pool assets. [Accounting specification](ACCOUNTIN
    Clearinghouse margin. Terminal full-close waivers do not create future debt.
 
 A liquidation uses a current account-adverse price, settles the price channel and dedicated liquidation reserve,
-removes the position curve, and clears pending orders/protection. Its capped charge is split between keeper,
-protocol treasury and LPs. A liquidated account's remaining opening bounties may be forfeited; close bounties are zero.
+removes the position curve, and clears stale pending closes/protection. Its capped charge is split between keeper,
+protocol treasury and LPs. Valid opening orders retain their queue position and margin and bounty reservations;
+close bounties are zero.
 
 Risk-off cleanup is different: an invalidated opening order's remaining margin and bounties return to the same
 account's free settlement, with no cleaner payment, token transfer or carry/NAV checkpoint. Liquidation performs

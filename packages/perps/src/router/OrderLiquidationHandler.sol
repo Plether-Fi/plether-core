@@ -9,7 +9,7 @@ import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterE
 import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 
 /// @title OrderLiquidationHandler
-/// @notice Executes priced account liquidations, forfeits order/protection bounties, and clears live orders.
+/// @notice Executes priced account liquidations, preserving opens and clearing stale closes.
 abstract contract OrderLiquidationHandler is OrderValidation {
 
     /// @notice Processes one single-call or batch liquidation account inside its own rollback frame.
@@ -93,10 +93,10 @@ abstract contract OrderLiquidationHandler is OrderValidation {
         }
     }
 
-    /// @notice Releases margin and terminally fails every live order belonging to a liquidated account.
-    /// @dev Uses the order ids and bounty amounts snapshotted during forfeiture, emits
+    /// @notice Terminally fails closes tied to the liquidated position while leaving opens queued.
+    /// @dev Uses the close ids and bounty amounts snapshotted during forfeiture, emits
     ///      `OrderFailed(AccountLiquidated)`, and finalizes a canonical receipt for each order.
-    /// @param account Liquidated account whose live queue is cleared.
+    /// @param account Liquidated account whose stale closes are cleared.
     function _clearLiquidatedAccountOrders(
         address account,
         uint64[] memory orderIds,
