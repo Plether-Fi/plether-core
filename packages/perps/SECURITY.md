@@ -942,6 +942,14 @@ standalone protection changes on an existing position add no exposure and do not
 Consequently, `L <= E < L + B` is solvent but unavailable for new risk and LP redemption funding. Raw degraded mode
 still latches only at `E < L` and may be cleared at `E >= L`; the full buffer need not be restored before clearing.
 
+LP redemption funding also reserves capacity for pending opens through their execution deadlines. A permanent risk-off
+cutoff releases invalidated opens from the LP budget immediately. The skew estimate discounts opposing live lots that
+unexpired queued closes could remove. The estimate uses the current pool book and can consume all free LP cash while
+orders are live. Execution still evaluates current risk and cash, including payouts and trader claims created by earlier
+settlements. The reported reserve includes obligations even when cash is insufficient to cover them. Withdrawable cash
+is floored at zero. Opens affected by a calendar restriction or a configuration change remain in the estimate until
+expiry or terminal cleanup.
+
 ### LP-capital carry
 
 The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
@@ -1348,8 +1356,8 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
 - stale cached marks can understate opening notional and execution bounties at commitment. The bounty floor/cap,
   trader's bound, and per-account order cap limit individual commitments but cannot guarantee profitable cleanup.
-  Execution validates oracle data separately. Commitment does not require a fresh stored mark, so an idle period
-  does not by itself require a keeper refresh before the trader may submit an open,
+  Open commitment enforces pool skew and solvency failures even when the stored mark is stale. Passing those checks
+  still allows submission with a stale mark. Execution validates its oracle data and current risk separately,
 - ordinary failed closes require unpaid cleanup. The protocol keeper must fund gas
   for permissionless oracle-free expiry; bounded deadlines and queues do not guarantee a positive keeper incentive
   or prevent repeated fresh invalid submissions,

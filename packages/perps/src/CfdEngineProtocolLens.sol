@@ -5,10 +5,10 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngineProtocolLens} from "@plether/perps/interfaces/ICfdEngineProtocolLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
@@ -97,7 +97,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         uint256 poolAssets
     ) private view returns (uint256) {
         uint256 bufferBps = engineContract.settlementBufferBps();
-        (uint256 pendingLong, uint256 pendingShort) = _unexpiredOpenLots();
+        IOrderLifecycleBook book = _lifecycleBook();
+        (uint256 pendingLong, uint256 pendingShort) =
+            address(book) == address(0) ? (uint256(0), uint256(0)) : book.unexpiredOpenLots();
         if (pendingLong == 0 && pendingShort == 0) {
             return SolvencyAccountingLib.settlementBufferTargetAssets(liveMaxLiability, bufferBps);
         }
@@ -118,42 +120,58 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
                 return liabilityFloor - liveMaxLiability;
             }
 
-            uint256 longLots = longSize / CfdTypes.SIZE_QUANTUM;
-            uint256 shortLots = shortSize / CfdTypes.SIZE_QUANTUM;
-            worstLongSkew = Math.saturatingSub(longLots + pendingLong, shortLots) * capPrice;
-            worstShortSkew = Math.saturatingSub(shortLots + pendingShort, longLots) * capPrice;
+            (worstLongSkew, worstShortSkew) =
+                _projectedSkew(book, longSize, shortSize, pendingLong, pendingShort, capPrice);
         }
-        // A lighter-side open that reduces skew can still execute above the cap. Reserve depth for each pending
-        // side that could finish heavier, without assuming that intervening opens on the other side will fill.
-        uint256 cappedSkew = Math.max(pendingLong == 0 ? 0 : worstLongSkew, pendingShort == 0 ? 0 : worstShortSkew);
-        (uint256 vpiFactor, uint256 maxSkewRatio,,,,,,,,) = engineContract.riskParams();
-        uint256 skewDepth = 0;
-        if (maxSkewRatio != 0) {
-            skewDepth = cappedSkew > Math.mulDiv(poolAssets, maxSkewRatio, CfdMath.WAD)
-                ? poolAssets
-                : Math.mulDiv(cappedSkew, CfdMath.WAD, maxSkewRatio, Math.Rounding.Ceil);
+        uint256 vpiFactor;
+        uint256 requiredDepth = liabilityFloor;
+        {
+            // Only orders that could finish on the heavier side need depth for the skew limit.
+            uint256 cappedSkew = Math.max(pendingLong == 0 ? 0 : worstLongSkew, pendingShort == 0 ? 0 : worstShortSkew);
+            uint256 maxSkewRatio;
+            (vpiFactor, maxSkewRatio,,,,,,,,) = engineContract.riskParams();
+            if (maxSkewRatio != 0) {
+                uint256 skewDepth = cappedSkew > Math.mulDiv(poolAssets, maxSkewRatio, CfdMath.WAD)
+                    ? poolAssets
+                    : Math.mulDiv(cappedSkew, CfdMath.WAD, maxSkewRatio, Math.Rounding.Ceil);
+                requiredDepth = Math.max(requiredDepth, skewDepth);
+            }
         }
-
-        uint256 requiredDepth = Math.max(liabilityFloor, skewDepth);
         if (vpiFactor != 0 && requiredDepth < poolAssets) {
             // A negative VPI cannot exceed the entire pre-open skew cost. That cost decreases with depth.
-            (bool valid, uint256 maxRebate) =
-                CfdMath.tryGetSkewCost(Math.max(worstLongSkew, worstShortSkew), requiredDepth, vpiFactor);
+            uint256 rebateSkew = Math.max(pendingShort == 0 ? 0 : worstLongSkew, pendingLong == 0 ? 0 : worstShortSkew);
+            (bool valid, uint256 maxRebate) = CfdMath.tryGetSkewCost(rebateSkew, requiredDepth, vpiFactor);
             requiredDepth = valid ? Math.saturatingAdd(requiredDepth, maxRebate) : poolAssets;
         }
         return Math.min(requiredDepth, poolAssets) - liveMaxLiability;
     }
 
-    function _unexpiredOpenLots() private view returns (uint256, uint256) {
+    function _projectedSkew(
+        IOrderLifecycleBook book,
+        uint256 longSize,
+        uint256 shortSize,
+        uint256 pendingLong,
+        uint256 pendingShort,
+        uint256 capPrice
+    ) private view returns (uint256 longSkew, uint256 shortSkew) {
+        (uint256 closingLong, uint256 closingShort) = book.unexpiredCloseLots();
+        uint256 longLots = longSize / CfdTypes.SIZE_QUANTUM;
+        uint256 shortLots = shortSize / CfdTypes.SIZE_QUANTUM;
+        // Opposing interest may close ahead of an open. Credit only the live lots that queued closes cannot remove.
+        longSkew = Math.saturatingSub(longLots + pendingLong, Math.saturatingSub(shortLots, closingShort)) * capPrice;
+        shortSkew = Math.saturatingSub(shortLots + pendingShort, Math.saturatingSub(longLots, closingLong)) * capPrice;
+    }
+
+    function _lifecycleBook() private view returns (IOrderLifecycleBook) {
         address router = engineContract.orderRouter();
         if (router.code.length == 0) {
-            return (0, 0);
+            return IOrderLifecycleBook(address(0));
         }
         // The production router binds its book at construction. Direct engine integrations may have no order queue.
         try IOrderRouterExecutionHost(router).lifecycleBook() returns (address boundBook) {
-            return OrderLifecycleBook(boundBook).unexpiredOpenLots();
+            return IOrderLifecycleBook(boundBook);
         } catch {
-            return (0, 0);
+            return IOrderLifecycleBook(address(0));
         }
     }
 

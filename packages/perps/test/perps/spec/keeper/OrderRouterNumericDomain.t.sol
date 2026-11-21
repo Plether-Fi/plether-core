@@ -132,27 +132,35 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
         _fundTrader(BOB, 50_000e6);
     }
 
-    function test_StaleOriginalExtremeSize_SingleRejectsSkewAndFollowerExecutes() public {
-        (uint64 poison, uint64 follower, uint256 totalBounty) = _stalePoisonQueue();
-        uint256 poisonBounty = book.pendingIntent(poison).executionBountyAssets;
-        uint256 keeperBefore = _settlementBalance(KEEPER);
-        bytes[] memory updates = _mockPythUpdateData();
-        vm.prank(KEEPER);
-        OrderV3Types.ExecutionResult memory failed = router.executeOrder(poison, updates);
-        assertEq(uint8(failed.status), uint8(OrderV3Types.LifecycleStatus.Failed));
-        assertEq(uint8(failed.pendingReason), uint8(OrderV3Types.PendingReason.None));
-        assertEq(router.nextExecuteId(), follower, "poison order cannot pin FIFO");
-        _assertRejected(poison, ALICE, poisonBounty, CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH);
-        vm.prank(KEEPER);
-        router.executeOrder(follower, updates);
-        _assertExecuted(follower, BOB, 10_000e18);
-        assertEq(router.nextExecuteId(), 0);
-        assertEq(_settlementBalance(KEEPER) - keeperBefore, totalBounty);
-    }
+    function test_StaleOpenAboveSkewLimitLeavesQueueAndReservesIntact() public {
+        CfdTypes.RiskParams memory risk = _riskParams();
+        risk.maxSkewRatio = 0.02e18;
+        _setRiskParams(risk);
+        assertGt(vm.getBlockTimestamp() - engine.lastMarkTime(), pletherOracle.orderExecutionStalenessLimit());
+        _fundTrader(CAROL, 2000e6);
 
-    function test_StaleOriginalExtremeSize_BatchRejectsSkewAndDrainsFollower() public {
-        (uint64 poison, uint64 follower, uint256 totalBounty) = _stalePoisonQueue();
-        uint256 poisonBounty = book.pendingIntent(poison).executionBountyAssets;
+        uint64 head = _commit(BOB, _request(bytes32("valid-head"), 10_000e18, 1000e6));
+        bytes32 headIntentHash = keccak256(abi.encode(book.pendingIntent(head)));
+        uint64 nextId = router.nextCommitId();
+        uint256 aliceSettlement = _settlementBalance(ALICE);
+        OrderV3Types.OrderRequest memory request = _request(bytes32("above-skew-limit"), 30_000e18, 1000e6);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH)
+            )
+        );
+        _commit(ALICE, request);
+        assertEq(router.nextCommitId(), nextId);
+        assertEq(router.nextExecuteId(), head);
+        assertEq(_settlementBalance(ALICE), aliceSettlement);
+        assertEq(keccak256(abi.encode(book.pendingIntent(head))), headIntentHash);
+        _assertClean(ALICE, nextId);
+
+        uint64 follower = _commit(CAROL, _request(bytes32("valid-follower"), 5000e18, 1000e6));
+        assertEq(follower, nextId);
+        uint256 totalBounty =
+            book.pendingIntent(head).executionBountyAssets + book.pendingIntent(follower).executionBountyAssets;
         uint256 keeperBefore = _settlementBalance(KEEPER);
         bytes[] memory updates = _mockPythUpdateData();
         vm.prank(KEEPER);
@@ -160,8 +168,8 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
         assertEq(result.terminalCount, 2);
         assertEq(result.nextOrderId, 0);
         assertEq(uint8(result.stopReason), uint8(OrderV3Types.PendingReason.None));
-        _assertRejected(poison, ALICE, poisonBounty, CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH);
-        _assertExecuted(follower, BOB, 10_000e18);
+        _assertExecuted(head, BOB, 10_000e18);
+        _assertExecuted(follower, CAROL, 5000e18);
         assertEq(_settlementBalance(KEEPER) - keeperBefore, totalBounty);
     }
 
@@ -278,19 +286,6 @@ contract OrderRouterNumericDomainTest is NumericDomainRouterFixture {
         vm.prank(KEEPER);
         router.executeOrder(orderId, updates);
         _assertExecuted(orderId, ALICE, 10_000e18);
-    }
-
-    function _stalePoisonQueue() private returns (uint64 poison, uint64 follower, uint256 bounty) {
-        vm.warp(block.timestamp + pletherOracle.orderExecutionStalenessLimit() + 1);
-        OrderV3Types.OrderRequest memory poisonRequest = _request(bytes32("original-1e39"), 1e39, 0);
-        uint256 gasBefore = gasleft();
-        poison = _commit(ALICE, poisonRequest);
-        uint256 commitGas = gasBefore - gasleft();
-        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(poison);
-        assertEq(pending.sizeDelta, 1e39);
-        emit log_named_uint("Stale extreme open commit gas", commitGas);
-        follower = _commit(BOB, _request(bytes32("healthy-follower"), 10_000e18, 1000e6));
-        bounty = book.pendingIntent(poison).executionBountyAssets + book.pendingIntent(follower).executionBountyAssets;
     }
 
 }

@@ -117,6 +117,46 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         assertGt(pool.getFreeAssets(), 20_000e6, "unused backing becomes withdrawable on terminal settlement");
     }
 
+    function test_AtomicSettlement_QueuedOpposingClosePreservesPendingOpenCapacity() public {
+        CfdTypes.RiskParams memory risk = _riskParams();
+        risk.maxSkewRatio = 0.4e18;
+        risk.vpiFactor = 0.01e18;
+        _setRiskParams(risk);
+
+        uint256 shares = _seedJuniorLp(ALICE, 100_000e6);
+        vm.warp(juniorVault.lastDepositTime(ALICE) + juniorVault.DEPOSIT_COOLDOWN());
+        _fundTrader(TRADER, 2000e6);
+        _fundTrader(CAROL, 2000e6);
+        _fundTrader(BOB, 2000e6);
+        _open(TRADER, CfdTypes.Side.LONG, 8000e18, 1000e6, 1e8);
+        _open(CAROL, CfdTypes.Side.SHORT, 10_000e18, 1000e6, 1e8);
+
+        uint256 redeemId = _requestJuniorRedeem(ALICE, shares);
+        _warpToEpoch(redeemId);
+        _setBasket(1e8, 0, vm.getBlockTimestamp());
+        router.updateMarkPrice(_emptyUpdateData());
+
+        vm.prank(CAROL);
+        uint64 closeId = router.commitOrder(CfdTypes.Side.SHORT, 10_000e18, 0, 95_000_000, true);
+        bytes[] memory closeUpdate = _mockPythUpdateData(1e8);
+        vm.prank(BOB);
+        uint64 openId = router.commitOrder(CfdTypes.Side.LONG, 3000e18, 500e6, 95_000_000, false);
+
+        _setBasket(1e8, 0, vm.getBlockTimestamp());
+        router.settleLpEpoch(_emptyUpdateData());
+        assertGt(juniorVault.claimableRedeemRequest(redeemId, ALICE), 0, "the LP receives unreserved cash");
+        assertGt(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0, "the rest remains queued");
+
+        router.executeOrder(closeId, closeUpdate);
+        (uint256 remainingShort,,,,,,) = engine.positions(CAROL);
+        assertEq(remainingShort, 0, "the opposing close executes first");
+
+        router.executeOrder(openId, _mockPythUpdateData(97_000_000));
+        (uint256 openedSize,, uint256 entryPrice,,,,) = engine.positions(BOB);
+        assertEq(openedSize, 3000e18, "the open still passes the skew check after the close");
+        assertEq(entryPrice, 97_000_000, "the open uses its pinned Pyth tick");
+    }
+
     function test_AtomicSettlement_ExpiredOpenReleasesLpCapacityBeforeCleanup() public {
         (uint256 redeemId, uint64 orderId) = _queueRedemptionAndOpen();
         uint256 deadline = router.lifecycleBook().orderTiming(orderId).executionDeadline;

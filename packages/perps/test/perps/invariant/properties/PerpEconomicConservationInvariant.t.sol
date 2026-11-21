@@ -269,16 +269,21 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(sizes[1], actualShortSize, "reserve actor domain must include every short");
     }
 
-    function _enumeratedPendingOpenLots() internal view returns (uint256[2] memory lots) {
+    function _enumeratedPendingLots() internal view returns (uint256[2] memory opens, uint256[2] memory closes) {
         // Read the individual Router orders and their stored deadlines so the model can catch errors in the reserve index.
         uint64 end = router.nextCommitId();
+        uint64 cutoff = routerAdmin.riskOffOrderCutoff();
         for (uint64 orderId = 1; orderId < end; ++orderId) {
             (IOrderRouterAccounting.PendingOrderView memory order,) = router.getPendingOrderView(orderId);
-            if (order.sizeDelta == 0 || order.isClose) {
+            if (order.sizeDelta == 0 || block.timestamp > router.lifecycleBook().orderTiming(orderId).executionDeadline)
+            {
                 continue;
             }
-            if (block.timestamp <= router.lifecycleBook().orderTiming(orderId).executionDeadline) {
-                lots[uint256(order.side)] += order.sizeDelta / CfdTypes.SIZE_QUANTUM;
+            uint256 lots = order.sizeDelta / CfdTypes.SIZE_QUANTUM;
+            if (order.isClose) {
+                closes[uint256(order.side)] += lots;
+            } else if (orderId > cutoff) {
+                opens[uint256(order.side)] += lots;
             }
         }
     }
@@ -290,24 +295,26 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         (uint256[2] memory liabilities, uint256[2] memory sizes) = _enumeratedPositions();
         liveLiability = liabilities[0] > liabilities[1] ? liabilities[0] : liabilities[1];
         uint256 bufferBps = engine.settlementBufferBps();
-        uint256[2] memory pendingLots = _enumeratedPendingOpenLots();
+        (uint256[2] memory pendingLots, uint256[2] memory closingLots) = _enumeratedPendingLots();
         if (pendingLots[0] == 0 && pendingLots[1] == 0) {
             return (liveLiability, liveLiability + _independentBuffer(liveLiability, bufferBps));
         }
 
         uint256 admissionSkew;
-        uint256 maxSkew;
+        uint256 rebateSkew;
         for (uint256 side; side < 2; ++side) {
             liabilities[side] += pendingLots[side] * CAP_PRICE;
             uint256 projectedLots = sizes[side] / CfdTypes.SIZE_QUANTUM + pendingLots[side];
             uint256 oppositeLots = sizes[1 - side] / CfdTypes.SIZE_QUANTUM;
+            uint256 oppositeClosingLots = closingLots[1 - side];
+            oppositeLots = oppositeLots > oppositeClosingLots ? oppositeLots - oppositeClosingLots : 0;
             if (projectedLots > oppositeLots) {
                 uint256 skew = (projectedLots - oppositeLots) * CAP_PRICE;
                 if (pendingLots[side] != 0 && skew > admissionSkew) {
                     admissionSkew = skew;
                 }
-                if (skew > maxSkew) {
-                    maxSkew = skew;
+                if (pendingLots[1 - side] != 0 && skew > rebateSkew) {
+                    rebateSkew = skew;
                 }
             }
         }
@@ -323,7 +330,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
         if (vpiFactor != 0 && backing < poolAssets) {
             // The fixture's bounded amounts fit checked arithmetic. Preserve the rounding of skew squared over depth.
-            uint256 scaledSkewSquaredOverDepth = maxSkew * maxSkew * 1e12 / backing;
+            uint256 scaledSkewSquaredOverDepth = rebateSkew * rebateSkew * 1e12 / backing;
             uint256 withRebate = backing + scaledSkewSquaredOverDepth * vpiFactor / 2e30;
             backing = withRebate < poolAssets ? withRebate : poolAssets;
         }

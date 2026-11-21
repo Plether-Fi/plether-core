@@ -11,6 +11,7 @@ contract OrderLifecycleBookUnpinnedConfigTest is RecordedOrderReceipts {
 
     address private constant ACCOUNT = address(0xA11CE);
     address private constant EXECUTOR = address(0xE7EC);
+    address private constant ROUTER_ADMIN = address(0xADA1);
     bytes32 private constant OBSERVED_CONFIG_HASH = keccak256("observed-config");
 
     OrderLifecycleBook private book;
@@ -18,6 +19,8 @@ contract OrderLifecycleBookUnpinnedConfigTest is RecordedOrderReceipts {
     function setUp() public {
         book = new OrderLifecycleBook(address(this), address(0xE001), address(0xC1EA), address(0xB001));
         vm.mockCall(address(0xE001), abi.encodeWithSignature("terminalNavBook()"), abi.encode(address(0x7EAD)));
+        vm.mockCall(address(this), abi.encodeWithSignature("admin()"), abi.encode(ROUTER_ADMIN));
+        vm.mockCall(ROUTER_ADMIN, abi.encodeWithSignature("riskOffOrderCutoff()"), abi.encode(uint64(0)));
     }
 
     function test_UnpinnedInternalIntentAcceptsOracleReceiptAndRecordsObservedConfig() public {
