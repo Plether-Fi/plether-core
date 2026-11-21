@@ -1830,12 +1830,10 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         vm.mockCall(
             planner,
             abi.encodeWithSelector(
-                bytes4(keccak256("computeCurrentCarryIndex(uint256,uint64,uint256,uint256,uint256,uint256)")),
+                bytes4(keccak256("computeCurrentCarryIndex(uint256,uint64,uint256,uint256)")),
                 uint256(7),
                 uint64(11),
                 uint256(11),
-                uint256(13),
-                uint256(17),
                 uint256(19)
             ),
             abi.encode(uint256(8))

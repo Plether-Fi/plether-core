@@ -176,23 +176,22 @@ library CfdEnginePlanLib {
     }
 
     /// @notice Computes all carry currently payable by the snapshot position.
-    /// @dev Starts with checkpointed `unsettledCarryAssets`. Indexed carry is added only for a nonzero position and borrow
-    ///      base whose selected-side carry index exceeds the position checkpoint. Index conversion rounds down.
-    /// @param snap Position, side-index, borrow-base, and unsettled-carry snapshot.
+    /// @dev Starts with checkpointed `unsettledCarryAssets`. Indexed carry is added only for a nonzero position and maximum-profit
+    ///      exposure whose global carry index exceeds the position checkpoint. Index conversion rounds down.
+    /// @param snap Position, global-index, maximum-profit, and unsettled-carry snapshot.
     /// @return Pending carry in 6-decimal settlement token.
     function _pendingCarryAssets(
         CfdEnginePlanTypes.RawSnapshot memory snap
     ) private pure returns (uint256) {
-        if (snap.position.size == 0 || snap.positionBorrowBaseAssets == 0) {
+        if (snap.position.size == 0 || snap.position.maxProfitAssets == 0) {
             return snap.unsettledCarryAssets;
         }
-        CfdEnginePlanTypes.SideSnapshot memory side = _selectedSide(snap, snap.position.side);
-        if (side.carryIndex <= snap.positionLastCarryIndex) {
+        if (snap.carryIndex <= snap.positionLastCarryIndex) {
             return snap.unsettledCarryAssets;
         }
         return snap.unsettledCarryAssets
             + PositionRiskAccountingLib.computeIndexedCarryAssets(
-            snap.positionBorrowBaseAssets, side.carryIndex - snap.positionLastCarryIndex
+            snap.position.maxProfitAssets, snap.carryIndex - snap.positionLastCarryIndex
         );
     }
 
@@ -601,13 +600,13 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap
     ) internal pure returns (uint256 collectedAssets) {
         collectedAssets = _applyPendingCarryRealizationToSnapshot(snap, _pendingCarryAssets(snap), false);
-        snap.positionLastCarryIndex = _selectedSide(snap, snap.position.side).carryIndex;
+        snap.positionLastCarryIndex = snap.carryIndex;
         snap.position.lastCarryTimestamp = uint64(snap.currentTimestamp);
     }
 
     /// @notice Projects margin-first carry collection before trade validation and terminal settlement.
-    /// @dev Mutates the existing local snapshot in place, including custody, pledge, side margin, borrow base, and
-    ///      pool depth. Uncovered carry remains available for existing terminal recovery/waiver rules.
+    /// @dev Mutates the existing local snapshot in place, including custody, pledge, side margin, and pool depth.
+    ///      Carry accrues on full maximum-profit exposure. Uncovered carry remains available for terminal recovery or waiver.
     /// @param snap Canonical, internally consistent snapshot to mutate.
     /// @param pendingCarryAssets Carry requested for realization.
     /// @param includeProtected Whether reducing settlement can collect from protected pledge and released top-ups.
@@ -640,12 +639,7 @@ library CfdEnginePlanLib {
         if (snap.protectedPositionMarginAssets > snap.position.margin) {
             snap.protectedPositionMarginAssets = snap.position.margin;
         }
-        uint256 borrowBaseAfterAssets = PositionRiskAccountingLib.computeBorrowBaseAssets(
-            snap.position.maxProfitAssets, snap.position.margin - snap.protectedPositionMarginAssets
-        );
-        selected.borrowBaseAssets = selected.borrowBaseAssets - snap.positionBorrowBaseAssets + borrowBaseAfterAssets;
-        snap.positionBorrowBaseAssets = borrowBaseAfterAssets;
-        snap.positionLastCarryIndex = selected.carryIndex;
+        snap.positionLastCarryIndex = snap.carryIndex;
         snap.unsettledCarryAssets = consumption.uncoveredAssets;
         snap.poolAssets += realizedCarryAssets;
         snap.poolCashAssets += realizedCarryAssets;

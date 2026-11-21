@@ -37,7 +37,7 @@ interface ICfdEngineAdminHost {
 
     /// @notice Applies finalized risk parameters, execution fee, frozen close spread, and settlement buffer.
     /// @dev Callable only by the engine's configured admin. The admin owns validation and timelock enforcement; the
-    ///      engine advances carry indexes before changing the carry rate.
+    ///      engine advances the carry index before changing the carry rate.
     /// @param config Risk configuration to apply
     function applyRiskConfig(
         EngineRiskConfig calldata config

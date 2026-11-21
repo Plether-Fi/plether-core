@@ -150,7 +150,7 @@ interface ICfdEngineLens {
 
     /// @notice Simulates a close/decrease at caller-supplied pool depth.
     /// @dev Treats `poolDepthAssets` as both solvency assets and available pool cash; it does not read hypothetical token
-    ///      custody or mutate protocol state. Carry-index projection still uses live effective HousePool assets. The
+    ///      custody or mutate protocol state. Carry uses the engine's projected global index. The
     ///      execution price is clamped to the engine cap.
     /// @param account Account whose position would be closed
     /// @param sizeDelta Position size to close (18 decimals)
@@ -189,8 +189,8 @@ interface ICfdEngineLens {
 
     /// @notice Simulates liquidation at caller-supplied pool depth.
     /// @dev Models pending-bounty forfeiture and treats the supplied depth as both solvency assets and pool cash; it
-    ///      does not mutate queues or custody and does not validate oracle freshness. Carry-index projection still uses
-    ///      live effective HousePool assets.
+    ///      does not mutate queues or custody and does not validate oracle freshness. Carry uses the engine's projected
+    ///      global index.
     /// @param account Account whose position would be tested
     /// @param oraclePrice Candidate liquidation execution price (8 decimals)
     /// @param poolDepthAssets Caller-supplied hypothetical solvency assets and available cash in settlement token

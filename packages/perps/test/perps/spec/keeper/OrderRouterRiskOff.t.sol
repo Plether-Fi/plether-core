@@ -114,7 +114,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         assertEq(uint256(_orderRecord(orderId).status), uint256(IOrderRouterAccounting.OrderStatus.Failed));
     }
 
-    function test_RiskOffRefundReleasesProtectedTopUpAndCheckpointsAccruedCarry() public {
+    function test_RiskOffRefundReleasesProtectedTopUpAndPreservesAccruedCarry() public {
         _open(ALICE, CfdTypes.Side.LONG, 20_000e18, 5000e6, MARK_PRICE);
         uint64 orderId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         uint256 topUp = 1500e6;
@@ -128,8 +128,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         vm.warp(vm.getBlockTimestamp() + 1 days);
         uint256 accruedCarry = _expectedIndexedCarryAssets(ALICE);
         assertGt(accruedCarry, 0);
-        uint256 expectedCarry = engine.unsettledCarryAssets(ALICE) + accruedCarry;
-        uint256 borrowBaseBefore = _positionBorrowBaseAssets(ALICE);
+        uint256 eligiblePledgeBefore = clearinghouse.eligiblePositionMarginAssets(ALICE);
         uint256 expectedRefund = _remainingCommittedMargin(orderId) + _executionBountyReserve(orderId);
         uint256 freeBefore = _freeSettlementAssets(ALICE);
         uint256 keeperBefore = _settlementBalance(KEEPER);
@@ -146,16 +145,15 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         (pledged, released) = clearinghouse.protectedTopUps(ALICE);
         assertEq(pledged + released, 0);
         assertEq(_positionHash(ALICE), beforeRefund.positionHash);
+        assertEq(clearinghouse.eligiblePositionMarginAssets(ALICE), eligiblePledgeBefore + topUp);
         assertEq(_freeSettlementAssets(ALICE), freeBefore + expectedRefund);
         assertEq(_settlementBalance(ALICE), beforeRefund.settlementBalanceAssets);
         assertEq(_settlementBalance(KEEPER), keeperBefore);
         assertEq(settlementToken.balanceOf(address(pool)), beforeRefund.poolAssets);
         assertEq(settlementToken.balanceOf(address(clearinghouse)), beforeRefund.clearinghouseAssets);
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), pythCallsBefore);
-        assertEq(engine.unsettledCarryAssets(ALICE), expectedCarry);
-        assertEq(_expectedIndexedCarryAssets(ALICE), 0);
-        assertEq(_lastCarryTimestamp(ALICE), vm.getBlockTimestamp());
-        assertEq(_positionBorrowBaseAssets(ALICE), borrowBaseBefore - topUp);
+        assertEq(_carryHash(ALICE), beforeRefund.carryHash);
+        assertEq(_expectedIndexedCarryAssets(ALICE), accruedCarry);
     }
 
     function test_Exactly64Of65RiskOffHeadsRefundThenResume() public {
@@ -518,7 +516,10 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         _open(RESTORED, CfdTypes.Side.LONG, 10_000e18, 250e6, MARK_PRICE);
         uint64 invalidOpenId = _commitOpen(RESTORED, CfdTypes.Side.LONG, 100e18, 49e6);
         routerAdmin.pause();
-        vm.warp(block.timestamp + 365 days);
+        // $10,000 maximum profit at 5% annually accrues $1.369863 in one day.
+        // Together with the seeded $20 shortfall, this is covered by the $49 margin refund.
+        vm.warp(block.timestamp + 1 days);
+        assertEq(_expectedIndexedCarryAssets(RESTORED), 1_369_863);
         _seedCarryDelinquencyWithPriceClaim();
 
         assertTrue(
@@ -588,7 +589,10 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         _open(RESTORED, CfdTypes.Side.LONG, 10_000e18, 250e6, MARK_PRICE);
         uint64 invalidOpenId = _commitOpen(RESTORED, CfdTypes.Side.LONG, 100e18, 49e6);
         routerAdmin.pause();
-        vm.warp(block.timestamp + 365 days);
+        // $10,000 maximum profit at 5% annually accrues $1.369863 in one day.
+        // Together with the seeded $20 shortfall, this is covered by the $49 margin refund.
+        vm.warp(block.timestamp + 1 days);
+        assertEq(_expectedIndexedCarryAssets(RESTORED), 1_369_863);
         _seedCarryDelinquencyWithPriceClaim();
 
         assertTrue(
@@ -695,17 +699,15 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     function _carryHash(
         address account
     ) internal view returns (bytes32) {
-        (uint256 borrowBase, uint256 carryIndex, uint64 carryTimestamp) = engine.positionCarryState(account);
+        (uint256 maxProfitAssets, uint256 carryIndex, uint64 carryTimestamp) = engine.positionCarryState(account);
         return keccak256(
             abi.encode(
-                borrowBase,
+                maxProfitAssets,
                 carryIndex,
                 carryTimestamp,
                 engine.unsettledCarryAssets(account),
-                engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)),
-                engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG)),
-                engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)),
-                engine.sideCarryTimestamp(uint256(CfdTypes.Side.SHORT))
+                engine.carryIndex(),
+                engine.carryTimestamp()
             )
         );
     }

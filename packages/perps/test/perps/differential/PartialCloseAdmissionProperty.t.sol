@@ -95,17 +95,17 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
         _open(ACCOUNT, CfdTypes.Side.LONG, 100 * CfdTypes.SIZE_QUANTUM, 1_003_200_000, 80_000_000);
         assertEq(pool.totalAssets(), 1_002_000e6);
         vm.warp(block.timestamp + 1 days);
-        // Golden vector: $7008 borrow / $1,002,000 depth -> 69 utilization bps. At 500 annual bps,
-        // one day advances index by 945205479452 and assesses exactly 6623 settlement token atoms.
+        // Golden vector: $8000 maximum profit at 5% annually owes $1.095890 over one day.
+        // The one-day index is 136986301369863 regardless of pledge and pool depth.
         uint256 cashBefore = settlementToken.balanceOf(address(pool));
         _close(ACCOUNT, CfdTypes.Side.LONG, 50 * CfdTypes.SIZE_QUANTUM, 80_000_000);
-        assertEq(clearinghouse.balanceAssets(ACCOUNT), 1000e6 - 6623 - 1_600_000);
-        assertEq(settlementToken.balanceOf(address(pool)), cashBefore + 6623);
-        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), 945_205_479_452);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), 1000e6 - 1_095_890 - 1_600_000);
+        assertEq(settlementToken.balanceOf(address(pool)), cashBefore + 1_095_890);
+        assertEq(engine.carryIndex(), 136_986_301_369_863);
         assertEq(engine.unsettledCarryAssets(ACCOUNT), 0);
         (uint256 size, uint256 pledge,,,,,) = engine.positions(ACCOUNT);
         assertEq(size, 50 * CfdTypes.SIZE_QUANTUM);
-        assertEq(pledge, 495_996_689, "Carry is collected once before proportional release, retaining the odd atom");
+        assertEq(pledge, 495_452_055, "Carry is collected once before proportional release, retaining the odd atom");
     }
 
     function test_UnfundedCarryRejectsPublicPartialCommitAndRollsBack() public {
@@ -118,15 +118,15 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
         _open(ACCOUNT, CfdTypes.Side.LONG, 100 * CfdTypes.SIZE_QUANTUM, 131_200_001, 80_000_000);
         assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), 120_000_001, "Open equity exceeds initial margin by one atom");
         assertEq(clearinghouse.liquidationReserveAssets(ACCOUNT), 8e6);
-        // $7879.999999 borrow, 78 utilization bps, and 100 years produce $307.319999 carry. Only $120.000001
-        // pledge is collectible; the separate $8 liquidation reserve remains protected, leaving $187.319998 arrears.
+        // $8000 maximum profit at 5% annually over 100 years produces $40,000 carry. Only $120.000001
+        // pledge is collectible; the separate $8 liquidation reserve stays protected, leaving $39,879.999999 arrears.
         vm.warp(block.timestamp + 100 * 365 days);
         vm.prank(address(router));
         engine.updateMarkPrice(80_000_000, uint64(block.timestamp));
         bytes32 beforeState = _state();
         uint64 nextId = router.nextCommitId();
         vm.expectRevert(
-            abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector, 187_319_998)
+            abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector, 39_879_999_999)
         );
         vm.prank(ACCOUNT);
         router.commitOrder(CfdTypes.Side.LONG, 50 * CfdTypes.SIZE_QUANTUM, 0, 80_000_000, true);
@@ -167,18 +167,11 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
     }
 
     function _carryState() private view returns (bytes32) {
-        (uint256 borrowBase, uint256 lastIndex, uint64 lastTimestamp) = engine.positionCarryState(ACCOUNT);
-        return keccak256(
-            abi.encode(
-                borrowBase,
-                lastIndex,
-                lastTimestamp,
-                engine.sideCarryIndex(0),
-                engine.sideCarryIndex(1),
-                engine.sideCarryTimestamp(0),
-                engine.sideCarryTimestamp(1)
-            )
-        );
+        (uint256 maxProfitAssets, uint256 lastIndex, uint64 lastTimestamp) = engine.positionCarryState(ACCOUNT);
+        return
+            keccak256(
+                abi.encode(maxProfitAssets, lastIndex, lastTimestamp, engine.carryIndex(), engine.carryTimestamp())
+            );
     }
 
     function _state() private view returns (bytes32) {

@@ -156,7 +156,7 @@ contract ProtectedTopUpInvariantHandler is Test {
     }
 
     function assertModel() external view {
-        uint256 expectedSideBorrow;
+        uint256 expectedSideExposure;
         for (uint256 i; i < 2; ++i) {
             AccountModel storage account = accounts[i];
             address trader = traders[i];
@@ -173,13 +173,13 @@ contract ProtectedTopUpInvariantHandler is Test {
             assertEq(buckets.freeSettlementAssets, account.custody - _locked(account));
             (uint256 size,,,,,,) = engine.positions(trader);
             assertEq(size, account.live ? SIZE : 0);
-            (uint256 borrowBase,,) = engine.positionCarryState(trader);
-            uint256 expectedBorrow =
-                account.live && account.ordinaryPledge < POSITION_VALUE ? POSITION_VALUE - account.ordinaryPledge : 0;
-            assertEq(borrowBase, expectedBorrow);
-            expectedSideBorrow += expectedBorrow;
+            (uint256 carryExposure,,) = engine.positionCarryState(trader);
+            uint256 expectedExposure = account.live ? POSITION_VALUE : 0;
+            assertEq(carryExposure, expectedExposure);
+            expectedSideExposure += expectedExposure;
         }
-        assertEq(engine.sideBorrowBaseAssets(uint8(CfdTypes.Side.LONG)), expectedSideBorrow);
+        (uint256 sideExposure,,,) = engine.sides(uint8(CfdTypes.Side.LONG));
+        assertEq(sideExposure, expectedSideExposure);
     }
 
     function _expire(

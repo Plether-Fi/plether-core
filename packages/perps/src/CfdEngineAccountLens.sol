@@ -173,8 +173,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
     /// @notice Returns a compact projection of the expanded account ledger snapshot.
     /// @dev The function still builds the full cached-mark risk snapshot before discarding its position fields. It
-    ///      therefore requires a configured ABI-compatible order router and, when nonzero borrow-base carry must be
-    ///      projected for an open position, a compatible pool.
+    ///      therefore requires a configured ABI-compatible order router. Carry projection does not read the pool.
     /// @param account Clearinghouse account to inspect.
     /// @return viewData Custody, router reservation, claim, and pending-order values; monetary fields use 6-decimal settlement token.
     function getAccountLedgerView(
@@ -201,8 +200,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ///      rejects an underfunded snapshot before returning a settlement plan. Excess reserve never adds price
     ///      collateral. The separate terminal-price cap excludes action reserves and clips price collateral to the
     ///      reachable endpoint. A flat account still returns raw ledger values but leaves every position and risk field,
-    ///      including net equity, at its zero default. Projecting nonzero borrow-base carry additionally requires a
-    ///      compatible pool.
+    ///      including net equity, at its zero default. Carry projection is independent of the pool.
     /// @param account Clearinghouse account to inspect.
     /// @return snapshot Expanded account snapshot; settlement token values use 6 decimals, size 18, and entry price 8.
     function getAccountLedgerSnapshot(
@@ -213,7 +211,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
     /// @notice Builds raw custody fields and, when a position exists, cached-mark terminal risk.
     /// @param account Clearinghouse account to inspect.
-    /// @return snapshot Expanded account snapshot assembled from engine, clearinghouse, router, and pool state.
+    /// @return snapshot Expanded account snapshot assembled from engine, clearinghouse, and router state.
     function _buildAccountLedgerSnapshot(
         address account
     ) internal view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
@@ -358,7 +356,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             candidateCapAssets < maximumCollectibleAssets ? candidateCapAssets : maximumCollectibleAssets;
     }
 
-    /// @notice Reconstructs the current position plus its separately stored carry timestamp.
+    /// @notice Loads the current position fields used by this lens.
     /// @param account Account whose position is loaded.
     /// @return pos Current engine position.
     function _position(
@@ -366,50 +364,26 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ) internal view returns (CfdTypes.Position memory pos) {
         (pos.size, pos.margin, pos.entryPrice, pos.maxProfitAssets, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engineContract.positions(account);
-        (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
     }
 
-    /// @notice Computes indexed carry accrued since the position's last side-index checkpoint.
+    /// @notice Computes indexed carry accrued since the position's last global-index checkpoint.
     /// @dev This excludes carry already stored in `unsettledCarryAssets`.
     /// @param account Account whose carry basis is loaded.
-    /// @param pos Current position, used to select the side index.
+    /// @param pos Current position, including maximum-profit exposure.
     /// @return Elapsed carry in 6-decimal settlement token units.
     function _elapsedCarryAssets(
         address account,
         CfdTypes.Position memory pos
     ) internal view returns (uint256) {
-        if (pos.size == 0) {
+        if (pos.maxProfitAssets == 0) {
             return 0;
         }
-        (uint256 borrowBaseAssets, uint256 startIndex,) = engineContract.positionCarryState(account);
-        if (borrowBaseAssets == 0) {
-            return 0;
-        }
-        uint256 endIndex = _currentSideCarryIndex(pos.side);
+        (, uint256 startIndex,) = engineContract.positionCarryState(account);
+        uint256 endIndex = engineContract.currentCarryIndex();
         if (endIndex <= startIndex) {
             return 0;
         }
-        return PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, endIndex - startIndex);
-    }
-
-    /// @notice Projects a side's cumulative carry index through the current block timestamp.
-    /// @param side Position side whose stored index is projected.
-    /// @return Current cumulative carry index, scaled by 1e18.
-    function _currentSideCarryIndex(
-        CfdTypes.Side side
-    ) internal view returns (uint256) {
-        uint256 sideIndex = uint256(side);
-        (,,,,, uint256 baseCarryBps,,,,) = engineContract.riskParams();
-        return PositionRiskAccountingLib.computeCurrentCarryIndex(
-            engineContract.sideCarryIndex(sideIndex),
-            engineContract.sideCarryTimestamp(sideIndex),
-            block.timestamp,
-            engineContract.sideBorrowBaseAssets(sideIndex),
-            PositionRiskAccountingLib.computeNetPoolDepthAssets(
-                engineContract.pool().totalAssets(), engineContract.totalTraderClaimBalanceAssets()
-            ),
-            baseCarryBps
-        );
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(pos.maxProfitAssets, endIndex - startIndex);
     }
 
     /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.

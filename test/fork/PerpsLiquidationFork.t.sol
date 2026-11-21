@@ -36,9 +36,10 @@ contract PerpsLiquidationForkTest is BasePerpTest {
     uint256 internal constant PRICE_LOSS_ASSETS = 1_209_881_000;
     uint256 internal constant LIQUIDATION_CHARGE_ASSETS = 96_458_009;
     uint256 internal constant KEEPER_BOUNTY_ASSETS = 48_229_004;
-    // floor(100468.845046 settlement tokens * 5% annual rate * 0.1002 utilization * 879494 / 31536000) = 14.037682 settlement tokens.
-    // Utilization is floored to 1002 bps against the fixed 1,002,000-token pool; indexed rounding gives the same atoms.
-    uint256 internal constant CARRY_ASSETS = 14_037_682;
+    // SHORT maximum profit = 100,000 * (2 - 0.97667890) = 102,332.11 settlement tokens.
+    // Flat 5% carry over the 879,494 seconds between the pinned execution times is 142.694819 tokens
+    // after the index and settlement-atom floors; neither trader margin nor pool utilization discounts it.
+    uint256 internal constant CARRY_ASSETS = 142_694_819;
     uint256 internal constant ETH_SURPLUS = 1 gwei;
 
     string internal openingFixture;
@@ -110,6 +111,12 @@ contract PerpsLiquidationForkTest is BasePerpTest {
         assertEq(beforeBuckets.orderMarginAssets, 0);
         assertGt(beforeBuckets.pnlPledgeAssets, PRICE_LOSS_ASSETS, "signed move leaves positive price equity");
         assertGt(beforeBuckets.liquidationReserveAssets, LIQUIDATION_CHARGE_ASSETS);
+        assertEq(
+            vm.parseJsonUint(liquidationFixture, ".executionTimestamp")
+                - vm.parseJsonUint(openingFixture, ".executionTimestamp"),
+            879_494,
+            "pinned holding interval"
+        );
         uint256 poolCashBefore = settlementToken.balanceOf(address(pool));
         uint256 clearingCashBefore = settlementToken.balanceOf(address(clearinghouse));
         uint256 keeperCreditBefore = clearinghouse.balanceAssets(KEEPER);
@@ -184,9 +191,9 @@ contract PerpsLiquidationForkTest is BasePerpTest {
         assertEq(margin, 0);
         assertEq(engine.positionEntryCostAssetAtoms(TRADER), 0);
         assertEq(engine.unsettledCarryAssets(TRADER), 0);
-        (uint256 borrowBase, uint256 carryIndex, uint64 carryTime) = engine.positionCarryState(TRADER);
-        assertEq(borrowBase, 0);
-        assertEq(carryIndex, 0);
+        (uint256 maxProfitAssets, uint256 positionCarryIndex, uint64 carryTime) = engine.positionCarryState(TRADER);
+        assertEq(maxProfitAssets, 0);
+        assertEq(positionCarryIndex, 0);
         assertEq(carryTime, 0);
         assertEq(engine.traderClaimBalanceAssets(TRADER), 0);
         ICfdEngineTypes.TerminalNavSnapshot memory nav = engine.terminalNavSnapshot();
@@ -260,9 +267,10 @@ contract PerpsLiquidationForkTest is BasePerpTest {
         assertEq(receipt.account, TRADER);
         assertEq(receipt.executionPrice, OPEN_PRICE);
         assertEq(receipt.oraclePublishTime, 1_790_091_398);
-        (uint256 size,, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(TRADER);
+        (uint256 size,, uint256 entryPrice, uint256 maxProfitAssets, CfdTypes.Side side,,) = engine.positions(TRADER);
         assertEq(size, POSITION_SIZE);
         assertEq(entryPrice, OPEN_PRICE);
+        assertEq(maxProfitAssets, 102_332_110_000, "full capped maximum profit supplies the flat carry basis");
         assertEq(uint256(side), uint256(CfdTypes.Side.SHORT));
         assertEq(engine.lastMarkPrice(), OPEN_MARK);
         _assertStoredTimes(vm.parseJsonUintArray(openingFixture, ".publishTimes"));
@@ -279,7 +287,7 @@ contract PerpsLiquidationForkTest is BasePerpTest {
         (uint256 size, uint256 margin, uint256 entry, uint256 maxProfit, CfdTypes.Side side, uint64 time, int256 vpi) =
             engine.positions(TRADER);
         (bool accepted, uint256 mark, uint64 publishTime) = pletherOracle.getAcceptedBasketMark();
-        (uint256 borrowBase, uint256 carryIndex, uint64 carryTime) = engine.positionCarryState(TRADER);
+        (, uint256 positionCarryIndex, uint64 carryTime) = engine.positionCarryState(TRADER);
         return keccak256(
             abi.encode(
                 size,
@@ -289,8 +297,7 @@ contract PerpsLiquidationForkTest is BasePerpTest {
                 side,
                 time,
                 vpi,
-                borrowBase,
-                carryIndex,
+                positionCarryIndex,
                 carryTime,
                 engine.unsettledCarryAssets(TRADER),
                 engine.positionEntryCostAssetAtoms(TRADER),

@@ -106,7 +106,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         uint64 first = _bountyCommit(trader, CfdTypes.Side.LONG, false, BOUNTY_SIZE, 1000e6);
         uint64 last = _bountyCommit(trader, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
         uint256 initialPledge = clearinghouse.pnlPledgeAssets(trader);
-        (uint256 initialBorrowBase,,) = engine.positionCarryState(trader);
+        uint256 initialCarryExposure = _positionMaxProfitAssets(trader);
         assertTrue(engineLens.isLiquidatableAt(trader, 1.2e8, pool.totalAssets()));
 
         vm.startPrank(trader);
@@ -119,8 +119,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         assertEq(pledged, 3000e6);
         assertEq(released, 0);
         assertEq(clearinghouse.pnlPledgeAssets(trader), initialPledge + pledged);
-        (uint256 borrowBase,,) = engine.positionCarryState(trader);
-        assertEq(borrowBase, initialBorrowBase);
+        assertEq(_positionMaxProfitAssets(trader), initialCarryExposure);
         assertFalse(engineLens.isLiquidatableAt(trader, 1.2e8, pool.totalAssets()));
         assertEq(
             engineLens.previewOpenRevertCode(trader, CfdTypes.Side.LONG, 150_000e18, 300e6, BOUNTY_PRICE),

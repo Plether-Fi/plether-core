@@ -283,15 +283,11 @@ contract ProtectedTopUpSettlementTest is Test {
         snapshot.position.maxProfitAssets = 10_000e6;
         snapshot.position.margin = clearinghouse.pnlPledgeAssets(TRADER);
         snapshot.positionEntryCostAssetAtoms = CfdMath.sizeToLots(snapshot.position.size) * snapshot.position.entryPrice;
-        snapshot.positionBorrowBaseAssets =
-            snapshot.position.maxProfitAssets - clearinghouse.eligiblePositionMarginAssets(TRADER);
         snapshot.longSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitAssets: snapshot.position.maxProfitAssets,
             openInterest: snapshot.position.size,
             entryNotional: snapshot.positionEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
-            totalMargin: snapshot.position.margin,
-            borrowBaseAssets: snapshot.positionBorrowBaseAssets,
-            carryIndex: 0
+            totalMargin: snapshot.position.margin
         });
         snapshot.poolAssets = 1_000_000e6;
         snapshot.poolCashAssets = 1_000_000e6;

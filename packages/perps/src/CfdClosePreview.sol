@@ -77,7 +77,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
                 revert IOrderLifecycleBook.OrderLifecycleBook__ClientIdDomainMismatch(request.clientOrderId, false);
             }
             ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
-            snapshot = _buildRawSnapshot(engine, planner, account, IHousePool(engine.pool()).totalAssets());
+            snapshot = _buildRawSnapshot(engine, account, IHousePool(engine.pool()).totalAssets());
             preview.commitment = CloseCommitmentLib.project(snapshot, request.sizeDelta);
             preview.commitmentCarryAssets = preview.commitment.carryCollectedAssets;
             delta = planner.planClose(snapshot, _requestOrder(account, request), executionPrice);
@@ -124,7 +124,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
-            _buildRawSnapshot(engine, planner, order.account, IHousePool(engine.pool()).totalAssets());
+            _buildRawSnapshot(engine, order.account, IHousePool(engine.pool()).totalAssets());
         return _previewSnapshot(planner, snapshot, order, engine.orderRouter(), executor, executionPrice, bounds);
     }
 
