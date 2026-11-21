@@ -709,18 +709,21 @@ Rules:
 - carry accrues continuously by wall-clock time,
 - carry does not pause when the oracle is stale or frozen,
 - both sides pay when they have nonzero maximum-profit exposure, regardless of margin or pool depth,
-- guard, open/modify, withdrawal, close, and liquidation paths allocate pending carry to canonical active position
-  margin first, then free settlement. Collection protects all other locked buckets and same-account trader claims,
+- ordinary collection uses eligible active pledge first, then free settlement. Close and liquidation execution
+  project and collect from the full active pledge, then free settlement, then released top-ups. These sources
+  leave other locked buckets and same-account trader claims intact,
 - projected price-risk health uses the remaining margin plus same-account claim and exact price PnL. Fully collected
   carry is not an independent delinquency, but its margin debit can cause a maintenance breach,
-- any uncovered carry remainder means both margin and free settlement are exhausted; it blocks withdrawal and
-  independently makes the account liquidatable. A trader claim cannot pay that remainder,
-- claim payments and keeper bounty credits first collect all available margin and free settlement toward carry,
+- carry left uncovered by the withdrawal projection blocks withdrawal. Carry left uncovered by the liquidation
+  projection independently makes the account liquidatable,
+- claim payments and keeper bounty credits first collect carry from eligible active pledge and free settlement,
   retaining any unpaid remainder. Then the full credit is applied: paid claims become pledge for live positions,
   bounties become free settlement. No second collection pass or waiver occurs; a later checkpoint can collect that
   credit even at the same timestamp, without reassessing elapsed carry,
 - stored `unsettledCarryAssets` may therefore coexist with new backing immediately after a credit. Health checks project
   collection from current buckets; stored arrears alone do not prove carry delinquency,
+- final order cleanup promotes protected pledge to eligible pledge and frees released top-ups. This changes
+  custody eligibility independently of the position's maximum-profit exposure and carry accrual,
 - claim service still requires pool cash to cover all outstanding trader claims after carry collection. Collected carry
   may enable that payout; insufficient cash or any later failure reverts the entire collection and credit,
 - the global carry index advances before position-exposure or annual-rate changes. Engine-owned collateral,
@@ -773,11 +776,12 @@ collectible cap continue to describe custody before collection. Price-risk equit
 margin and free settlement, respectively; same-account claims contribute to price equity without funding carry.
 
 For every checkpoint sequence, `starting arrears + newly accrued carry = margin collected + free settlement collected
-+ ending arrears`. At a terminal action, reconcile any remaining arrears separately against terminal recovery and waiver.
++ released top-ups collected + ending arrears`. At a terminal action, reconcile any remaining arrears separately
+against terminal recovery and waiver.
 An ordinary close commitment collects applicable carry without reserving a bounty from free settlement or position pledge.
-Zero free settlement alone does not prevent commitment. Partial commitments still require no unpaid carry and strict
-post-carry maintenance/FAD health; full commitments retain their separate rules. The zero bounty does not bypass
-carry or admission checks.
+Zero free settlement alone does not prevent commitment. For a partial commitment, the projected reducing settlement
+must cover any remaining carry and leave strict post-carry maintenance/FAD health. Full commitments retain their
+separate admission rules.
 
 ## Trader Claim Liabilities
 
@@ -959,9 +963,10 @@ trigger rewards, and liquidation rewards remain paid incentives. A zero reward d
 or guarantee that every partial reduction passes its health and financial limits.
 
 Ordinary close commitment validates the position, queued exposure, direction, size quantum, minimum partial size,
-carry and financial bounds. It collects carry from pledge first, then free settlement, protecting other reservations. A partial
-commitment requires fully collected carry and strict maintenance/FAD health. Full-close commitment may retain unpaid
-carry under its own admission rules. Collected commitment carry is included exactly once in gross account debit,
+carry, and financial bounds. It collects carry from eligible active pledge first, then free settlement. Partial
+commitment requires that reducing settlement can cover any remaining carry and preserve strict maintenance/FAD
+health. Full-close commitment may retain unpaid carry under its own admission rules. Collected commitment carry is
+included exactly once in gross account debit,
 assessed/collected action charges, and carry totals for the user's financial bounds. The Book records custody before
 and after commitment and any carry still outstanding.
 
@@ -1053,21 +1058,21 @@ When a close realizes a loss:
    or protocol debt; a partial close still requires a healthy residual position,
 4. handle still-unpaid carry, VPI, fees, and spreads through their separate settlement paths; those distinct
    charges retain their explicit partial-close collection policy,
-5. on a full close, release the unused post-carry, post-price-loss pledge and liquidation reserve into free settlement
-   before collecting action charges; waive only the shortfall after all eligible funds are exhausted,
+5. on a full close, release the remaining liquidation reserve and the post-carry, post-price-loss pledge for
+   settlement. Encumber any unused protected portion as released top-ups while orders remain pending. Waive only the
+   shortfall after all eligible funds are exhausted,
 6. atomically replace or remove the account's terminal curve, including the residual position's updated collectible
    cap, before the transition completes.
 
 Required properties:
 
 - full closes withhold new price gains and settle dedicated VPI backing first, then collect generic action charges
-  from spendable action reserve, free settlement (including released liquidation reserve and unused VPI backing), safely released pledge, and finally
-  committed-order margin in FIFO order. Protected execution bounties and existing trader claims cannot pay action
-  charges. A waiver at the engine settlement boundary implies no eligible cash remains; later router bounty credits
-  and protected-reservation refunds are separate transitions,
+  from spendable action reserve, free settlement (including released liquidation reserve and unused VPI backing),
+  safely released pledge from the current close, previously released top-ups, and finally committed-order margin in
+  FIFO order. A waiver at the engine settlement boundary implies no eligible cash remains,
 - partial closes retain the current health- and terminal-cap-safe pledge funding policy, but cannot use released
-  liquidation reserve or committed-order margin for action charges and still reject a shortfall. Liquidation's
-  separate charge and bounty allocation is unchanged,
+  liquidation reserve or committed-order margin for action charges. Previously released top-ups can fund the charge
+  before a remaining shortfall causes the partial close to reject,
 - price-loss write-off never creates a receivable; a partial close still requires a healthy residual position and
   full collection of its required action charges,
 - a price payout, after any action charge withheld from the gain, is paid in full only when unreserved pool cash
@@ -1195,9 +1200,9 @@ Liquidation-charge rule:
 
 Required property:
 
-- liquidation eligibility first projects carry from active position margin and then free settlement, and uses the
-  reduced pledge for exact price-risk equity. Carry left uncovered by both sources independently makes the account
-  liquidatable; same-account claims remain exclusive to price-loss netting,
+- liquidation eligibility projects carry from active position margin, then free settlement, then released top-ups,
+  and uses the reduced pledge for exact price-risk equity. Carry left uncovered by those sources independently
+  makes the account liquidatable. Same-account claims contribute to price-risk equity and can settle price loss,
 - liquidation charge caps and residual planning use their typed physically eligible sources rather than folding carry
   into the price channel,
 - negative accrued VPI does not reduce pledge-plus-claim price-risk equity. Its gross target must instead remain fully backed by the
@@ -1206,7 +1211,8 @@ Required property:
   withheld trader gain before excess reserve is released,
 - the keeper/protocol charge is capped by its dedicated reserve and other explicitly eligible charge funds; it must
   never raid PnL pledge needed by price settlement,
-- an uncollectible terminal action charge is waived rather than reclassified as protocol debt or price loss,
+- the terminal action charge can use released top-ups after spendable action reserve and ordinary free settlement,
+  and before committed-order margin. Any remaining uncollectible charge is waived,
 - liquidation does not assess `frozenCloseSpreadBps`, including while `oracleFrozen`,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 

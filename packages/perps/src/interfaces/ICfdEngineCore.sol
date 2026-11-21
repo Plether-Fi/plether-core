@@ -174,6 +174,10 @@ interface ICfdEngineCore is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
+    function releaseProtectedTopUp(
+        address account
+    ) external;
+
     /// @notice Protocol cap price (8 decimals). Oracle prices are clamped to this.
     /// @return Maximum supported oracle price
     function CAP_PRICE() external view returns (uint256);

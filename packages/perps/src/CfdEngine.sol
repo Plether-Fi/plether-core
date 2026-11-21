@@ -16,6 +16,7 @@ import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineS
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
@@ -491,8 +492,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     /// @notice Adds isolated margin to an existing open position without changing size.
     /// @dev The caller must equal `account`. Collectible accrued carry is realized first and any uncovered amount
     ///      remains unsettled; then clearinghouse free settlement is locked as active position margin and aggregate
-    ///      side margin accounting is refreshed; the full maximum-profit carry basis is unchanged. A zero amount
-    ///      reverts with `CfdEngine__ZeroAmount`.
+    ///      side margin accounting is refreshed. A top-up while orders are pending is protected from queued increases
+    ///      until the queue drains. Carry uses full maximum-profit exposure. A zero amount reverts with
+    ///      `CfdEngine__ZeroAmount`.
     /// @param account Position owner and required caller.
     /// @param amount Nonzero amount to move from free settlement into position margin, in 6-decimal settlement token units.
     function addMargin(
@@ -514,13 +516,27 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         _realizeCarryFromSettlement(account, pos);
 
-        clearinghouse.lockPositionMargin(account, amount);
+        clearinghouse.lockPositionTopUp(account, amount);
         _sideState(pos.side).totalMargin += amount;
         pos.lastUpdateTime = uint64(block.timestamp);
         pos.lastCarryTimestamp = uint64(block.timestamp);
         _endTerminalCurveMutation(account, expectedOldHash);
 
         emit MarginAdded(account, amount);
+    }
+
+    /// @notice Lifts the collateral restriction after the router removes the last pending order.
+    function releaseProtectedTopUp(
+        address account
+    ) external nonReentrant {
+        if (orderRouter.code.length == 0 || IOrderRouterAccounting(orderRouter).pendingOrderCounts(account) != 0) {
+            return;
+        }
+        (uint256 pledgedAssets, uint256 releasedAssets) = clearinghouse.protectedTopUps(account);
+        if (pledgedAssets == 0 && releasedAssets == 0) {
+            return;
+        }
+        clearinghouse.releaseProtectedTopUp(account);
     }
 
     /// @notice Collects available backing toward accrued carry when the clearinghouse changes an account's collateral basis.
@@ -1241,7 +1257,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
         StoredPosition storage pos = _positions[delta.account];
         CfdTypes.Side marginSide = pos.side;
-        _realizeCarryFromSettlement(delta.account, pos);
+        _realizeCarryFromSettlement(delta.account, pos, true);
         CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
         settlementSidecar.executeClose(delta, currentPosition, publishTime);
         emit PositionClosed(delta.account, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlAssets);
@@ -1258,7 +1274,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         address keeper
     ) internal returns (uint256 keeperBountyAssets) {
         bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
-        _realizeCarryFromSettlement(delta.account, _positions[delta.account]);
+        _realizeCarryFromSettlement(delta.account, _positions[delta.account], true);
         bool syncKeeper = delta.keeperBountyAssets > 0 && keeper != delta.account && _positions[keeper].lots > 0;
         bytes32 keeperExpectedOldHash;
         if (syncKeeper) {
@@ -1338,6 +1354,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     function _realizeCarryFromSettlement(
         address account,
         StoredPosition storage pos
+    ) internal returns (uint256) {
+        return _realizeCarryFromSettlement(account, pos, false);
+    }
+
+    function _realizeCarryFromSettlement(
+        address account,
+        StoredPosition storage pos,
+        bool includeProtected
     ) internal returns (uint256 realizedCarryAssets) {
         uint256 carryDueAssets = _checkpointPositionCarry(account, pos);
         if (carryDueAssets == 0) {
@@ -1350,7 +1374,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             expectedOldHash = _beginTerminalCurveMutation(account);
         }
         (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets) =
-            clearinghouse.consumeSettlementLoss(account, carryDueAssets, address(this));
+            clearinghouse.consumePositionCarry(account, carryDueAssets, address(this), includeProtected);
         realizedCarryAssets = carryDueAssets - uncoveredAssets;
         unsettledCarryAssets[account] = uncoveredAssets;
 
@@ -1367,11 +1391,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             );
         }
         emit CarryRealized(
-            account,
-            realizedCarryAssets,
-            freeSettlementConsumedAssets,
-            marginConsumedAssets,
-            unsettledCarryAssets[account]
+            account, realizedCarryAssets, freeSettlementConsumedAssets, marginConsumedAssets, uncoveredAssets
         );
         if (marginBefore > 0) {
             _endTerminalCurveMutation(account, expectedOldHash);

@@ -12,7 +12,8 @@ library AccountLensViewTypes {
     /// @param settlementBalanceAssets Total clearinghouse settlement balance, including encumbered settlement.
     /// @param freeSettlementAssets Settlement balance not assigned to a typed locked-margin bucket.
     /// @param activePositionMarginAssets Locked margin backing the account's live position.
-    /// @param otherLockedMarginAssets Locked liquidation-reserve, committed-order, and reserved-settlement margin.
+    /// @param otherLockedMarginAssets Locked liquidation reserve, committed-order margin, reserved settlement,
+    ///        and released top-ups.
     /// @param executionBountyReserveAssets Clearinghouse-custodied settlement attributed to router execution bounties.
     /// @param committedMarginAssets Margin committed through the router to pending open or increase orders.
     /// @param traderClaimBalanceAssets Unpaid trader value recorded as a protocol claim.
@@ -34,7 +35,8 @@ library AccountLensViewTypes {
     /// @param settlementBalanceAssets Total clearinghouse settlement balance, including encumbered settlement.
     /// @param freeSettlementAssets Settlement balance not assigned to a typed locked-margin bucket.
     /// @param activePositionMarginAssets Locked margin backing the account's live position.
-    /// @param otherLockedMarginAssets Locked liquidation-reserve, committed-order, and reserved-settlement margin.
+    /// @param otherLockedMarginAssets Locked liquidation reserve, committed-order margin, reserved settlement,
+    ///        and released top-ups.
     /// @param positionMarginBucketAssets Canonical clearinghouse position-margin bucket.
     /// @param committedOrderMarginBucketAssets Canonical clearinghouse pending-order margin bucket.
     /// @param reservedSettlementBucketAssets Canonical clearinghouse reserved-settlement bucket.
@@ -56,8 +58,8 @@ library AccountLensViewTypes {
     /// @param entryPrice Average position entry price, with 8 decimals.
     /// @param unrealizedPnlAssets Mark-to-market PnL at the cached engine mark, excluding pending carry and VPI.
     /// @param netEquityAssets Exact price-risk equity from projected post-carry PnL pledge, same-account claim, and
-    ///        unrealized price PnL. VPI, generic settlement, and action reserves are excluded. Carry uncovered by both
-    ///        margin and free settlement and an underfunded negative-VPI reserve independently fail health checks.
+    ///        unrealized price PnL. Carry left uncovered after projecting liquidation collection, or an underfunded
+    ///        negative-VPI reserve, independently fails the health check.
     /// @param liquidatable Whether exact price risk breaches the active margin requirement, projected carry remains
     ///        uncovered, or the negative-VPI reserve is underfunded. This cached-mark diagnostic does not validate
     ///        mark freshness; the liquidation planner rejects an underfunded VPI reserve before settlement.

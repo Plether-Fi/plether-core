@@ -13,7 +13,7 @@ library MarginClearinghouseAccountingLib {
     /// @notice Priority breakdown for a requested settlement loss.
     /// @param freeSettlementConsumedAssets Portion consumed from unlocked settlement under the selected loss policy.
     /// @param activeMarginConsumedAssets Portion consumed from active-position margin under the selected loss policy.
-    /// @param otherLockedMarginConsumedAssets Portion consumed from other locked margin; zero on the carry-loss path.
+    /// @param otherLockedMarginConsumedAssets Portion consumed from released protected top-ups in reducing settlement.
     /// @param totalConsumedAssets Total settlement balance to debit.
     /// @param uncoveredAssets Requested loss not covered by eligible settlement balance.
     struct SettlementConsumption {
@@ -86,46 +86,77 @@ library MarginClearinghouseAccountingLib {
             buckets.settlementBalanceAssets > encumberedAssets ? buckets.settlementBalanceAssets - encumberedAssets : 0;
     }
 
-    /// @notice Plans carry-loss collection from active position margin, then free settlement.
-    /// @dev Other locked buckets and trader claims remain protected. Uncovered carry is retained until collection or
+    /// @notice Plans carry collection from eligible pledge, free settlement, and any eligible released top-ups.
+    /// @dev Other reserves and trader claims remain protected. Uncovered carry is retained until collection or
     ///      terminal recovery/waiver; it is never converted into position price-loss debt.
     /// @param buckets Account bucket snapshot.
     /// @param lossAssets Carry loss requested for collection.
-    /// @return consumption Free/active consumption, total debit, and uncovered remainder.
+    /// @param protectedPledgeAssets Active pledge to exclude from collection.
+    /// @param eligibleReleasedAssets Released top-ups authorized for collection by this path.
+    /// @return consumption Consumption by bucket, total debit, and uncovered remainder.
     function planCarryLossConsumption(
         IMarginClearinghouse.AccountAssetBuckets memory buckets,
-        uint256 lossAssets
+        uint256 lossAssets,
+        uint256 protectedPledgeAssets,
+        uint256 eligibleReleasedAssets
     ) internal pure returns (SettlementConsumption memory consumption) {
-        consumption.activeMarginConsumedAssets =
-            buckets.activePositionMarginAssets < lossAssets ? buckets.activePositionMarginAssets : lossAssets;
+        uint256 eligiblePledgeAssets = buckets.activePositionMarginAssets - protectedPledgeAssets;
+        consumption.activeMarginConsumedAssets = eligiblePledgeAssets < lossAssets ? eligiblePledgeAssets : lossAssets;
         uint256 remainderAssets = lossAssets - consumption.activeMarginConsumedAssets;
         consumption.freeSettlementConsumedAssets =
             buckets.freeSettlementAssets < remainderAssets ? buckets.freeSettlementAssets : remainderAssets;
-        consumption.totalConsumedAssets =
-            consumption.activeMarginConsumedAssets + consumption.freeSettlementConsumedAssets;
+        remainderAssets -= consumption.freeSettlementConsumedAssets;
+        consumption.otherLockedMarginConsumedAssets =
+            eligibleReleasedAssets < remainderAssets ? eligibleReleasedAssets : remainderAssets;
+        consumption.totalConsumedAssets = consumption.activeMarginConsumedAssets
+            + consumption.freeSettlementConsumedAssets + consumption.otherLockedMarginConsumedAssets;
         consumption.uncoveredAssets = lossAssets - consumption.totalConsumedAssets;
     }
 
     /// @notice Projects carry allocation and the resulting account collateral without changing the input snapshot.
     /// @dev Requires canonical, internally consistent buckets. Returns a fresh bucket object: callers can retain raw
     ///      custody for diagnostics while using projected margin for price equity and projected free cash for actions.
-    ///      Claims and other locked buckets are not carry funding sources. Uncovered carry remains an obligation.
+    ///      Uncovered carry remains an obligation. Released top-ups are eligible only in reducing settlement.
     function projectCarryLoss(
         IMarginClearinghouse.AccountAssetBuckets memory buckets,
         uint256 pendingCarryAssets
+    ) internal pure returns (SettlementConsumption memory, IMarginClearinghouse.AccountAssetBuckets memory) {
+        return projectCarryLoss(buckets, pendingCarryAssets, 0, 0);
+    }
+
+    function projectCarryLoss(
+        IMarginClearinghouse.AccountAssetBuckets memory buckets,
+        uint256 pendingCarryAssets,
+        uint256 protectedPledgeAssets,
+        uint256 eligibleReleasedAssets
     )
         internal
         pure
         returns (SettlementConsumption memory consumption, IMarginClearinghouse.AccountAssetBuckets memory afterBuckets)
     {
-        consumption = planCarryLossConsumption(buckets, pendingCarryAssets);
+        consumption =
+            planCarryLossConsumption(buckets, pendingCarryAssets, protectedPledgeAssets, eligibleReleasedAssets);
         afterBuckets = IMarginClearinghouse.AccountAssetBuckets({
             settlementBalanceAssets: buckets.settlementBalanceAssets - consumption.totalConsumedAssets,
-            totalLockedMarginAssets: buckets.totalLockedMarginAssets - consumption.activeMarginConsumedAssets,
+            totalLockedMarginAssets: buckets.totalLockedMarginAssets - consumption.activeMarginConsumedAssets
+                - consumption.otherLockedMarginConsumedAssets,
             activePositionMarginAssets: buckets.activePositionMarginAssets - consumption.activeMarginConsumedAssets,
-            otherLockedMarginAssets: buckets.otherLockedMarginAssets,
+            otherLockedMarginAssets: buckets.otherLockedMarginAssets - consumption.otherLockedMarginConsumedAssets,
             freeSettlementAssets: buckets.freeSettlementAssets - consumption.freeSettlementConsumedAssets
         });
+    }
+
+    /// @dev Ordinary pledge is released and spent first. Any unused protected release stays encumbered.
+    function protectedCloseRelease(
+        uint256 pledgeAssets,
+        uint256 protectedPledgeAssets,
+        uint256 releasedPledgeAssets,
+        uint256 chargeFromReleaseAssets
+    ) internal pure returns (uint256) {
+        uint256 ordinaryPledgeAssets = pledgeAssets - protectedPledgeAssets;
+        uint256 availableToRelease =
+            ordinaryPledgeAssets > chargeFromReleaseAssets ? ordinaryPledgeAssets : chargeFromReleaseAssets;
+        return releasedPledgeAssets > availableToRelease ? releasedPledgeAssets - availableToRelease : 0;
     }
 
     /// @notice Plans how signed action cost and newly supplied margin change settlement and PnL pledge.
@@ -211,14 +242,14 @@ library MarginClearinghouseAccountingLib {
     }
 
     /// @notice Converts a carry-loss consumption plan into clearinghouse mutation amounts.
-    /// @dev Other locked margin is not unlocked on this path.
     /// @param consumption Carry-loss allocation to convert.
-    /// @return mutation Settlement debit and active-position margin consumption.
+    /// @return mutation Settlement debit and locked-margin consumption.
     function applyCarryLossMutation(
         SettlementConsumption memory consumption
     ) internal pure returns (BucketMutation memory mutation) {
         mutation.settlementDebitAssets = consumption.totalConsumedAssets;
         mutation.positionMarginUnlockedAssets = consumption.activeMarginConsumedAssets;
+        mutation.otherLockedMarginUnlockedAssets = consumption.otherLockedMarginConsumedAssets;
     }
 
 }

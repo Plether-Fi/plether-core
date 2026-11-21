@@ -100,6 +100,136 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         }
     }
 
+    function test_QueuedTopUpsProtectPositionAndBecomeEligibleAfterQueueDrains() public {
+        address trader = BOUNTY_TRADER;
+        _openFunded(CfdTypes.Side.LONG);
+        uint64 first = _bountyCommit(trader, CfdTypes.Side.LONG, false, BOUNTY_SIZE, 1000e6);
+        uint64 last = _bountyCommit(trader, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+        uint256 initialPledge = clearinghouse.pnlPledgeAssets(trader);
+        uint256 initialCarryExposure = _positionMaxProfitAssets(trader);
+        assertTrue(engineLens.isLiquidatableAt(trader, 1.2e8, pool.totalAssets()));
+
+        vm.startPrank(trader);
+        engine.addMargin(trader, 1200e6);
+        engine.addMargin(trader, 1800e6);
+        vm.stopPrank();
+        engine.releaseProtectedTopUp(trader);
+
+        (uint256 pledged, uint256 released) = clearinghouse.protectedTopUps(trader);
+        assertEq(pledged, 3000e6);
+        assertEq(released, 0);
+        assertEq(clearinghouse.pnlPledgeAssets(trader), initialPledge + pledged);
+        assertEq(_positionMaxProfitAssets(trader), initialCarryExposure);
+        assertFalse(engineLens.isLiquidatableAt(trader, 1.2e8, pool.totalAssets()));
+        assertEq(
+            engineLens.previewOpenRevertCode(trader, CfdTypes.Side.LONG, 150_000e18, 300e6, BOUNTY_PRICE),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
+        );
+
+        _bountyExecute(first, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        (pledged, released) = clearinghouse.protectedTopUps(trader);
+        assertEq(pledged, 3000e6);
+        assertEq(released, 0);
+        assertEq(
+            engineLens.previewOpenRevertCode(trader, CfdTypes.Side.LONG, 150_000e18, 300e6, BOUNTY_PRICE),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
+        );
+        _bountyExpire(last, BOUNTY_KEEPER);
+        (pledged, released) = clearinghouse.protectedTopUps(trader);
+        assertEq(pledged + released, 0);
+        assertEq(
+            engineLens.previewOpenRevertCode(trader, CfdTypes.Side.LONG, 150_000e18, 300e6, BOUNTY_PRICE),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.OK)
+        );
+    }
+
+    function test_QueuedFullCloseKeepsUnusedTopUpLockedForFollower() public {
+        address trader = BOUNTY_TRADER;
+        _openFunded(CfdTypes.Side.LONG);
+        uint64 closeId = _bountyCommit(trader, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+        uint64 openId = _bountyCommit(trader, CfdTypes.Side.SHORT, false, BOUNTY_SIZE, 1000e6);
+        vm.prank(trader);
+        engine.addMargin(trader, 3000e6);
+
+        OrderV3Types.OrderReceipt memory receipt =
+            _bountyExecute(closeId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        (uint256 pledged, uint256 released) = clearinghouse.protectedTopUps(trader);
+        assertEq(pledged, 0);
+        assertEq(released, 3000e6);
+        assertEq(clearinghouse.pnlPledgeAssets(trader), 0);
+        assertEq(clearinghouse.lockedMarginAssets(trader), 3000e6 + 1000e6 + _bountyReservation(openId).amountAssets);
+        assertEq(receipt.economics.close.postFreeSettlementAssets, clearinghouse.getFreeBuyingPowerAssets(trader));
+
+        _bountyExecute(openId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        (pledged, released) = clearinghouse.protectedTopUps(trader);
+        assertEq(pledged + released, 0);
+        assertEq(router.pendingOrderCounts(trader), 0);
+        assertEq(
+            clearinghouse.lockedMarginAssets(trader),
+            clearinghouse.pnlPledgeAssets(trader) + clearinghouse.liquidationReserveAssets(trader)
+        );
+    }
+
+    function testFuzz_PartialClosePreservesProtectedTopUpUntilQueueDrains(
+        uint256 topUpSeed
+    ) public {
+        address trader = BOUNTY_TRADER;
+        _openFunded(CfdTypes.Side.LONG);
+        uint64 first = _bountyCommit(trader, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
+        uint64 last = _bountyCommit(trader, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
+        uint256 topUp = bound(topUpSeed, 3000e6, 5000e6);
+        vm.prank(trader);
+        engine.addMargin(trader, topUp);
+
+        OrderV3Types.OrderReceipt memory receipt =
+            _bountyExecute(first, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        (uint256 pledged, uint256 released) = clearinghouse.protectedTopUps(trader);
+        assertGt(pledged, 0);
+        assertGt(released, 0);
+        assertEq(pledged + released, topUp);
+        assertLe(pledged, clearinghouse.pnlPledgeAssets(trader));
+        uint256 freeBeforeDrain = clearinghouse.getFreeBuyingPowerAssets(trader);
+        assertEq(receipt.economics.close.postFreeSettlementAssets, freeBeforeDrain);
+
+        _bountyExpire(last, BOUNTY_KEEPER);
+        (pledged,) = clearinghouse.protectedTopUps(trader);
+        assertEq(pledged, 0);
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(trader), freeBeforeDrain + released);
+    }
+
+    function test_RouterRejectsIncreaseWithInsufficientEligibleMargin() public {
+        address trader = BOUNTY_TRADER;
+        _openFunded(CfdTypes.Side.LONG);
+        uint64 orderId = _bountyCommit(trader, CfdTypes.Side.LONG, false, 100_000e18, 1000e6);
+        vm.prank(trader);
+        engine.addMargin(trader, 1000e6);
+        uint256 pledgeBefore = clearinghouse.pnlPledgeAssets(trader);
+
+        // An adverse price move leaves the increase below initial margin using eligible collateral.
+        OrderV3Types.OrderReceipt memory receipt =
+            _bountyExecute(orderId, 1.03e8, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Failed);
+
+        assertEq(uint8(receipt.reason), uint8(OrderV3Types.TerminalReason.PlannerRejected));
+        assertEq(receipt.failure.code, uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN));
+        (uint256 liveSize,,,,,,) = engine.positions(trader);
+        assertEq(liveSize, BOUNTY_SIZE);
+        assertEq(clearinghouse.pnlPledgeAssets(trader), pledgeBefore);
+        assertEq(router.pendingOrderCounts(trader), 0);
+    }
+
+    function test_LastQueuedCloseReportsReleasedTopUpAsFreeSettlement() public {
+        address trader = BOUNTY_TRADER;
+        _openFunded(CfdTypes.Side.LONG);
+        uint64 closeId = _bountyCommit(trader, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+        vm.prank(trader);
+        engine.addMargin(trader, 3000e6);
+
+        OrderV3Types.OrderReceipt memory receipt =
+            _bountyExecute(closeId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        assertEq(clearinghouse.lockedMarginAssets(trader), 0);
+        assertEq(receipt.economics.close.postFreeSettlementAssets, clearinghouse.getFreeBuyingPowerAssets(trader));
+    }
+
     function test_WrongSideBatchFinalizesEachItemAndExecutesFollower() public {
         _openFunded(CfdTypes.Side.LONG);
         FailedChain memory chain = _commitFailedChain(CfdTypes.Side.LONG, false);

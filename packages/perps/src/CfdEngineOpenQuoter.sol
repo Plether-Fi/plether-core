@@ -220,7 +220,7 @@ contract CfdEngineOpenQuoter {
         uint256 collateralCeiling = Math.min(
             ctx.snap.position.margin + ctx.marginDelta + ctx.snap.traderClaimBalanceForAccount, type(uint144).max
         );
-        int256 equity = SafeCast.toInt256(collateralCeiling) + ctx.pricePnl;
+        int256 equity = SafeCast.toInt256(collateralCeiling - ctx.snap.protectedPositionMarginAssets) + ctx.pricePnl;
         if (equity <= 0) {
             return 0;
         }
@@ -302,7 +302,9 @@ contract CfdEngineOpenQuoter {
         if (!affordable) {
             return false;
         }
-        int256 maxEquity = SafeCast.toInt256(maxMargin + ctx.snap.traderClaimBalanceForAccount) + ctx.pricePnl;
+        int256 maxEquity = SafeCast.toInt256(
+            maxMargin - ctx.snap.protectedPositionMarginAssets + ctx.snap.traderClaimBalanceForAccount
+        ) + ctx.pricePnl;
         uint256 minInitial = Math.max(
             Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.initMarginBps, 10_000),
             ctx.snap.riskParams.minBountyAssets

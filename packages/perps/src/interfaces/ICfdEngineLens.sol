@@ -18,10 +18,13 @@ interface ICfdEngineLens {
     /// @param preview Preview of the maximum; for zero capacity, diagnostics at the minimum notional-admissible size
     ///        (one quantum for zero price). In that case preview.sizeDelta is the attempted size, not zero.
     /// @param limitingReason Planner rejection at maxSizeDelta + SIZE_QUANTUM; for zero capacity, preview.invalidReason.
+    /// @param postEligibleEquityAssets Projected equity for open order bounds, excluding protected top-up pledge.
+    ///        Available only for a valid plan.
     struct MaxOpenQuote {
         uint256 maxSizeDelta;
         ICfdEngineTypes.OpenPreview preview;
         CfdEnginePlanTypes.OpenRevertCode limitingReason;
+        int256 postEligibleEquityAssets;
     }
 
     /// @notice Account-queue corruption prevents bounded Router-aware preview traversal.
@@ -61,7 +64,8 @@ interface ICfdEngineLens {
     /// @notice Previews an open/increase against current pool depth.
     /// @dev This is read-only and uses the caller-supplied oracle price; it does not ingest Pyth
     ///      updates, fetch Hermes data, validate timing/freshness, or mutate engine mark state. Uses current effective
-    ///      `HousePool.totalAssets()` and clamps execution economics to `CAP_PRICE`.
+    ///      `HousePool.totalAssets()` and clamps execution economics to `CAP_PRICE`. Use
+    ///      `previewOpenWithEligibleEquity` for the equity used to set order bounds.
     /// @param account Account that would open or increase the position
     /// @param side Position side
     /// @param sizeDelta Position size delta (18 decimals)
@@ -76,6 +80,23 @@ interface ICfdEngineLens {
         uint256 oraclePrice
     ) external view returns (ICfdEngineTypes.OpenPreview memory preview);
 
+    /// @notice Returns the standard open preview and the equity used for order bounds.
+    /// @dev Uses the same snapshot and plan as `previewOpen`.
+    /// @param account Account that would open or increase the position
+    /// @param side Position side
+    /// @param sizeDelta Position size delta (18 decimals)
+    /// @param marginDelta Margin supplied with the hypothetical order in settlement token
+    /// @param oraclePrice Candidate execution price (8 decimals)
+    /// @return preview Standard open preview, including full position equity for health and liquidation diagnostics
+    /// @return postEligibleEquityAssets Projected equity excluding protected top-up pledge. Zero for an invalid plan.
+    function previewOpenWithEligibleEquity(
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice
+    ) external view returns (ICfdEngineTypes.OpenPreview memory preview, int256 postEligibleEquityAssets);
+
     /// @notice Quotes the largest planner-valid open/increase at current pool depth.
     /// @dev Uses carry-adjusted bounds and an interval search that supports disconnected valid ranges. Returns an
     ///      exact, quantum-aligned result or explicitly reverts on search-budget exhaustion. Uses the same read-only
@@ -86,7 +107,7 @@ interface ICfdEngineLens {
     /// @param side Position side
     /// @param marginDelta Margin supplied with the hypothetical order in settlement token
     /// @param oraclePrice Candidate execution price (8 decimals)
-    /// @return quote Largest planner-valid increase, its complete preview, and a limiting rejection code
+    /// @return quote Largest planner-valid increase, its preview, the limiting rejection code, and eligible equity
     function quoteMaxOpen(
         address account,
         CfdTypes.Side side,

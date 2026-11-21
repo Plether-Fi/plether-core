@@ -157,8 +157,10 @@ successful cleanup transaction does not by itself establish that the position cl
 - Protection reads: `PositionProtectionBook.activePositionProtectionId(address)` and
   `PositionProtectionBook.getPositionProtection(uint64)`. Read the retained close ceilings with
   `PositionProtectionBook.closeFinancialLimits(uint64)`.
-- Open-ticket planning: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.quoteMaxOpen(...)`; these exclude Router
-  admission, bounty-reservation, and oracle-validation checks.
+- Open-ticket planning uses `CfdEngineLens.previewOpenWithEligibleEquity(...)` or
+  `CfdEngineLens.quoteMaxOpen(...)`. Use `postEligibleEquityAssets` for open-order equity and leverage bounds.
+  `previewOpen(...).postEquityAssets` and `quoteMaxOpen(...).preview.postEquityAssets` describe position health with
+  the full active pledge. Simulate Router admission, bounty reservation, and oracle validation separately.
 - Pre-commit close review: `CfdClosePreview.previewClose(...)`, which projects commitment carry and the new order's
   zero-bounty commitment before assessing execution. See the current [close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy). Continue to
   simulate the actual Router commitment for queue, deadline, configuration, and other admission checks.
