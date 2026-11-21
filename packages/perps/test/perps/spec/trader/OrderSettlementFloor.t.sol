@@ -419,13 +419,26 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         uint64 id = _commit(_request());
         uint256 beforeBalance = clearinghouse.balanceAssets(BOUNTY_TRADER);
         uint256 beforeSurplus = engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        vm.prank(BOUNTY_TRADER);
+        engine.settleTraderClaim(BOUNTY_TRADER);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), beforeBalance);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), beforeSurplus);
+        assertEq(engine.traderClaimBalanceAssets(BOUNTY_TRADER), 996_400_000);
+        _expectFloor(id, beforeSurplus + 1, true);
+
+        _bountyExpire(id, BOUNTY_KEEPER);
+        assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 0);
+        beforeBalance = clearinghouse.balanceAssets(BOUNTY_TRADER);
+        beforeSurplus = engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER);
         vm.prank(BOUNTY_TRADER);
         engine.settleTraderClaim(BOUNTY_TRADER);
         assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), beforeBalance + 996_400_000);
         assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), beforeSurplus + 996_400_000);
         assertEq(engine.unsettledCarryAssets(BOUNTY_TRADER), 0);
+        id = _commit(_request());
         assertEq(router.accountHeadOrderId(BOUNTY_TRADER), id);
-        _expectFloor(id, beforeSurplus + 996_400_000 + 1, true);
+        _expectFloor(id, engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER) + 1, true);
     }
 
 }

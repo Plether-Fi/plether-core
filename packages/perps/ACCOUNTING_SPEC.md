@@ -790,6 +790,8 @@ The protocol supports fail-soft terminal settlement.
   owner must execute through that account),
 - settlement is all-or-nothing for the account claim once aggregate trader claim liabilities are fully cash-covered,
 - settlement is credited into `MarginClearinghouse`,
+- a beneficiary cannot settle a claim while any of its orders remain pending; this keeps claim collateral available
+  through queued closes and opens, including orders that reserve no margin,
 - if the beneficiary still has a live position, paid claim value is credited directly to `pnlPledgeAssets` and the
   account's terminal curve is resynchronized; it must not become withdrawable free settlement while its value was
   already included in the marked collectible cap.

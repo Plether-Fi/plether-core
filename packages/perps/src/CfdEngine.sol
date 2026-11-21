@@ -16,6 +16,7 @@ import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineS
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
@@ -546,17 +547,24 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Settles the caller's trader claim balance into the clearinghouse.
     /// @dev The caller must equal `account`. Settlement is all-or-nothing and is available only when HousePool cash
-    ///      covers all outstanding trader claims. The global carry index and any open-position indexed carry are
-    ///      checkpointed before the pool payout and clearinghouse credit change collateral balances. Available
-    ///      margin and free settlement pay carry first, retaining arrears. The incoming claim payment is not collected
-    ///      in this call. When it becomes PnL pledge, aggregate side margin accounting is refreshed; the full
-    ///      maximum-profit carry basis is unchanged.
+    ///      covers all outstanding trader claims and the account has no pending orders. This prevents a queued close
+    ///      from releasing paid claim collateral before a later open executes. The global carry index and any
+    ///      open-position indexed carry are checkpointed before the pool payout and clearinghouse credit change
+    ///      collateral balances. Available margin and free settlement pay carry first, retaining arrears. The incoming
+    ///      claim payment is not collected in this call. When it becomes PnL pledge, aggregate side margin accounting
+    ///      is refreshed; the full maximum-profit carry basis is unchanged.
     /// @param account Claim beneficiary and required caller.
     function settleTraderClaim(
         address account
     ) external nonReentrant {
         if (msg.sender != account) {
             revert CfdEngine__NotAccountOwner();
+        }
+        if (
+            traderClaimBalanceAssets[account] != 0 && orderRouter != address(0)
+                && IOrderRouterAccounting(orderRouter).pendingOrderCounts(account) != 0
+        ) {
+            revert CfdEngine__PendingOrdersExist();
         }
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         StoredPosition storage pos = _positions[account];
