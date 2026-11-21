@@ -3,7 +3,6 @@ pragma solidity 0.8.35;
 
 import {IEntryPoint} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {
-    IKernelStakerProfile,
     IKernelV4FactoryProfile,
     PletherKernelVerifyingPaymaster
 } from "@plether/perps-aa/PletherKernelVerifyingPaymaster.sol";
@@ -18,29 +17,11 @@ interface IKernelECDSARoot {
 
 }
 
-interface IKernelEntryPointStakeInfo {
-
-    struct DepositInfo {
-        uint112 deposit;
-        bool staked;
-        uint112 stake;
-        uint32 unstakeDelaySec;
-        uint48 withdrawTime;
-    }
-
-    function getDepositInfo(
-        address account
-    ) external view returns (DepositInfo memory);
-
-}
-
 /// @notice Deploys a paused paymaster using the reviewed Kernel profile evidence for Arbitrum Sepolia.
 /// @dev The sample Kernel must be deployed through its real factory and verified by the qualification run first.
 contract DeployPletherKernelVerifyingPaymaster is Script {
 
     uint256 internal constant ARBITRUM_SEPOLIA_CHAIN_ID = 421_614;
-    uint256 internal constant MIN_STAKE = 1 ether;
-    uint32 internal constant MIN_UNSTAKE_DELAY = 1 days;
     address internal constant ENTRY_POINT_V09 = 0x433709009B8330FDa32311DF1C2AFA402eD8D009;
     bytes32 internal constant IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes32 internal constant BEACON_SLOT = 0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50;
@@ -48,7 +29,6 @@ contract DeployPletherKernelVerifyingPaymaster is Script {
         0xded5d420c407eac3c615e6abe13ab4a0bd7173e5045ea543765b46f0df6e260c;
 
     struct Profile {
-        address staker;
         address factory;
         address implementation;
         address rootValidator;
@@ -58,9 +38,6 @@ contract DeployPletherKernelVerifyingPaymaster is Script {
     error UnsupportedDeploymentChain(uint256 actual);
     error InvalidProfileCodeHash(address account, bytes32 actual, bytes32 expected);
     error InvalidSampleAccount(address account);
-    error InvalidStakerConfiguration(address staker, address factory);
-    error InvalidStakerOwner(address actual, address expected);
-    error InsufficientEntityStake(address entity);
 
     function run() external returns (PletherKernelVerifyingPaymaster paymaster) {
         if (block.chainid != ARBITRUM_SEPOLIA_CHAIN_ID) {
@@ -81,7 +58,6 @@ contract DeployPletherKernelVerifyingPaymaster is Script {
             maxSponsoredCost,
             policyId,
             profile.proxyCodeHash,
-            profile.staker,
             profile.factory,
             profile.implementation,
             profile.rootValidator
@@ -90,7 +66,6 @@ contract DeployPletherKernelVerifyingPaymaster is Script {
 
         console2.log("PletherKernelVerifyingPaymaster", address(paymaster));
         console2.log("EntryPoint", ENTRY_POINT_V09);
-        console2.log("Kernel Staker", profile.staker);
         console2.log("Kernel factory", profile.factory);
         console2.log("Kernel implementation", profile.implementation);
         console2.log("Kernel root validator", profile.rootValidator);
@@ -100,27 +75,15 @@ contract DeployPletherKernelVerifyingPaymaster is Script {
     }
 
     function _readProfile() internal view returns (Profile memory profile) {
-        profile.staker = vm.envAddress("KERNEL_STAKER");
         profile.factory = vm.envAddress("KERNEL_FACTORY");
         profile.implementation = vm.envAddress("KERNEL_IMPLEMENTATION");
         profile.rootValidator = vm.envAddress("KERNEL_ROOT_VALIDATOR");
         profile.proxyCodeHash = vm.envBytes32("KERNEL_PROXY_RUNTIME_CODE_HASH");
 
         _requireCodeHash(ENTRY_POINT_V09, vm.envBytes32("KERNEL_ENTRY_POINT_CODE_HASH"));
-        _requireCodeHash(profile.staker, vm.envBytes32("KERNEL_STAKER_CODE_HASH"));
         _requireCodeHash(profile.factory, vm.envBytes32("KERNEL_FACTORY_CODE_HASH"));
         _requireCodeHash(profile.implementation, vm.envBytes32("KERNEL_IMPLEMENTATION_CODE_HASH"));
         _requireCodeHash(profile.rootValidator, vm.envBytes32("KERNEL_ROOT_VALIDATOR_CODE_HASH"));
-        if (!IKernelStakerProfile(profile.staker).approved(profile.factory)) {
-            revert InvalidStakerConfiguration(profile.staker, profile.factory);
-        }
-        address expectedStakerOwner = vm.envAddress("KERNEL_STAKER_OWNER");
-        address actualStakerOwner = IKernelStakerProfile(profile.staker).owner();
-        if (actualStakerOwner != expectedStakerOwner) {
-            revert InvalidStakerOwner(actualStakerOwner, expectedStakerOwner);
-        }
-        _requireEntityStake(profile.staker);
-
         address sampleOwner = vm.envAddress("KERNEL_SAMPLE_OWNER");
         require(sampleOwner != address(0), "invalid sample owner");
         IKernelV4FactoryProfile.Install[] memory packages = new IKernelV4FactoryProfile.Install[](1);
@@ -136,26 +99,6 @@ contract DeployPletherKernelVerifyingPaymaster is Script {
                 || IKernelECDSARoot(profile.rootValidator).ecdsaValidatorStorage(sampleAccount) != sampleOwner
         ) {
             revert InvalidSampleAccount(sampleAccount);
-        }
-    }
-
-    /// @notice Run after the paymaster owner adds stake, before unpausing the canary.
-    function verifyPaymasterStake(
-        address paymaster
-    ) external view {
-        if (paymaster.code.length == 0) {
-            revert InsufficientEntityStake(paymaster);
-        }
-        _requireEntityStake(paymaster);
-    }
-
-    function _requireEntityStake(
-        address entity
-    ) internal view {
-        IKernelEntryPointStakeInfo.DepositInfo memory info =
-            IKernelEntryPointStakeInfo(ENTRY_POINT_V09).getDepositInfo(entity);
-        if (!info.staked || info.stake < MIN_STAKE || info.unstakeDelaySec < MIN_UNSTAKE_DELAY) {
-            revert InsufficientEntityStake(entity);
         }
     }
 
