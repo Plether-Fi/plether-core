@@ -200,6 +200,7 @@ contract SeniorCapacityTest is BasePerpTest {
     }
 
     function test_CouponDriftCannotRefundOrBlockExactCapacityCommitment() public {
+        _fundSenior(BOB, 1e6);
         _configureAndReconcile(2000e6, 9999);
         uint256 reservedAssets = pool.getSeniorDepositCapacity();
         assertGt(reservedAssets, 0);
@@ -227,6 +228,7 @@ contract SeniorCapacityTest is BasePerpTest {
 
     function test_RateChangeFreshnessCannotDisplaceFirmSeniorReservation() public {
         _fundJunior(BOB, 200_000e6);
+        _fundSenior(BOB, 1e6);
 
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.maxSeniorExposureAssets = 2000e6;
@@ -565,6 +567,7 @@ contract SeniorCapacityTest is BasePerpTest {
 
     function test_JuniorWithdrawalPreservesBackingForPendingSeniorCommitment() public {
         _fundJunior(ALICE, 2000e6);
+        _fundSenior(CAROL, 1e6);
         _configureAndReconcile(10_000e6, 5000);
         uint256 juniorCapBeforeRequest = pool.getMaxJuniorWithdraw();
         uint256 seniorEpochId = _requestSenior(BOB, 500e6);
@@ -601,6 +604,7 @@ contract SeniorCapacityTest is BasePerpTest {
     }
 
     function test_JuniorWithdrawalRatioUsesHighWaterMarkWhenSeniorIsImpaired() public {
+        _fundSenior(BOB, 1e6);
         _configureAndReconcile(10_000e6, 5000);
         _disableSeniorCoupon();
 
@@ -637,6 +641,7 @@ contract SeniorCapacityTest is BasePerpTest {
 
     function test_ZeroShareJuniorWithdrawalIsClosedWhileSeniorExposureExists() public {
         _fundJunior(ALICE, 100e6);
+        _fundSenior(BOB, 1e6);
         _setSeniorCapacity(10_000e6, 0);
         _refreshMark();
 
@@ -654,6 +659,7 @@ contract SeniorCapacityTest is BasePerpTest {
     }
 
     function test_PassiveCouponOverageDoesNotRevertAccountingAndClosesNewSeniorEntry() public {
+        _fundSenior(BOB, 1e6);
         uint256 absoluteCap = 1050e6;
         _configureAndReconcile(absoluteCap, 9999);
         assertLt(_protectedSenior(), absoluteCap);

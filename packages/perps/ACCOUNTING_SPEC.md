@@ -412,8 +412,9 @@ couponDue  = floor(seniorPrincipal * seniorRateBps * dt / (10_000 * 365 days))
 couponPaid = min(couponDue, juniorPrincipal)
 ```
 
-The coupon requires nonzero Junior share supply. Payment first fills any Senior impairment; only the remainder
-raises both Senior principal and its high-water mark. It changes no pool cash and creates no unpaid-coupon liability
+The coupon requires nonzero Junior share supply and pauses while only the permanent Senior seed shares remain.
+The coupon clock continues to checkpoint during that pause. Payment first fills any Senior impairment. Any remainder
+raises both Senior principal and its high-water mark. Payment changes no pool cash and creates no unpaid-coupon liability
 when Junior cannot cover the full amount. Paid coupon becomes Senior principal for subsequent accrual intervals.
 The default `seniorRateBps` is 800 (8% nominal annual rate); it is not a guaranteed return.
 
@@ -513,6 +514,8 @@ Rules:
   terminal wipe, Senior impairment, rejected epochs, and a Pool entry pause also permit refunds,
 - funded junior redemptions of net assets `w` must additionally preserve
   `(X + R) * 10_000 <= Q * (X + R + J - w)` using active protected exposure plus pending commitments,
+- the Junior withdrawal ratio is waived when only the permanent Senior seed shares remain and `R = 0`. If a
+  Senior deposit is reserved, Junior still backs the combined Senior balance that activation would create,
 - funded Senior redemptions and Junior deposits improve capacity and may cure an overage,
 - governance reductions are prospective for active claims and accepted reservations: neither is burned, repriced, or
   forced out, while new Senior capacity remains zero until the state returns within both limits.

@@ -226,6 +226,8 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         settlementToken.mint(address(this), seniorSeed);
         settlementToken.approve(address(pool), seniorSeed);
         pool.initializeSeedPosition(true, seniorSeed, address(this));
+        uint256 redeemableSenior = 1e6;
+        _assignSeniorCapital(redeemableSenior);
 
         vm.warp(block.timestamp + 30 days);
         uint256 juniorSeedTime = block.timestamp;
@@ -233,7 +235,7 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         settlementToken.approve(address(pool), juniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
 
-        uint256 seniorBeforeJuniorSeed = seniorSeed + juniorCapacityBacking;
+        uint256 seniorBeforeJuniorSeed = seniorSeed + redeemableSenior + juniorCapacityBacking;
         assertEq(
             pool.seniorPrincipal(), seniorBeforeJuniorSeed, "Junior seed should not pay pre-existing senior coupon time"
         );
