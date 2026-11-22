@@ -98,20 +98,17 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         router.commitOrder(CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 5000e6, 1e8, false);
     }
 
-    function test_CommitOrder_DoesNotUseStaleCachedMarkForPredictableOpenPrefilter() public {
-        _startRecordingLogs();
-        address eve = address(0xE112);
-        address eveAccount = eve;
-        _fundTrader(eve, 1000e6);
-
+    function test_CommitOrder_RejectsUnderfundedOpenEvenWithStaleCachedMark() public {
         vm.warp(block.timestamp + router.pletherOracle().orderExecutionStalenessLimit() + 1);
 
-        vm.prank(eve);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
+            )
+        );
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 100e6, 1e8, false);
-
-        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(eveAccount);
-        assertEq(pending.length, 1, "Stale cached marks should skip commit-time predictable-open rejection");
-        assertEq(pending[0].sizeDelta, 100_000e18, "Queued order should preserve the requested open intent");
     }
 
     /// @dev Bucket: spec. Source: ACCOUNTING_SPEC "Open projection" permits above-cap recovery only while the order

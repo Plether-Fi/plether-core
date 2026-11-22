@@ -6,6 +6,8 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 contract AccountPriceCollateralFeesTest is BasePerpTest {
 
@@ -72,15 +74,20 @@ contract LiquidationBountyForfeitureTest is BasePerpTest {
         address account = trader;
         address counterAccount = counterparty;
 
+        router.updateMarkPrice(_mockPythUpdateData(1e8));
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 100_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
         _open(counterAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
+        IPositionProtectionActions protection = IPositionProtectionActions(address(router.positionProtectionBook()));
+        PositionProtectionTypes.PositionProtectionParams memory params;
+        params.stopLossTriggerPrice = 110_000_000;
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, CAP_PRICE, false);
+        protection.createPositionProtection(params);
 
-        uint256 forfeitedBounty = _executionBountyReserve(1);
+        uint256 forfeitedBounty = clearinghouse.totalBountyReservationsAssets(trader);
+        assertGt(forfeitedBounty, 0);
         uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
 
         bytes[] memory priceData = new bytes[](1);
@@ -94,7 +101,7 @@ contract LiquidationBountyForfeitureTest is BasePerpTest {
         assertEq(
             clearinghouse.balanceAssets(engine.protocolTreasury()) - feesBefore,
             forfeitedBounty,
-            "Forfeited queued order bounties should accrue to protocol fees"
+            "Forfeited protection bounties should accrue to protocol fees"
         );
     }
 

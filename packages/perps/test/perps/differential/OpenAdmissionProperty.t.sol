@@ -40,7 +40,7 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
         _tryOpenAndCheck(side, size, margin);
     }
 
-    function test_ZeroMarginHealingIncreaseIsReachableAndCollateralized() public {
+    function test_HealingIncreaseRequiresMarginForFeeOffsetInRebateReserve() public {
         _seedSkew();
         _open(ACCOUNT, CfdTypes.Side.SHORT, 10_000e18, 2000e6, MARK);
         // Governance lowers the reserve ratio: the existing reserve now covers the increased notional.
@@ -49,21 +49,30 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
         params.baseCarryBps = 0;
         params.bountyBps = 5;
         _setRiskParams(params);
-        assertTrue(_tryOpenAndCheck(CfdTypes.Side.SHORT, 10_000e18, 0), "Reach zero-supplied-margin increase");
+        uint256 depth = pool.totalAssets();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED),
+                false
+            )
+        );
+        _open(ACCOUNT, CfdTypes.Side.SHORT, 10_000e18, 0, MARK, depth);
+        assertTrue(_tryOpenAndCheck(CfdTypes.Side.SHORT, 10_000e18, 4e6), "New margin covers the four-bps fee");
         (,,,,,, int256 lifetimeVpi) = engine.positions(ACCOUNT);
         assertLt(lifetimeVpi, 0, "Scenario must earn and reserve a lifetime rebate");
     }
 
     function test_HealingRebateCannotSubstituteForInitialMargin_AtomBoundary() public {
         _seedSkew();
-        // 40,000 settlement token notional needs 600 settlement token price-risk pledge and 40 settlement token liquidation reserve.
-        // A healing rebate is free settlement / VPI reserve, never additional pledge for admission.
-        for (uint256 supplied = 640e6 - 1; supplied <= 640e6 + 1; supplied++) {
+        // On $40,000 notional, the order funds $16 in fees, a $40 liquidation reserve and over $600 in pledge.
+        for (uint256 supplied = 656e6 - 1; supplied <= 656e6 + 1; supplied++) {
             uint256 snapshot = vm.snapshotState();
             bool success = _tryOpenAndCheck(CfdTypes.Side.SHORT, 40_000e18, supplied);
-            assertEq(success, supplied > 640e6, "Admission boundary must exclude the rebate from price-risk equity");
+            assertEq(success, supplied > 656e6, "Admission boundary must exclude the rebate from price-risk equity");
             if (success) {
-                assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), supplied - 40e6);
+                assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), supplied - 16e6 - 40e6);
                 (,,,,,, int256 lifetimeVpi) = engine.positions(ACCOUNT);
                 assertLt(lifetimeVpi, 0, "Boundary must execute a healing rebate");
             }

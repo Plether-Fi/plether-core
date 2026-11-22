@@ -374,18 +374,13 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
     function test_UserInvalidPaysClearer() public {
         address eve = address(0xE223);
-        address eveAccount = eve;
         address keeperAccount = KEEPER;
-
+        _fundTrader(eve, 101e6);
+        vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
-
-        vm.startPrank(eve);
-        settlementToken.mint(eve, 3000e6);
-        settlementToken.approve(address(clearinghouse), 3000e6);
-        clearinghouse.deposit(eveAccount, 3000e6);
-        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
-        vm.stopPrank();
+        engine.updateMarkPrice(25_000_000, uint64(vm.getBlockTimestamp()));
+        vm.prank(eve);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
         // Admission is valid; the later price doubles the initial-margin requirement and invalidates execution.

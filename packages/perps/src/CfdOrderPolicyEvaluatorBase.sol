@@ -14,6 +14,7 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {CfdEngineRawSnapshotLib} from "@plether/perps/libraries/CfdEngineRawSnapshotLib.sol";
+import {OpenOrderFundingLib} from "@plether/perps/libraries/OpenOrderFundingLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @dev Permissionless Engine read surface used to build policy-evaluation snapshots.
@@ -132,7 +133,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
             _buildRawSnapshot(engine, order.account, context.poolDepthAssets);
-        return _assessSnapshot(context, order, bounds, planner, snapshot);
+        return _assessSnapshot(context, order, bounds, planner, snapshot, order.marginDelta);
     }
 
     function _assessSnapshot(
@@ -140,7 +141,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdTypes.Order memory order,
         OrderV3Types.ExecutionBounds memory bounds,
         ICfdEnginePlanner planner,
-        CfdEnginePlanTypes.RawSnapshot memory snapshot
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        uint256 availableOrderMarginAssets
     ) internal view returns (OrderV3Types.ExecutionAssessment memory) {
         bool bountyReturnsToAccount = context.executor == order.account;
         OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
@@ -153,7 +155,14 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         }
 
         CfdEnginePlanTypes.OpenDelta memory openDelta = planner.planOpen(snapshot, order, context.currentOraclePrice);
-        return _evaluateOpen(snapshot, openDelta, boundsCopy, context.executionBountyAssets, bountyReturnsToAccount);
+        return _evaluateOpen(
+            snapshot,
+            openDelta,
+            boundsCopy,
+            context.executionBountyAssets,
+            bountyReturnsToAccount,
+            availableOrderMarginAssets
+        );
     }
 
     function _evaluateOpen(
@@ -161,13 +170,47 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.OpenDelta memory delta,
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyAssets,
-        bool bountyReturnsToAccount
+        bool bountyReturnsToAccount,
+        uint256 availableOrderMarginAssets
     ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidOpenDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
         assessment =
             _buildOpenAssessment(snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode);
+        _requireStandaloneOpenFunding(snapshot, delta, bounds, availableOrderMarginAssets);
         _enforceBounds(assessment, bounds, executionBountyAssets, false);
+    }
+
+    /// @dev A queued increase must satisfy its own risk policy without an earlier position, claim, or free cash.
+    ///      Negative VPI is backed by its dedicated reserve, so it does not add to the new position's pledge.
+    function _requireStandaloneOpenFunding(
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        CfdEnginePlanTypes.OpenDelta memory delta,
+        OrderV3Types.ExecutionBounds memory bounds,
+        uint256 availableOrderMarginAssets
+    ) private pure {
+        if (availableOrderMarginAssets < delta.marginDeltaAssets) {
+            revert ICfdEngineTypes.CfdEngine__TypedOrderFailure(
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
+                false
+            );
+        }
+
+        CfdEnginePlanTypes.OpenRevertCode fundingCode = OpenOrderFundingLib.validate(
+            snapshot.riskParams,
+            snapshot.isFadWindow,
+            delta.openState.notionalAssets,
+            delta.executionFeeAssets,
+            delta.posVpiAccruedDelta,
+            availableOrderMarginAssets,
+            bounds
+        );
+        if (fundingCode != CfdEnginePlanTypes.OpenRevertCode.OK) {
+            revert ICfdEngineTypes.CfdEngine__TypedOrderFailure(
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid, uint8(fundingCode), false
+            );
+        }
     }
 
     function _evaluateClose(

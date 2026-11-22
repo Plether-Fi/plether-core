@@ -184,7 +184,7 @@ contract PriceAndActionReservePriorityLiquidationTest is BasePerpTest {
     address trader = address(0xC10A);
 
     /// @dev accounting; source: ACCOUNTING_SPEC.md#liquidation-settlement.
-    function test_LiquidationMustConsumeQueuedCommittedMarginBeforeWaivingActionCharge() public {
+    function test_LiquidationDoesNotDrainQueuedCommittedMarginForActionCharge() public {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
@@ -209,10 +209,10 @@ contract PriceAndActionReservePriorityLiquidationTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still clear the live insolvent position");
         assertEq(_executionBountyReserve(queuedOrderId), 200_000, "Queued execution bounty should remain reserved");
-        assertLt(
+        assertEq(
             router.getAccountReservations(account).committedMarginAssets,
             committedBefore,
-            "Liquidation should consume queued committed margin before waiving terminal carry"
+            "Liquidation keeps opening-order margin reserved even when terminal carry is unpaid"
         );
     }
 

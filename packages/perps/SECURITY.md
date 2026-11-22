@@ -489,9 +489,10 @@ governance owns the coordinator and assigns its guardian.
   reason `RiskOff`, execution mode and price source `None`, the cleaner as executor, and the account as bounty
   recipient with disposition `RefundedToAccount` when the bounty is nonzero. A zero bounty instead has disposition
   `None` and a zero recipient.
-- Liquidation applies the same risk-off refund before forfeiting unaffected queued bounties, so cleanup-first and
-  liquidation-first keeper ordering cannot change whether the invalidated-open reservation is refunded. Refunded free
-  settlement remains ordinary trader capital and may still satisfy legitimate liquidation obligations. Liquidation
+- Liquidation applies the same risk-off refund before processing the remaining queue, so cleanup-first and
+  liquidation-first keeper ordering cannot change whether the invalidated-open reservation is refunded. Valid opens
+  keep their committed margin and execution bounty; stale closes and unpaid protection-trigger bounties are settled.
+  Refunded free settlement remains ordinary trader capital and may still satisfy legitimate liquidation obligations. Liquidation
   reuses the exact single-order Clearinghouse reversal for each invalidated open; this is bounded by the 32-order
   account cap and remains inside one rollback frame.
 - HousePool pause blocks LP entry only. Redemptions, synchronized redemption funding, and funded claims remain live.
@@ -751,8 +752,9 @@ Terminal classification is deliberately allow-listed:
   the trader's order plus attached `PendingOpen` protection reserves internally in one no-checkpoint clearinghouse
   release without paying the cleanup caller; its receipt records no price source and, for a nonzero order bounty,
   `RefundedToAccount`,
-- liquidation cleanup records each remaining order as `AccountLiquidated` and preserves the original keeper as
-  receipt executor. Unpaid opening bounties may be forfeited to treasury; zero close records move no value,
+- liquidation cleanup records stale closes as `AccountLiquidated` and preserves the original keeper as receipt
+  executor. Valid opening orders remain pending with their margin and bounty reservations; zero close records move
+  no value,
 - close-only, same-block/MEV, historical-price availability, insufficient gas, and mark-price ordering remain
   nonterminal,
 - an unknown selector, panic, out-of-gas, empty or malformed revert, or malformed success payload is never decoded as
@@ -779,6 +781,15 @@ the internal unpinned marker. A terminal full close skips only the post-position
 position survives. Gross account debit
 includes settlement value lost or charged, consumed trader-claim value, and the
 reserved execution bounty; post-settlement balance means total internal settlement custody, including locked value.
+An opening order must also cover its own fees, VPI charge, liquidation reserve, initial and active margin thresholds,
+and pinned equity/leverage bounds from its remaining committed margin alone. Existing position pledge, trader claims,
+and free settlement cannot make that independent check pass. An increase in the VPI rebate reserve draws first on
+the order's available net rebate, then on its new pledge. Moving unrelated free settlement therefore leaves that
+allocation unchanged. Commitment and execution use the same funding calculation. Admission uses the stored reference
+mark, exact execution fee, and any VPI computed by the live planner.
+If the planner stops before quoting VPI (for example, while an opposing position awaits a queued close), admission
+checks the fee and own-margin requirements with zero VPI; execution must check the full live VPI at its pinned Pyth
+price. Admission is therefore a necessary funding check, not a guarantee of future execution.
 
 `currentExecutionConfigHash()` binds the schema and chain; lifecycle Book, Router, Engine, Clearinghouse, HousePool,
 execution sidecar, evaluator, and Oracle; both admin identities and monotonic active versions; the Engine planner and
@@ -817,9 +828,9 @@ compact permanent outcome, deletes pending policy, and emits the full `OrderFina
 includes identity and expected/observed config, status/reason/mode, executor, adverse execution price, neutral mark,
 pool depth, oracle time, whether the price reached the Engine, bounty recipient/disposition, typed failure evidence,
 and normalized economics fields. Its hash additionally commits to chain, Book, Router, terminal block, and terminal
-time. For queued orders removed by account liquidation, the receipt's state-only economics use the state observed
+time. For stale close orders removed by account liquidation, the receipt's state-only economics use the state observed
 after liquidation in both summary slots; Engine liquidation events remain the source for the position transition,
-while the order receipt records any forfeited opening bounty and zero close-bounty movement.
+while the close-order receipt records zero bounty movement.
 
 At registration, `IntentRegistered` emits the complete `OrderRequest` preimage alongside its canonical hash and the
 actual reserved bounty. Terminal verification therefore needs only canonical chain logs plus the Book's permanent
@@ -1335,7 +1346,7 @@ Trade-off:
 
 ### Queue interaction during liquidation
 
-Liquidation performs bounded account-local cleanup of that account's pending orders.
+Liquidation performs a bounded account-local scan of that account's pending orders.
 
 This preserves terminal liveness without requiring an unbounded global queue scan.
 
@@ -1344,11 +1355,13 @@ standalone cleanup. An isolated inner frame then authenticates reservations and 
 path. If the account is healthy, the inner frame rolls back while retaining valid outer risk-off refunds. Only the
 exact direct Engine solvent failure receives that classification; other errors propagate.
 
-If the account remains liquidatable, every other pending order is terminally recorded as `AccountLiquidated`;
-unpaid opening bounty may go to treasury, while a close has zero bounty and `None` disposition. Historical mixed
-disposition ordinals remain decodable but are not ordinary close outcomes. The executor is the original keeper, not
-the Router self-call address. Router records are deleted within the same rollback frame as reservation settlement
-and Book finalization; other accounts retain relative FIFO order.
+If the account remains liquidatable, valid opening orders retain their queue position, committed margin, and
+execution bounty. Only stale closes are terminally recorded as `AccountLiquidated`; their zero bounty has `None`
+disposition. Historical mixed disposition ordinals remain decodable but are not ordinary close outcomes. The
+executor is the original keeper, not the Router self-call address. Close records are deleted within the same
+rollback frame as reservation settlement and Book finalization; other accounts retain relative FIFO order.
+Liquidation action charges cannot consume surviving opening-order margin; any unpaid remainder follows the terminal
+waiver rule.
 
 Batch liquidation validates and pays for one shared Pyth snapshot, updates the neutral mark once, and isolates each
 account in its own rollback frame. Solvent and positionless accounts are skipped without losing prior successes, while
@@ -1407,7 +1420,8 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
 ### Liquidation
 
 1. The Router refunds cutoff-invalid opens before entering the isolated liquidation frame. Inside that frame it
-   authenticates reservations, settles zero close records, and invokes the planner's health/settlement checks.
+   authenticates reservations, forfeits unpaid protection-trigger bounties, and invokes the planner's
+   health/settlement checks.
    A healthy-account result rolls back the inner frame while valid preceding risk-off refunds remain.
 2. For a liquidatable account, carry and exact price PnL use the typed collateral rules. Same-account claim nets
    against price loss once; PnL pledge pays the remaining collectible loss. Excess price loss is written off.
@@ -1416,8 +1430,8 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
 4. Positive fresh trader payout uses available pool cash or becomes a trader claim. Uncollectible terminal action
    obligations follow their waiver rules. The Engine removes the position and curve and checks actual post-operation
    solvency for degraded mode.
-5. Bounded account-local cleanup finalizes remaining orders as `AccountLiquidated`; unaffected opening bounties may
-   be forfeited and zero close records move no value. Other accounts retain their relative FIFO order.
+5. Bounded account-local cleanup finalizes stale closes as `AccountLiquidated`; valid opens and their margin and bounty
+   reservations remain pending. Other accounts retain their relative FIFO order.
 
 ## Known Limitations
 
@@ -1438,6 +1452,14 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
 ### Router and keeper limitations
 
 - users cannot manually cancel queued intents,
+- **Retained-open liquidation policy (accepted residual risk):** An opening order
+  admitted against its own funds at the stored reference mark may still fail after liquidation changes live skew, VPI,
+  or pool depth, or the pinned execution price differs.
+  An authenticated typed planner or pinned financial-bound failure can then release its remaining margin reservation to
+  free settlement. The owner accepts this state-dependent outcome; the controlled test demonstrates reachability,
+  not its frequency in live markets. Liquidation cannot debit a surviving order's margin or bounty, and an existing
+  position's collateral cannot make its independent funding check pass. Other terminal rules, including expiry and
+  risk-off, still apply. Existing deployments keep their original behavior,
 - account-scoped client ids are permanent; a terminal or config-invalidated id cannot be reused for a replacement
   request, so clients must generate and persist unique ids,
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
@@ -1463,7 +1485,7 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
   current registered protection attempt may relatch for a fresh child when the exact protected position remains; other
   orders have no terminal retry lane,
   while uncertain dependency failures deliberately retain the FIFO head and can block later orders until a successful
-  retry or a different terminal rule such as expiry/risk-off/liquidation applies,
+  retry or a different terminal rule such as expiry/risk-off (or liquidation for a stale close) applies,
 - complete terminal economics are event-backed; on-chain storage retains only the compact outcome and receipt hash,
   so historical consumers require reliable log indexing,
 - the lifecycle Book has no migration or repair authority. A binding/invariant fault requires containment and a

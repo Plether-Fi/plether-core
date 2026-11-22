@@ -21,6 +21,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
@@ -253,23 +254,17 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
         vm.warp(block.timestamp + router.pletherOracle().orderExecutionStalenessLimit() + 1);
 
         address eve = address(0xE222);
-        address eveAccount = eve;
+        _fundTrader(eve, 1e6);
 
-        vm.startPrank(eve);
-        settlementToken.mint(eve, 1e6);
-        settlementToken.approve(address(clearinghouse), 1e6);
-        clearinghouse.deposit(eveAccount, 1e6);
-        vm.stopPrank();
+        assertEq(clearinghouse.balanceAssets(eve), 1e6, "Trader only funds the reserved execution bounty");
 
-        assertEq(clearinghouse.balanceAssets(eveAccount), 1e6, "Trader only funds the reserved execution bounty");
-
+        vm.prank(eve);
         vm.expectRevert(
             abi.encodeWithSelector(
                 IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
                 uint8(CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED)
             )
         );
-        vm.prank(eve);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
 
         assertEq(router.nextCommitId(), 2, "unfunded reserve must not allocate an order");
@@ -281,17 +276,15 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
     function test_TypedUserInvalidOpenPaysClearer() public {
         _startRecordingLogs();
         _fundJunior(bob, 1_000_000e6);
+        vm.warp(vm.getBlockTimestamp() + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        engine.updateMarkPrice(25_000_000, uint64(vm.getBlockTimestamp()));
+        vm.warp(block.timestamp + router.pletherOracle().orderExecutionStalenessLimit() + 1);
         address eve = address(0xE223);
-        address eveAccount = eve;
-
-        vm.startPrank(eve);
-        settlementToken.mint(eve, 20_000e6);
-        settlementToken.approve(address(clearinghouse), 20_000e6);
-        clearinghouse.deposit(eveAccount, 20_000e6);
-        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
-        vm.stopPrank();
+        _fundTrader(eve, 101e6);
+        vm.prank(eve);
+        // The order funds its own margin at the cached $0.25 mark. The $1 execution mark requires more.
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
 
         uint256 keeperBefore = _settlementBalance(address(this));
         // This was valid at commitment; a later adverse price raises VPI/fees beyond available collateral.
@@ -312,7 +305,7 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), 1);
         assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.PlannerRejected));
-        assertEq(uint8(outcome.failureCategory), uint8(CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid));
+        assertEq(outcome.failureCategory, uint8(CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid));
         assertEq(
             settlementToken.balanceOf(address(router)),
             0,

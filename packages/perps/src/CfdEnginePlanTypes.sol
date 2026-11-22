@@ -185,7 +185,7 @@ library CfdEnginePlanTypes {
         INVALID_SIZE_QUANTUM,
         /// @notice Order-supplied margin cannot fund the position's required dedicated liquidation reserve.
         LIQUIDATION_RESERVE_UNFUNDED,
-        /// @notice Existing VPI backing is deficient, or free settlement plus new pledge cannot back resulting negative VPI.
+        /// @notice Existing VPI backing is deficient, or the order's net rebate and new pledge cannot fund the increase.
         VPI_REBATE_RESERVE_UNFUNDED,
         /// @notice The open exceeds canonical position storage or representable accounting intermediates.
         NUMERIC_DOMAIN_EXCEEDED

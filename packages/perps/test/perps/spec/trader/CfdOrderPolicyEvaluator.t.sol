@@ -525,6 +525,28 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         evaluator.evaluateOpen(snapshot, _baseOpenDelta(), bounds, BOUNTY);
     }
 
+    function test_OpenRequiresOwnEquityStrictlyAboveInitialMargin() public {
+        CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
+        snapshot.riskParams = _coordinatorRiskParams();
+        CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
+        // On $100 notional, $2 in costs and a $1 reserve leave exactly the $1.50 initial margin.
+        delta.marginDeltaAssets = 4_500_000;
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+                false
+            )
+        );
+        evaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
+
+        delta.marginDeltaAssets += 1;
+        evaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
+    }
+
     function test_OpenPlannerFailureKeepsExistingTypedCategoryAndCode() public {
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         delta.valid = false;
@@ -579,6 +601,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function _baseOpenDelta() private pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         delta.valid = true;
         delta.openState.notionalAssets = 100e6;
+        delta.marginDeltaAssets = 205e6;
         delta.posSide = CfdTypes.Side.SHORT;
         delta.newPosSize = CfdTypes.SIZE_QUANTUM;
         delta.newPosEntryPrice = PRICE;

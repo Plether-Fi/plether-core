@@ -190,43 +190,32 @@ contract PerpMixedLiquidationTest is BasePerpTest {
         }
     }
 
-    function test_BothSidesTerminalCarryConsumesPendingMarginAndReleasesItsRemainder() public {
+    function test_BothSidesTerminalCarryLeavesPendingMarginReserved() public {
         for (uint256 side; side < 2; ++side) {
             uint256 snapshot = vm.snapshotState();
             LiquidationReferenceMath.Values memory v = _runTerminal(side, 11);
             assertEq(v.pnl, 0);
             assertEq(v.claimConsumed, 0);
             assertGt(v.remainingClaim, 1500e6);
-            assertGt(v.committedConsumed, 0);
-            assertLt(v.committedConsumed, 1020e6, "some queued margin remains to release after carry collection");
-            assertEq(v.carryCash, v.committedConsumed);
+            assertEq(v.committedConsumed, 0);
+            assertEq(v.carryCash, 0);
             assertEq(v.carryWithheld, 0);
-            assertEq(v.carryWaived, 0);
+            assertGt(v.carryWaived, 0);
             assertEq(v.fresh, 0);
             assertEq(handler.liquidationPendingMarginConsumed(), v.committedConsumed);
-            assertEq(handler.orders().count(side), 0);
-            assertEq(handler.orders().liveCount(), 0);
+            assertEq(handler.orders().count(side), 1);
+            assertEq(handler.orders().liveCount(), 1);
 
             PendingOrderReferenceLedger.Order memory queued = handler.orders().order(handler.orders().nextId() - 1);
             assertEq(queued.actorIndex, side);
             assertEq(queued.originalMargin, 1020e6);
-            assertEq(queued.remainingMargin, 0);
-            assertEq(queued.remainingBounty, 0);
-            assertEq(uint8(queued.marginStatus), uint8(PendingOrderReferenceLedger.MarginStatus.Released));
-            assertEq(uint8(queued.status), uint8(OrderV3Types.LifecycleStatus.Failed));
-            assertEq(uint8(queued.reason), uint8(OrderV3Types.TerminalReason.AccountLiquidated));
-            OrderV3Types.TerminalOutcome memory outcome = router.lifecycleBook().terminalOutcome(queued.id);
-            assertEq(outcome.account, handler.actorAt(side));
-            assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
-            assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.AccountLiquidated));
-            assertTrue(queued.receiptHash != bytes32(0), "handler authenticated the permanent terminal receipt");
-            assertEq(outcome.receiptHash, queued.receiptHash);
+            _assertRetainedQueuedOrder(queued.id, side);
             handler.assertModel();
             assertTrue(vm.revertToState(snapshot));
         }
     }
 
-    function test_BothSidesLiquidationClearsFiveOwnOrdersAndPreservesInterleavedOtherAccount() public {
+    function test_BothSidesLiquidationKeepsFiveOwnOrdersAndInterleavedOtherAccount() public {
         for (uint256 side; side < 2; ++side) {
             uint256 snapshot = vm.snapshotState();
             uint256 entry = side == 0 ? 80_000_002 : 120_000_002;
@@ -245,7 +234,6 @@ contract PerpMixedLiquidationTest is BasePerpTest {
             assertLt(ownIds[1], otherId);
             assertGt(ownIds[2], otherId);
             bytes32 otherState = _pendingOrderState(otherId);
-            uint256 ownBounties = handler.orders().bounty(side);
             uint256 treasuryBefore = handler.expectedTreasury();
 
             handler.liquidateAndReuse(side);
@@ -253,31 +241,30 @@ contract PerpMixedLiquidationTest is BasePerpTest {
             assertEq(handler.liquidations(), 1);
             assertEq(handler.generations(side), 1);
             assertEq(handler.traderState(side).lots, 0);
-            assertEq(handler.orders().count(side), 0);
-            assertEq(handler.orders().liveCount(), 1);
-            assertEq(handler.orders().head(), otherId);
-            assertEq(handler.orders().tail(), otherId);
-            assertEq(router.nextExecuteId(), otherId);
-            assertEq(router.pendingOrderCounts(handler.actorAt(side)), 0);
+            assertEq(handler.orders().count(side), 5);
+            assertEq(handler.orders().liveCount(), 6);
+            assertEq(handler.orders().head(), ownIds[0]);
+            assertEq(handler.orders().tail(), ownIds[4]);
+            assertEq(router.nextExecuteId(), ownIds[0]);
+            assertEq(router.pendingOrderCounts(handler.actorAt(side)), 5);
             assertEq(router.pendingOrderCounts(handler.actorAt(1 - side)), 1);
-            assertEq(handler.expectedTreasury(), treasuryBefore + ownBounties);
-            assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), treasuryBefore + ownBounties);
+            assertEq(handler.expectedTreasury(), treasuryBefore);
+            assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), treasuryBefore);
             for (uint256 j; j < ownIds.length; ++j) {
-                _assertLiquidatedQueuedOrder(ownIds[j], side);
+                _assertRetainedQueuedOrder(ownIds[j], side);
             }
             assertEq(
                 _pendingOrderState(otherId), otherState, "other account request, cash, locks and lifecycle survive"
             );
 
             handler.addCollateral(side, 100e6);
+            uint256 cashBeforeReplay = handler.traderState(side).cash;
             handler.replayPending(ownIds[0] - 1, false);
             assertEq(handler.replayedOrders(), 1);
-            assertEq(
-                handler.traderState(side).cash, 100e6, "terminal replay cannot re-reserve the new generation's cash"
-            );
-            _assertLiquidatedQueuedOrder(ownIds[0], side);
-            assertEq(handler.orders().liveCount(), 1);
-            assertEq(handler.orders().head(), otherId);
+            assertEq(handler.traderState(side).cash, cashBeforeReplay, "pending replay cannot reserve a second time");
+            _assertRetainedQueuedOrder(ownIds[0], side);
+            assertEq(handler.orders().liveCount(), 6);
+            assertEq(handler.orders().head(), ownIds[0]);
             assertEq(_pendingOrderState(otherId), otherState);
             handler.assertModel();
             assertTrue(vm.revertToState(snapshot));
@@ -300,32 +287,29 @@ contract PerpMixedLiquidationTest is BasePerpTest {
         );
     }
 
-    function _assertLiquidatedQueuedOrder(
+    function _assertRetainedQueuedOrder(
         uint64 id,
         uint256 actor
     ) private view {
         PendingOrderReferenceLedger.Order memory queued = handler.orders().order(id);
         assertEq(queued.actorIndex, actor);
         assertEq(queued.originalMargin, 1020e6);
-        assertEq(queued.remainingMargin, 0);
-        assertEq(queued.remainingBounty, 0);
-        assertEq(uint8(queued.marginStatus), uint8(PendingOrderReferenceLedger.MarginStatus.Released));
-        assertEq(uint8(queued.status), uint8(OrderV3Types.LifecycleStatus.Failed));
-        assertEq(uint8(queued.reason), uint8(OrderV3Types.TerminalReason.AccountLiquidated));
+        assertEq(queued.remainingMargin, queued.originalMargin);
+        assertEq(queued.remainingBounty, queued.bountyAssets);
+        assertEq(uint8(queued.marginStatus), uint8(PendingOrderReferenceLedger.MarginStatus.Active));
+        assertEq(uint8(queued.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(queued.reason), uint8(OrderV3Types.TerminalReason.None));
         OrderV3Types.TerminalOutcome memory outcome = router.lifecycleBook().terminalOutcome(id);
-        assertEq(outcome.account, handler.actorAt(actor));
-        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
-        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.AccountLiquidated));
-        assertTrue(queued.receiptHash != bytes32(0));
-        assertEq(outcome.receiptHash, queued.receiptHash, "permanent receipt matches the authenticated liquidation log");
-        assertEq(router.lifecycleBook().pendingIntent(id).account, address(0));
+        assertEq(outcome.account, address(0), "retained order has no terminal outcome");
+        assertEq(queued.receiptHash, bytes32(0), "retained order has no receipt");
+        assertEq(router.lifecycleBook().pendingIntent(id).account, handler.actorAt(actor));
         IMarginClearinghouse.OrderReservation memory margin = clearinghouse.getOrderReservation(id);
-        assertEq(margin.remainingAmountAssets, 0);
-        assertEq(uint8(margin.status), uint8(PendingOrderReferenceLedger.MarginStatus.Released));
+        assertEq(margin.remainingAmountAssets, queued.originalMargin);
+        assertEq(uint8(margin.status), uint8(PendingOrderReferenceLedger.MarginStatus.Active));
         IMarginClearinghouse.BountyReservation memory bounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
-        assertEq(bounty.amountAssets, 0);
-        assertEq(uint8(bounty.state), uint8(IMarginClearinghouse.BountyReservationState.Settled));
+        assertEq(bounty.amountAssets, queued.bountyAssets);
+        assertEq(uint8(bounty.state), uint8(IMarginClearinghouse.BountyReservationState.Active));
     }
 
     function test_BothSidesPaidClaimLeavesStoredArrearsButRestoresProjectedHealth() public {

@@ -195,7 +195,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         );
     }
 
-    function test_Batch_SuccessForfeitsQueuedBountyAndClearsOrders() public {
+    function test_Batch_SuccessClearsQueuedCloses() public {
         address account = address(0xBA7CB017);
         _fundAndOpenThinLong(account);
 
@@ -247,19 +247,23 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         _setRouterConfig(config);
 
         address account = address(0xBA7C0032);
-        _fundTrader(account, 270e6);
+        _fundTrader(account, 302e6);
         _open(account, CfdTypes.Side.LONG, 10_000e18, 200e6, NEUTRAL_PRICE);
 
         uint64 firstOrderId = router.nextCommitId();
         vm.startPrank(account);
         for (uint256 i = 0; i < maxPendingOrders; i++) {
-            router.commitOrder(CfdTypes.Side.LONG, 100e18, 2e6, CAP_PRICE, false);
+            router.commitOrder(CfdTypes.Side.LONG, 100e18, 3e6, CAP_PRICE, false);
         }
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountReservationView memory reservationBefore = router.getAccountReservations(account);
         assertEq(reservationBefore.pendingOrderCount, maxPendingOrders, "setup must reach the configured order cap");
-        assertEq(reservationBefore.committedMarginAssets, 64e6, "setup must reserve every order's committed margin");
+        assertEq(
+            reservationBefore.committedMarginAssets,
+            maxPendingOrders * 3e6,
+            "setup must reserve every order's committed margin"
+        );
         assertGt(reservationBefore.executionBountyAssets, 0, "setup must reserve execution bounties");
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, LIQUIDATION_PRICE);
@@ -277,28 +281,28 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
 
         assertEq(nextIndex, 1, "maximum-order item must complete within its calculated gas cap");
         assertEq(_positionSize(account), 0, "maximum-order account must liquidate");
-        assertEq(router.pendingOrderCounts(account), 0, "all live orders must be removed");
-        assertEq(router.accountHeadOrderId(account), 0, "account queue head must be clear");
+        assertEq(router.pendingOrderCounts(account), maxPendingOrders, "opening orders remain pending");
+        assertEq(router.accountHeadOrderId(account), firstOrderId, "account queue head remains the first open");
 
         IOrderRouterAccounting.AccountReservationView memory reservationAfter = router.getAccountReservations(account);
-        assertEq(reservationAfter.committedMarginAssets, 0, "committed margin reservation must be clear");
-        assertEq(reservationAfter.executionBountyAssets, 0, "execution bounty reservation must be clear");
-        assertEq(reservationAfter.pendingOrderCount, 0, "pending order reservation count must be clear");
+        assertEq(reservationAfter.committedMarginAssets, reservationBefore.committedMarginAssets);
+        assertEq(reservationAfter.executionBountyAssets, reservationBefore.executionBountyAssets);
+        assertEq(reservationAfter.pendingOrderCount, maxPendingOrders);
 
         for (uint256 i = 0; i < maxPendingOrders; i++) {
             uint64 orderId = firstOrderId + uint64(i);
             assertEq(
                 uint256(_orderRecord(orderId).status),
-                uint256(IOrderRouterAccounting.OrderStatus.Failed),
-                "every queued order must terminally fail"
+                uint256(IOrderRouterAccounting.OrderStatus.Pending),
+                "every opening order remains pending"
             );
-            assertEq(_remainingCommittedMargin(orderId), 0, "every committed margin reservation must be released");
-            assertEq(_orderRecord(orderId).executionBountyAssets, 0, "every execution bounty must be cleared");
+            assertEq(_remainingCommittedMargin(orderId), 3e6, "every opening margin reservation remains intact");
+            assertGt(_orderRecord(orderId).executionBountyAssets, 0, "every opening bounty remains funded");
         }
         assertEq(
             _settlementBalance(engine.protocolTreasury()) - treasuryBefore,
-            reservationBefore.executionBountyAssets,
-            "all queued bounties must be forfeited to protocol treasury"
+            0,
+            "surviving opening bounties do not move to treasury"
         );
         assertEq(
             _settlementBalance(KEEPER) - keeperBefore,

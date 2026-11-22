@@ -605,7 +605,16 @@ library CfdEnginePlanLib {
             && (change >= 0 || previous > type(int256).min - change);
     }
 
-    /// @notice Allocates newly required VPI and liquidation reserves from free cash and new position pledge.
+    /// @notice Returns the reserve increase left for new pledge after using this order's available net rebate.
+    function vpiReserveFromNewPledge(
+        MarginClearinghouseAccountingLib.OpenCostPlan memory cost,
+        uint256 vpiReserveIncreaseAssets
+    ) internal pure returns (uint256) {
+        uint256 availableRebateAssets = Math.min(cost.settlementCreditAssets, cost.resultingFreeSettlementAssets);
+        return vpiReserveIncreaseAssets - Math.min(vpiReserveIncreaseAssets, availableRebateAssets);
+    }
+
+    /// @notice Allocates newly required VPI and liquidation reserves from the order's net rebate and new pledge.
     function _planOpenReserveFunding(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan,
@@ -624,10 +633,7 @@ library CfdEnginePlanLib {
         uint256 vpiReserveIncreaseAssets = delta.vpiRebateReserveAfterAssets > delta.vpiRebateReserveBeforeAssets
             ? delta.vpiRebateReserveAfterAssets - delta.vpiRebateReserveBeforeAssets
             : 0;
-        uint256 vpiReserveFromFreeAssets = vpiReserveIncreaseAssets < openCostPlan.resultingFreeSettlementAssets
-            ? vpiReserveIncreaseAssets
-            : openCostPlan.resultingFreeSettlementAssets;
-        delta.vpiRebateReserveFromPledgeAssets = vpiReserveIncreaseAssets - vpiReserveFromFreeAssets;
+        delta.vpiRebateReserveFromPledgeAssets = vpiReserveFromNewPledge(openCostPlan, vpiReserveIncreaseAssets);
         if (delta.vpiRebateReserveFromPledgeAssets > newPledgeAvailableAssets) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED;
             return;
@@ -1592,9 +1598,10 @@ library CfdEnginePlanLib {
     /// @dev Price loss consumes only the same-account claim and PnL pledge; excess is a diagnostic write-off. The
     ///      keeper/protocol/LP charge is capped by `liquidationReserveAssets`. Still-unpaid carry and negative lifetime VPI
     ///      are action charges recovered from new price gain first, dedicated VPI backing for its clawback, spendable
-    ///      action reserve, pre-existing free settlement (including released VPI backing), then committed order margin.
-    ///      Any remainder is waived. These action charges cannot consume PnL pledge, liquidation reserve, or protected
-    ///      execution-bounty reserves, and no shortfall becomes protocol debt.
+    ///      action reserve, then pre-existing free settlement (including released VPI backing). Committed opening-order
+    ///      margin stays reserved for the surviving orders; any remaining action charge is waived. These charges cannot
+    ///      consume PnL pledge, liquidation reserve, or protected execution-bounty reserves, and no shortfall becomes
+    ///      protocol debt.
     /// @param snap Account, pool cash, claims, risk parameters, and aggregate side snapshot.
     /// @param delta Liquidatable delta containing precomputed risk state.
     /// @param pos Entire position being liquidated.
@@ -1715,13 +1722,8 @@ library CfdEnginePlanLib {
                 freeConsumedAssets = collectibleFreeSettlementAssets;
             }
         }
-        uint256 actionChargeAfterFreeAssets = actionChargeAfterReserveAssets - freeConsumedAssets;
-        delta.actionCommittedMarginConsumedAssets = actionChargeAfterFreeAssets
-            < snap.lockedBuckets.committedOrderMarginAssets
-            ? actionChargeAfterFreeAssets
-            : snap.lockedBuckets.committedOrderMarginAssets;
-        delta.actionChargeCollectedAssets = delta.vpiRebateReserveConsumedAssets + delta.actionReserveConsumedAssets
-            + freeConsumedAssets + delta.actionCommittedMarginConsumedAssets;
+        delta.actionChargeCollectedAssets =
+            delta.vpiRebateReserveConsumedAssets + delta.actionReserveConsumedAssets + freeConsumedAssets;
         delta.actionChargeWaivedAssets = delta.actionChargeToCollectAssets - delta.actionChargeCollectedAssets;
     }
 

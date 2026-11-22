@@ -168,12 +168,12 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         assertEq(handler.ghostSuccessfulLiquidations(), 2, "reused account must liquidate a second time");
         assertEq(handler.ghost().accountGeneration(actor), 2);
         assertEq(handler.ghostOrderGeneration(pendingOrderId), 1);
-        assertEq(router.pendingOrderCounts(actor), 0);
-        assertEq(_remainingCommittedMargin(pendingOrderId), 0);
+        assertEq(router.pendingOrderCounts(actor), 1);
+        assertEq(_remainingCommittedMargin(pendingOrderId), 1000e6);
         assertEq(
             clearinghouse.balanceAssets(actor),
-            44_999_600_000,
-            "second generation also forfeits its pending order's capped $0.20 bounty"
+            44_999_800_000,
+            "second generation retains its pending order's capped $0.20 bounty"
         );
         assertEq(
             settlementToken.balanceOf(actor),
@@ -244,6 +244,10 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     }
 
     function test_ReusedLiquidationPreservesAndPaysRemainingClaimEntitlement() public {
+        // Start just before Friday's 21:30 UTC FAD margin window (November, standard time).
+        // The second position must be independently funded, so its surviving claim can only
+        // coexist with liquidation once the higher FAD maintenance requirement applies.
+        vm.warp(1_795_210_200 - 60);
         address actor = handler.actorAt(0);
         _openReusableActor();
         handler.liquidate(0, 1.69e8);
@@ -257,24 +261,29 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         handler.restoreSolvencyAndClearDegradedMode();
         handler.setPoolAssets(1_000_000_000e6);
         handler.syncMarkNow(1.2e8);
-        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 1000, 500e6, 1.2e8);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 1000, 2000e6, 1.2e8);
         handler.executeNextOrderModelled();
         (uint256 size,,,,,,) = engine.positions(actor);
         assertEq(size, 1000 * CfdTypes.SIZE_QUANTUM);
         uint256 reopenedAt = vm.getBlockTimestamp();
-        // A $4,200 price loss consumes only the claim, leaving $798. With $344 pledge, equity
-        // is $1,142 < $1,242 maintenance. The liquidation charge is capped at the $108 reserve.
+        vm.warp(1_795_210_200);
+        assertTrue(engine.isFadWindow(), "FAD maintenance must be active");
+        // A $4,200 price loss leaves part of the claim. Even with this order's independently
+        // funded pledge, equity falls below the 3% FAD maintenance requirement.
         handler.liquidate(0, 1.242e8);
-        assertEq(vm.getBlockTimestamp() - reopenedAt, 1);
         assertEq(handler.ghostSuccessfulLiquidations(), 2);
         assertEq(engine.traderClaimBalanceAssets(actor), 798e6, "claim remainder survives liquidation");
-        // The reopened $120,000 envelope pays another 190 atoms for one second of flat carry.
-        assertEq(clearinghouse.balanceAssets(actor), 44_839_399_795, "free cash plus surviving pledge entitlement");
+        // The reopened $120,000 envelope accrues flat carry at 5% until liquidation.
+        uint256 carry = 120_000e6 * (vm.getBlockTimestamp() - reopenedAt) / (20 * 365 days);
+        // The second position pays a $48 execution fee, a $0.20 opening bounty, and the $108 liquidation reserve.
+        uint256 balanceBeforeClaimSettlement = 44_839_399_985 - carry;
+        assertEq(clearinghouse.balanceAssets(actor), balanceBeforeClaimSettlement);
         handler.settleTraderClaim(0);
         assertEq(engine.traderClaimBalanceAssets(actor), 0);
-        assertEq(clearinghouse.balanceAssets(actor), 45_637_399_795);
-        handler.withdrawCollateral(0, 45_637_399_795);
-        assertEq(settlementToken.balanceOf(actor), 45_637_399_795);
+        uint256 balanceAfterClaimSettlement = balanceBeforeClaimSettlement + 798e6;
+        assertEq(clearinghouse.balanceAssets(actor), balanceAfterClaimSettlement);
+        handler.withdrawCollateral(0, balanceAfterClaimSettlement);
+        assertEq(settlementToken.balanceOf(actor), balanceAfterClaimSettlement);
         vm.prank(actor);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
         clearinghouse.withdraw(actor, 1);
@@ -312,7 +321,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         handler.depositCollateral(0, 50_000e6);
         handler.syncMarkNow(1.2e8);
         handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 17, 1000e6, 1.2e8);
-        assertEq(router.pendingOrderCounts(handler.actorAt(0)), 1);
+        assertEq(router.pendingOrderCounts(handler.actorAt(0)), 2);
         _assertAllInvariants();
 
         IMarginClearinghouse.OrderReservation memory stale = clearinghouse.getOrderReservation(oldReservationId);
@@ -421,13 +430,13 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function _assertInvariant_LiquidatedGenerationsHaveNoLiveOrdersOrReserves() internal view {
+    function _assertInvariant_LiquidatedGenerationsHaveNoStaleCloseReserves() internal view {
         for (uint256 i; i < handler.actorCount(); ++i) {
             (uint256 pending, uint256 liveReserves, uint256 reserved) =
                 handler.liquidatedGenerationExposure(handler.actorAt(i));
-            assertEq(pending, 0, "Liquidated generations must not keep pending orders");
-            assertEq(liveReserves, 0, "Liquidated generations must not retain live reserves");
-            assertEq(reserved, 0, "Liquidated generations must not retain reserved settlement");
+            assertEq(pending, 0, "Liquidated generations must not keep stale closes");
+            assertEq(liveReserves, 0, "Stale closes must not retain live reserves");
+            assertEq(reserved, 0, "Stale closes must not retain reserved settlement");
         }
     }
 
@@ -822,7 +831,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     function _assertAllInvariants() internal view {
         _assertInvariant_ClearinghouseReservationsMatchLiveExecutionBounties();
         _assertInvariant_TerminalNavBookMatchesCanonicalEngineState();
-        _assertInvariant_LiquidatedGenerationsHaveNoLiveOrdersOrReserves();
+        _assertInvariant_LiquidatedGenerationsHaveNoStaleCloseReserves();
         _assertInvariant_WalletsMatchSubmittedFlows();
         _assertInvariant_GhostCommittedMarginMatchesAccountReservation();
         _assertInvariant_OrderReservationModuleSummariesMatchAccountReservation();
