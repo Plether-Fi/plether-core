@@ -295,6 +295,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             clearinghouse.reclassifyPnlPledgeToLiquidationReserve(
                 delta.account, delta.liquidationReserveAfterAssets - delta.liquidationReserveBeforeAssets
             );
+        } else if (delta.liquidationReserveBeforeAssets > delta.liquidationReserveAfterAssets) {
+            uint256 excessReserveAssets = delta.liquidationReserveBeforeAssets - delta.liquidationReserveAfterAssets;
+            clearinghouse.releaseLiquidationReserve(delta.account, excessReserveAssets);
+            clearinghouse.lockPositionMargin(delta.account, excessReserveAssets);
         }
 
         netMarginChange;

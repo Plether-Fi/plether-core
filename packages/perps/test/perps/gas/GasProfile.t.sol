@@ -1031,11 +1031,8 @@ contract GasProfileTest is RecordedOrderReceipts {
                 reserve = beforeTrade.liquidationReserve;
             }
         } else {
-            if (reserve < beforeTrade.liquidationReserve) {
-                reserve = beforeTrade.liquidationReserve;
-            }
             expectedMargin = beforeTrade.margin + beforeTrade.marginDelta - carry - charge
-                - (reserve - beforeTrade.liquidationReserve);
+                + beforeTrade.liquidationReserve - reserve;
             // The order's net rebate covers reserve growth first. Its pledge funds any shortfall.
             (uint256 vpiReserveAfter, uint256 vpiReserveFromPledge) =
                 _expectedOpenVpiReserve(beforeTrade.accruedVpi, economics.vpiAssets, action);

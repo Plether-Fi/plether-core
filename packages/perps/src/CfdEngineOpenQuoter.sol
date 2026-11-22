@@ -212,7 +212,7 @@ contract CfdEngineOpenQuoter {
         ctx.preSkewCost = SafeCast.toInt256(_skewCost(ctx, _skew(ctx, 0)));
     }
 
-    /// @dev Pledge cannot grow by more than marginDelta, and exact price PnL is unchanged by an open at this price.
+    /// @dev Pledge can grow by at most marginDelta plus released liquidation reserve. Exact price PnL is unchanged.
     ///      Invert FLOOR(notional * IM / BPS) < equity using CEIL(equity * BPS / denominator) - 1.
     ///      Skew uses the carry-projected depth. Healing exceptions still cannot finish above opposing OI + the cap.
     function _upperBound(
@@ -223,6 +223,12 @@ contract CfdEngineOpenQuoter {
         uint256 collateralCeiling = Math.min(
             ctx.snap.position.margin + ctx.marginDelta + ctx.snap.traderClaimBalanceForAccount, type(uint144).max
         );
+        uint256 minReserve = ctx.snap.riskParams.minBountyAssets;
+        if (ctx.snap.liquidationReserveAssets > minReserve) {
+            collateralCeiling += Math.min(
+                ctx.snap.liquidationReserveAssets - minReserve, type(uint144).max - collateralCeiling
+            );
+        }
         int256 equity = SafeCast.toInt256(collateralCeiling - ctx.snap.protectedPositionMarginAssets) + ctx.pricePnl;
         if (equity <= 0) {
             return 0;
@@ -380,6 +386,9 @@ contract CfdEngineOpenQuoter {
             return (false, 0, totalNotionalFloor);
         }
         maxMargin = cost.resultingPositionMarginAssets - minVpiFromPledge - minReserveIncrease;
+        if (ctx.snap.liquidationReserveAssets > minLiquidationReserve) {
+            maxMargin += ctx.snap.liquidationReserveAssets - minLiquidationReserve;
+        }
         return (true, maxMargin, totalNotionalFloor);
     }
 

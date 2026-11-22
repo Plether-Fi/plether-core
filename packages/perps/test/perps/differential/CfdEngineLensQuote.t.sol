@@ -124,6 +124,31 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         assertEq(uint8(limitingReason), uint8(quote.limitingReason));
     }
 
+    function test_QuoteMaxOpen_IncreaseReclassifiesExcessLiquidationReserve() public {
+        address account = address(0xBEEF);
+        CfdTypes.Side side = CfdTypes.Side.SHORT;
+        _fundTrader(account, 20_000e6);
+        _open(account, side, 100_000e18, 11_490e6, 1e8);
+        assertEq(clearinghouse.liquidationReserveAssets(account), 100e6);
+        assertEq(clearinghouse.pnlPledgeAssets(account), 11_350e6);
+        uint256 balanceBefore = clearinghouse.balanceAssets(account);
+        uint256 lockedBefore = clearinghouse.lockedMarginAssets(account);
+
+        // At $0.90, the released reserve is needed to meet initial margin without adding collateral.
+        ICfdEngineLens.MaxOpenQuote memory quote = _quote(account, side, 0, 0.9e8);
+        assertEq(quote.maxSizeDelta, 600e18);
+        assertEq(quote.preview.postMarginAssets, 11_359_460_000);
+        assertEq(clearinghouse.liquidationReserveAssets(account), 100e6);
+
+        _open(account, side, quote.maxSizeDelta, 0, 0.9e8);
+        assertEq(clearinghouse.liquidationReserveAssets(account), 90_540_000);
+        assertEq(clearinghouse.pnlPledgeAssets(account), quote.preview.postMarginAssets);
+        assertEq(clearinghouse.lockedMarginAssets(account), lockedBefore);
+        assertEq(
+            clearinghouse.balanceAssets(account), balanceBefore - _engineExecutionFeeAssets(quote.maxSizeDelta, 0.9e8)
+        );
+    }
+
     function test_QuoteMaxOpen_ReturnsZeroForZeroPrice() public {
         address account = address(0xCAFE);
         _fundTrader(account, 10_000e6);

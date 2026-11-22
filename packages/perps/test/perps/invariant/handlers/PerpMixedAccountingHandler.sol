@@ -2988,14 +2988,16 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (v.reserve < 1e6) {
             v.reserve = 1e6;
         }
-        if (v.reserve < t.liquidationReserve) {
-            v.reserve = t.liquidationReserve;
+        if (v.reserve > t.liquidationReserve) {
+            uint256 reserveIncrease = v.reserve - t.liquidationReserve;
+            if (reserveIncrease > x.newPledge - x.vpiFromPledge) {
+                v.revertCode = 9;
+                return v;
+            }
+            v.margin -= reserveIncrease;
+        } else {
+            v.margin += t.liquidationReserve - v.reserve;
         }
-        if (v.reserve - t.liquidationReserve > x.newPledge - x.vpiFromPledge) {
-            v.revertCode = 9;
-            return v;
-        }
-        v.margin -= v.reserve - t.liquidationReserve;
         x.pnl = int256(t.basis) - int256(t.lots * currentPrice);
         if (i % 2 != 0) {
             x.pnl = -x.pnl;
