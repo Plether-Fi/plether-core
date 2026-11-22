@@ -235,11 +235,11 @@ interface IHousePool {
     event ClaimantInflowAccounted(
         address indexed caller, ClaimantInflowKind kind, ClaimantInflowCashMode cashMode, uint256 amountAssets
     );
-    /// @notice Emitted when all quarantined ownerless assets are assigned to a tranche and matching shares are minted.
+    /// @notice Emitted when all quarantined ownerless assets are assigned to a tranche.
     /// @param toSenior True when assets were assigned to senior, false for junior.
-    /// @param receiver Account receiving bootstrap vault shares.
+    /// @param receiver Account specified to receive any bootstrap vault shares.
     /// @param amountAssets Principal assigned to the tranche, in settlement token.
-    /// @param sharesMinted Vault shares minted to `receiver`.
+    /// @param sharesMinted Vault shares minted to `receiver`, or zero for a credit to existing Junior holders.
     event UnassignedAssetsAssigned(
         bool indexed toSenior, address indexed receiver, uint256 amountAssets, uint256 sharesMinted
     );
@@ -418,13 +418,14 @@ interface IHousePool {
         uint256 expectedPublishTime
     ) external returns (LpEpochSettlementResult memory result);
 
-    /// @notice Explicitly bootstraps quarantined LP assets into a tranche and mints matching shares.
+    /// @notice Explicitly assigns quarantined LP assets to a tranche.
     /// @dev Owner only, outside oracle-frozen mode and with any required mark satisfying active freshness policy.
-    ///      Reconciles, assigns the entire unassigned balance, and asks the selected configured vault to mint shares.
+    ///      Reconciles first and assigns the entire unassigned balance. If Junior has zero principal and outstanding
+    ///      shares, credits Junior principal without minting. Otherwise the selected vault mints matching shares.
     ///      No settlement token moves and the tranche seed-lifecycle flag is not initialized by this action. Senior assignment is
     ///      bounded by the active capacity limits, which are neutral before the first governed configuration.
     /// @param toSenior True to assign assets to senior, false to junior
-    /// @param receiver Account receiving bootstrap tranche shares
+    /// @param receiver Nonzero account receiving any bootstrap tranche shares
     function assignUnassignedAssets(
         bool toSenior,
         address receiver
