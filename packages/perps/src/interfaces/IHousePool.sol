@@ -166,6 +166,8 @@ interface IHousePool {
     error HousePool__PendingBootstrap();
     /// @notice Explicit bootstrap assignment was requested when no unassigned assets remain.
     error HousePool__NoUnassignedAssets();
+    /// @notice Terminal equity cannot cover existing tranche principal and the full unassigned reserve.
+    error HousePool__UnassignedAssetsUnderbacked();
     /// @notice Bootstrap or seed pricing produced zero shares, or a seed amount was zero.
     error HousePool__BootstrapSharesZero();
     /// @notice The selected tranche's permanent seed position was already initialized.
@@ -380,8 +382,8 @@ interface IHousePool {
     /// @return Protected senior entitlement in settlement token restored before revenue flows to junior
     function seniorHighWaterMark() external view returns (uint256);
 
-    /// @notice Accounted LP assets currently quarantined pending explicit bootstrap / assignment (6 decimals)
-    /// @return Ownerless canonical assets reserved from ordinary LP withdrawals and deposits
+    /// @notice Reserve for ownerless LP equity awaiting explicit assignment (6 decimals)
+    /// @return Full reserve target, including any shortfall in current backing
     function unassignedAssets() external view returns (uint256);
 
     /// @notice Unsettled recapitalization reserved from discretionary pool payouts.
@@ -420,8 +422,9 @@ interface IHousePool {
 
     /// @notice Explicitly assigns quarantined LP assets to a tranche.
     /// @dev Owner only, outside oracle-frozen mode and with any required mark satisfying active freshness policy.
-    ///      Reconciles first and assigns the entire unassigned balance. If Junior has zero principal and outstanding
-    ///      shares, credits Junior principal without minting. Otherwise the selected vault mints matching shares.
+    ///      Reconciles first and assigns the entire unassigned balance if fully backed. If Junior has zero principal
+    ///      and outstanding shares, credits Junior principal without minting. Otherwise the selected vault mints
+    ///      matching shares.
     ///      No settlement token moves and the tranche seed-lifecycle flag is not initialized by this action. Senior assignment is
     ///      bounded by the active capacity limits, which are neutral before the first governed configuration.
     ///      Junior assignment requires Senior principal to be at least its high-water mark after reconciliation.

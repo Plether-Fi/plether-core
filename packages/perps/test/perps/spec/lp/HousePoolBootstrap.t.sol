@@ -648,7 +648,7 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(pool.seniorPrincipal(), 100_000e6);
     }
 
-    function test_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public {
+    function test_AssignUnassignedAssets_WaitsForFullBackingAfterAdverseMark() public {
         settlementToken.mint(address(pool), 100_000e6);
         pool.accountExcess();
         vm.prank(address(juniorVault));
@@ -661,9 +661,19 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         _ensureLaterOracleTime();
         vm.prank(address(router));
         engine.updateMarkPrice(1.2e8, uint64(vm.getBlockTimestamp()));
+
+        vm.expectRevert(IHousePool.HousePool__UnassignedAssetsUnderbacked.selector);
         pool.assignUnassignedAssets(false, alice);
-        assertLt(pool.juniorPrincipal(), 100_000e6);
+        assertEq(pool.unassignedAssets(), 100_000e6);
+        assertEq(juniorVault.balanceOf(alice), 0);
+
+        _ensureLaterOracleTime();
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(vm.getBlockTimestamp()));
+        pool.assignUnassignedAssets(false, alice);
+        assertEq(pool.juniorPrincipal(), pool.totalAssets());
         assertEq(pool.unassignedAssets(), 0);
+        assertGt(juniorVault.balanceOf(alice), 0);
     }
 
     function test_RecordImplicitTradingRevenue_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public {

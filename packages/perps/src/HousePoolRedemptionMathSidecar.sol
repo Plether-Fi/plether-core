@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IHousePoolRedemptionMathSidecar} from "@plether/perps/interfaces/IHousePoolRedemptionMathSidecar.sol";
 import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccountingLib.sol";
 import {HousePoolPendingPreviewLib} from "@plether/perps/libraries/HousePoolPendingPreviewLib.sol";
@@ -41,8 +40,8 @@ contract HousePoolRedemptionMathSidecar is IHousePoolRedemptionMathSidecar {
         if (markFresh) {
             uint256 distributable =
                 snapshot.distributable > allocatedAssets ? snapshot.distributable - allocatedAssets : 0;
-            pendingState.unassignedAssets = Math.min(pendingState.unassignedAssets, distributable);
-            uint256 distributableToClaims = distributable - pendingState.unassignedAssets;
+            uint256 distributableToClaims =
+                distributable > pendingState.unassignedAssets ? distributable - pendingState.unassignedAssets : 0;
             if (distributableToClaims < claimedBeforeRecap) {
                 pendingState.waterfall = HousePoolWaterfallAccountingLib.absorbLoss(
                     pendingState.waterfall, claimedBeforeRecap - distributableToClaims

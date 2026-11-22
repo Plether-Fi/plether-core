@@ -152,7 +152,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     uint256 public seniorHighWaterMark;
     /// @notice Canonical recognized asset ledger in settlement token (6 decimals); `totalAssets()` also caps it by raw cash.
     uint256 public accountedAssets;
-    /// @notice Canonical assets without a safe share-owner path, reserved until explicit assignment (6 decimals).
+    /// @notice Reserve target for assets awaiting explicit assignment, including any shortfall (6 decimals).
     uint256 public unassignedAssets;
     /// @notice Unsettled claimant recapitalization intent reserved from withdrawals (6-decimal settlement token).
     uint256 public pendingRecapitalizationAssets;
@@ -708,6 +708,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         uint256 amount = unassignedAssets;
         if (amount == 0) {
             revert HousePool__NoUnassignedAssets();
+        }
+        uint256 distributable = HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot).distributable;
+        if (distributable < seniorPrincipal + juniorPrincipal + amount) {
+            revert HousePool__UnassignedAssetsUnderbacked();
         }
         if (toSenior) {
             _requireSeniorDepositCapacity(amount, _getWaterfallState());

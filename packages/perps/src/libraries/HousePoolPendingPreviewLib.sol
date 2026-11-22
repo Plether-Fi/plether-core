@@ -20,7 +20,7 @@ library HousePoolPendingPreviewLib {
 
     /// @notice In-memory waterfall and ownership state used for pending-inflow previews.
     /// @param waterfall Current senior principal, junior principal, and senior high-water mark.
-    /// @param unassignedAssets Assets not represented by a senior or junior principal claim.
+    /// @param unassignedAssets Reserve target for assets awaiting explicit assignment, including any shortfall.
     /// @param seniorSupply Current senior share supply; only zero versus nonzero is used.
     /// @param juniorSupply Current junior share supply; only zero versus nonzero is used.
     struct PendingAccountingState {
