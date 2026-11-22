@@ -166,6 +166,12 @@ interface IOrderLifecycleBook {
         uint64 orderId
     ) external view returns (OrderV3Types.OrderTiming memory);
 
+    /// @notice Pending opening lots by side through their deadlines, excluding risk-off invalidated orders.
+    function unexpiredOpenLots() external view returns (uint256 longLots, uint256 shortLots);
+
+    /// @notice Queued closing lots by side through their deadlines.
+    function unexpiredCloseLots() external view returns (uint256 longLots, uint256 shortLots);
+
     function pendingPolicy(
         uint64 orderId
     ) external view returns (OrderV3Types.ExecutionBounds memory bounds);

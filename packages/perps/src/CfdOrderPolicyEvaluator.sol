@@ -47,15 +47,14 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
                 account, request.side, request.sizeDelta, request.marginDelta, commitPrice, executionBountyAssets
             )
         );
-        if (code == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED) {
+        // Pending opens reserve pool capacity immediately. Enforce pool-risk and numeric failures even on a stale mark.
+        if (OrderFailurePolicyLib.isPredictablyInvalidOpen(uint8(code), false)) {
             revert IOrderRouterErrors.OrderRouter__PredictableOpenInvalid(uint8(code));
         }
         // An earlier queued close may remove the opposing position before execution.
         if (
             code != CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING
-                && OrderFailurePolicyLib.isPredictablyInvalidOpen(
-                    CfdEnginePlanLib.getOpenFailurePolicyCategory(code)
-                )
+                && OrderFailurePolicyLib.isPredictablyInvalidOpen(uint8(code), true)
         ) {
             uint64 markTime = engine.lastMarkTime();
             if (

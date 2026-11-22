@@ -51,6 +51,8 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
     function setUp() public {
         book = new OrderLifecycleBook(address(this), ENGINE, CLEARINGHOUSE, HOUSE_POOL);
         vm.mockCall(ENGINE, abi.encodeWithSignature("terminalNavBook()"), abi.encode(TERMINAL_NAV_BOOK));
+        vm.mockCall(address(this), abi.encodeWithSignature("admin()"), abi.encode(ROUTER_ADMIN));
+        vm.mockCall(ROUTER_ADMIN, abi.encodeWithSignature("riskOffOrderCutoff()"), abi.encode(uint64(0)));
     }
 
     function test_RegisterRejectsUnsetTerminalNavBookButPreservesExactReplay() public {
@@ -65,6 +67,86 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         OrderV3Types.OrderRequest memory fresh = _request(bytes32("unbound"));
         vm.expectRevert(IOrderRouterErrors.OrderRouter__TerminalNavBookUnavailable.selector);
         book.registerPending(ACCOUNT, 2, fresh, EXECUTION_BOUNTY_ASSETS);
+    }
+
+    function test_UnexpiredOpenLotsAcrossDeadlineBuckets() public {
+        vm.warp(255);
+        OrderV3Types.OrderRequest memory longOpen = _request(bytes32("long-open"));
+        longOpen.side = CfdTypes.Side.LONG;
+        longOpen.sizeDelta = 500e18;
+        longOpen.bounds.executionWindowSeconds = 1 hours;
+        book.registerPending(ACCOUNT, 1, longOpen, EXECUTION_BOUNTY_ASSETS);
+
+        OrderV3Types.OrderRequest memory shortOpen = _request(bytes32("short-open"));
+        shortOpen.bounds.executionWindowSeconds = 1;
+        book.registerPending(OTHER_ACCOUNT, 2, shortOpen, EXECUTION_BOUNTY_ASSETS);
+
+        vm.warp(256);
+        (uint256 longLots, uint256 shortLots) = book.unexpiredOpenLots();
+        assertEq(longLots, 5);
+        assertEq(shortLots, 1, "an order remains eligible at its deadline");
+
+        vm.warp(257);
+        (longLots, shortLots) = book.unexpiredOpenLots();
+        assertEq(longLots, 5, "an earlier order with a later deadline stays reserved");
+        assertEq(shortLots, 0);
+
+        vm.warp(3856);
+        (longLots, shortLots) = book.unexpiredOpenLots();
+        assertEq(longLots, 0);
+        assertEq(shortLots, 0);
+    }
+
+    function test_RiskOffCutoffReleasesOpenReserveBeforeCleanup() public {
+        OrderV3Types.OrderRequest memory oldOpen = _request(bytes32("before-cutoff"));
+        oldOpen.side = CfdTypes.Side.LONG;
+        oldOpen.sizeDelta = 500e18;
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, oldOpen, EXECUTION_BOUNTY_ASSETS);
+        (uint256 longLots,) = book.unexpiredOpenLots();
+        assertEq(longLots, 5);
+
+        vm.mockCall(ROUTER_ADMIN, abi.encodeWithSignature("riskOffOrderCutoff()"), abi.encode(uint64(1)));
+        (longLots,) = book.unexpiredOpenLots();
+        assertEq(longLots, 0, "cutoff releases capacity before finalization");
+        assertEq(book.pendingIntent(1).account, ACCOUNT, "order remains queued for normal settlement");
+
+        OrderV3Types.OrderRequest memory newOpen = _request(bytes32("after-cutoff"));
+        newOpen.side = CfdTypes.Side.LONG;
+        newOpen.sizeDelta = 200e18;
+        book.registerPending(OTHER_ACCOUNT, 2, newOpen, EXECUTION_BOUNTY_ASSETS);
+        (uint64 replayedId,, bool replayed) = book.registerPending(ACCOUNT, 3, oldOpen, EXECUTION_BOUNTY_ASSETS);
+        assertTrue(replayed);
+        assertEq(replayedId, 1);
+        (longLots,) = book.unexpiredOpenLots();
+        assertEq(longLots, 2, "only the new open reserves capacity at the shared deadline");
+
+        book.finalize(_riskOffReceipt(1, oldOpen, intentHash));
+        (longLots,) = book.unexpiredOpenLots();
+        assertEq(longLots, 2, "old cleanup preserves the new reserve");
+    }
+
+    function test_UnexpiredCloseLotsTrackDeadlineAndIgnoreOpenCutoff() public {
+        OrderV3Types.OrderRequest memory close = _request(bytes32("close-lots"));
+        close.isClose = true;
+        close.side = CfdTypes.Side.SHORT;
+        close.sizeDelta = 300e18;
+        close.marginDelta = 0;
+        close.bounds.executionWindowSeconds = 10;
+        close.bounds.minPostSettlementBalanceAssets = 0;
+        book.registerPending(ACCOUNT, 1, close, 0);
+
+        vm.mockCall(ROUTER_ADMIN, abi.encodeWithSignature("riskOffOrderCutoff()"), abi.encode(uint64(1)));
+        uint256 deadline = book.orderTiming(1).executionDeadline;
+        vm.warp(deadline);
+        (uint256 longLots, uint256 shortLots) = book.unexpiredCloseLots();
+        assertEq(longLots, 0);
+        assertEq(shortLots, 3, "close remains eligible on its deadline through risk-off");
+        (longLots, shortLots) = book.unexpiredOpenLots();
+        assertEq(longLots + shortLots, 0, "closes contribute no open exposure");
+
+        vm.warp(deadline + 1);
+        (longLots, shortLots) = book.unexpiredCloseLots();
+        assertEq(longLots + shortLots, 0, "close expires before cleanup");
     }
 
     function testFuzz_CompactCommitmentRoundTripsWithoutNarrowingBalances(

@@ -11,6 +11,7 @@ import {CloseAccountingLib} from "@plether/perps/libraries/CloseAccountingLib.so
 import {LiquidationAccountingLib} from "@plether/perps/libraries/LiquidationAccountingLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {OpenAccountingLib} from "@plether/perps/libraries/OpenAccountingLib.sol";
+import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 import {VpiAccrualAccountingLib} from "@plether/perps/libraries/VpiAccrualAccountingLib.sol";
@@ -130,17 +131,7 @@ library CfdEnginePlanLib {
     function getOpenFailurePolicyCategory(
         CfdEnginePlanTypes.OpenRevertCode code
     ) internal pure returns (CfdEnginePlanTypes.OpenFailurePolicyCategory) {
-        if (
-            code == CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING
-                || code == CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL
-                || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
-                || code == CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN
-                || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
-                || code == CfdEnginePlanTypes.OpenRevertCode.INVALID_SIZE_QUANTUM
-                || code == CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED
-                || code == CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED
-                || code == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED
-        ) {
+        if (OrderFailurePolicyLib.isPredictablyInvalidOpen(uint8(code), true)) {
             return CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable;
         }
 

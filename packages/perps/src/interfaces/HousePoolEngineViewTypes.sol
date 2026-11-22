@@ -13,8 +13,8 @@ library HousePoolEngineViewTypes {
     /// @param netPhysicalAssets Canonical pool assets, equal to physicalAssets. Treasury settlement is held
     ///        separately in the clearinghouse and must not be subtracted again; trader claims are also separate.
     /// @param maxLiabilityAssets Larger of the long-side and short-side maximum-profit envelopes.
-    /// @param supplementalReservedAssets Additional senior reservation supplied by the engine, including protected
-    ///        settlement headroom that does not affect terminal NAV.
+    /// @param supplementalReservedAssets Protected settlement headroom and pending-open backing for LP withdrawals.
+    ///        This supplemental reserve does not affect terminal NAV.
     /// @param terminalLpPriceDeltaAssets Signed terminal mark-to-close delta attributable to LPs.
     /// @param terminalNavBookVersion Monotonic terminal-NAV book version captured with the engine snapshot.
     /// @param traderClaimBalanceAssets Aggregate unpaid trader claims senior to fresh discretionary payouts.

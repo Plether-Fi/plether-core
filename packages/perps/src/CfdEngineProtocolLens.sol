@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngineProtocolLens} from "@plether/perps/interfaces/ICfdEngineProtocolLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
 import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccountingLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
@@ -34,9 +38,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
     /// @notice Returns the canonical protocol accounting and solvency snapshot.
     /// @dev Maximum liability is the larger side maximum-profit envelope. Withdrawal reserve is that liability plus all
-    ///      trader claims, refundable positive lifetime VPI, and the liability-scaled settlement buffer. Free settlement
-    ///      token is pool assets above that reserve; effective solvency assets are pool assets net of trader claims.
-    ///      Net physical assets equal canonical pool
+    ///      trader claims, refundable positive lifetime VPI, the liability-scaled settlement buffer, and pending-open
+    ///      capacity. Free settlement token is pool assets above that reserve; effective solvency assets are pool assets
+    ///      net of trader claims. Net physical assets equal canonical pool
     ///      assets: treasury clearinghouse balances are separate custody and are reported without subtracting them.
     ///      `hasLiveLiability` follows nonzero side maximum-profit envelopes rather than raw open interest.
     /// @return snapshot Protocol-level accounting, liability, claim, and degraded-mode values in 6-decimal settlement token units.
@@ -51,9 +55,10 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     /// @notice Builds the engine-side snapshot consumed by HousePool accounting.
     /// @dev Physical and net physical assets are current pool `totalAssets`; treasury clearinghouse balances are
     ///      outside pool custody. Terminal delta, claims, maximum directional liability, open-position
-    ///      status, and book version come from one authenticated Engine snapshot. The supplemental reserve is the
-    ///      liability-scaled settlement buffer and affects withdrawals without changing terminal NAV. A separately
-    ///      authenticated VPI snapshot supplies refundable pool cash and collectible clearinghouse backing for LP NAV.
+    ///      status, and book version come from one authenticated Engine snapshot. The supplemental reserve protects
+    ///      queued opening exposure and the liability-scaled settlement buffer from LP withdrawals without changing
+    ///      terminal NAV. A separately authenticated VPI snapshot supplies refundable pool cash and collectible
+    ///      clearinghouse backing for LP NAV.
     ///      Mark freshness is required whenever terminal price exposure exists. When gating is required,
     ///      frozen-market policy uses `fadMaxStaleness`; live policy uses the tighter nonzero engine/pool limit. This
     ///      function selects a limit but does not itself test the cached mark's age.
@@ -67,9 +72,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.physicalAssets = poolAssets;
         snapshot.netPhysicalAssets = poolAssets;
         snapshot.maxLiabilityAssets = terminalSnapshot.maxDirectionalLiabilityAssets;
-        snapshot.supplementalReservedAssets = SolvencyAccountingLib.settlementBufferTargetAssets(
-            snapshot.maxLiabilityAssets, engineContract.settlementBufferBps()
-        );
+        snapshot.supplementalReservedAssets = _withdrawalSupplement(snapshot.maxLiabilityAssets, poolAssets);
         snapshot.terminalLpPriceDeltaAssets = terminalSnapshot.terminalLpPriceDeltaAssets;
         snapshot.terminalNavBookVersion = terminalSnapshot.bookVersion;
         snapshot.traderClaimBalanceAssets = terminalSnapshot.totalTraderClaimsAssets;
@@ -90,6 +93,91 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
                 engineContract.fadMaxStaleness()
             )
             .maxStaleness;
+        }
+    }
+
+    /// @dev Holds capacity for pending opens only in the LP budget. The cap price bounds each lot's liability and
+    ///      skew contribution before its first eligible oracle update is known.
+    function _withdrawalSupplement(
+        uint256 liveMaxLiability,
+        uint256 poolAssets
+    ) private view returns (uint256) {
+        uint256 bufferBps = engineContract.settlementBufferBps();
+        IOrderLifecycleBook book = _lifecycleBook();
+        (uint256 pendingLong, uint256 pendingShort) =
+            address(book) == address(0) ? (uint256(0), uint256(0)) : book.unexpiredOpenLots();
+        if (pendingLong == 0 && pendingShort == 0) {
+            return SolvencyAccountingLib.settlementBufferTargetAssets(liveMaxLiability, bufferBps);
+        }
+
+        uint256 liabilityFloor;
+        uint256 worstLongSkew;
+        uint256 worstShortSkew;
+        {
+            uint256 capPrice = engineContract.CAP_PRICE();
+            (uint256 longLiability, uint256 longSize,,) = engineContract.sides(uint8(CfdTypes.Side.LONG));
+            (uint256 shortLiability, uint256 shortSize,,) = engineContract.sides(uint8(CfdTypes.Side.SHORT));
+            uint256 projectedLiability = SolvencyAccountingLib.getMaxLiability(
+                longLiability + pendingLong * capPrice, shortLiability + pendingShort * capPrice
+            );
+            liabilityFloor =
+                projectedLiability + SolvencyAccountingLib.settlementBufferTargetAssets(projectedLiability, bufferBps);
+            if (liabilityFloor >= poolAssets) {
+                return liabilityFloor - liveMaxLiability;
+            }
+
+            (worstLongSkew, worstShortSkew) =
+                _projectedSkew(book, longSize, shortSize, pendingLong, pendingShort, capPrice);
+        }
+        uint256 vpiFactor;
+        uint256 requiredDepth = liabilityFloor;
+        {
+            // Only orders that could finish on the heavier side need depth for the skew limit.
+            uint256 cappedSkew = Math.max(pendingLong == 0 ? 0 : worstLongSkew, pendingShort == 0 ? 0 : worstShortSkew);
+            uint256 maxSkewRatio;
+            (vpiFactor, maxSkewRatio,,,,,,,,) = engineContract.riskParams();
+            if (maxSkewRatio != 0) {
+                uint256 skewDepth = cappedSkew > Math.mulDiv(poolAssets, maxSkewRatio, CfdMath.WAD)
+                    ? poolAssets
+                    : Math.mulDiv(cappedSkew, CfdMath.WAD, maxSkewRatio, Math.Rounding.Ceil);
+                requiredDepth = Math.max(requiredDepth, skewDepth);
+            }
+        }
+        if (vpiFactor != 0 && requiredDepth < poolAssets) {
+            // A negative VPI cannot exceed the entire pre-open skew cost. That cost decreases with depth.
+            uint256 rebateSkew = Math.max(pendingShort == 0 ? 0 : worstLongSkew, pendingLong == 0 ? 0 : worstShortSkew);
+            (bool valid, uint256 maxRebate) = CfdMath.tryGetSkewCost(rebateSkew, requiredDepth, vpiFactor);
+            requiredDepth = valid ? Math.saturatingAdd(requiredDepth, maxRebate) : poolAssets;
+        }
+        return Math.min(requiredDepth, poolAssets) - liveMaxLiability;
+    }
+
+    function _projectedSkew(
+        IOrderLifecycleBook book,
+        uint256 longSize,
+        uint256 shortSize,
+        uint256 pendingLong,
+        uint256 pendingShort,
+        uint256 capPrice
+    ) private view returns (uint256 longSkew, uint256 shortSkew) {
+        (uint256 closingLong, uint256 closingShort) = book.unexpiredCloseLots();
+        uint256 longLots = longSize / CfdTypes.SIZE_QUANTUM;
+        uint256 shortLots = shortSize / CfdTypes.SIZE_QUANTUM;
+        // Opposing interest may close ahead of an open. Credit only the live lots that queued closes cannot remove.
+        longSkew = Math.saturatingSub(longLots + pendingLong, Math.saturatingSub(shortLots, closingShort)) * capPrice;
+        shortSkew = Math.saturatingSub(shortLots + pendingShort, Math.saturatingSub(longLots, closingLong)) * capPrice;
+    }
+
+    function _lifecycleBook() private view returns (IOrderLifecycleBook) {
+        address router = engineContract.orderRouter();
+        if (router.code.length == 0) {
+            return IOrderLifecycleBook(address(0));
+        }
+        // The production router binds its book at construction. Direct engine integrations may have no order queue.
+        try IOrderRouterExecutionHost(router).lifecycleBook() returns (address boundBook) {
+            return IOrderLifecycleBook(boundBook);
+        } catch {
+            return IOrderLifecycleBook(address(0));
         }
     }
 
@@ -149,12 +237,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.netPhysicalAssets = solvencyState.netPhysicalAssets;
         snapshot.maxLiabilityAssets = maxLiabilityAssets;
         snapshot.effectiveSolvencyAssets = solvencyState.effectiveAssets;
-        uint256 settlementBufferAssets = SolvencyAccountingLib.settlementBufferTargetAssets(
-            maxLiabilityAssets, engineContract.settlementBufferBps()
-        );
         (uint256 positiveVpiAssets,) = engineContract.vpiAccountingSnapshot();
-        snapshot.withdrawalReservedAssets =
-            solvencyState.withdrawalReservedAssets + settlementBufferAssets + positiveVpiAssets;
+        snapshot.withdrawalReservedAssets = solvencyState.withdrawalReservedAssets
+            + _withdrawalSupplement(maxLiabilityAssets, poolAssets) + positiveVpiAssets;
         snapshot.freeAssets =
             poolAssets > snapshot.withdrawalReservedAssets ? poolAssets - snapshot.withdrawalReservedAssets : 0;
         snapshot.protocolTreasuryBalanceAssets = protocolTreasuryBalanceAssets;

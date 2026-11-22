@@ -870,8 +870,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         RedemptionPhase memory juniorPhase;
         juniorPhase.pricingPrincipal = juniorPrincipal;
         juniorPhase.pricingSupply = _juniorShareSupply();
-        uint256 freeAssets =
-            _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, _pendingClaimantBucketAssets()).freeAssets;
+        uint256 freeAssets = _getWithdrawalSnapshot(accountingSnapshot).freeAssets;
 
         RedemptionPhase memory seniorPhase = RedemptionPhase({
             pricingPrincipal: seniorPrincipal,
@@ -1268,12 +1267,13 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     ///      assets. This accounting view does not itself apply degraded-mode or mark-freshness liveness gates.
     /// @return Free settlement token available to the tranche withdrawal waterfall (6 decimals)
     function getFreeAssets() public view returns (uint256) {
-        return _getWithdrawalSnapshot().freeAssets;
+        return _getWithdrawalSnapshot(_getHousePoolInputSnapshot()).freeAssets;
     }
 
     /// @inheritdoc IHousePool
     /// @dev Reads live side aggregates because the terminal-NAV lens rejects reads during engine settlement.
-    ///      Positive lifetime VPI remains reserved; negative VPI backing is not cash. Returns zero while both stored
+    ///      Positive lifetime VPI remains reserved; negative VPI backing is not cash. Pending-open capacity applies
+    ///      to LP withdrawals; engine settlement uses the live-position reserve. Returns zero while both stored
     ///      tranche principals are zero so a fee top-up cannot consume value awaiting claimant ownership.
     function getSettlementFreeAssets() public view override returns (uint256) {
         if (seniorPrincipal + juniorPrincipal == 0) {
@@ -1289,10 +1289,13 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     ///      requires a Router-bound mark published in the current epoch.
     /// @return Withdrawable senior settlement token, capped by free settlement token and `seniorPrincipal` (6 decimals)
     function getMaxSeniorWithdraw() public view returns (uint256) {
-        if (!_withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot())) {
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
+        if (!_withdrawalsLive(accountingSnapshot, _getHousePoolStatusSnapshot())) {
             return 0;
         }
-        return HousePoolWithdrawalPreviewLib.seniorWithdrawCap(getFreeAssets(), seniorPrincipal);
+        return HousePoolWithdrawalPreviewLib.seniorWithdrawCap(
+            _getWithdrawalSnapshot(accountingSnapshot).freeAssets, seniorPrincipal
+        );
     }
 
     /// @notice Returns stored-state capacity available to matured junior redemption demand.
@@ -1302,13 +1305,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     ///      Router-bound mark required for execution with open positions outside frozen mode.
     /// @return Junior funding capacity in settlement token, before controller-specific queue limits
     function getMaxJuniorWithdraw() public view returns (uint256) {
-        if (!_withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot())) {
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
+        if (!_withdrawalsLive(accountingSnapshot, _getHousePoolStatusSnapshot())) {
             return 0;
         }
         if (seniorVault != address(0) && _hasMaturedRedeemHead(seniorVault, currentLpEpoch())) {
             return 0;
         }
-        return _juniorSettlementCapacity(getFreeAssets(), _getWaterfallState());
+        return _juniorSettlementCapacity(_getWithdrawalSnapshot(accountingSnapshot).freeAssets, _getWaterfallState());
     }
 
     /// @notice Returns tranche principals and withdrawal caps as if reconcile ran right now.
@@ -1469,8 +1473,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     function getPoolLiquidityView() external view returns (PoolLiquidityView memory viewData) {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
-        HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot =
-            _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, _pendingClaimantBucketAssets());
+        HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot = _getWithdrawalSnapshot(accountingSnapshot);
         viewData.totalAssets = totalAssets();
         viewData.freeAssets = withdrawalSnapshot.freeAssets;
         viewData.withdrawalReservedAssets = withdrawalSnapshot.reserved;
@@ -1618,12 +1621,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             markValid ? 0 : Math.min(pendingClaimantPayoutDebitAssets, remainingPendingAssets);
     }
 
-    function _getWithdrawalSnapshot()
-        internal
-        view
-        returns (HousePoolAccountingLib.WithdrawalSnapshot memory snapshot)
-    {
-        return _buildWithdrawalSnapshot(_getHousePoolInputSnapshot(), unassignedAssets, _pendingClaimantBucketAssets());
+    function _getWithdrawalSnapshot(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot
+    ) internal view returns (HousePoolAccountingLib.WithdrawalSnapshot memory) {
+        return _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, _pendingClaimantBucketAssets());
     }
 
     function _buildHousePoolContext(

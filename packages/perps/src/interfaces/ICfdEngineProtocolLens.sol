@@ -25,7 +25,8 @@ interface ICfdEngineProtocolLens {
     /// @notice Builds the HousePool accounting snapshot against a caller-supplied freshness limit.
     /// @dev Reports custody-capped `HousePool.totalAssets()` plus authenticated Engine price and VPI snapshots:
     ///      signed LP terminal delta, trader claims, both gross accrued VPI amounts, larger-side maximum liability,
-    ///      book version, and position flags. Supplemental reserve is the liability-scaled settlement buffer. Open positions require freshness; frozen
+    ///      book version, and position flags. Supplemental reserve includes the liability-scaled settlement buffer and
+    ///      pending-open capacity. Open positions require freshness; frozen
     ///      mode uses `fadMaxStaleness`, while live policy selects the tighter nonzero engine/pool limit. This function
     ///      selects but does not test the age.
     /// @param markStalenessLimit Pool-configured live mark age limit in seconds; zero delegates to the engine limit
