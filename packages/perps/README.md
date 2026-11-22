@@ -18,7 +18,7 @@ The underlying basket mark moves inversely to dollar strength:
 - **SHORT** profits when the basket mark rises and the dollar weakens.
 
 The mark is bounded between zero and `CAP_PRICE`. Before accepting new exposure, the protocol checks that pool
-capital can cover the worst-case directional payout plus a settlement buffer.
+capital can cover the worst-case directional payout, a settlement buffer, and outstanding refundable VPI backing.
 
 Carry is a flat simple annual charge on each position's full maximum possible profit. The release annual rate is
 `500 bps` (5%): a position with 10,000 USDG of maximum profit accrues 500 USDG over 365 days. Posted margin, pool
@@ -71,6 +71,11 @@ Deposits and redemptions use an asynchronous request, settlement, and claim proc
 available liquidity after trader claims and required reserves. Both tranches carry risk; Senior priority does
 not guarantee principal or returns.
 
+Share prices defer ownership of VPI that remains refundable on an open position. They also include negative accrued
+VPI collectible from protected trader reserves, which cannot fund withdrawals before collection. These signed VPI
+credits and refunds follow the lifetime clamp and reserve rules; there is no separate maker reward program. See
+[Deferred VPI ownership](ACCOUNTING_SPEC.md#deferred-vpi-ownership).
+
 Accepted Senior deposits are binding during normal operation and reserve backing that can limit Junior withdrawals.
 Refunds remain available under the documented recovery conditions. See the
 [LP integration guide](CANONICAL_ENTRYPOINTS.md#lps) and [LP risk model](SECURITY.md#housepool-and-lp-specific-risks)
@@ -86,7 +91,7 @@ for request, cancellation, claim and reserve rules.
 | `PletherOracle` | Validates signed basket data and applies live, historical and frozen price rules. |
 | `PositionProtectionBook` | Tracks take-profit and stop-loss protection. |
 | `CfdEngine` | Tracks positions, risk, carry, and settlement accounting. |
-| `CfdEnginePlanningReader` | Builds read-only planner requests for its constructor-bound engine. |
+| `CfdEnginePlanningReader` | Constructs canonical read-only snapshots and planner requests for its constructor-bound engine. |
 | `HousePool` | Holds LP capital and manages the senior/junior waterfall. |
 | `TrancheVault` | Handles LP shares, deposit requests, and redemptions. |
 | `PerpsPublicLens` | Provides product-facing views of accounts, queues, and protocol state. |

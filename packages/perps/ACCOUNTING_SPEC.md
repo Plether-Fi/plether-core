@@ -19,7 +19,7 @@ Use it together with:
 ## Reading the accounting model
 
 The protocol keeps cash availability, risk solvency, and terminal LP equity as separate questions. LP entry and exit
-pricing, however, deliberately share one exact terminal-NAV view.
+pricing share the same exact marked price-PnL adjustment and deferred VPI ownership view.
 
 The key rules are:
 
@@ -37,6 +37,8 @@ The key rules are:
 7. A valid risk-reducing transition must not revert just to preserve either pre-close solvency or settlement-buffer
    headroom; the protocol contains raw insolvency with `degradedMode` instead.
 8. Frozen-close spread value belongs to LPs and must never be credited to protocol treasury.
+9. Outstanding positive lifetime VPI defers LP ownership of refundable charges. Outstanding negative lifetime VPI is
+   a reserve-backed receivable; it affects share ownership but cannot fund withdrawals before collection.
 
 ## Canonical Quantities
 
@@ -48,7 +50,7 @@ decimals, position sizes use 18 decimals, and rates in basis points use a denomi
 | PnL | Trader profit or loss from the change in the capped basket price. |
 | PnL pledge | Settlement cash allocated to the live position and reachable for price losses. |
 | Trader claim | An unpaid price payout owed by the pool; it is a liability, not cash in the trader's clearinghouse account. |
-| NAV | Net asset value attributed to LP shares after the terminal price adjustment and tranche waterfall. |
+| NAV | Net asset value attributed to LP shares after the terminal price adjustment, signed accrued VPI correction, and tranche waterfall. |
 | VPI | Virtual price impact: a signed skew-based action charge or rebate, accounted separately from price PnL. |
 | FAD | The scheduled close-only regime with elevated maintenance margin around oracle closures. FAD alone does not mean the oracle is frozen. |
 
@@ -63,8 +65,9 @@ Use these terms consistently:
 - `accountedAssets`: canonical protocol-owned USDG recognized by pool accounting
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: conservative economic pool backing
-- `economicDepth = max(physicalAssets - totalTraderClaimBalanceAssets, 0)`: depth for skew capacity and VPI.
-  Do not also subtract open-position liabilities, the settlement buffer, or LP principal.
+- `economicDepth = max(physicalAssets - totalTraderClaimBalanceAssets - totalPositiveVpiAccruedAssets, 0)`: cash depth
+  for skew capacity and VPI. Do not add negative-VPI receivables or subtract open-position price liabilities, the
+  settlement buffer, or LP principal again.
 - `protocolTreasuryBalance = clearinghouse.balanceAssets(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
 - `netPhysicalAssets = physicalAssets`: the retained snapshot field reports canonical pool backing. Treasury
   settlement is held in the clearinghouse, outside pool custody, so subtracting it here would understate backing.
@@ -88,6 +91,31 @@ Operational rules:
 - `priceLossWrittenOffAssets`: diagnostic trader price loss above the account's collectible cap; it is not a liability
   or receivable. Unpaid price payouts become trader claims; negative aggregate terminal equity is reported
   separately as `terminalDeficit`.
+
+### Deferred VPI ownership
+
+The Engine owns two unsigned aggregates over live positions:
+
+```text
+Rplus = totalPositiveVpiAccruedAssets = sum(max(position.vpiAccrued, 0))
+Rminus = totalNegativeVpiAccruedAssets = sum(max(-position.vpiAccrued, 0))
+```
+
+Canonical position writes replace the old contribution with the actual new contribution; deletion removes it.
+This includes increases, sign crossings, proportional partial closes, full closes and liquidations. The guarded
+`vpiAccountingSnapshot()` exposes both totals to stable accounting reads. The terminal price book and its
+`TerminalNavSnapshot` remain price-only.
+
+Positive accrued VPI is treated as deferred LP ownership until the related exposure closes. Negative accrued VPI
+has mandatory dedicated clearinghouse backing and is a collectible receivable, not pool cash. Excess reserve
+funding does not increase this receivable. These are existing signed VPI settlement rules, not a separate maker
+reward: the lifetime clamp prevents a closed position portion from finishing with net negative VPI.
+
+This policy conservatively defers recognition; it does not forecast the exact VPI from every possible future close.
+An opening signed VPI adjustment changes physical cash and signed accrued VPI equally, so its VPI-only NAV effect is
+zero. A close removing accrued `a` and assessing signed VPI `c` recognizes finalized lifetime expense `a + c`, subject
+to actual settlement and waiver. Liquidation releases positive accrued VPI as finalized income and recovers negative
+accrued VPI before removing its receivable.
 
 ### Settlement-buffer terms
 
@@ -157,24 +185,27 @@ For a valid close plan, `frozenSpreadAssets == frozenSpreadPaidAssets + frozenSp
 
 ### Symmetric exact marked NAV
 
-The aggregate signed book output is the sole mark-to-close adjustment used to price both LP deposits and LP
-redemptions, before allocating pending claimant inflows and excluding ownerless assets from tranche ownership:
+Both LP deposits and redemptions use the exact signed book output together with the separate deferred VPI correction,
+before allocating pending claimant inflows and excluding ownerless assets from tranche ownership:
 
 ```text
 signedTerminalEquity = physicalAssets
                      - totalTraderClaimBalanceAssets
                      + terminalLpPriceDeltaAssets
+                     - totalPositiveVpiAccruedAssets
+                     + totalNegativeVpiAccruedAssets
 
 distributable = max(signedTerminalEquity, 0)
 terminalDeficit = max(-signedTerminalEquity, 0)
 ```
 
 This is symmetric: an entrant receives the same discount for inherited marked liabilities that an exiting LP bears,
-and receives credit only for collectible marked receivables. It does not make those receivables cash. Redemption
-funding still uses the stricter physical withdrawal reserve described below.
+and receives credit only for collectible marked and backed VPI receivables. It does not make those receivables cash.
+The positive and negative VPI amounts enter before the single final equity floor; neither changes terminal price
+collectible cap `K`. Redemption funding still uses the stricter physical withdrawal reserve described below.
 
 For example, suppose the pool holds 1,000 USDG, owes 100 USDG of trader claims, has maximum open-position liability
-of 600 USDG, and has a collectible terminal price delta of +80 USDG. At a 25-bps buffer rate:
+of 600 USDG, has a collectible terminal price delta of +80 USDG, and has no outstanding VPI accrual. At a 25-bps buffer rate:
 
 | Question | Calculation | Result |
 | --- | --- | --- |
@@ -238,12 +269,12 @@ This view determines whether the protocol may accept more risk. Compute the foll
 
 - derive post-op `E = max(P - C, 0)`,
 - derive post-op `L = max(longMaxProfit, shortMaxProfit)`,
-- derive `B = ceil(L * settlementBufferBps / 10_000)`.
+- derive `B = ceil(L * settlementBufferBps / 10_000)` and post-op `Rplus`.
 
 Rule:
 
-- a risk-increasing open or increase is allowed only if post-op `E >= L + B`; implementation uses the equivalent
-  subtraction form after first proving `E >= L`.
+- a risk-increasing open or increase is allowed only if post-op `E >= L + B + Rplus`. Raw insolvency and degraded
+  mode still compare `E` against `L`; a refundable VPI charge cannot finance new price exposure.
 
 Notes:
 
@@ -259,12 +290,12 @@ Notes:
 This view determines how much cash the next synchronized settlement may commit to matured LP redemptions:
 
 ```text
-baseWithdrawalReservedAssets = C + L + B
+baseWithdrawalReservedAssets = C + L + B + Rplus
 freeAssets = max(P - withdrawalReservedAssets, 0)
 ```
 
 HousePool adds pending claimant assets and `unassignedAssets` to the base reserve before calculating free cash.
-The Engine supplies `B` as `supplementalReservedAssets`.
+The Engine supplies `B` as `supplementalReservedAssets` and the VPI totals as separate snapshot fields.
 
 Rule:
 
@@ -274,7 +305,7 @@ Rule:
 Notes:
 
 - this view is intentionally stricter than solvency,
-- it ignores uncollected carry and marked price-loss receivables as a cash source for withdrawal,
+- it ignores uncollected carry, marked price-loss receivables and backed negative VPI as cash sources for withdrawal,
 - dormant Senior NAV is not reserved merely because it exists; only eligible matured Senior demand has priority over
   Junior demand,
 - deposit assets finalized later in the same synchronized transaction are not a funding source for withdrawals,
@@ -288,6 +319,7 @@ This view determines tranche equity for share pricing and revenue distribution:
 
 - start from the same physical assets, trader-claim liabilities, claimant buckets, recapitalizations, and revenue state,
 - apply the exact signed `terminalLpPriceDeltaAssets` once,
+- subtract `Rplus` and add the backed `Rminus` once before flooring equity,
 - route the resulting distributable equity through the same Senior/Junior waterfall for both redemption and deposit
   pricing,
 - ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, Junior requests
@@ -534,6 +566,8 @@ Key fields:
 - `terminalLpPriceDeltaAssets`: exact signed collectible price-PnL adjustment used by both entry and exit pricing
 - `terminalNavBookVersion`: monotonic version captured with the exact delta
 - `traderClaimBalanceAssets`
+- `totalPositiveVpiAccruedAssets`: deferred VPI liability also protected by the physical withdrawal reserve
+- `totalNegativeVpiAccruedAssets`: backed VPI receivable included only in ownership pricing
 - `hasOpenPositions`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
@@ -542,7 +576,7 @@ Rule:
 
 - downstream LP accounting must not re-derive the terminal delta from rounded position tuples or side aggregates,
 - the Engine snapshot authenticates mark, claims, position status, maximum directional liability, and book version in
-  one call,
+  one call; the separate guarded VPI snapshot is read in the same stable static-call flow,
 - no ordinary deposit request mints active shares in the submission transaction; shares are priced and minted at
   epoch activation.
 
@@ -648,6 +682,8 @@ Keep these categories separate:
 - `recordClaimantInflow(amount, Recapitalization, CashArrived)`: recapitalization intended to restore waterfall claimants
 - `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the pool in this flow
 - `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the pool and only needing ownership routing
+- `recordClaimantInflow(amount, BalanceOnly, CashArrived)`: recognize incoming deferred VPI cash or collection of an
+  already-counted negative-VPI receivable without adding a pending revenue intent
 - `accountExcess()`: owner-governed admission of unsolicited raw pool cash into canonical assets
 
 Governance funds recapitalization through `CfdEngine.recapitalizePool(amountAssets)`. The engine owner approves
@@ -672,12 +708,20 @@ Rules:
 
 `unassignedAssets` should be exceptional telemetry, not a normal operating bucket.
 
+Positive opening VPI and mandatory negative-VPI clawback are balance-only flows. A gain-withheld clawback likewise
+replaces the existing receivable without adding retained-revenue intent. Releasing a positive accrual makes retained
+value visible through corrected NAV; it needs no second revenue record. Other realized price, fee and carry revenue
+keeps its existing routing. When both stored tranche principals are zero, pool-funded protocol-fee top-ups are
+forgone for that action to protect claimant continuity before reconciliation. Direct fees collected from the trader
+remain eligible; skipped top-ups create no fee debt and are not recovered by later reconciliation.
+
 ## Economic Depth For Carry And Risk Pricing
 
 The opening skew cap and open/close VPI use `economicDepth`, not gross physical assets. Paying a flat account's
 existing claim reduces assets and liabilities equally and therefore does not change this depth when no other state
 changes. Physical custody, payout affordability, solvency snapshots, Router depth/receipt fields, and hypothetical
-preview inputs remain gross; each risk-pricing consumer subtracts claims once.
+preview inputs remain gross; each risk-pricing consumer subtracts claims and `Rplus` once.
+`Rminus` never increases the denominator because its backing remains in clearinghouse custody until collection.
 
 Carry is independent of economic depth. The heading is retained for existing links. Neither actual nor hypothetical
 pool depth, claim changes, recapitalization, LP activity, or passive balance shocks change the annual carry rate or
@@ -1104,8 +1148,9 @@ Required properties:
   including a newly deferred price payout. It may be partially paid; the unfunded portion is explicitly waived and
   never becomes a trader claim or PnL pledge,
 - anticipated carry, VPI, fees, spreads, and other action economics stay outside terminal `K`; the book is synchronized
-  only to actually installed PnL pledge and same-account claim state after settlement. The VPI reserve therefore does
-  not inflate marked LP receivables or symmetric LP NAV,
+  only to actually installed PnL pledge and same-account claim state after settlement. Deferred VPI enters full LP NAV
+  through the separate `Rplus`/`Rminus` correction; arbitrary reserve overfunding never increases either price `K` or
+  VPI receivables,
 - a user must not shield otherwise reachable settlement by parking it in queued committed margin right before terminal settlement,
 - carry-adjusted close loss must be planned once and consumed live from that same canonical loss amount,
 - price-gain-withheld or cash-collected frozen spread becomes LP revenue and never treasury margin; same-account claim
@@ -1133,7 +1178,8 @@ snapshot. Only collected cash is added to pool assets. Margin collection alone d
 settlement and may fund the dedicated VPI reserve; they do not directly become price-risk pledge.
 
 Admission then checks the resulting pledge plus same-account claim, after the VPI-reserve funding and
-liquidation-reserve carve-out. It also checks the pool's post-trade settlement buffer. An order above the configured
+liquidation-reserve carve-out. It also checks the pool's post-trade settlement buffer and positive-VPI cash backing.
+An order above the configured
 skew cap is allowed only when it strictly reduces the existing imbalance without making its own side heavier.
 
 An open must match the position projected through earlier queued orders. A full queued close can project the account
@@ -1251,10 +1297,10 @@ Close and liquidation settlement latch it when their post-operation solvency che
 E < L
 ```
 
-This is the raw solvency boundary. The settlement buffer is deliberately excluded: a close or liquidation may leave
-`L <= E < L + B` without entering degraded mode. The owner may clear an existing latch once `E >= L`; restoring the
-full buffer is not a clear condition. Subsequent opens and increases still fail their separate `E >= L + B`
-admission check.
+This is the raw solvency boundary. The settlement buffer and deferred positive VPI are deliberately excluded: a close
+or liquidation may leave `L <= E < L + B + Rplus` without entering degraded mode. The owner may clear an existing
+latch once `E >= L`; restoring the buffer and VPI cash headroom is not a clear condition. Subsequent opens and
+increases still fail their separate `E >= L + B + Rplus` admission check.
 
 Allowed while degraded:
 
@@ -1349,11 +1395,13 @@ The main accounting invariants are:
 9. Reservations cannot be withdrawn or reused; negative lifetime VPI remains backed by its dedicated reserve.
 10. Collected carry is pool revenue once; uncollected carry is not an LP receivable.
 11. Price-loss write-offs, action-charge waivers, deferred price claims, and terminal deficit remain separate quantities.
-12. Successful opens/increases meet `E >= L + B`. Closes and liquidations may consume the buffer and complete into
+12. Successful opens/increases meet `E >= L + B + Rplus`. Closes and liquidations may consume the buffer and complete into
     degraded mode; they do not revert solely to preserve pre-close pool solvency.
 13. Frozen-close spread and frozen LP exit fees stay with LPs; they never become protocol treasury margin.
 14. Ordinary and protection close attempts authenticate zero bounty records without reserving or paying a close bounty.
 15. LP request ids use the same five-minute cutoff for both tranches and both directions; maturity does not fix a price.
+16. Gross positive and negative VPI totals equal live position contributions. LP prices apply both signs, while cash
+    reserves and economic depth protect gross positive VPI without spending the negative receivable.
 
 ### Implementation references
 

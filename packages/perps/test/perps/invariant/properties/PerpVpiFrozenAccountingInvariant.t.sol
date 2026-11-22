@@ -91,7 +91,11 @@ contract PerpVpiFrozenAccountingHandler is Test {
         ghostLots[i] += lots;
         ghostSideLots[i % 2] += lots;
         ghostVpiAccrued[i] += vpi;
-        _bookCash(i, vpi, fee, 0, fee);
+        // The mock has zero stored tranche principal. Pool-funded fee top-ups are forgone; only cash collected
+        // directly from this action can credit treasury when negative VPI offsets the assessed execution fee.
+        int256 collected = vpi + int256(fee);
+        uint256 creditedFee = collected <= 0 ? 0 : uint256(collected) < fee ? uint256(collected) : fee;
+        _bookCash(i, vpi, fee, 0, creditedFee);
         ++opens;
         assertModel();
     }
@@ -202,7 +206,13 @@ contract PerpVpiFrozenAccountingHandler is Test {
         uint256 afterSkew = longLots > shortLots ? longLots - shortLots : shortLots - longLots;
         // k = 0.005 = 1/200, C(S) = floor(S^2 / (400 D)). With this exact rational k, the specified WAD
         // intermediate rounding reduces algebraically to this formula. Do not call CfdMath or production planners.
-        uint256 denominator = 400 * uint256(ghostPoolCash);
+        (uint256 positiveVpiAssets,) = _ghostVpiTotals();
+        uint256 cash = uint256(ghostPoolCash);
+        uint256 depth = cash > positiveVpiAssets ? cash - positiveVpiAssets : 0;
+        if (depth == 0) {
+            return 0;
+        }
+        uint256 denominator = 400 * depth;
         uint256 preCost = (beforeSkew * PRICE) ** 2 / denominator;
         uint256 postCost = (afterSkew * PRICE) ** 2 / denominator;
         return int256(postCost) - int256(preCost);
@@ -250,6 +260,9 @@ contract PerpVpiFrozenAccountingHandler is Test {
     }
 
     function assertModel() public view {
+        (uint256 positiveVpiAssets, uint256 negativeVpiAssets) = _ghostVpiTotals();
+        assertEq(engine.totalPositiveVpiAccruedAssets(), positiveVpiAssets, "independent gross positive VPI total");
+        assertEq(engine.totalNegativeVpiAccruedAssets(), negativeVpiAssets, "independent gross negative VPI total");
         uint256 expectedCustody = ghostTreasuryCash;
         for (uint256 i; i < 4; ++i) {
             address account = actorAt(i);
@@ -274,6 +287,20 @@ contract PerpVpiFrozenAccountingHandler is Test {
         );
         assertEq(settlementToken.balanceOf(address(clearinghouse)), expectedCustody, "physical clearinghouse custody");
         assertFalse(engine.degradedMode(), "bounded funded actions remain solvent");
+    }
+
+    function _ghostVpiTotals() internal view returns (uint256 positiveAssets, uint256 negativeAssets) {
+        for (uint256 i; i < 4; ++i) {
+            if (ghostLots[i] == 0) {
+                continue;
+            }
+            int256 accrued = ghostVpiAccrued[i];
+            if (accrued >= 0) {
+                positiveAssets += uint256(accrued);
+            } else {
+                negativeAssets += uint256(-(accrued + 1)) + 1;
+            }
+        }
     }
 
 }
@@ -321,6 +348,14 @@ contract PerpVpiFrozenAccountingInvariantTest is BasePerpInvariantTest {
         settlementToken.mint(address(housePool), 1);
         vm.expectRevert();
         handler.assertModel();
+    }
+
+    function test_FullClosesRemoveAllDeferredVpiContributions() public {
+        handler.close(0, 1000);
+        handler.close(1, 500);
+        handler.assertModel();
+        assertEq(engine.totalPositiveVpiAccruedAssets(), 0, "flat positions release all deferred positive VPI");
+        assertEq(engine.totalNegativeVpiAccruedAssets(), 0, "flat positions remove all backed VPI receivables");
     }
 
     function test_ReachesBothVpiSignsAndFrozenPartialAndFullCloses() public {

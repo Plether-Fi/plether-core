@@ -126,13 +126,16 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         _fundTrader(crossingShortTrader, 30_000e6);
         _open(longTrader, CfdTypes.Side.LONG, 300_000e18, 30_000e6, 1e8);
 
-        uint256 targetPoolAssets = 700_000e6;
+        // Skew policy uses pool cash net of refundable positive VPI. Keep that
+        // economic depth at the original 700,000-unit cap boundary.
+        uint256 positiveVpiReserveAssets = engine.totalPositiveVpiAccruedAssets();
+        uint256 targetPoolAssets = 700_000e6 + positiveVpiReserveAssets;
         uint256 poolAssetsBeforeDrainAssets = pool.totalAssets();
         vm.prank(address(pool));
         settlementToken.transfer(address(0xDEAD), poolAssetsBeforeDrainAssets - targetPoolAssets);
 
         uint256 poolAssets = pool.totalAssets();
-        uint256 maxSkewAssets = (poolAssets * 0.4e18) / 1e18;
+        uint256 maxSkewAssets = ((poolAssets - positiveVpiReserveAssets) * 0.4e18) / 1e18;
         uint256 preSkewAssets = 300_000e6;
         uint256 healingSize = 10_000e18;
         uint256 postHealingSkewAssets = preSkewAssets - 10_000e6;

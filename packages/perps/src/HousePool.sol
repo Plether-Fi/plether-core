@@ -23,7 +23,6 @@ import {HousePoolSeniorCapacityLib} from "@plether/perps/libraries/HousePoolSeni
 import {HousePoolTrancheGateLib} from "@plether/perps/libraries/HousePoolTrancheGateLib.sol";
 import {HousePoolWaterfallAccountingLib} from "@plether/perps/libraries/HousePoolWaterfallAccountingLib.sol";
 import {HousePoolWithdrawalPreviewLib} from "@plether/perps/libraries/HousePoolWithdrawalPreviewLib.sol";
-import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
 /// @dev Pool-only queue hooks implemented by both asynchronous tranche vaults.
 interface ITrancheVaultEpochSettlement {
@@ -646,7 +645,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     ///      settlement sidecar may record revenue; recapitalization is engine-only. `CashArrived` increments
     ///      `accountedAssets`, whereas `AlreadyRetained` only routes ownership. This function never transfers or
     ///      verifies raw settlement token. Recapitalization is queued for claimant routing; revenue is explicitly queued when
-    ///      both stored tranche principals are zero. A zero amount is a no-op.
+    ///      both stored tranche principals are zero. Balance-only cash never adds pending claimant value because its
+    ///      ownership is already represented by the lifetime-VPI NAV adjustment. A zero amount is a no-op.
     /// @param amount settlement token amount to route through claimant accounting (6 decimals)
     /// @param kind Economic source bucket for the claimant inflow
     /// @param cashMode Whether the inflow arrived with this call or was already retained by the pool
@@ -670,10 +670,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             accountedAssets += amount;
         }
 
-        if (kind == IHousePool.ClaimantInflowKind.Recapitalization) {
-            _recordPendingClaimantInflow(kind, amount);
-            freshlyQueuedClaimantAssets += amount;
-        } else if (seniorPrincipal + juniorPrincipal == 0) {
+        if (
+            kind == IHousePool.ClaimantInflowKind.Recapitalization
+                || (kind == IHousePool.ClaimantInflowKind.Revenue && seniorPrincipal + juniorPrincipal == 0)
+        ) {
             _recordPendingClaimantInflow(kind, amount);
             freshlyQueuedClaimantAssets += amount;
         }
@@ -1258,8 +1258,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
     /// @notice Returns canonical settlement token not reserved for protocol or exceptional claimant obligations.
     /// @dev Starts from `totalAssets()` and reserves the larger directional position liability, realized trader
-    ///      claims, supplemental engine reserves, pending claimant inflows, and unassigned assets. This accounting
-    ///      view does not itself apply degraded-mode or mark-freshness liveness gates.
+    ///      claims, refundable positive VPI, supplemental engine reserves, pending claimant inflows, and unassigned
+    ///      assets. This accounting view does not itself apply degraded-mode or mark-freshness liveness gates.
     /// @return Free settlement token available to the tranche withdrawal waterfall (6 decimals)
     function getFreeAssets() public view returns (uint256) {
         return _getWithdrawalSnapshot().freeAssets;
@@ -1267,20 +1267,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
     /// @inheritdoc IHousePool
     /// @dev Reads live side aggregates because the terminal-NAV lens rejects reads during engine settlement.
-    ///      At rest, the same reserve components and withdrawal-snapshot arithmetic back `getFreeAssets()`.
+    ///      Positive lifetime VPI remains reserved; negative VPI backing is not cash. Returns zero while both stored
+    ///      tranche principals are zero so a fee top-up cannot consume value awaiting claimant ownership.
     function getSettlementFreeAssets() public view override returns (uint256) {
-        (uint256 longMaxProfitAssets,,,) = ENGINE.sides(0);
-        (uint256 shortMaxProfitAssets,,,) = ENGINE.sides(1);
-        uint256 maxLiabilityAssets =
-            longMaxProfitAssets > shortMaxProfitAssets ? longMaxProfitAssets : shortMaxProfitAssets;
-
-        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot;
-        accountingSnapshot.physicalAssets = totalAssets();
-        accountingSnapshot.maxLiabilityAssets = maxLiabilityAssets;
-        accountingSnapshot.traderClaimBalanceAssets = ENGINE.totalTraderClaimBalanceAssets();
-        accountingSnapshot.supplementalReservedAssets =
-            SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, ENGINE.settlementBufferBps());
-        return _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, _pendingClaimantBucketAssets()).freeAssets;
+        if (seniorPrincipal + juniorPrincipal == 0) {
+            return 0;
+        }
+        return CfdEngineProtocolLens(address(ENGINE_PROTOCOL_LENS))
+            .getSettlementFreeAssets(unassignedAssets + _pendingClaimantBucketAssets());
     }
 
     /// @notice Returns the current stored senior principal that pool liquidity permits withdrawing.

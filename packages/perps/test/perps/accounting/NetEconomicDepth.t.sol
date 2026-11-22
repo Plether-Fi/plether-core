@@ -33,6 +33,15 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
     }
 
+    function _expectedEconomicDepth() private view returns (uint256) {
+        (,,,,,, int256 traderVpi) = engine.positions(TRADER);
+        (,,,,,, int256 otherVpi) = engine.positions(OTHER);
+        uint256 positiveVpi = (traderVpi > 0 ? uint256(traderVpi) : 0) + (otherVpi > 0 ? uint256(otherVpi) : 0);
+        uint256 reserved = engine.totalTraderClaimBalanceAssets() + positiveVpi;
+        uint256 assets = pool.totalAssets();
+        return assets > reserved ? assets - reserved : 0;
+    }
+
     function test_SeededFlatClaimPaymentPreservesFlatCarry() public {
         _openTraderPosition();
         uint256 assets = pool.totalAssets();
@@ -179,8 +188,8 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _fundTrader(TRADER, 50_000e6);
         _open(OTHER, CfdTypes.Side.LONG, 200_000e18, 20_000e6, 1e8);
         _open(TRADER, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
-        uint256 depth = pool.totalAssets() - 400_000e6;
         _seedAuthenticatedTraderClaim(CLAIMANT, 400_000e6);
+        uint256 depth = _expectedEconomicDepth();
         ICfdEngineTypes.ClosePreview memory beforePreview = engineLens.previewClose(TRADER, 100_000e18, 1e8);
         int256 expectedVpi = int256(uint256(200_000e6) * 200_000e6 / (200 * depth))
             - int256(uint256(100_000e6) * 100_000e6 / (200 * depth));

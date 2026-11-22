@@ -22,6 +22,12 @@ Immutable and one-time bindings prevent a Router-only replacement or an in-place
 There is no live-state migration tool. Cutover needs a separate plan for existing positions, queued orders,
 protections, balances, claims, and LP obligations.
 
+Deferred VPI ownership requires a fresh matched Engine, Pool, lens and dependent deployment set. Its positive and
+negative accrued-VPI totals start at zero with no positions; there is no owner backfill setter or in-place correction
+for populated immutable contracts. Export the new guarded `vpiAccountingSnapshot()` and expanded accounting tuples
+from the candidate build. The terminal price book's eight-word snapshot remains price-only. Preserve historical ABI
+and release files for their original deployments.
+
 Manual shutdown uses the existing `OrderRouterAdmin` and `HousePool` entry pauses, left in place while obligations
 are settled. Do not use the LP epoch settlement hold as a permanent stop because it also blocks redemption funding.
 The source adds no automatic wipeout latch or irreversible restart restriction.
@@ -62,7 +68,7 @@ transaction evidence unset and must not be marked deployed or active.
 | Consumer ABI and build-evidence export | `scripts/export-perps-release.py` |
 | One bounded LP settlement pass | `script/LpEpochKeeper.s.sol` |
 
-The full-stack manifest includes 29 contracts, including constructor-created children. Save the exact source commit,
+The full-stack manifest includes 30 contracts, including constructor-created children. Save the exact source commit,
 compiler settings, deployment block, transaction receipts, addresses, runtime hashes, creation inputs, and active
 execution-config hash. The standalone verifier checks the deployment graph and release state; it does not replace
 comparison of every deployed bytecode artifact with the release build.
@@ -73,6 +79,8 @@ The deploy script performs creation and one-time wiring in this order:
 
 1. Deploy MockUSDG, MarginClearinghouse, CfdEngine, and the empty Engine-bound TerminalNavBookV2. Wire the Book before
    any exposure. Deploy and wire the Engine planner, settlement sidecar, and admin.
+   The Engine constructor creates its immutable planning reader, which owns read-only snapshot construction; the
+   settlement sidecar resolves that reader lazily and retains the authorized snapshot facade.
 2. Deploy HousePoolRedemptionMathSidecar, then the release HousePool. The Pool constructor also creates
    CfdEngineProtocolLens. Deploy Senior with a zero maintenance fee and zero recipient, register it, snapshot
    `Engine.protocolTreasury()`, then deploy Junior with a zero fee and that recipient. Register Junior and wire the
@@ -176,6 +184,10 @@ Read [Accounting specification](ACCOUNTING_SPEC.md) for fee, reserve, margin, an
 
 - The settlement buffer reserves additional withdrawal capacity and gates new risk. Raw degraded mode still uses
   `E < L`, with `E = max(Pool assets - trader claims, 0)` and `L` the larger directional liability.
+- Buffered admission and LP withdrawal cash also protect gross positive accrued VPI. LP NAV subtracts that deferred
+  amount and adds reserve-backed negative accrued VPI; the negative receivable is never cash headroom. Qualify both
+  signs and matching consumer tuples before activation. When both stored tranche principals are zero, pool-funded
+  protocol-fee top-ups are forgone for that action and do not become fee debt.
 - Junior maintenance fees mint Junior shares. The zero-rate treasury recipient is a deployment-time snapshot;
   changing the Engine treasury does not rotate it automatically.
 - The frozen close spread applies to voluntary reductions during `oracleFrozen`. Pricing and live/frozen Pyth fee

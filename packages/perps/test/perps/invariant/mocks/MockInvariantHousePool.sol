@@ -51,12 +51,18 @@ contract MockInvariantHousePool is IHousePool {
     }
 
     function getSettlementFreeAssets() external view returns (uint256) {
+        // This fixture has no stored tranche principal. Match HousePool's zero-principal
+        // fee budget so newly finalized VPI cannot be paid as a protocol fee top-up.
+        if (this.seniorPrincipal() + this.juniorPrincipal() == 0) {
+            return 0;
+        }
         ICfdEngineCore host = ICfdEngineCore(engine);
         (uint256 longMaxProfitAssets,,,) = host.sides(0);
         (uint256 shortMaxProfitAssets,,,) = host.sides(1);
         uint256 maxLiabilityAssets =
             longMaxProfitAssets > shortMaxProfitAssets ? longMaxProfitAssets : shortMaxProfitAssets;
         uint256 reservedAssets = maxLiabilityAssets + host.totalTraderClaimBalanceAssets()
+            + host.totalPositiveVpiAccruedAssets()
             + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, host.settlementBufferBps())
             + pendingRecapitalizationAssets + pendingTradingRevenueAssets;
         uint256 cashAssets = settlementToken.balanceOf(address(this));
@@ -99,7 +105,7 @@ contract MockInvariantHousePool is IHousePool {
         _requireAuthorized();
         if (kind == IHousePool.ClaimantInflowKind.Recapitalization) {
             pendingRecapitalizationAssets += amountAssets;
-        } else {
+        } else if (kind == IHousePool.ClaimantInflowKind.Revenue) {
             pendingTradingRevenueAssets += amountAssets;
         }
     }

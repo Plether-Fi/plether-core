@@ -9,7 +9,6 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
-import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -17,6 +16,7 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IOrderRouterEmergencyAdmin} from "@plether/perps/interfaces/IOrderRouterEmergencyAdmin.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
+import {CfdEngineRawSnapshotLib} from "@plether/perps/libraries/CfdEngineRawSnapshotLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @dev Minimal canonical Router binding used by the refund-aware liquidation preview.
@@ -704,7 +704,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @notice Reconstructs planner input from engine and clearinghouse state plus hypothetical pool depth.
     /// @dev `poolDepthAssets` populates both asset and cash fields. This lens does not populate the last-mark context
     ///      used only by close-commitment planning. The global carry index is independent of actual or hypothetical
-    ///      pool depth. VPI and skew subtract claims from the gross planning input.
+    ///      pool depth. VPI and skew subtract claims and positive accrued VPI from the gross planning input.
     /// @param account Account whose position, buckets, carry, and claims are loaded.
     /// @param poolDepthAssets Hypothetical pool assets and cash, in 6-decimal settlement token units.
     /// @return snap Raw planner snapshot.
@@ -712,26 +712,12 @@ contract CfdEngineLens is ICfdEngineLens {
         address account,
         uint256 poolDepthAssets
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        ICfdEngineTypes.SideState memory long;
-        ICfdEngineTypes.SideState memory short;
-        (long.maxProfitAssets, long.openInterest, long.entryNotional, long.totalMargin) =
-            engineContract.sides(uint8(CfdTypes.Side.LONG));
-        (short.maxProfitAssets, short.openInterest, short.entryNotional, short.totalMargin) =
-            engineContract.sides(uint8(CfdTypes.Side.SHORT));
-        snap.position = _position(account);
-        snap.positionEntryCostAssetAtoms = engineContract.positionEntryCostAssetAtoms(account);
-        snap.account = account;
-        snap.currentTimestamp = block.timestamp;
-        (, snap.positionLastCarryIndex,) = engineContract.positionCarryState(account);
-        snap.carryIndex = engineContract.currentCarryIndex();
-        snap.longSide = _sideSnapshot(long);
-        snap.shortSide = _sideSnapshot(short);
+        IHousePool pool = IHousePool(address(engineContract.pool()));
+        CfdEngineRawSnapshotLib.loadCore(snap, address(engineContract), account, pool);
+        snap.longSide = CfdEngineRawSnapshotLib.loadSideState(address(engineContract), CfdTypes.Side.LONG);
+        snap.shortSide = CfdEngineRawSnapshotLib.loadSideState(address(engineContract), CfdTypes.Side.SHORT);
         snap.poolAssets = poolDepthAssets;
         snap.poolCashAssets = poolDepthAssets;
-        IHousePool pool = IHousePool(address(engineContract.pool()));
-        snap.poolAdditionalReservedAssets =
-            pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
-        snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
         snap.accountBuckets = clearinghouse.getAccountAssetBuckets(account);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
@@ -739,17 +725,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.actionReserveAssets = clearinghouse.actionReserveAssets(account);
         snap.vpiRebateReserveAssets = clearinghouse.vpiRebateReserveAssets(account);
         snap.protectedExecutionBountyAssets = clearinghouse.totalBountyReservationsAssets(account);
-        snap.unsettledCarryAssets = engineContract.unsettledCarryAssets(account);
-        snap.totalTraderClaimBalanceAssets = engineContract.totalTraderClaimBalanceAssets();
-        snap.traderClaimBalanceForAccount = engineContract.traderClaimBalanceAssets(account);
-        snap.degradedMode = engineContract.degradedMode();
-        snap.capPrice = engineContract.CAP_PRICE();
-        snap.riskParams = _riskParams();
-        snap.executionFeeBps = engineContract.executionFeeBps();
-        snap.settlementBufferBps = engineContract.settlementBufferBps();
-        snap.isFadWindow = engineContract.isFadWindow();
-        snap.oracleFrozen = engineContract.isOracleFrozen();
-        snap.frozenCloseSpreadBps = engineContract.frozenCloseSpreadBps();
+        CfdEngineRawSnapshotLib.loadExecutionContext(snap, address(engineContract));
     }
 
     /// @notice Adjusts a memory snapshot for execution-bounty value forfeited before liquidation settlement.
@@ -798,26 +774,6 @@ contract CfdEngineLens is ICfdEngineLens {
         (pos.size, pos.margin, pos.entryPrice, pos.maxProfitAssets, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engineContract.positions(account);
         (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
-    }
-
-    /// @notice Converts an aggregate side-state tuple to its planner representation.
-    /// @param side Aggregate side state loaded from the engine.
-    /// @return snap Complete planner side snapshot.
-    function _sideSnapshot(
-        ICfdEngineTypes.SideState memory side
-    ) internal pure returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
-        snap = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitAssets: side.maxProfitAssets,
-            openInterest: side.openInterest,
-            entryNotional: side.entryNotional,
-            totalMargin: side.totalMargin
-        });
-    }
-
-    /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.
-    /// @return params Current risk, VPI, carry, margin, and bounty settings.
-    function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
-        params = ICfdEngineRiskParamsView(address(engineContract)).riskParams();
     }
 
 }

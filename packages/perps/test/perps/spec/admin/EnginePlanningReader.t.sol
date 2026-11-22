@@ -45,6 +45,80 @@ contract EnginePlanningReaderTest is CfdEngineTestBase {
         reader.planClose(order, 1e8, 1_000_000e6);
         vm.expectRevert(CfdEnginePlanningReader.CfdEnginePlanningReader__OnlyEngine.selector);
         reader.planLiquidation(TRADER, 1e8, 1_000_000e6);
+        vm.expectRevert(CfdEnginePlanningReader.CfdEnginePlanningReader__OnlyEngineOrSidecar.selector);
+        reader.buildRawSnapshot(TRADER, 1_000_000e6, false);
+        vm.expectRevert(CfdEnginePlanningReader.CfdEnginePlanningReader__OnlyEngineOrSidecar.selector);
+        vm.prank(OTHER);
+        reader.buildRawSnapshot(TRADER, 1_000_000e6, true);
+    }
+
+    function test_PlanningReader_CloseCommitSnapshotKeepsReducedReadsAndClearinghousePledge() public {
+        _fundTrader(TRADER, 10_000e6);
+        _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+        CfdEnginePlanningReader reader = engine.planningReader();
+        CfdEnginePlanTypes.RawSnapshot memory full = _snapshot(TRADER, pool.totalAssets() - 123e6);
+
+        // The position tuple's margin is a derived Engine observation; the clearinghouse remains authoritative.
+        vm.mockCall(
+            address(engine),
+            abi.encodeWithSignature("positions(address)", TRADER),
+            abi.encode(
+                full.position.size,
+                full.position.margin + 1e6,
+                full.position.entryPrice,
+                full.position.maxProfitAssets,
+                full.position.side,
+                full.position.lastUpdateTime,
+                full.position.vpiAccrued
+            )
+        );
+        bytes memory omittedRead = abi.encodeWithSignature("Error(string)", "execution-only read");
+        vm.mockCallRevert(address(engine), abi.encodeWithSignature("sides(uint256)", 1), omittedRead);
+        vm.mockCallRevert(address(engine), abi.encodeWithSignature("executionFeeBps()"), omittedRead);
+        vm.mockCallRevert(address(engine), abi.encodeWithSignature("settlementBufferBps()"), omittedRead);
+        vm.mockCallRevert(address(engine), abi.encodeWithSignature("degradedMode()"), omittedRead);
+        vm.mockCallRevert(address(engine), abi.encodeWithSignature("isOracleFrozen()"), omittedRead);
+        vm.mockCallRevert(address(engine), abi.encodeWithSignature("frozenCloseSpreadBps()"), omittedRead);
+        vm.mockCallRevert(
+            address(clearinghouse),
+            abi.encodeWithSignature("totalBountyReservationsAssets(address)", TRADER),
+            omittedRead
+        );
+
+        vm.prank(address(engine.settlementSidecar()));
+        CfdEnginePlanTypes.RawSnapshot memory commitment = reader.buildRawSnapshot(TRADER, 1, true);
+        assertEq(commitment.position.margin, clearinghouse.pnlPledgeAssets(TRADER));
+        assertEq(abi.encode(commitment.longSide), abi.encode(full.longSide));
+        assertEq(commitment.shortSide.maxProfitAssets, 0);
+        assertEq(commitment.shortSide.openInterest, 0);
+        assertEq(commitment.poolAssets, pool.totalAssets(), "commitment must use live cash, not hypothetical depth");
+        assertEq(commitment.totalPositiveVpiAccruedAssets, full.totalPositiveVpiAccruedAssets);
+        assertEq(commitment.totalNegativeVpiAccruedAssets, full.totalNegativeVpiAccruedAssets);
+        assertEq(commitment.vpiRebateReserveAssets, 0);
+        assertEq(commitment.protectedExecutionBountyAssets, 0);
+        assertEq(commitment.executionFeeBps, 0);
+        assertEq(commitment.settlementBufferBps, 0);
+    }
+
+    function test_PlanningReader_PreservesConfiguredSidecarSnapshotSource() public {
+        _fundTrader(TRADER, 10_000e6);
+        CfdTypes.Order memory order = _order(TRADER, false);
+        uint256 depth = pool.totalAssets();
+        CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(TRADER, depth);
+        snap.poolAssets = 10e6;
+        CfdEnginePlanningReader reader = engine.planningReader();
+        ICfdEngineSettlementSidecar sidecar = engine.settlementSidecar();
+        vm.mockCall(
+            address(sidecar),
+            abi.encodeCall(ICfdEngineSettlementSidecar.buildRawSnapshot, (TRADER, depth)),
+            abi.encode(snap)
+        );
+        CfdEnginePlanTypes.OpenDelta memory expected = engine.planner().planOpen(snap, order, 1e8);
+        assertFalse(expected.valid, "configured snapshot must control planning");
+        vm.expectCall(address(sidecar), abi.encodeCall(ICfdEngineSettlementSidecar.buildRawSnapshot, (TRADER, depth)));
+        vm.prank(address(engine));
+        CfdEnginePlanTypes.OpenDelta memory actual = reader.planOpen(order, 1e8, depth);
+        assertEq(abi.encode(actual), abi.encode(expected));
     }
 
     function test_PlanningReader_SnapshotReadPermissionDoesNotGrantSettlementAuthority() public {

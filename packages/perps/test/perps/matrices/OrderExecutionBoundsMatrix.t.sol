@@ -421,8 +421,9 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
     }
 
     /// @dev Offline rational potential vectors: C(S)=S²/(100D), D starts at 1,002,000 settlement token.
-    /// Seed: 80,000-settlement token skew costs 63.872255; at D=1,002,063.872255, moving to 88,000 costs
-    /// 13.412318 and moving to 72,000 rebates 12.134955. These are constants, not evaluator outputs.
+    /// Seed: 80,000-settlement token skew costs 63.872255. Its cash arrives with an equal deferred reserve, so
+    /// D remains 1,002,000; moving to 88,000 costs 13.413174 and moving to 72,000 rebates 12.135729.
+    /// These are independent integer-curve constants, not evaluator outputs.
     struct VpiGolden {
         int256 vpi;
         uint256 charge;
@@ -455,8 +456,8 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         Row memory row = Row(0, 0, healing ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG, self);
         _prepare(row);
         VpiGolden memory golden;
-        golden.vpi = healing ? int256(-12_134_955) : int256(13_412_318);
-        golden.charge = healing ? 0 : 16_612_318;
+        golden.vpi = healing ? int256(-12_135_729) : int256(13_413_174);
+        golden.charge = healing ? 0 : 16_613_174;
         golden.gross = golden.charge + 200_000;
         golden.settlement = uint256(int256(FUNDING - FEE) - golden.vpi) - (self ? 0 : 200_000);
         _vpiLimit(row, golden, 3);

@@ -111,7 +111,9 @@ contract CfdEngineOpenQuoter {
         if (
             price == 0 || !carryCollectible || projected.degradedMode
                 || PositionRiskAccountingLib.computeNetPoolDepthAssets(
-                        projected.poolAssets, projected.totalTraderClaimBalanceAssets
+                        projected.poolAssets,
+                        projected.totalTraderClaimBalanceAssets,
+                        projected.totalPositiveVpiAccruedAssets
                     ) == 0 || (projected.position.size > 0 && projected.position.side != probe.order.side)
                 || projected.vpiRebateReserveAssets < _negativeReserve(projected.position.vpiAccrued)
         ) {
@@ -189,8 +191,9 @@ contract CfdEngineOpenQuoter {
         uint256 price
     ) private pure returns (Context memory ctx) {
         ctx.snap = snap;
-        ctx.netDepthAssets =
-            PositionRiskAccountingLib.computeNetPoolDepthAssets(snap.poolAssets, snap.totalTraderClaimBalanceAssets);
+        ctx.netDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
+            snap.poolAssets, snap.totalTraderClaimBalanceAssets, snap.totalPositiveVpiAccruedAssets
+        );
         ctx.price = price;
         ctx.marginDelta = order.marginDelta;
         ctx.currentLots = snap.position.size / CfdTypes.SIZE_QUANTUM;
@@ -242,8 +245,10 @@ contract CfdEngineOpenQuoter {
     ///      - the VPI extrema come from the min/max absolute skew, including zero when the interval crosses balance;
     ///      - fees, liquidation reserves, margin requirements and added liability are minimized at low;
     ///      - minimum action cost and maximum reserve release overestimate affordable pledge and free cash;
-    ///      - maximum VPI overestimates pool assets. Combining incompatible optimistic extrema is safe: it can only
-    ///        retain extra intervals, never discard a valid size. At a singleton these bounds become exact.
+    ///      - maximum VPI and the fee ceiling bound cash before any pool-funded fee top-up;
+    ///        minimum VPI minimizes the positive accrued reserve.
+    ///      Combining incompatible optimistic extrema can retain extra intervals but cannot discard a valid size.
+    ///      Each retained endpoint is tested with the exact canonical planner.
     function _mayContainValid(
         Context memory ctx,
         uint256 low,
@@ -258,14 +263,47 @@ contract CfdEngineOpenQuoter {
         if (maxVpi >= 0) {
             maxCash += uint256(maxVpi);
         } else {
-            uint256 debit = uint256(-maxVpi);
+            // The planner nets the execution fee against the rebate before spending pool cash. A later top-up
+            // can only reduce cash. Use the fee at the upper lot bound to keep this estimate optimistic.
+            uint256 feeCeiling = Math.mulDiv(high * ctx.price, ctx.snap.executionFeeBps, 10_000);
+            uint256 rebate = uint256(-maxVpi);
+            uint256 debit = rebate > feeCeiling ? rebate - feeCeiling : 0;
             maxCash = maxCash > debit ? maxCash - debit : 0;
         }
-        uint256 maxEffective =
-            maxCash > ctx.snap.totalTraderClaimBalanceAssets ? maxCash - ctx.snap.totalTraderClaimBalanceAssets : 0;
+        uint256 oldPositiveVpi = ctx.snap.position.vpiAccrued > 0 ? uint256(ctx.snap.position.vpiAccrued) : 0;
+        (bool reserveFits, uint256 minimumPositiveVpi) = Math.tryAdd(
+            ctx.snap.totalPositiveVpiAccruedAssets - oldPositiveVpi,
+            _positiveAccrualAfterDelta(ctx.snap.position.vpiAccrued, minVpi)
+        );
+        if (!reserveFits) {
+            return false;
+        }
+        uint256 maxEffective = PositionRiskAccountingLib.computeNetPoolDepthAssets(
+            maxCash, ctx.snap.totalTraderClaimBalanceAssets, minimumPositiveVpi
+        );
         uint256 minLiability = Math.max(ctx.selectedLiability + low * ctx.profitPerLot, ctx.opposingLiability);
         return
             SolvencyAccountingLib.hasRequiredSettlementBuffer(maxEffective, minLiability, ctx.snap.settlementBufferBps);
+    }
+
+    /// @dev Computes max(accrued + delta, 0) without a potentially overflowing signed addition. Both positive
+    ///      operands fit int256, so their unsigned sum fits uint256 even when the planner would reject the signed sum.
+    function _positiveAccrualAfterDelta(
+        int256 accrued,
+        int256 delta
+    ) private pure returns (uint256) {
+        if (delta >= 0) {
+            if (accrued >= 0) {
+                return uint256(accrued) + uint256(delta);
+            }
+            uint256 negativeAccrual = uint256(-(accrued + 1)) + 1;
+            return uint256(delta) > negativeAccrual ? uint256(delta) - negativeAccrual : 0;
+        }
+        if (accrued <= 0) {
+            return 0;
+        }
+        uint256 negativeDelta = uint256(-(delta + 1)) + 1;
+        return uint256(accrued) > negativeDelta ? uint256(accrued) - negativeDelta : 0;
     }
 
     function _optimisticCostPlan(

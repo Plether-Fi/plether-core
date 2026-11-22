@@ -13,14 +13,16 @@ library PositionRiskAccountingLib {
     /// @notice Fixed-point scale for cumulative carry indexes.
     uint256 internal constant CARRY_INDEX_SCALE = 1e18;
 
-    /// @notice Returns economic pool depth after reserving outstanding trader claims.
+    /// @notice Returns economic pool depth after reserving trader claims and refundable positive VPI.
     /// @dev Physical assets remain gross in custody and solvency snapshots. Only skew and VPI use this depth;
     ///      open-position liabilities and the settlement buffer are not deducted again.
     function computeNetPoolDepthAssets(
         uint256 physicalAssets,
-        uint256 traderClaimsAssets
+        uint256 traderClaimsAssets,
+        uint256 positiveVpiAccruedAssets
     ) internal pure returns (uint256) {
-        return physicalAssets > traderClaimsAssets ? physicalAssets - traderClaimsAssets : 0;
+        uint256 assetsAfterClaims = physicalAssets > traderClaimsAssets ? physicalAssets - traderClaimsAssets : 0;
+        return assetsAfterClaims > positiveVpiAccruedAssets ? assetsAfterClaims - positiveVpiAccruedAssets : 0;
     }
 
     /// @notice Price-risk state for one position at a supplied collateral and margin policy.

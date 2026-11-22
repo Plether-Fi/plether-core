@@ -314,6 +314,8 @@ contract CfdEnginePlanLibHarness {
             lastCarryTimestamp: 0,
             vpiAccrued: params.vpiAccrued
         });
+        snap.totalPositiveVpiAccruedAssets = params.vpiAccrued > 0 ? uint256(params.vpiAccrued) : 0;
+        snap.totalNegativeVpiAccruedAssets = vpiReserveAssets;
         snap.positionEntryCostAssetAtoms = currentEntryCostAssetAtoms;
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = params.price;
