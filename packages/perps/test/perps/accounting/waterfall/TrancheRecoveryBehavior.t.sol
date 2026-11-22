@@ -21,7 +21,7 @@ contract SeniorHighWaterRecoveryTest is BasePerpTest {
     }
 
     /// @dev accounting; source: ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows.
-    function test_PostWipeoutRequiresExplicitRecapForHwmReset() public {
+    function test_PostWipeoutRecapRestoresOnlyExistingSeniorEntitlement() public {
         uint256 seedAssets = 50_000e6;
         uint256 recapAmount = 10_000e6;
         address seed = address(0xBEEF);
@@ -33,6 +33,7 @@ contract SeniorHighWaterRecoveryTest is BasePerpTest {
         settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
+        uint256 survivingHwm = pool.seniorHighWaterMark();
 
         settlementToken.mint(address(seniorVault), recapAmount);
         vm.startPrank(address(seniorVault));
@@ -51,7 +52,7 @@ contract SeniorHighWaterRecoveryTest is BasePerpTest {
         pool.reconcile();
 
         assertEq(pool.seniorPrincipal(), recapAmount, "Explicit recapitalization should restore senior principal");
-        assertEq(pool.seniorHighWaterMark(), recapAmount, "Explicit recapitalization should reset the HWM");
+        assertEq(pool.seniorHighWaterMark(), survivingHwm, "Recapitalization must preserve existing Senior entitlement");
     }
 
 }
@@ -606,7 +607,7 @@ contract ReservedSettlementBehaviorRecoveryTest is BasePerpTest {
         pool.reconcile();
 
         assertEq(pool.seniorPrincipal(), depositAmount, "Senior tranche should accept recapitalization from zero");
-        assertEq(pool.seniorHighWaterMark(), depositAmount, "Recapitalization should seed a fresh HWM");
+        assertGt(pool.seniorHighWaterMark(), depositAmount, "Recapitalization should preserve the surviving HWM");
     }
 
 }
