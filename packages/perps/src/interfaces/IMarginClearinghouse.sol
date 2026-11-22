@@ -161,15 +161,21 @@ interface IMarginClearinghouse {
         uint256 vpiRebateReserveAssets;
         uint256 totalLockedAssets;
         uint256 freeSettlementAssets;
+        /// @notice Protected top-ups still pledged to the active position, included in `pnlPledgeAssets`.
+        uint256 protectedPledgeAssets;
+        /// @notice Protected top-ups released by a close, included in `totalLockedAssets` and available for
+        ///         risk-reducing carry and action charges.
+        uint256 protectedReleasedAssets;
     }
 
     /// @notice Legacy three-field locked-margin split for one clearinghouse account.
-    /// @dev Prefer `PnlIsolationBuckets` for the canonical four-bucket view. The legacy named fields omit liquidation
-    ///      reserve, while `totalLockedMarginAssets` still includes it so free-equity calculations remain conservative.
+    /// @dev Prefer `PnlIsolationBuckets` for the canonical split. The legacy total includes liquidation reserve
+    ///      and released top-ups in addition to the separately named buckets.
     /// @param positionMarginAssets Margin backing the active position.
     /// @param committedOrderMarginAssets Aggregate margin backing active order reservations.
     /// @param reservedSettlementAssets Settlement protected from generic order and position release paths.
-    /// @param totalLockedMarginAssets Sum of PnL pledge, liquidation reserve, order margin, and action reserve.
+    /// @param totalLockedMarginAssets Sum of PnL pledge, liquidation reserve, order margin, action reserve, and
+    ///        released top-ups.
     struct LockedMarginBuckets {
         uint256 positionMarginAssets;
         uint256 committedOrderMarginAssets;
@@ -225,7 +231,8 @@ interface IMarginClearinghouse {
     /// @param settlementBalanceAssets Total internal settlement balance, including all locked value.
     /// @param totalLockedMarginAssets Sum of all typed locked-margin buckets.
     /// @param activePositionMarginAssets Active-position custody bucket.
-    /// @param otherLockedMarginAssets Sum of liquidation reserve, committed-order, and reserved-settlement buckets.
+    /// @param otherLockedMarginAssets Sum of liquidation reserve, committed-order, reserved settlement, and
+    ///        released top-ups.
     /// @param freeSettlementAssets Settlement balance above total locked margin, floored at zero.
     struct AccountAssetBuckets {
         uint256 settlementBalanceAssets;
@@ -254,7 +261,7 @@ interface IMarginClearinghouse {
         address account
     ) external view returns (uint256);
 
-    /// @notice Returns total locked margin across all four canonical isolation buckets.
+    /// @notice Returns total locked margin across all isolation buckets, including released top-ups.
     /// @param account Account to inspect
     /// @return Total locked margin in settlement token
     function lockedMarginAssets(
@@ -263,7 +270,7 @@ interface IMarginClearinghouse {
 
     /// @notice Returns the typed locked-margin buckets for an account.
     /// @param account Account to inspect
-    /// @return buckets Legacy named fields plus a total that also includes the omitted liquidation reserve
+    /// @return buckets Legacy named fields plus a total that includes liquidation reserve and released top-ups
     function getLockedMarginBuckets(
         address account
     ) external view returns (LockedMarginBuckets memory buckets);
@@ -320,6 +327,23 @@ interface IMarginClearinghouse {
     function lockPositionMargin(
         address account,
         uint256 amountAssets
+    ) external;
+
+    function lockPositionTopUp(
+        address account,
+        uint256 amountAssets
+    ) external;
+
+    function protectedTopUps(
+        address account
+    ) external view returns (uint256 pledgedAssets, uint256 releasedAssets);
+
+    function eligiblePositionMarginAssets(
+        address account
+    ) external view returns (uint256);
+
+    function releaseProtectedTopUp(
+        address account
     ) external;
 
     /// @notice Unlocks active position margin back into free settlement.
@@ -457,20 +481,17 @@ interface IMarginClearinghouse {
         uint256 amountAssets
     ) external;
 
-    /// @notice Collects an action charge from spendable action reserve, free settlement, then committed order margin.
-    /// @dev Locked PnL pledge, liquidation reserve, negative-VPI backing, and pending execution bounties are never
-    ///      reachable here. Full closes release surplus pledge and liquidation reserve into free settlement first.
-    ///      Both expected-source arguments must exactly match the split implied by current state; this makes a stale or
-    ///      incorrect settlement plan revert. Committed margin is consumed through the clearinghouse-owned FIFO reservation
-    ///      ledger. Collection is capped by eligible value, so callers may treat the remainder as waived.
+    /// @notice Collects from spendable action reserve, free settlement, released top-ups, then committed order margin.
+    /// @dev Expected source amounts must match the live split or settlement reverts. Committed margin is consumed
+    ///      through the clearinghouse FIFO. The call collects at most the value available from the listed sources.
     /// @param account Account paying the charge
     /// @param chargeAssets Maximum action charge to collect
     /// @param actionReserveConsumedAssets Exact spendable action reserve the settlement plan expects to consume
-    /// @param actionCommittedMarginConsumedAssets Exact committed order margin the plan expects to consume after free settlement
+    /// @param actionCommittedMarginConsumedAssets Exact committed margin consumed after free settlement and released top-ups
     /// @param recipient External recipient of the non-protocol portion
     /// @param protocolTreasury Clearinghouse account credited with the protocol portion; zero disables the credit
     /// @param protocolFeeAssets Requested protocol portion, capped by the amount collected
-    /// @return collectedAssets Action reserve, free settlement, and committed order margin actually collected
+    /// @return collectedAssets Total settlement collected across the eligible sources
     /// @return protocolFeeCreditedAssets Collected amount credited internally to `protocolTreasury`
     function consumeActionCharge(
         address account,
@@ -503,9 +524,8 @@ interface IMarginClearinghouse {
         uint256 protocolFeeAssets
     ) external returns (int256 netMarginChangeAssets, uint256 protocolFeeCreditedAssets);
 
-    /// @notice Consumes carry from canonical active position margin first, then free settlement.
-    /// @dev Callable only by the engine or settlement sidecar. Consumption uses canonical stored buckets.
-    ///      Other locked buckets and claims are protected; uncovered carry is returned.
+    /// @notice Consumes carry from eligible active position margin first, then free settlement.
+    /// @dev Callable only by the engine or settlement sidecar. Returns any uncovered carry.
     /// @param account Account paying the loss
     /// @param lossAssets Maximum loss to collect in settlement token
     /// @param recipient External recipient of collected settlement token
@@ -516,6 +536,25 @@ interface IMarginClearinghouse {
         address account,
         uint256 lossAssets,
         address recipient
+    ) external returns (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets);
+
+    /// @notice Collects position carry from eligible pledge and free settlement, with reducing-settlement sources
+    ///         selected by `includeProtected`.
+    /// @dev When `includeProtected` is true, collection uses all active pledge first, then free settlement,
+    ///      then released top-ups. Released top-ups collected equal `lossAssets - uncoveredAssets` less the two
+    ///      returned source amounts. The clearinghouse emits `ProtectedTopUpUpdated` when the protected balance changes.
+    /// @param account Account paying the loss
+    /// @param lossAssets Maximum loss to collect in settlement token
+    /// @param recipient External recipient of collected settlement token
+    /// @param includeProtected Whether the settlement may collect from protected pledge and released top-ups
+    /// @return marginConsumedAssets Active position margin consumed in settlement token
+    /// @return freeSettlementConsumedAssets Ordinary free settlement consumed in settlement token
+    /// @return uncoveredAssets Requested loss left uncovered in settlement token
+    function consumePositionCarry(
+        address account,
+        uint256 lossAssets,
+        address recipient,
+        bool includeProtected
     ) external returns (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets);
 
     /// @notice Collects terminal position price loss from PnL pledge only.

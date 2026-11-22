@@ -209,6 +209,7 @@ library OrderV3Types {
         uint256 postTraderClaimAssets;
         uint256 postPositionSize;
         uint256 postPositionMarginAssets;
+        /// @notice For opens, equity and leverage are measured with the collateral eligible at execution.
         int256 postPositionEquityAssets;
         uint256 postLeverageBps;
         CloseEconomics close;
@@ -247,6 +248,7 @@ library OrderV3Types {
         uint256 postTraderClaimBalanceAssets;
         uint256 postPositionSize;
         uint256 postPositionMarginAssets;
+        /// @notice For opens, the equity and leverage used to check the committed order bounds.
         int256 postPositionEquityAssets;
         uint256 postLeverageBps;
         CloseEconomics close;

@@ -114,6 +114,48 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         assertEq(uint256(_orderRecord(orderId).status), uint256(IOrderRouterAccounting.OrderStatus.Failed));
     }
 
+    function test_RiskOffRefundReleasesProtectedTopUpAndPreservesAccruedCarry() public {
+        _open(ALICE, CfdTypes.Side.LONG, 20_000e18, 5000e6, MARK_PRICE);
+        uint64 orderId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
+        uint256 topUp = 1500e6;
+        vm.prank(ALICE);
+        engine.addMargin(ALICE, topUp);
+        (uint256 pledged, uint256 released) = clearinghouse.protectedTopUps(ALICE);
+        assertEq(pledged, topUp);
+        assertEq(released, 0);
+
+        routerAdmin.pause();
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        uint256 accruedCarry = _expectedIndexedCarryAssets(ALICE);
+        assertGt(accruedCarry, 0);
+        uint256 eligiblePledgeBefore = clearinghouse.eligiblePositionMarginAssets(ALICE);
+        uint256 expectedRefund = _remainingCommittedMargin(orderId) + _executionBountyReserve(orderId);
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
+        uint256 keeperBefore = _settlementBalance(KEEPER);
+        uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
+        NoCheckpointSnapshot memory beforeRefund = _noCheckpointSnapshot(ALICE);
+
+        vm.prank(KEEPER);
+        router.clearRiskOffOrder(orderId);
+
+        assertEq(
+            uint8(router.lifecycleBook().terminalOutcome(orderId).reason), uint8(OrderV3Types.TerminalReason.RiskOff)
+        );
+        assertEq(router.pendingOrderCounts(ALICE), 0);
+        (pledged, released) = clearinghouse.protectedTopUps(ALICE);
+        assertEq(pledged + released, 0);
+        assertEq(_positionHash(ALICE), beforeRefund.positionHash);
+        assertEq(clearinghouse.eligiblePositionMarginAssets(ALICE), eligiblePledgeBefore + topUp);
+        assertEq(_freeSettlementAssets(ALICE), freeBefore + expectedRefund);
+        assertEq(_settlementBalance(ALICE), beforeRefund.settlementBalanceAssets);
+        assertEq(_settlementBalance(KEEPER), keeperBefore);
+        assertEq(settlementToken.balanceOf(address(pool)), beforeRefund.poolAssets);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), beforeRefund.clearinghouseAssets);
+        assertEq(baseMockPyth.updatePriceFeedsCallCount(), pythCallsBefore);
+        assertEq(_carryHash(ALICE), beforeRefund.carryHash);
+        assertEq(_expectedIndexedCarryAssets(ALICE), accruedCarry);
+    }
+
     function test_Exactly64Of65RiskOffHeadsRefundThenResume() public {
         uint64[] memory orderIds = new uint64[](65);
         for (uint256 i; i < orderIds.length; ++i) {
@@ -349,6 +391,36 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         assertEq(clearinghouse.balanceAssets(KEEPER) - keeperBefore, preview.liquidation.keeperBountyAssets);
         assertEq(clearinghouse.balanceAssets(ALICE), preview.liquidation.settlementRetainedAssets);
         assertEq(engine.traderClaimBalanceAssets(ALICE), preview.liquidation.traderClaimBalanceAssets);
+    }
+
+    function test_RouterPreviewMatchesCleanupOfBothProtectedBalances() public {
+        _open(ALICE, CfdTypes.Side.LONG, 100_000e18, 2000e6, MARK_PRICE);
+        uint64 closeId = _commitClose(ALICE, CfdTypes.Side.LONG, 50_000e18);
+        uint64 openId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
+        vm.prank(ALICE);
+        engine.addMargin(ALICE, 12_000e6);
+        bytes[] memory closeUpdate = _mockPythUpdateData(MARK_PRICE);
+        vm.prank(KEEPER);
+        router.executeOrder(closeId, closeUpdate);
+        assertEq(_positionSize(ALICE), 50_000e18);
+
+        (uint256 pledged, uint256 released) = clearinghouse.protectedTopUps(ALICE);
+        assertGt(pledged, 0);
+        assertGt(released, 0);
+        routerAdmin.pause();
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        ICfdEngineLens.RouterLiquidationPreview memory preview =
+            engineLens.previewRouterLiquidation(ALICE, UNSAFE_LONG_PRICE);
+        assertEq(preview.refundedOrderCount, 1);
+        assertTrue(preview.liquidation.liquidatable);
+
+        router.clearRiskOffOrder(openId);
+        (pledged, released) = clearinghouse.protectedTopUps(ALICE);
+        assertEq(pledged + released, 0);
+        assertEq(
+            keccak256(abi.encode(preview.liquidation)),
+            keccak256(abi.encode(engineLens.previewLiquidation(ALICE, UNSAFE_LONG_PRICE)))
+        );
     }
 
     function test_RouterPreviewIncludesPendingProtectionRefundInSyntheticPositionState() public {

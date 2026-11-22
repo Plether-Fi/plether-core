@@ -305,7 +305,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             assertEq(
                 buckets.otherLockedMarginAssets,
                 isolationBuckets.liquidationReserveAssets + isolationBuckets.orderMarginAssets
-                    + isolationBuckets.actionReserveAssets,
+                    + isolationBuckets.actionReserveAssets + isolationBuckets.protectedReleasedAssets,
                 "Tracked account other locked margin must equal canonical non-position buckets"
             );
             assertEq(
@@ -503,7 +503,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             assertEq(
                 snapshot.otherLockedMarginAssets,
                 isolationBuckets.liquidationReserveAssets + isolationBuckets.orderMarginAssets
-                    + isolationBuckets.actionReserveAssets,
+                    + isolationBuckets.actionReserveAssets + isolationBuckets.protectedReleasedAssets,
                 "Account snapshot other locked margin must equal canonical non-position buckets"
             );
             assertEq(

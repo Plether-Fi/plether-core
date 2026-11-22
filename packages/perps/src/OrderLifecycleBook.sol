@@ -494,6 +494,14 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         delete _pendingIntents[receipt.orderId];
         delete _protectionAttempts[receipt.orderId];
 
+        // The router unlinks the order before finalizing its receipt. The engine checks that the account queue is empty.
+        if (CLEARINGHOUSE.code.length != 0) {
+            (uint256 pledged, uint256 released) = IMarginClearinghouse(CLEARINGHOUSE).protectedTopUps(receipt.account);
+            if (pledged != 0 || released != 0) {
+                ICfdEngineCore(ENGINE).releaseProtectedTopUp(receipt.account);
+            }
+        }
+
         emit OrderFinalized(
             receipt.orderId, receipt.account, receipt.clientOrderId, receiptHash, terminalBlock, terminalTime, receipt
         );

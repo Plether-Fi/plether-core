@@ -375,6 +375,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Terminal evidence | Every terminal transition finalizes one authenticated Book receipt after economic settlement; a receipt failure rolls back that item |
 | Single terminal owner | Router records are fully deleted terminally, while the Book retains permanent client identity, lifecycle outcome, and the full-receipt hash |
 | Bounty conservation | Clearinghouse-reserved opening and protection-trigger bounty value is conserved until distributed or absorbed, and is excluded from close-loss reachability while reserved; close records have zero amount |
+| Protected top-ups | Active protected pledge contributes to position health. The released balance stays encumbered while any order is pending and can fund carry and action charges during a close or liquidation |
 | Zero ordinary close bounty | Ordinary and protection close attempts create authenticated Active Order records with zero amount. Nonzero close-bounty configuration and nonzero close-commitment bounty are rejected; no pledge is reclassified into a close escrow |
 | Close queue admission | No pledge-specific empty-queue rule applies. FIFO, queued exposure, per-account capacity, position, carry, and financial bounds still govern close commitment |
 | VPI reserve conservation | Every live negative lifetime-VPI balance has equal dedicated action-reserve backing; only an exact clawback, equivalent withholding, or lower surviving target may consume or release it |
@@ -486,8 +487,9 @@ governance owns the coordinator and assigns its guardian.
 - Router pause records an inclusive, monotonic order-id cutoff. Pending opens at or below it are permanently invalid,
   including after unpause; later orders are unaffected.
 - Cleanup is permissionless and oracle-independent. It returns all remaining committed margin and execution bounty to
-  the trader's free internal settlement, pays the caller nothing, and defers carry checkpointing to the trader's next
-  ordinary margin mutation. The protocol incident keeper therefore funds cleanup gas. The terminal Book receipt uses
+  the trader's free internal settlement and pays the caller nothing. Resolving the last pending order releases
+  protected top-ups and leaves accrued carry due for the next realization. The protocol incident
+  keeper therefore funds cleanup gas. The terminal Book receipt uses
   reason `RiskOff`, execution mode and price source `None`, the cleaner as executor, and the account as bounty
   recipient with disposition `RefundedToAccount` when the bounty is nonzero. A zero bounty instead has disposition
   `None` and a zero recipient.
@@ -1006,6 +1008,27 @@ standalone protection changes on an existing position add no exposure and do not
 Consequently, `L <= E < L + B + Rplus` is solvent but unavailable for new risk and LP redemption funding. Raw degraded mode
 still latches only at `E < L` and may be cleared at `E >= L`; the full buffer need not be restored before clearing.
 
+### Protected top-ups
+
+A margin top-up made while the account has pending orders becomes protected active pledge. It contributes to the
+live position's price equity and liquidation buffer. Open and increase orders exclude this part of the pledge when
+checking initial margin and caller-pinned equity or leverage bounds.
+
+A close can move unused protected pledge into the released top-up balance. Released top-ups stay locked while the
+account has pending orders, including after a full close with a queued follower. Closes and liquidations can collect
+carry and separate action charges from that balance. Opening orders and withdrawals use ordinary available
+settlement. Price losses use the active PnL pledge and nettable same-account claim. The dedicated liquidation
+reserve funds the configured liquidation charge.
+
+For an action charge, the settlement plan applies eligible gain withholding, dedicated VPI backing, spendable action
+reserve, ordinary free settlement, and any safe pledge release from the current close. The plan then uses previously
+released top-ups before reaching committed order margin on terminal settlement or applying the existing rules for an
+unpaid remainder.
+
+Finalizing the last pending order makes the remaining protected active pledge eligible for opens and frees the
+remaining released balance. This changes which funds are available for future settlement. Carry continues to
+accrue on the position's full maximum-profit exposure.
+
 ### LP-capital carry
 
 The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
@@ -1025,7 +1048,7 @@ The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
   reduced planner/view interfaces require a fresh compatible stack. Do not mix prior directional-index contracts or
   assume their storage can be upgraded into this layout
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
-- claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryAssets`,
+- claim/bounty credits: first collect from eligible active pledge and free settlement, retain unpaid carry in `unsettledCarryAssets`,
   then apply the full incoming credit. The credit can fund retained arrears at a later checkpoint, including at the same
   timestamp; it is not collected or waived in this call. Claim liquidity checks run after collection, and any failure
   rolls back the collection and credit
@@ -1040,15 +1063,16 @@ The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
   account debt; projected flat-rate carry remains due at the next Engine or explicit checkpoint. An atomic Router
   settlement may separately advance carry while synchronizing the oracle mark
 - destination: realized carry becomes LP trading revenue
-- collection priority: active position margin first, then free settlement; all other locked buckets and trader claims
-  remain protected during carry collection
+- collection priority: ordinary activity collects from eligible active pledge and then free settlement. Close and
+  liquidation settlement collect from the full active pledge, then free settlement, then previously released top-ups.
 - projection: planners and account views share `projectCarryLoss` for post-carry buckets. Its output must not alias
-  raw custody; ledger diagnostics retain raw values. The planner updates side margin, the position carry checkpoint,
-  arrears and pool revenue together, using maximum profit directly and one global index in the raw snapshot. Actual and hypothetical pool depth must not alter accrued carry
-- health: project margin consumption before evaluating exact price risk. Fully paid carry is not delinquency, but a
-  reduced pledge may breach maintenance. Carry uncovered by both margin and free settlement independently blocks
-  withdrawal and makes the account liquidatable; claims cannot fund carry. Stored arrears alone are not delinquency
-  when a subsequent credit has made backing available; health projects collection from the current buckets
+  raw custody. Ledger diagnostics retain raw values. The planner updates side margin, the position carry checkpoint,
+  arrears and pool revenue together, using maximum profit and the global index. Carry accrual is independent of
+  actual or hypothetical pool depth.
+- health: project margin consumption before evaluating exact price risk. A reduced pledge may breach maintenance
+  after carry is fully collected. Carry left uncovered by the withdrawal path blocks withdrawal. Carry left
+  uncovered by the liquidation path makes the account liquidatable. The health projection checks the available
+  funds in the applicable custody buckets, so newly available collateral can cure stored arrears.
 - terminal settlement: first realize projected carry through the shared collector, then apply price settlement against
   reduced pledge. Only unpaid carry enters existing action recovery/waiver; count direct collection once in receipts,
   financial bounds and LP revenue
@@ -1399,8 +1423,8 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
 
 1. The trader commits the reduction with the ordinary FIFO, queued-exposure, carry, health, and financial checks.
    The close bounty is zero.
-2. At execution, the planner allocates exact entry cost to closed lots. Carry is collected from pledge first and
-   free settlement second before price loss uses the reduced pledge and nettable same-account claim.
+2. At execution, the planner allocates exact entry cost to closed lots. It projects carry collection using the
+   close settlement sources before price loss uses the reduced pledge and nettable same-account claim.
 3. Price loss above the collectible cap is a diagnostic write-off. Separate action charges must still be collectible;
    an unfunded required action remainder rejects the partial close.
 4. The Engine preserves any pledge needed for the residual marked curve and atomically installs the remaining lots,
@@ -1410,9 +1434,9 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
 
 1. The frozen oracle policy validates the close. Normal signed VPI and its lifetime clamp still apply; the fixed
    LP-owned spread replaces the adverse-confidence price shift on this voluntary close.
-2. Price settlement uses same-account claim and PnL pledge up to the collectible cap. Separate action obligations use
-   their eligible gain withholding, protected VPI backing, spendable action reserve, free settlement, and committed
-   order margin according to the canonical plan; those sources do not enlarge the price-loss cap.
+2. Price settlement uses same-account claim and PnL pledge up to the collectible cap. The canonical plan funds
+   separate action obligations from eligible gain withholding, protected VPI backing, spendable action reserve,
+   free settlement, released top-ups, and committed order margin.
 3. Collected spread belongs to LPs. Any terminally uncollectible spread is recorded as `frozenSpreadWaivedAssets`, and
    excess price loss is recorded as `PriceLossWrittenOff`; neither creates a new liability or deficit.
 4. The Engine removes the position and curve. Terminal close liveness does not waive oracle validation, FIFO,
@@ -1428,9 +1452,9 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
    against price loss once; PnL pledge pays the remaining collectible loss. Excess price loss is written off.
 3. The dedicated liquidation reserve caps the charge. Keeper and treasury receive their configured floor-rounded
    shares as clearinghouse credits; the exact remainder goes to LPs. There is no pool-funded bounty subsidy.
-4. Positive fresh trader payout uses available pool cash or becomes a trader claim. Uncollectible terminal action
-   obligations follow their waiver rules. The Engine removes the position and curve and checks actual post-operation
-   solvency for degraded mode.
+4. Positive fresh trader payout uses available pool cash or becomes a trader claim. The action charge planner
+   includes released top-ups among the sources available before applying terminal waiver rules. The Engine removes
+   the position and curve and checks actual post-operation solvency for degraded mode.
 5. Bounded account-local cleanup finalizes stale closes as `AccountLiquidated`; valid opens and their margin and bounty
    reservations remain pending. Other accounts retain their relative FIFO order.
 

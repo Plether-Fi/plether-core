@@ -134,7 +134,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         }
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption;
-        (carryConsumption, buckets) = _projectAccountCarry(account, pos, buckets);
+        (uint256 protectedPledge,) = engineContract.clearinghouse().protectedTopUps(account);
+        (carryConsumption, buckets) = _projectAccountCarry(account, pos, buckets, protectedPledge, 0);
         if (carryConsumption.uncoveredAssets != 0) {
             return 0;
         }
@@ -281,7 +282,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ) internal view returns (PositionRiskAccountingLib.PositionRiskState memory) {
         CfdTypes.RiskParams memory params = _riskParams();
         MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption;
-        (carryConsumption, buckets) = _projectAccountCarry(account, pos, buckets);
+        (, uint256 releasedTopUp) = engineContract.clearinghouse().protectedTopUps(account);
+        (carryConsumption, buckets) = _projectAccountCarry(account, pos, buckets, 0, releasedTopUp);
         bool vpiReserveUnderfunded =
             engineContract.clearinghouse().vpiRebateReserveAssets(account) < _negativeVpiReserveTarget(pos.vpiAccrued);
         uint256 riskCollateralAssets =
@@ -305,7 +307,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     function _projectAccountCarry(
         address account,
         CfdTypes.Position memory pos,
-        IMarginClearinghouse.AccountAssetBuckets memory buckets
+        IMarginClearinghouse.AccountAssetBuckets memory buckets,
+        uint256 protectedPledge,
+        uint256 eligibleReleasedAssets
     )
         private
         view
@@ -315,7 +319,10 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         )
     {
         return MarginClearinghouseAccountingLib.projectCarryLoss(
-            buckets, engineContract.unsettledCarryAssets(account) + _elapsedCarryAssets(account, pos)
+            buckets,
+            engineContract.unsettledCarryAssets(account) + _elapsedCarryAssets(account, pos),
+            protectedPledge,
+            eligibleReleasedAssets
         );
     }
 

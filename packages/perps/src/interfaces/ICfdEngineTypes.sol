@@ -159,6 +159,8 @@ interface ICfdEngineTypes {
     /// @notice Emitted when nonzero carry due is evaluated; collected value follows the HousePool claimant path.
     /// @dev Collected value may be zero when no backing is available. Claim and bounty credits occur afterward
     ///      and can cover retained arrears at a later checkpoint.
+    ///      Released top-ups collected equal `realizedCarryAssets - freeSettlementConsumedAssets - marginConsumedAssets`.
+    ///      The clearinghouse emits `ProtectedTopUpUpdated` when the protected balance changes.
     /// @param account Position account paying carry.
     /// @param realizedCarryAssets Total carry collected in settlement token.
     /// @param freeSettlementConsumedAssets Portion collected from free settlement, in settlement token.
@@ -177,9 +179,11 @@ interface ICfdEngineTypes {
     ///      collateral. `closeReachableAssets` is the legacy free-settlement value. Liquidation reachability may include
     ///      locked value that liquidation can release; the terminal price collectible cap is a separate exact domain.
     /// @param settlementBalanceAssets Total clearinghouse settlement balance, including locked buckets.
-    /// @param lockedMarginAssets Sum of active-position, liquidation-reserve, committed-order, and reserved-settlement buckets.
+    /// @param lockedMarginAssets Sum of active-position margin, liquidation reserve, committed-order margin,
+    ///        reserved settlement, and released top-ups.
     /// @param activePositionMarginAssets Clearinghouse custody bucket backing the live position.
-    /// @param otherLockedMarginAssets Sum of liquidation-reserve, committed-order, and reserved-settlement buckets.
+    /// @param otherLockedMarginAssets Sum of liquidation reserve, committed-order margin, reserved settlement,
+    ///        and released top-ups.
     /// @param freeSettlementAssets Settlement balance not assigned to any locked bucket.
     /// @param closeReachableAssets Legacy close reachability value, exactly equal to `freeSettlementAssets`.
     /// @param liquidationReachableSettlementAssets Settlement balance available to liquidation after excluding

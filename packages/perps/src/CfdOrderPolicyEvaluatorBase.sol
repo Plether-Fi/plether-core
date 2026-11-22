@@ -14,6 +14,7 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {CfdEngineRawSnapshotLib} from "@plether/perps/libraries/CfdEngineRawSnapshotLib.sol";
+import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {OpenOrderFundingLib} from "@plether/perps/libraries/OpenOrderFundingLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
@@ -122,6 +123,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         uint256 currentOraclePrice;
         uint256 poolDepthAssets;
         uint256 executionBountyAssets;
+        bool drainsAccountQueue;
     }
 
     function _assessOrder(
@@ -150,8 +152,14 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory closeDelta =
                 planner.planClose(snapshot, order, context.currentOraclePrice);
-            return
-                _evaluateClose(snapshot, closeDelta, boundsCopy, context.executionBountyAssets, bountyReturnsToAccount);
+            return _evaluateClose(
+                snapshot,
+                closeDelta,
+                boundsCopy,
+                context.executionBountyAssets,
+                bountyReturnsToAccount,
+                context.drainsAccountQueue
+            );
         }
 
         CfdEnginePlanTypes.OpenDelta memory openDelta = planner.planOpen(snapshot, order, context.currentOraclePrice);
@@ -218,12 +226,14 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.CloseDelta memory delta,
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyAssets,
-        bool bountyReturnsToAccount
+        bool bountyReturnsToAccount,
+        bool drainsAccountQueue
     ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidCloseDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
-        assessment =
-            _buildCloseAssessment(snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode);
+        assessment = _buildCloseAssessment(
+            snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode, drainsAccountQueue
+        );
         _enforceBounds(assessment, bounds, executionBountyAssets, delta.deletePosition);
     }
 
@@ -311,37 +321,39 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         bool bountyReturnsToAccount,
         OrderV3Types.ExecutionMode mode
     ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
-        uint256 positiveTradeCostAssets = 0;
-        uint256 tradeRebateAssets = 0;
-        if (delta.tradeCostAssets >= 0) {
-            positiveTradeCostAssets = uint256(delta.tradeCostAssets);
-        } else {
-            tradeRebateAssets = _negativeMagnitude(delta.tradeCostAssets);
-        }
-
-        // A zero-size snapshot deliberately does not realize an inconsistent stale carry value during Engine apply.
-        // slither-disable-next-line incorrect-equality
-        uint256 realizedCarryAssets = snapshot.position.size == 0 ? 0 : delta.pendingCarryAssets;
-
         assessment.mode = mode;
         assessment.executionNotionalAssets = delta.openState.notionalAssets;
-        assessment.grossAccountDebitAssets = realizedCarryAssets + positiveTradeCostAssets + executionBountyAssets;
-        assessment.actionChargeAssessedAssets = _netOpenActionCharge(realizedCarryAssets, delta.tradeCostAssets);
-        assessment.actionChargeCollectedAssets = realizedCarryAssets + positiveTradeCostAssets;
         assessment.explicitFeesAssets = delta.executionFeeAssets;
         assessment.preSettlementBalanceAssets = snapshot.accountBuckets.settlementBalanceAssets;
+        {
+            uint256 positiveTradeCostAssets = 0;
+            uint256 tradeRebateAssets = 0;
+            if (delta.tradeCostAssets >= 0) {
+                positiveTradeCostAssets = uint256(delta.tradeCostAssets);
+            } else {
+                tradeRebateAssets = _negativeMagnitude(delta.tradeCostAssets);
+            }
 
-        uint256 postSettlementBalanceAssets = assessment.preSettlementBalanceAssets - realizedCarryAssets;
-        if (positiveTradeCostAssets > 0) {
-            postSettlementBalanceAssets -= positiveTradeCostAssets;
-        } else if (tradeRebateAssets > 0) {
-            postSettlementBalanceAssets += tradeRebateAssets;
+            // A zero-size snapshot deliberately does not realize an inconsistent stale carry value during Engine apply.
+            // slither-disable-next-line incorrect-equality
+            uint256 realizedCarryAssets = snapshot.position.size == 0 ? 0 : delta.pendingCarryAssets;
+
+            assessment.grossAccountDebitAssets = realizedCarryAssets + positiveTradeCostAssets + executionBountyAssets;
+            assessment.actionChargeAssessedAssets = _netOpenActionCharge(realizedCarryAssets, delta.tradeCostAssets);
+            assessment.actionChargeCollectedAssets = realizedCarryAssets + positiveTradeCostAssets;
+            assessment.carryAssets = realizedCarryAssets;
+
+            uint256 postSettlementBalanceAssets = assessment.preSettlementBalanceAssets - realizedCarryAssets;
+            if (positiveTradeCostAssets > 0) {
+                postSettlementBalanceAssets -= positiveTradeCostAssets;
+            } else if (tradeRebateAssets > 0) {
+                postSettlementBalanceAssets += tradeRebateAssets;
+            }
+            assessment.postSettlementBalanceAssets =
+                _settlementAfterBounty(postSettlementBalanceAssets, executionBountyAssets, bountyReturnsToAccount);
         }
-        assessment.postSettlementBalanceAssets =
-            _settlementAfterBounty(postSettlementBalanceAssets, executionBountyAssets, bountyReturnsToAccount);
 
         assessment.vpiAssets = delta.posVpiAccruedDelta;
-        assessment.carryAssets = realizedCarryAssets;
         assessment.executionFeeAssets = delta.executionFeeAssets;
         assessment.preTraderClaimAssets = snapshot.traderClaimBalanceForAccount;
         assessment.postTraderClaimAssets = snapshot.traderClaimBalanceForAccount;
@@ -361,7 +373,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             delta.newPosEntryCostAssetAtoms,
             delta.price,
             snapshot.capPrice,
-            assessment.postPositionMarginAssets + assessment.postTraderClaimAssets,
+            assessment.postPositionMarginAssets - snapshot.protectedPositionMarginAssets
+                + assessment.postTraderClaimAssets,
             0
         );
         assessment.postPositionEquityAssets = riskState.equityAssets;
@@ -373,7 +386,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.CloseDelta memory delta,
         uint256 executionBountyAssets,
         bool bountyReturnsToAccount,
-        OrderV3Types.ExecutionMode mode
+        OrderV3Types.ExecutionMode mode,
+        bool drainsAccountQueue
     ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         assessment.mode = mode;
         assessment.close = OrderV3Types.CloseEconomics({
@@ -426,6 +440,12 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         uint256 lockedAfter = delta.posMarginAfter + snapshot.liquidationReserveAssets
             - delta.liquidationReserveReleaseAssets + snapshot.lockedBuckets.committedOrderMarginAssets
             - delta.actionCommittedMarginConsumedAssets + actionReserveAfter;
+        if (
+            !drainsAccountQueue
+                && (snapshot.protectedPositionMarginAssets != 0 || snapshot.protectedReleasedMarginAssets != 0)
+        ) {
+            lockedAfter += _protectedReleasedAfterClose(snapshot, delta);
+        }
         assessment.close.postFreeSettlementAssets = assessment.postSettlementBalanceAssets > lockedAfter
             ? assessment.postSettlementBalanceAssets - lockedAfter
             : 0;
@@ -451,6 +471,41 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         );
         assessment.postPositionEquityAssets = riskState.equityAssets;
         assessment.postLeverageBps = _postLeverageBps(riskState.currentNotionalAssets, riskState.equityAssets);
+    }
+
+    /// @dev Reconciles the released balance using the plan's collected amounts, then adds any newly released protection.
+    function _protectedReleasedAfterClose(
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        CfdEnginePlanTypes.CloseDelta memory delta
+    ) private pure returns (uint256) {
+        uint256 carryFromPledge = Math.min(snapshot.position.margin, delta.realizedCarryAssets);
+        uint256 releasedRemaining;
+        {
+            uint256 carryAfterPledge = delta.realizedCarryAssets - carryFromPledge;
+            uint256 freeBefore = snapshot.accountBuckets.freeSettlementAssets;
+            uint256 carryFromFree = Math.min(freeBefore, carryAfterPledge);
+            releasedRemaining = snapshot.protectedReleasedMarginAssets - (carryAfterPledge - carryFromFree);
+
+            uint256 releasedVpi = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
+                - delta.vpiRebateReserveConsumedAssets;
+            uint256 freeForAction = freeBefore - carryFromFree + releasedVpi;
+            if (delta.deletePosition) {
+                freeForAction += delta.liquidationReserveReleaseAssets;
+            }
+            uint256 actionFromFreeAndProtected = delta.actionChargeCollectedAssets
+                - delta.vpiRebateReserveConsumedAssets - delta.actionReserveConsumedAssets
+                - delta.actionCommittedMarginConsumedAssets - delta.actionChargeFromReleasedMarginAssets;
+            releasedRemaining -= Math.saturatingSub(actionFromFreeAndProtected, freeForAction);
+        }
+
+        uint256 pledgeAfterLoss = snapshot.position.margin - carryFromPledge - delta.pricePnlPledgeConsumedAssets;
+        return releasedRemaining
+            + MarginClearinghouseAccountingLib.protectedCloseRelease(
+            pledgeAfterLoss,
+            Math.min(pledgeAfterLoss, snapshot.protectedPositionMarginAssets),
+            delta.safeMarginReleaseAssets,
+            delta.actionChargeFromReleasedMarginAssets
+        );
     }
 
     function _includeCommitment(

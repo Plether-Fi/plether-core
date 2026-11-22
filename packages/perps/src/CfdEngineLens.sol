@@ -18,6 +18,7 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IOrderRouterEmergencyAdmin} from "@plether/perps/interfaces/IOrderRouterEmergencyAdmin.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
+import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {CfdEngineRawSnapshotLib} from "@plether/perps/libraries/CfdEngineRawSnapshotLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
@@ -101,7 +102,18 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 marginDelta,
         uint256 oraclePrice
     ) external view returns (ICfdEngineTypes.OpenPreview memory preview) {
-        preview = _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice);
+        (preview,) = _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice);
+    }
+
+    /// @inheritdoc ICfdEngineLens
+    function previewOpenWithEligibleEquity(
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice
+    ) external view returns (ICfdEngineTypes.OpenPreview memory preview, int256 postEligibleEquityAssets) {
+        return _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice);
     }
 
     /// @notice Quotes the largest open or same-side increase accepted by the current engine plan.
@@ -135,7 +147,7 @@ contract CfdEngineLens is ICfdEngineLens {
         CfdEnginePlanTypes.OpenDelta memory delta;
         ICfdEnginePlanner planner = engineContract.planner();
         (quote.maxSizeDelta, delta, quote.limitingReason) = openQuoter.quote(planner, snap, order, oraclePrice);
-        quote.preview = _openPreviewFromPlan(snap, delta, marginDelta, planner);
+        (quote.preview, quote.postEligibleEquityAssets) = _openPreviewFromPlan(snap, delta, marginDelta, planner);
     }
 
     /// @notice Returns the numeric typed business-rule result for the same plan as `previewOpen`.
@@ -154,7 +166,8 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 marginDelta,
         uint256 oraclePrice
     ) external view returns (uint8 code) {
-        return uint8(_previewOpen(account, side, sizeDelta, marginDelta, oraclePrice).invalidReason);
+        (ICfdEngineTypes.OpenPreview memory preview,) = _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice);
+        return uint8(preview.invalidReason);
     }
 
     /// @inheritdoc ICfdEngineLens
@@ -197,7 +210,8 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 marginDelta,
         uint256 oraclePrice
     ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category) {
-        return _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice).failureCategory;
+        (ICfdEngineTypes.OpenPreview memory preview,) = _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice);
+        return preview.failureCategory;
     }
 
     /// @notice Simulates a close/decrease with caller-supplied hypothetical pool accounting depth and cash.
@@ -281,13 +295,14 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param marginDelta Requested margin contribution, in 6-decimal settlement token units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
     /// @return preview Typed open result and projected position/risk fields.
+    /// @return postEligibleEquityAssets Projected equity for open-order bounds.
     function _previewOpen(
         address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
         uint256 oraclePrice
-    ) internal view returns (ICfdEngineTypes.OpenPreview memory preview) {
+    ) internal view returns (ICfdEngineTypes.OpenPreview memory preview, int256 postEligibleEquityAssets) {
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, engineContract.pool().totalAssets());
         CfdEnginePlanTypes.OpenDelta memory delta = _planOpen(snap, account, side, sizeDelta, marginDelta, oraclePrice);
 
@@ -300,7 +315,7 @@ contract CfdEngineLens is ICfdEngineLens {
         CfdEnginePlanTypes.OpenDelta memory delta,
         uint256 marginDelta,
         ICfdEnginePlanner planner
-    ) internal pure returns (ICfdEngineTypes.OpenPreview memory preview) {
+    ) internal pure returns (ICfdEngineTypes.OpenPreview memory preview, int256 postEligibleEquityAssets) {
         uint256 price = delta.price;
         preview.executionPrice = price;
         preview.sizeDelta = delta.sizeDelta;
@@ -321,7 +336,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.postMarginAssets = delta.positionMarginAfterOpen;
         preview.postEntryPrice = delta.newPosEntryPrice;
         if (delta.revertCode == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED) {
-            return preview;
+            return (preview, 0);
         }
         preview.postVpiAccrued = snap.position.vpiAccrued + delta.posVpiAccruedDelta;
         if (!delta.valid) {
@@ -334,7 +349,7 @@ contract CfdEngineLens is ICfdEngineLens {
                     10_000
                 );
             }
-            return preview;
+            return (preview, 0);
         }
 
         CfdTypes.Position memory projected = _projectOpenPosition(snap.position, delta);
@@ -346,6 +361,7 @@ contract CfdEngineLens is ICfdEngineLens {
 
         preview.postUnrealizedPnlAssets = risk.unrealizedPnlAssets;
         preview.postEquityAssets = risk.equityAssets;
+        postEligibleEquityAssets = risk.equityAssets - int256(snap.protectedPositionMarginAssets);
         preview.maintenanceMarginAssets = risk.maintenanceMarginAssets;
         preview.postLiquidatable = risk.liquidatable;
         preview.postHealthBps = _healthBps(risk.equityAssets, risk.maintenanceMarginAssets);
@@ -694,7 +710,8 @@ contract CfdEngineLens is ICfdEngineLens {
         if (protectionId != 0) {
             protection = protectionBook.getPositionProtection(protectionId);
         }
-        uint256 remaining = router.pendingOrderCounts(snap.account);
+        uint256 pendingCount = router.pendingOrderCounts(snap.account);
+        uint256 remaining = pendingCount;
         for (uint64 orderId = router.accountHeadOrderId(snap.account); orderId != 0;) {
             if (remaining == 0) {
                 revert CfdEngineLens__InvalidRouterQueue();
@@ -717,6 +734,11 @@ contract CfdEngineLens is ICfdEngineLens {
             orderId = next;
         }
         uint256 released = preview.releasedCommittedMarginAssets + preview.releasedBountyAssets;
+        if (preview.refundedOrderCount != 0 && preview.refundedOrderCount == pendingCount) {
+            released += snap.protectedReleasedMarginAssets;
+            snap.protectedReleasedMarginAssets = 0;
+            snap.protectedPositionMarginAssets = 0;
+        }
         snap.lockedBuckets.committedOrderMarginAssets -= preview.releasedCommittedMarginAssets;
         snap.lockedBuckets.reservedSettlementAssets -= preview.releasedBountyAssets;
         snap.lockedBuckets.totalLockedMarginAssets -= released;
@@ -747,13 +769,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.shortSide = CfdEngineRawSnapshotLib.loadSideState(address(engineContract), CfdTypes.Side.SHORT);
         snap.poolAssets = poolDepthAssets;
         snap.poolCashAssets = poolDepthAssets;
-        IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
-        snap.accountBuckets = clearinghouse.getAccountAssetBuckets(account);
-        snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        snap.liquidationReserveAssets = clearinghouse.liquidationReserveAssets(account);
-        snap.actionReserveAssets = clearinghouse.actionReserveAssets(account);
-        snap.vpiRebateReserveAssets = clearinghouse.vpiRebateReserveAssets(account);
-        snap.protectedExecutionBountyAssets = clearinghouse.totalBountyReservationsAssets(account);
+        CfdEngineCollateralSnapshotLib.load(snap, engineContract.clearinghouse(), account, false);
         CfdEngineRawSnapshotLib.loadExecutionContext(snap, address(engineContract));
     }
 

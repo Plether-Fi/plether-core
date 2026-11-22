@@ -103,7 +103,7 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
     uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_573;
     // v2 includes the pure reconciliation planner and pending-claimant caps.
     uint256 internal constant REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT = 3600;
-    // Measured production runtime with signed VPI accounting and scheduled closures.
+    // Measured production runtime with signed VPI accounting, scheduled closures, and protected top-ups.
     uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 24_576;
     // Snapshot construction lives in the immutable planning reader. Keep at least 4 KiB of headroom.
     uint256 internal constant CFD_ENGINE_SETTLEMENT_SIDECAR_RUNTIME_TARGET = 20_480;

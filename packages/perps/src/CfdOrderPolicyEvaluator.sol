@@ -112,7 +112,8 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
             executor,
             executionPrice,
             IHousePool(engine.pool()).totalAssets(),
-            pending.executionBountyAssets
+            pending.executionBountyAssets,
+            order.isClose && IOrderRouterAccounting(router).pendingOrderCounts(order.account) == 1
         );
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
@@ -191,7 +192,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         CfdEnginePlanTypes.RawSnapshot memory snapshotCopy = snapshot;
         CfdEnginePlanTypes.CloseDelta memory deltaCopy = delta;
         OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
-        return _evaluateClose(snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false);
+        return _evaluateClose(snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false, false);
     }
 
 }
