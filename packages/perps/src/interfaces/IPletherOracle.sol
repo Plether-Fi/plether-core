@@ -169,7 +169,7 @@ interface IPletherOracle {
     /// @param publishTime Basket publish time.
     /// @param lastMarkTime Engine cached-mark publish time.
     error PletherOracle__PriceOutOfOrder(uint64 publishTime, uint64 lastMarkTime);
-    /// @notice A signed live component predates the previously accepted price for that feed.
+    /// @notice A signed live component predates the feed's accepted timestamp or the initial Engine mark floor.
     error PletherOracle__FeedTimeOutOfOrder(bytes32 feedId, uint256 publishTime, uint256 acceptedPublishTime);
     /// @notice A replay disagrees with the Engine mark at the same oracle timestamp.
     error PletherOracle__EqualTimeMarkMismatch(uint64 publishTime, uint256 basketPrice, uint256 enginePrice);

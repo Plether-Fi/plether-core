@@ -21,8 +21,9 @@ The Oracle stores the accepted live basket; only the configured Router can updat
 1. Set a caller-independent cutoff at `block.timestamp - min(LIVE_TICK_LOOKBACK, modeMaxStaleness)`.
    `LIVE_TICK_LOOKBACK` is 15 seconds.
 2. Parse a signed price for **every configured feed** between that cutoff and the current timestamp.
-3. Require each component to be at least as new as its previously accepted value. Validate positive prices,
-   component age/divergence, aggregate confidence and basket ordering.
+3. Require every component of the first live basket to be at least as new as `engine.lastMarkTime()`.
+   For later baskets, require each component to be at least as new as its own previously accepted value.
+   Validate positive prices, component age/divergence, aggregate confidence and basket ordering.
 4. Accept the entire basket together. Its publish time is the newest component time; an equal-time basket cannot
    change the aggregate price.
 
