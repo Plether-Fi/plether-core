@@ -130,7 +130,9 @@ CfdClosePreview is a separate stateless contract, not the policy evaluator or a 
 
 HousePool deliberately has no getter for its immutable redemption-math sidecar. Preserve its constructor input and
 creation evidence. Bootstrap's supplied-sidecar check proves code and
-`implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v1")`, not the Pool's hidden binding.
+`implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v2")`, not the Pool's hidden binding.
+The v2 sidecar also supplies the pure reconciliation planner and pending-claimant caps. Deploy it with the matching
+HousePool revision; the Pool rejects a v1 redemption-only implementation.
 
 ## Initial release parameters
 

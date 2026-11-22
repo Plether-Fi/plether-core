@@ -240,7 +240,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         }
         IHousePoolRedemptionMathSidecar redemptionMathSidecar = IHousePoolRedemptionMathSidecar(_redemptionMathSidecar);
         try redemptionMathSidecar.implementationId() returns (bytes32 implementationId) {
-            if (implementationId != keccak256("Plether.HousePoolRedemptionMathSidecar.v1")) {
+            if (implementationId != keccak256("Plether.HousePoolRedemptionMathSidecar.v2")) {
                 revert HousePool__InvalidRedemptionMathSidecar();
             }
         } catch {
@@ -1587,7 +1587,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         (
             HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets,
             HousePoolPendingPreviewLib.ClaimantPendingBuckets memory remainingClaimantBuckets
-        ) = _resolvePendingClaimantBuckets(reconcileSnapshot, claimantBuckets, markValid);
+        ) = _resolvePendingClaimantBuckets(accountingSnapshot, reconcileSnapshot, claimantBuckets, markValid);
         HousePoolPendingPreviewLib.PendingAccountingState memory nextState =
             _previewPendingAccountingState(reconcileSnapshot, settleableClaimantBuckets, couponElapsed, markFresh);
 
@@ -1636,7 +1636,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         (
             HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets,
             HousePoolPendingPreviewLib.ClaimantPendingBuckets memory remainingClaimantBuckets
-        ) = _resolvePendingClaimantBuckets(reconcileSnapshot, claimantBuckets, markValid);
+        ) = _resolvePendingClaimantBuckets(accountingSnapshot, reconcileSnapshot, claimantBuckets, markValid);
         ctx.residualPendingClaimantAssets = _pendingClaimantBucketAssets(remainingClaimantBuckets);
         uint256 couponElapsed =
             block.timestamp > lastSeniorCouponCheckpointTime ? block.timestamp - lastSeniorCouponCheckpointTime : 0;
@@ -1654,48 +1654,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         uint256 couponElapsed,
         bool markFresh
     ) internal view returns (HousePoolPendingPreviewLib.PendingAccountingState memory pendingState) {
-        pendingState = _currentPendingAccountingState();
-        uint256 allocatedAssets = _pendingClaimantBucketAssets(settleableClaimantBuckets);
-        if (couponElapsed > 0 && pendingState.juniorSupply > 0) {
-            (pendingState.waterfall,) = HousePoolWaterfallAccountingLib.paySeniorCoupon(
-                pendingState.waterfall, poolConfig.seniorRateBps, couponElapsed
-            );
-        }
-        uint256 claimedBeforeRecap = pendingState.waterfall.seniorPrincipal + pendingState.waterfall.juniorPrincipal;
-        uint256 ordinaryRevenue;
-        if (markFresh) {
-            uint256 distributable = reconcileSnapshot.distributable > allocatedAssets
-                ? reconcileSnapshot.distributable - allocatedAssets
-                : 0;
-            pendingState.unassignedAssets = Math.min(pendingState.unassignedAssets, distributable);
-            uint256 distributableToClaims = distributable - pendingState.unassignedAssets;
-            if (distributableToClaims < claimedBeforeRecap) {
-                pendingState.waterfall = HousePoolWaterfallAccountingLib.absorbLoss(
-                    pendingState.waterfall, claimedBeforeRecap - distributableToClaims
-                );
-            } else {
-                ordinaryRevenue = distributableToClaims - claimedBeforeRecap;
-            }
-        }
-
-        // Losses precede the recap; the recap precedes ordinary gains so Senior's gap is filled only once.
-        HousePoolPendingPreviewLib.applyClaimantRecapitalizationIntent(
-            pendingState, settleableClaimantBuckets.recapitalizationAssets
+        return REDEMPTION_MATH_SIDECAR.previewPendingAccountingState(
+            _currentPendingAccountingState(),
+            reconcileSnapshot,
+            settleableClaimantBuckets,
+            poolConfig.seniorRateBps,
+            couponElapsed,
+            markFresh
         );
-        if (ordinaryRevenue > 0) {
-            if (claimedBeforeRecap == 0) {
-                HousePoolPendingPreviewLib.applyRevenueIntent(pendingState, ordinaryRevenue);
-            } else {
-                uint256 juniorBeforeRevenue = pendingState.waterfall.juniorPrincipal;
-                pendingState.waterfall =
-                    HousePoolWaterfallAccountingLib.distributeRevenue(pendingState.waterfall, ordinaryRevenue);
-                if (pendingState.juniorSupply == 0) {
-                    pendingState.unassignedAssets += pendingState.waterfall.juniorPrincipal - juniorBeforeRevenue;
-                    pendingState.waterfall.juniorPrincipal = juniorBeforeRevenue;
-                }
-            }
-        }
-        HousePoolPendingPreviewLib.applyRevenueIntent(pendingState, settleableClaimantBuckets.revenueAssets);
     }
 
     function _markIsFreshForReconcile(
@@ -1824,9 +1790,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         return HousePoolPendingPreviewLib.claimantBucketAssets(claimantBuckets);
     }
 
-    /// @dev Retire paid claims before allocating new value. Keep fresh intent backed by physical cash or a
-    ///      collectible mark even when an unrelated payout temporarily reduces LP equity.
+    /// @dev Retire paid claims and unsupported pending revenue before allocating new value above the unassigned
+    ///      reserve. Keep fresh intent backed by physical cash or a collectible mark even when an unrelated payout
+    ///      temporarily reduces LP equity.
     function _resolvePendingClaimantBuckets(
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
         HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot,
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets,
         bool markValid
@@ -1843,11 +1811,22 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         claimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(
             claimantBuckets, _pendingClaimantBucketAssets(claimantBuckets) - claimDebit
         );
+        (claimantBuckets.revenueAssets,,) = REDEMPTION_MATH_SIDECAR.capPendingClaimantBuckets(
+            accountingSnapshot.physicalAssets,
+            accountingSnapshot.terminalLpPriceDeltaAssets,
+            reconcileSnapshot.distributable,
+            unassignedAssets,
+            claimantBuckets.recapitalizationAssets,
+            claimantBuckets.revenueAssets
+        );
         uint256 freshAssets = Math.min(freshlyQueuedClaimantAssets, _pendingClaimantBucketAssets(claimantBuckets));
+        uint256 distributableToClaims = reconcileSnapshot.distributable > unassignedAssets
+            ? reconcileSnapshot.distributable - unassignedAssets
+            : 0;
         settleableClaimantBuckets = HousePoolPendingPreviewLib.settleableClaimantBuckets(
             claimantBuckets,
-            reconcileSnapshot.distributable,
-            seniorPrincipal + juniorPrincipal + unassignedAssets,
+            distributableToClaims,
+            seniorPrincipal + juniorPrincipal,
             freshAssets
         );
         remainingClaimantBuckets =
@@ -1864,7 +1843,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             );
         }
     }
-
     function _getHousePoolInputSnapshot()
         internal
         view

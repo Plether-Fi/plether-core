@@ -236,7 +236,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         );
         require(
             deployed.housePoolRedemptionMathSidecar.implementationId()
-                == keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
+                == keccak256("Plether.HousePoolRedemptionMathSidecar.v2"),
             "HousePool redemption math sidecar ID mismatch"
         );
         deployed.housePool = new ArbitrumSepoliaReleaseHousePool(
