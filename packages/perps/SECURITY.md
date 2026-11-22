@@ -14,8 +14,8 @@ It is written as an audit-facing companion to:
 The perps system is built around a few core security choices:
 
 - bounded trader payouts through a capped market price,
-- delayed-order execution through a keeper-run FIFO router with caller-pinned deadlines, configuration, execution
-  regimes, and financial bounds,
+- delayed-order execution through a keeper-run FIFO router with a protocol-fixed execution lifetime and caller-pinned
+  submission cutoffs, configuration, execution regimes, and financial bounds,
 - strict separation between trader custody, router intent records, engine accounting, and LP capital,
 - permanent account-scoped client-id resolution and authenticated terminal receipts in an immutable lifecycle Book,
 - exact-shape failure classification: only known typed policy failures are terminal, while unknown, panic,
@@ -797,9 +797,14 @@ receipts authenticate the original submission limit, execution duration, commitm
 be used as a compatibility signal.
 
 Execution deadline equality passes. Expiry begins only when `block.timestamp > executionDeadline`. Fresh commitment
-requires `block.timestamp <= submitBy` and a positive execution duration no greater than `maxExecutionWindowSeconds`.
+requires `block.timestamp <= submitBy` and `executionWindowSeconds == maxExecutionWindowSeconds` (default 60 seconds).
+The existing configuration name is retained, but it specifies the fixed lifetime rather than a caller-selectable
+maximum. A mismatch reverts; the Router does not normalize the request's signed bounds. `submitBy` controls admission
+only and cannot shorten a committed order's lifetime.
 The lifecycle Book resolves and retains `executionDeadline = commitTimestamp + executionWindowSeconds` exactly once.
-Exact replay returns the original id and timing even after either deadline; timing changes under that id conflict.
+Configuration changes do not rewrite stored timing. Exact replay returns the original id and timing even after either
+deadline; timing changes under that id conflict. The Oracle's separate `orderSettlementWindow` limits qualifying
+historical publish times, not the execution lifetime.
 
 The Book's execution-authority digest is separate from `SettlementMonitorLens.observableConfigDigest()` and its
 observation digests. Monitor digests remain advisory drift evidence and are never accepted by the Router as an order

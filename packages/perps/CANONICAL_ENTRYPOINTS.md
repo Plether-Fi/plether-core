@@ -57,19 +57,21 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 ### Order timing
 
 Every ordinary request supplies two clocks in [`OrderV3Types.ExecutionBounds`](src/OrderV3Types.sol): a deadline to
-submit, then an execution duration measured from commitment.
+submit, then the protocol's fixed execution duration measured from commitment.
 
 | Field | Meaning | Boundary |
 | --- | --- | --- |
 | `uint64 submitBy` | Latest chain timestamp for fresh commitment | Equality is allowed. |
-| `uint32 executionWindowSeconds` | Duration after successful commitment | Positive and at most `maxExecutionWindowSeconds` (default 60 seconds; governance maximum one hour). |
+| `uint32 executionWindowSeconds` | Fixed duration after successful commitment | Must equal `maxExecutionWindowSeconds` (default 60 seconds; governance maximum one hour). A mismatch reverts. |
 | `commitTimestamp` | Timestamp of successful commitment | Recorded by the lifecycle Book. |
 | `executionDeadline` | `commitTimestamp + executionWindowSeconds` | Expiry is strictly after this timestamp; equality remains eligible. |
 
-A request with `submitBy = 12:02:00` and a 60-second duration committed at `12:01:30` expires after `12:02:30`.
-The submission cutoff no longer controls a committed order. FIFO, oracle, MEV, gas and financial checks still apply.
-Extending execution duration does not extend the Oracle's separate post-commit `orderSettlementWindow`; the signed
-historical price must qualify in that window even if execution happens later. Frozen execution follows the
+With the configured lifetime at 60 seconds, a request with `submitBy = 12:02:00` committed at `12:01:30` expires after
+`12:02:30`. The submission cutoff no longer controls a committed order. The configuration name
+`maxExecutionWindowSeconds` is retained, but callers must echo its exact value; the Router does not normalize signed
+bounds. Configuration changes do not rewrite stored timing. FIFO, oracle, MEV, gas and financial checks still apply.
+The execution lifetime is separate from the Oracle's post-commit `orderSettlementWindow`; the signed historical
+price must qualify in that window even if execution happens later. Frozen execution follows the
 [stored-mark policy](ORACLE_SYNCHRONIZATION.md#frozen-operation).
 
 Expiry makes an order eligible for cleanup; it does not automatically release reservations. `expireOrder` and
