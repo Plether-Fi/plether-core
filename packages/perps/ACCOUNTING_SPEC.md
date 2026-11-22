@@ -625,10 +625,25 @@ Accounting rules:
 - the fee does not increase `protocolTreasuryBalanceAssets`,
 - the fee remains inside the same tranche and therefore benefits incumbent LPs of that tranche only.
 
-Senior withdrawal protection follows the actual net principal debit: for pre-withdrawal principal `P`, high-water
-mark `H`, and funded assets `A`, settlement sets `P' = P - A` and `H' = H - floor(H * A / P)`.
-This preserves healthy Senior principal/HWM equality and retains impaired protection proportionally, including
-protection for retained fees. Rounding favors the remaining protected claim; zero funding leaves both values unchanged.
+Senior withdrawal protection follows the actual net principal debit, with a share-ownership floor for impaired
+partial withdrawals. For pre-withdrawal principal `P`, high-water mark `H`, and net funded assets `A`, settlement
+sets `P' = P - A`. If Senior is impaired (`H > P`) and positive principal remains (`0 < A < P`), it sets:
+
+`H' = H - min(floor(H * A / P), floor(H * x / S))`
+
+Here `x` is the aggregate Senior shares actually funded during the settlement phase, and `S` is that phase's
+post-reconcile, pre-burn real Senior share supply, without the ERC-4626 virtual share offset. All matured epochs
+funded in one phase use the same supply snapshot. A later settlement pass takes a fresh snapshot.
+
+Otherwise, positive funding uses `H' = H - floor(H * A / P)`. This preserves healthy Senior principal/HWM equality
+and protection for retained fees. Zero funding leaves both values unchanged, including a wiped-out Senior's HWM;
+funding the entire principal clears the HWM even if shares remain outstanding.
+
+The impaired partial-withdrawal floor prevents virtual-offset pricing and asset rounding from removing more HWM
+than the funded shares' fraction of real ownership. The net-principal result remains unchanged whenever it already
+meets that floor. This is a conservative, one-sided bound: when asset rounding or retained fees remove a smaller
+fraction of principal than of shares, remaining HWM may exceed share-proportional protection. It does not guarantee
+exact proportionality or that differences between asset-based and share-based protection are below one USDG atom.
 
 Async allocation dust is resolved only after every controller's entitlement is accounted for:
 

@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEngineProtocolLens} from "@plether/perps/CfdEngineProtocolLens.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
@@ -635,7 +636,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         _payOut(recipient, amount);
         // The Engine may still be inside a terminal-book mutation. Defer ownership clipping until the next stable
         // reconcile rather than reading a transient claim balance here.
-        pendingClaimantPayoutDebitAssets += _min(
+        pendingClaimantPayoutDebitAssets += Math.min(
             amount, _pendingClaimantBucketAssets() - pendingClaimantPayoutDebitAssets
         );
     }
@@ -874,7 +875,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         RedemptionPhase memory seniorPhase = RedemptionPhase({
             pricingPrincipal: seniorPrincipal,
             pricingSupply: _seniorShareSupply(),
-            budget: _min(freeAssets, seniorPrincipal),
+            budget: Math.min(freeAssets, seniorPrincipal),
             fundedShares: 0,
             fundedAssets: 0,
             processedEpochs: 0,
@@ -884,11 +885,18 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             seniorVault, result.cutoffEpoch, seniorPhase, _settlementFeeBps(true, statusSnapshot.oracleFrozen)
         );
         if (seniorPhase.fundedAssets > 0) {
-            HousePoolWaterfallAccountingLib.WaterfallState memory nextState =
-                HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(_getWaterfallState(), seniorPhase.fundedAssets);
-            _setWaterfallState(nextState);
+            (seniorPrincipal, seniorHighWaterMark) = HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(
+                seniorPhase.pricingPrincipal,
+                seniorHighWaterMark,
+                seniorPhase.fundedAssets,
+                seniorPhase.fundedShares,
+                seniorPhase.pricingSupply
+            );
             accountedAssets -= seniorPhase.fundedAssets;
-            freeAssets -= seniorPhase.fundedAssets;
+            // Canonical redemption math caps aggregate funding by the phase budget, which cannot exceed freeAssets.
+            unchecked {
+                freeAssets -= seniorPhase.fundedAssets;
+            }
         }
         result.seniorFundedShares = seniorPhase.fundedShares;
         result.seniorFundedAssets = seniorPhase.fundedAssets;
@@ -1224,13 +1232,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         );
     }
 
-    function _min(
-        uint256 a,
-        uint256 b
-    ) internal pure returns (uint256) {
-        return a < b ? a : b;
-    }
-
     function _juniorSettlementCapacity(
         uint256 freeAssets,
         HousePoolWaterfallAccountingLib.WaterfallState memory state
@@ -1242,7 +1243,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             reservedSeniorDepositAssets,
             poolConfig.maxSeniorShareBps
         );
-        return _min(freeAssets, _min(state.juniorPrincipal, ratioCap));
+        return Math.min(freeAssets, Math.min(state.juniorPrincipal, ratioCap));
     }
 
     function _saturatingSubtract(
@@ -1607,9 +1608,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         uint256 remainingPendingAssets = _pendingClaimantBucketAssets(remainingClaimantBuckets);
         freshlyQueuedClaimantAssets = _pendingClaimantBucketAssets(settleableClaimantBuckets) != 0
             ? 0
-            : _min(freshlyQueuedClaimantAssets, remainingPendingAssets);
+            : Math.min(freshlyQueuedClaimantAssets, remainingPendingAssets);
         pendingClaimantPayoutDebitAssets =
-            markValid ? 0 : _min(pendingClaimantPayoutDebitAssets, remainingPendingAssets);
+            markValid ? 0 : Math.min(pendingClaimantPayoutDebitAssets, remainingPendingAssets);
     }
 
     function _getWithdrawalSnapshot()
@@ -1666,7 +1667,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             uint256 distributable = reconcileSnapshot.distributable > allocatedAssets
                 ? reconcileSnapshot.distributable - allocatedAssets
                 : 0;
-            pendingState.unassignedAssets = _min(pendingState.unassignedAssets, distributable);
+            pendingState.unassignedAssets = Math.min(pendingState.unassignedAssets, distributable);
             uint256 distributableToClaims = distributable - pendingState.unassignedAssets;
             if (distributableToClaims < claimedBeforeRecap) {
                 pendingState.waterfall = HousePoolWaterfallAccountingLib.absorbLoss(
@@ -1838,11 +1839,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         )
     {
         uint256 claimDebit =
-            markValid ? _min(pendingClaimantPayoutDebitAssets, _pendingClaimantBucketAssets(claimantBuckets)) : 0;
+            markValid ? Math.min(pendingClaimantPayoutDebitAssets, _pendingClaimantBucketAssets(claimantBuckets)) : 0;
         claimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(
             claimantBuckets, _pendingClaimantBucketAssets(claimantBuckets) - claimDebit
         );
-        uint256 freshAssets = _min(freshlyQueuedClaimantAssets, _pendingClaimantBucketAssets(claimantBuckets));
+        uint256 freshAssets = Math.min(freshlyQueuedClaimantAssets, _pendingClaimantBucketAssets(claimantBuckets));
         settleableClaimantBuckets = HousePoolPendingPreviewLib.settleableClaimantBuckets(
             claimantBuckets,
             reconcileSnapshot.distributable,
@@ -1852,14 +1853,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         remainingClaimantBuckets =
             HousePoolPendingPreviewLib.subtractClaimantBuckets(claimantBuckets, settleableClaimantBuckets);
         if (markValid && freshAssets != 0) {
-            uint256 physicalAssets = _min(rawAssets(), accountedAssets);
+            uint256 physicalAssets = Math.min(rawAssets(), accountedAssets);
             uint256 backingAssets =
                 physicalAssets > reconcileSnapshot.distributable ? physicalAssets : reconcileSnapshot.distributable;
             // Settled buckets already fit within distributable, so only fresh intent above total backing is lost.
             uint256 unsupportedFreshAssets = freshAssets > backingAssets ? freshAssets - backingAssets : 0;
             uint256 remainingAssets = _pendingClaimantBucketAssets(remainingClaimantBuckets);
             remainingClaimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(
-                remainingClaimantBuckets, remainingAssets - _min(unsupportedFreshAssets, remainingAssets)
+                remainingClaimantBuckets, remainingAssets - Math.min(unsupportedFreshAssets, remainingAssets)
             );
         }
     }
