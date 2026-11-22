@@ -424,6 +424,7 @@ interface IHousePool {
     ///      shares, credits Junior principal without minting. Otherwise the selected vault mints matching shares.
     ///      No settlement token moves and the tranche seed-lifecycle flag is not initialized by this action. Senior assignment is
     ///      bounded by the active capacity limits, which are neutral before the first governed configuration.
+    ///      Junior assignment requires Senior principal to be at least its high-water mark after reconciliation.
     /// @param toSenior True to assign assets to senior, false to junior
     /// @param receiver Nonzero account receiving any bootstrap tranche shares
     function assignUnassignedAssets(

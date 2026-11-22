@@ -104,6 +104,48 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(pool.unassignedAssets(), 0);
     }
 
+    function test_AssignUnassignedAssets_RevertsWhenVaultQuotesZeroShares() public {
+        uint256 assets = 1000e6;
+        _mintAndAccountPoolExcess(assets);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        vm.mockCall(address(juniorVault), abi.encodeCall(TrancheVault.quoteBootstrapDeposit, (assets)), abi.encode(0));
+        vm.expectRevert(IHousePool.HousePool__BootstrapSharesZero.selector);
+        pool.assignUnassignedAssets(false, alice);
+
+        assertEq(pool.unassignedAssets(), assets);
+        assertEq(juniorVault.balanceOf(alice), 0);
+    }
+
+    function test_AssignUnassignedAssets_JuniorWaitsForSeniorRecovery() public {
+        settlementToken.mint(address(this), 45_000e6);
+        settlementToken.approve(address(pool), 40_000e6);
+        pool.initializeSeedPosition(false, 10_000e6, address(this));
+        pool.initializeSeedPosition(true, 30_000e6, address(this));
+        settlementToken.approve(address(engine), 5000e6);
+        engine.recapitalizePool(5000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), 5000e6);
+
+        // The loss has not been reconciled when the owner attempts the assignment.
+        settlementToken.burn(address(pool), 15_000e6);
+        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
+        pool.assignUnassignedAssets(false, alice);
+        assertEq(pool.unassignedAssets(), 5000e6);
+        assertEq(juniorVault.balanceOf(alice), 0);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 25_000e6);
+        settlementToken.mint(address(pool), 15_000e6);
+        pool.assignUnassignedAssets(false, alice);
+        assertEq(pool.seniorPrincipal(), 30_000e6);
+        assertEq(pool.unassignedAssets(), 0);
+        assertGt(juniorVault.balanceOf(alice), 0);
+    }
+
     function test_InitializeSeedPosition_MintsPermanentSeedShares() public {
         uint256 assets = 100_000e6;
         address seed = address(0xBEEF);
