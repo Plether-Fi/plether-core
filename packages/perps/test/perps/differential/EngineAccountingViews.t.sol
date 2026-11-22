@@ -31,7 +31,7 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 7900 * 1e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 7900 * 1e6, CAP_PRICE, false);
 
         ICfdEngineTypes.AccountCollateralView memory viewData = engineAccountLens.getAccountCollateralView(account);
         (, uint256 positionMargin,,,,,) = engine.positions(account);

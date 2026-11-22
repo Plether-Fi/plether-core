@@ -89,6 +89,20 @@ contract PendingOrderReferenceLedgerTest is Test {
         assertEq(ledger.pendingCloseLots(0), 60, "Stored close count includes every still-pending close intent");
     }
 
+    function test_QueuedExposureSkipsExpiredOpenAndCloseThatDependsOnIt() public {
+        vm.warp(100);
+        ledger.commit(0, 2, _request(1, CfdTypes.Side.LONG, 20, 100e6, false), 100_000, 0, 100, 10);
+        vm.warp(200);
+        ledger.commit(0, 2, _request(2, CfdTypes.Side.LONG, 110, 0, true), 0, 0, 200, 11);
+
+        vm.warp(400);
+        assertEq(ledger.queuedLots(0, 100, 0), 10, "the open is live at its deadline");
+        vm.warp(401);
+        assertEq(ledger.queuedLots(0, 100, 0), 100, "expired open and now-oversized close cannot affect projection");
+        assertEq(ledger.count(0), 2, "expiration does not perform queue cleanup");
+        assertEq(ledger.margin(0), 100e6, "expiration does not release the reserved margin");
+    }
+
     function test_CloseRejectsAnyFundedBountyButAllowsCloseOpenCloseHistory() public {
         OrderV3Types.OrderRequest memory request = _request(1, CfdTypes.Side.LONG, 20, 0, true);
         vm.expectRevert(PendingOrderReferenceLedger.InvalidRequest.selector);

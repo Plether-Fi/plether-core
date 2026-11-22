@@ -11,6 +11,15 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 ///      denominator, and VPI parameters use 18-decimal WAD precision. Integer divisions round down.
 library OpenAccountingLib {
 
+    /// @notice Computes the unfloored liquidation reserve used by minimum-size and reserve-funding policy.
+    function rawLiquidationRequirement(
+        uint256 lots,
+        uint256 price,
+        uint256 bountyBps
+    ) internal pure returns (uint256) {
+        return (lots * price * bountyBps) / 10_000;
+    }
+
     /// @notice Inputs needed to value an open or same-side position increase.
     /// @param currentSize Existing position size, or zero for a new position.
     /// @param currentEntryCostAssetAtoms Exact existing entry cost in 6-decimal settlement token atoms.
@@ -145,7 +154,7 @@ library OpenAccountingLib {
         ) {
             return (false, state, 0);
         }
-        rawLiquidationRequirementAssets = (resultingNotionalAssets * inputs.riskParams.bountyBps) / 10_000;
+        rawLiquidationRequirementAssets = rawLiquidationRequirement(newLots, inputs.price, inputs.riskParams.bountyBps);
         state.liquidationReserveTargetAssets = rawLiquidationRequirementAssets;
         if (state.liquidationReserveTargetAssets < inputs.riskParams.minBountyAssets) {
             state.liquidationReserveTargetAssets = inputs.riskParams.minBountyAssets;

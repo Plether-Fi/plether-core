@@ -395,7 +395,7 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
         _open(counterparty, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, CAP_PRICE, false);
         uint256 forfeitedBounty = _executionBountyReserve(1);
         assertGt(forfeitedBounty, 0);
         uint256 oldTreasuryBalance = clearinghouse.balanceAssets(TREASURY_A);

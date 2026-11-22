@@ -722,6 +722,18 @@ An order starts `Pending`. Successful execution makes it `Executed`; an authenti
 lifecycle Book retains the permanent outcome and receipt hash. Neither state can reuse or requeue the same id.
 Retryable failure leaves the same order `Pending`; users cannot cancel a queued intent.
 
+Admission projects only predecessors that have not expired, still match their pinned execution configuration
+(or use the internal unpinned marker), and have feasible fixed request bounds. Ignoring a predecessor in this
+projection does not release its collateral, bounty, or queue slot; terminal cleanup owns those changes. A full CLOSE
+may support a queued opposing OPEN, but its live `MUST_CLOSE_OPPOSING` preview cannot suppress invariant size,
+numeric-domain, or minimum new-position reserve-funding checks. Price-sensitive checks still use the ordinary
+fresh-mark policy; delayed execution can fail if a currently valid predecessor or market state later changes.
+
+Fresh OPEN preflight projects the same carry checkpoint and execution-bounty lock performed by commitment.
+It leaves the order's supplied margin available to planning, matching the committed-margin release before execution
+assessment. The bounty is unavailable in both snapshots, so locking that same bounty cannot by itself invalidate an
+accepted fresh OPEN at otherwise unchanged execution state. Exact client-intent replay precedes all fresh checks.
+
 Terminal classification is deliberately allow-listed:
 
 - slippage-invalid orders fail terminally,

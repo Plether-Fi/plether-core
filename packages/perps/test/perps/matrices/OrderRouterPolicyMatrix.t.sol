@@ -377,15 +377,19 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address eveAccount = eve;
         address keeperAccount = KEEPER;
 
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
         vm.startPrank(eve);
-        settlementToken.mint(eve, 1e6);
-        settlementToken.approve(address(clearinghouse), 1e6);
-        clearinghouse.deposit(eveAccount, 1e6);
-        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
+        settlementToken.mint(eve, 3000e6);
+        settlementToken.approve(address(clearinghouse), 3000e6);
+        clearinghouse.deposit(eveAccount, 3000e6);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
         vm.stopPrank();
 
         uint256 keeperSettlementBefore = clearinghouse.balanceAssets(keeperAccount);
-        bytes[] memory priceData = _mockPythUpdateData(1e8);
+        // Admission is valid; the later price doubles the initial-margin requirement and invalidates execution.
+        bytes[] memory priceData = _mockPythUpdateData(2e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         vm.prank(KEEPER);

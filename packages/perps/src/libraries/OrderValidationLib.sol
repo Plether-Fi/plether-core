@@ -2,10 +2,84 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 /// @notice Pure validation helpers for delayed-order router checks.
 library OrderValidationLib {
+
+    struct ExecutionDomain {
+        uint256 capPrice;
+        uint256 executionFeeBps;
+        bool vpiDisabled;
+        uint256 executionBountyAssets;
+    }
+
+    /// @notice Whether the fixed request permits at least one positive execution price within the engine cap.
+    /// @dev OPEN execution requires Live mode; this checks only unavoidable contradictions, not future market prices.
+    function isRequestFeasible(
+        CfdTypes.Side side,
+        bool isClose,
+        uint256 sizeDelta,
+        uint256 targetPrice,
+        OrderV3Types.ExecutionBounds memory bounds,
+        ExecutionDomain memory domain
+    ) internal pure returns (bool) {
+        if (!isClose && bounds.allowedExecutionModes & 1 == 0) {
+            return false;
+        }
+        uint256 lots = sizeDelta / CfdTypes.SIZE_QUANTUM;
+        // Avoid multiplying an untrusted uint256 lot count outside the engine's numeric domain.
+        if (lots == 0 || lots > type(uint112).max || sizeDelta % CfdTypes.SIZE_QUANTUM != 0) {
+            return false;
+        }
+        (uint256 minimumPrice, uint256 maximumPrice) =
+            executionPriceRange(side, isClose, sizeDelta, targetPrice, bounds, domain);
+        return minimumPrice != 0 && minimumPrice <= maximumPrice
+            && (isClose
+                || (bounds.maxPostPositionSize >= sizeDelta
+                    && bounds.minPostPositionEquityAssets <= uint256(type(int256).max)));
+    }
+
+    /// @notice Intersects directional slippage with unavoidable notional, fee, and debit constraints.
+    /// @dev The caller validates nonzero aligned size inside uint112 lots before calling this helper.
+    function executionPriceRange(
+        CfdTypes.Side side,
+        bool isClose,
+        uint256 sizeDelta,
+        uint256 targetPrice,
+        OrderV3Types.ExecutionBounds memory bounds,
+        ExecutionDomain memory domain
+    ) internal pure returns (uint256 minimumPrice, uint256 maximumPrice) {
+        bool lowerPriceBound = (side == CfdTypes.Side.LONG) != isClose;
+        minimumPrice = lowerPriceBound ? targetPrice : 1;
+        maximumPrice = !lowerPriceBound && targetPrice < domain.capPrice ? targetPrice : domain.capPrice;
+        uint256 lots = sizeDelta / CfdTypes.SIZE_QUANTUM;
+        uint256 notionalPrice = bounds.maxExecutionNotionalAssets / lots;
+        if (maximumPrice > notionalPrice) {
+            maximumPrice = notionalPrice;
+        }
+        uint256 feeAllowance = bounds.maxExplicitFeesAssets;
+        if (!isClose && bounds.maxGrossAccountDebitAssets < domain.executionBountyAssets) {
+            return (minimumPrice, 0);
+        }
+        if (domain.vpiDisabled) {
+            if (feeAllowance > bounds.maxActionChargeAssets) {
+                feeAllowance = bounds.maxActionChargeAssets;
+            }
+            if (!isClose) {
+                uint256 debitAllowance = bounds.maxGrossAccountDebitAssets - domain.executionBountyAssets;
+                if (feeAllowance > debitAllowance) {
+                    feeAllowance = debitAllowance;
+                }
+            }
+        }
+        uint256 feePerPrice = lots * domain.executionFeeBps;
+        if (feePerPrice != 0 && (maximumPrice * feePerPrice) / 10_000 > feeAllowance) {
+            // This branch bounds feeAllowance by the uint112-lot, uint32-price fee domain.
+            maximumPrice = (feeAllowance * 10_000 + 9999) / feePerPrice;
+        }
+    }
 
     /// @notice Validates size, lot-alignment, and margin constraints common to order commits.
     /// @param sizeDelta Requested position-size delta (18 decimals).

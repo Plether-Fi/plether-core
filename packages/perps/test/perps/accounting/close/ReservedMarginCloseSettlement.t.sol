@@ -26,7 +26,7 @@ contract PartialCloseCommitmentIsolationTest is BasePerpTest {
         _open(counterAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, CAP_PRICE, false);
 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertGt(committedBefore, 0, "Should have committed margin from pending open order");
@@ -51,7 +51,7 @@ contract PartialCloseCommitmentIsolationTest is BasePerpTest {
         _open(counterAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, CAP_PRICE, false);
 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
@@ -158,7 +158,7 @@ contract PriceAndActionReservePriorityCloseTest is BasePerpTest {
         uint64 queuedOrderId = router.nextCommitId();
         uint256 committedMarginAssets = _freeSettlementAssets(account) - 200_000;
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, committedMarginAssets, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, committedMarginAssets, CAP_PRICE, false);
 
         uint256 committedBefore = router.getAccountReservations(account).committedMarginAssets;
         assertEq(_freeSettlementAssets(account), 0, "Setup must shelter all non-bounty free settlement in the queue");

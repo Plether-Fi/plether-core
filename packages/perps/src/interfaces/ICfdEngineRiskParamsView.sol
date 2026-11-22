@@ -7,6 +7,8 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 /// @dev The struct's static fields have the same return encoding as the generated getter's ten-value tuple.
 interface ICfdEngineRiskParamsView {
 
+    function executionFeeBps() external view returns (uint256);
+
     function riskParams() external view returns (CfdTypes.RiskParams memory);
 
 }
