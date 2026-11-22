@@ -98,11 +98,11 @@ interface IOrderDelegatedLogicRefundAdmin {
 ///      Router's EIP-170 runtime and EIP-3860 creation input.
 abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
-    /// @notice Minimal projected position used by delegated close-commit validation.
+    /// @notice Minimal projected position used by delegated order admission.
     struct QueuedPositionView {
-        bool exists;
         CfdTypes.Side side;
         uint256 size;
+        uint256 closeableSize;
     }
 
     /// @notice Dedicated rejection ABI for direct or foreign-context liquidation-batch calls.
@@ -350,13 +350,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) private view {
         ICfdEngineCore engine = host.engine();
         QueuedPositionView memory queuedPosition = _queuedPosition(host, account);
-        OrderValidationLib.validateCloseCommit(
-            queuedPosition.exists, queuedPosition.size, queuedPosition.side, side, sizeDelta
-        );
+        // A positive closeable size means the projected position has never gone flat, so its side is still live.
+        OrderValidationLib.validateCloseCommit(queuedPosition.closeableSize, queuedPosition.side, side, sizeDelta);
 
         uint256 commitPrice = _commitReferencePrice(engine);
-        // Admission already checked lot alignment; the projected size is bounded by the Engine's uint112 lots
-        // and the Router's bounded pending-order count, while commitPrice is capped.
+        // A below-minimum close must still flatten the projected position if earlier increases fill.
         if (
             sizeDelta < queuedPosition.size
                 && (sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice < host.minOpenNotionalAssets()
@@ -369,7 +367,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         IOrderLiquidationBatchHost host,
         address account
     ) private view returns (QueuedPositionView memory queuedPosition) {
-        (queuedPosition.exists, queuedPosition.side, queuedPosition.size) =
+        (, queuedPosition.side, queuedPosition.size, queuedPosition.closeableSize) =
             host.engineLensForCommit().orderAdmissionValidator().queuedPosition(account);
     }
 

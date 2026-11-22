@@ -19,6 +19,6 @@ interface ICfdOrderAdmissionValidator {
 
     function queuedPosition(
         address account
-    ) external view returns (bool exists, CfdTypes.Side side, uint256 size);
+    ) external view returns (bool exists, CfdTypes.Side side, uint256 size, uint256 closeableSize);
 
 }

@@ -102,15 +102,18 @@ contract PerpMixedPendingOrdersTest is BasePerpTest {
         handler.assertModel();
     }
 
-    function test_CloseOpenCloseProjectsQueuedResidualAndCreatesNewPositionEpoch() public {
+    function test_CloseAfterReopenUsesNewLivePositionEpoch() public {
         handler.openOrIncrease(0, 100, 80_000_002);
         handler.commitClose(0, 100, true);
         handler.commitOpen(0, 17, 80_000_002);
         handler.commitClose(0, 17, true);
-        assertEq(handler.orders().count(0), 3);
-        handler.executeBatch(3);
-        assertEq(handler.traderState(0).lots, 0);
+        assertEq(handler.orders().count(0), 2);
+        handler.executeBatch(2);
+        assertEq(handler.traderState(0).lots, 17);
         assertEq(handler.positionEpochs(0), 2);
+        handler.commitClose(0, 17, true);
+        handler.executeBatch(1);
+        assertEq(handler.traderState(0).lots, 0);
         handler.replayPending(0, false);
         handler.assertModel();
     }

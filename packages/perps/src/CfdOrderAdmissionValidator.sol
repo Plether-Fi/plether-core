@@ -31,6 +31,7 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
         bool exists;
         CfdTypes.Side side;
         uint256 size;
+        uint256 closeableSize;
     }
 
     constructor(
@@ -81,9 +82,9 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
     /// @inheritdoc ICfdOrderAdmissionValidator
     function queuedPosition(
         address account
-    ) external view returns (bool exists, CfdTypes.Side side, uint256 size) {
+    ) external view returns (bool exists, CfdTypes.Side side, uint256 size, uint256 closeableSize) {
         QueuedPosition memory position = _queuedPosition(account);
-        return (position.exists, position.side, position.size);
+        return (position.exists, position.side, position.size, position.closeableSize);
     }
 
     function _validateRequest(
@@ -110,6 +111,8 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
     ) private view returns (QueuedPosition memory position) {
         (position.size,,,, position.side,,) = engine.positions(account);
         position.exists = position.size != 0;
+        position.closeableSize = position.size;
+        CfdTypes.Side liveSide = position.side;
         IAdmissionRouter router = IAdmissionRouter(engine.orderRouter());
         uint64 orderId = router.accountHeadOrderId(account);
         if (orderId == 0) {
@@ -131,7 +134,7 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
                         || intent.bounds.expectedConfigHash == currentConfigHash)
             ) {
                 domain.executionBountyAssets = intent.executionBountyAssets;
-                position = _projectPendingOrder(position, pending, intent, domain, riskParams);
+                position = _projectPendingOrder(position, liveSide, pending, intent, domain, riskParams);
             }
             orderId = nextOrderId;
         }
@@ -139,6 +142,7 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
 
     function _projectPendingOrder(
         QueuedPosition memory position,
+        CfdTypes.Side liveSide,
         IOrderRouterAccounting.PendingOrderView memory pending,
         OrderV3Types.PendingIntent memory intent,
         OrderValidationLib.ExecutionDomain memory domain,
@@ -169,6 +173,10 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
             ) {
                 position.size -= pending.sizeDelta;
                 position.exists = position.size != 0;
+                if (pending.side == liveSide) {
+                    position.closeableSize =
+                        position.closeableSize > pending.sizeDelta ? position.closeableSize - pending.sizeDelta : 0;
+                }
             }
             return position;
         }

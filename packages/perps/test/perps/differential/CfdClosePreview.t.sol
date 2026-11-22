@@ -305,6 +305,18 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
         _commitParity(_order(CfdTypes.Side.LONG, size), 101_000_000, KEEPER);
     }
 
+    function test_CloseBelowDustFloorMustFlattenProjectedPosition() public {
+        _setCloseFloor(1000e6);
+        _openNormally(CfdTypes.Side.LONG, 500e6);
+        uint256 residual = 9 * CfdTypes.SIZE_QUANTUM;
+        vm.startPrank(ACCOUNT);
+        router.commitOrder(CfdTypes.Side.LONG, SIZE - residual, 0, PRICE, true);
+        router.commitOrder(CfdTypes.Side.LONG, 1000e18, 100e6, PRICE, false);
+        vm.expectRevert(abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, uint8(11)));
+        router.commitOrder(CfdTypes.Side.LONG, residual, 0, PRICE, true);
+        vm.stopPrank();
+    }
+
     function test_PartialCloseTracksGovernedMinimumWhileFullCloseRemainsExempt() public {
         _openNormally(CfdTypes.Side.LONG, 20e6);
         vm.warp(uint256(engine.lastMarkTime()) + 1);
@@ -418,6 +430,28 @@ contract CfdClosePreviewRequestTest is CfdClosePreviewTestBase {
         assertEq(router.nextCommitId(), nextOrderId);
         assertEq(router.pendingOrderCounts(ACCOUNT), 0);
         assertEq(clearinghouse.balanceAssets(ACCOUNT), balance);
+    }
+
+    function test_CloseAdmissionUsesLiveSizeLessQueuedCloses() public {
+        _openNormally(CfdTypes.Side.LONG, 500e6);
+        vm.startPrank(ACCOUNT);
+        router.commitOrder(CfdTypes.Side.LONG, SIZE / 2, 0, PRICE, true);
+        router.commitOrder(CfdTypes.Side.LONG, SIZE / 2, 250e6, PRICE, false);
+        vm.stopPrank();
+
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2 + CfdTypes.SIZE_QUANTUM);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector);
+        _requestPreview(request, PRICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector);
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 2);
+
+        request.sizeDelta = SIZE / 2;
+        _requestPreview(request, PRICE);
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+        assertEq(router.pendingCloseSize(ACCOUNT), SIZE);
     }
 
     function test_ConflictingClientIdMatchesSubmissionEvenAfterDeadline() public {
