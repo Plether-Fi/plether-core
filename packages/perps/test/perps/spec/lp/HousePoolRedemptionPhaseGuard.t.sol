@@ -272,23 +272,66 @@ contract HousePoolRedemptionPhaseGuardTest is Test {
         assertEq(vault.refundedShares(), 0);
     }
 
+    function test_StillZeroHeadAfterBurnIsRefundedInSamePhase() public {
+        TwoHeadRedemptionQueueMock dustVault =
+            new TwoHeadRedemptionQueueMock(address(pool), SUPPLY, FIRST_HEAD_SHARES, 1);
+
+        (uint256 fundedShares, uint256 fundedAssets, uint256 processedEpochs, bool backlog) =
+            pool.runRedemptionPhase(address(dustVault), 2, PRINCIPAL, SUPPLY, 3, 0);
+
+        assertEq(fundedShares, FIRST_HEAD_SHARES);
+        assertEq(fundedAssets, 3);
+        assertEq(processedEpochs, 2, "worthless dust must clear even after the funding budget is exhausted");
+        assertFalse(backlog);
+        assertEq(dustVault.refundedShares(), 1);
+        assertEq(dustVault.totalSupply(), SUPPLY - FIRST_HEAD_SHARES, "refunded shares must not burn");
+        assertEq(dustVault.balanceOf(address(dustVault)), 1, "dust must remain escrowed for its refund");
+        assertEq(settlementToken.balanceOf(address(dustVault)), 3, "refund must not transfer assets");
+    }
+
+    function test_FeeRoundedZeroHeadAfterBurnIsRefundedInSamePhase() public {
+        uint256 dustShares = 20_000_000;
+        TwoHeadRedemptionQueueMock dustVault =
+            new TwoHeadRedemptionQueueMock(address(pool), SUPPLY, FIRST_HEAD_SHARES, dustShares);
+
+        (uint256 fundedShares, uint256 fundedAssets, uint256 processedEpochs, bool backlog) =
+            pool.runRedemptionPhase(address(dustVault), 2, PRINCIPAL, SUPPLY, 3, FEE_BPS);
+
+        assertEq(fundedShares, FIRST_HEAD_SHARES);
+        assertEq(fundedAssets, 2);
+        assertEq(
+            HousePoolRedemptionMathLib.netAssetsForShares(
+                dustShares, PRINCIPAL - fundedAssets, SUPPLY - fundedShares, 1, 1000, 0
+            ),
+            1,
+            "post-burn gross quote is positive but the fee rounds its payout to zero"
+        );
+        assertEq(processedEpochs, 2);
+        assertFalse(backlog);
+        assertEq(dustVault.refundedShares(), dustShares);
+        assertEq(dustVault.totalSupply(), SUPPLY - FIRST_HEAD_SHARES);
+        assertEq(dustVault.balanceOf(address(dustVault)), dustShares);
+        assertEq(settlementToken.balanceOf(address(dustVault)), 2);
+    }
+
     function test_RedemptionSupplyGuardAllowsAccruedSharesMaterializedBeforeBurn() public {
         uint256 rawSupply = 1_000_000_000;
         uint256 accruedShares = 100_000_000;
         uint256 redeemShares = 100_000_000;
         uint256 pricingSupply = rawSupply + accruedShares;
         uint256 principal = 1_100_000;
-        TwoHeadRedemptionQueueMock feeVault = new TwoHeadRedemptionQueueMock(address(pool), rawSupply, redeemShares, 0);
+        TwoHeadRedemptionQueueMock feeVault = new TwoHeadRedemptionQueueMock(address(pool), rawSupply, redeemShares, 1);
         feeVault.setPendingAccruedShares(accruedShares);
         settlementToken.mint(address(pool), principal);
 
         (uint256 fundedShares, uint256 fundedAssets, uint256 processedEpochs, bool backlog) =
-            pool.runRedemptionPhase(address(feeVault), 1, principal, pricingSupply, principal, 0);
+            pool.runRedemptionPhase(address(feeVault), 2, principal, pricingSupply, principal, 0);
 
         assertEq(fundedShares, redeemShares);
         assertGt(fundedAssets, 0);
-        assertEq(processedEpochs, 1);
+        assertEq(processedEpochs, 2, "post-burn dust classification must include accrued shares");
         assertFalse(backlog);
+        assertEq(feeVault.refundedShares(), 1);
         assertEq(feeVault.balanceOf(address(0xFEE)), accruedShares);
         assertEq(feeVault.totalSupply(), rawSupply + accruedShares - redeemShares);
     }
