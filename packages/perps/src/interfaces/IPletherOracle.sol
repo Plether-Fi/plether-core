@@ -119,6 +119,7 @@ interface IPletherOracle {
     /// @param confidence Aggregate basket confidence in 8-decimal price units.
     /// @param publishTime Newest component publish time for the cached basket and Engine mark.
     /// @param oldestPublishTime Oldest component publish time, used to check the next order's settlement delay.
+    /// @param componentPublishTimes Parsed publish times in configured feed order, used to check stored-feed coverage.
     struct BatchOrderPriceCache {
         bool hasHistoricalBasket;
         uint64 minReusableCommitTime;
@@ -126,6 +127,7 @@ interface IPletherOracle {
         uint256 confidence;
         uint64 publishTime;
         uint64 oldestPublishTime;
+        uint256[] componentPublishTimes;
     }
 
     /// @notice Thrown when the caller is not the engine's configured order router.
@@ -185,6 +187,8 @@ interface IPletherOracle {
     /// @param storedPublishTime Current stored component timestamp.
     /// @param requiredPublishTime Minimum timestamp required by this resolution.
     error PletherOracle__StoredFeedBehind(bytes32 feedId, uint256 storedPublishTime, uint256 requiredPublishTime);
+    /// @notice A reused cache has the wrong number of component times or inconsistent oldest and newest times.
+    error PletherOracle__InvalidBatchCacheTimes();
     /// @notice Thrown when a component is future-dated, too old, or required historical data is unavailable.
     /// @param mode Action policy under which validation failed.
     /// @param feedId Failing Pyth feed id, or zero when no individual historical feed is available.
