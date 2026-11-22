@@ -26,6 +26,11 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         params.vpiFactor = 0.005e18;
     }
 
+    function _initialHousePoolAssets() internal pure override returns (uint256) {
+        // Leave enough positive VPI to keep economic depth at zero after the seeded partial close collects carry.
+        return 100_000_000e6;
+    }
+
     function setUp() public override {
         super.setUp();
 
@@ -39,7 +44,7 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         handler.commitOpenOrder(1, uint8(CfdTypes.Side.SHORT), 30, 1500e6, 1.2e8);
         handler.executeNextOrderModelled();
 
-        // Increase at a non-divisible weighted basis, then partially close into an empty HousePool. Every campaign
+        // Increase at a non-divisible weighted basis, then partially close with zero economic depth. Every campaign
         // therefore begins with exact-entry dust, a live residual curve, and a same-account deferred trader claim.
         handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 13, 500e6, 1.11e8);
         handler.executeNextOrderModelled();
