@@ -42,6 +42,17 @@ qualification. PR runs use the `ci` profile, post-merge deep runs use production
 
 Additional focused suites cover:
 
+- [JuniorDepositSafety.t.sol](accounting/fees/JuniorDepositSafety.t.sol)::`test_CouponTimedDustDepositIsRefundedWhileSeniorExitClears`:
+  a coupon-timed positive dust-NAV deposit is rejected and refunded while an actual Senior exit is paid; companion
+  cases cover floor equality, fee-inclusive admission, oversized quotes, and the owner bootstrap floor exception
+  with its supply limits.
+- [JuniorDepositQuote.t.sol](accounting/fees/JuniorDepositQuote.t.sol)::`test_ExpandingQuoteAllowsExactHeadroom`:
+  direct boundary vectors and full-domain fuzzing cover exact quote headroom, floor units, and arithmetic overflow.
+- [JuniorMaintenanceFeeMathLib.t.sol](accounting/fees/JuniorMaintenanceFeeMathLib.t.sol)::`test_FeeCapsBeforeTheNominalQuoteOverflows`:
+  capped quotes across the full supply domain, virtual-share headroom, and independent threshold-rounding vectors.
+- [JuniorMaintenanceFee.t.sol](accounting/fees/JuniorMaintenanceFee.t.sol)::`test_CappedFeeReservesVirtualSharesAndCanBeDisabledAfterOneYearAtMaxApr`:
+  synthetic near-limit supply isolates fee capping, disablement, Junior burns, and live/frozen Senior exits without
+  asserting public reachability of that supply or covering the separate dust-NAV deposit pump.
 - [OpenNumericDomain.t.sol](accounting/fees/OpenNumericDomain.t.sol)::`testFuzz_CheckedVpiMatchesOriginalDomain`:
   checked VPI arithmetic against the supported original floor sequence and independent in-domain vectors.
 - [OrderRouterNumericDomain.t.sol](spec/keeper/OrderRouterNumericDomain.t.sol)::`test_PublicMarginChangeReachesTerminalCapFailureAndBatchContinues`:

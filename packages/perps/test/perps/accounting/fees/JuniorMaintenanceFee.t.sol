@@ -437,6 +437,73 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         assertEq(juniorVault.pendingMaintenanceFeeShares(), 0, "disabled fee must remain disabled");
     }
 
+    function test_CappedFeeReservesVirtualSharesAndCanBeDisabledAfterOneYearAtMaxApr() public {
+        uint256 supplyCeiling = type(uint256).max - VIRTUAL_SHARES;
+        uint256 rawSupply = supplyCeiling - 100;
+        _poolMint(juniorVault, rawSupply - juniorVault.totalSupply(), LP);
+        _enableFee(juniorVault, 10_000, FEE_RECIPIENT);
+        vm.warp(juniorVault.maintenanceFeeCheckpointBoundary() + 365 days);
+
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 100, "only remaining pricing-safe headroom accrues");
+        assertEq(juniorVault.accruedTotalSupply(), supplyCeiling);
+        assertEq(juniorVault.accruedTotalSupply() + VIRTUAL_SHARES, type(uint256).max);
+        assertGt(juniorVault.convertToAssets(rawSupply), 0, "virtual-share pricing must remain readable");
+
+        juniorVault.proposeMaintenanceFeeConfig(0, address(0));
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+        juniorVault.finalizeMaintenanceFeeConfig();
+
+        assertEq(juniorVault.totalSupply(), supplyCeiling, "checkpoint must mint the bounded view quote");
+        assertEq(juniorVault.balanceOf(FEE_RECIPIENT), 100);
+        assertEq(juniorVault.maintenanceFeeAprBps(), 0);
+        assertEq(juniorVault.maintenanceFeeRecipient(), address(0));
+        assertEq(juniorVault.maintenanceFeeConfigActivationTime(), 0);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 0);
+
+        vm.warp(block.timestamp + 365 days);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 0, "fee disablement must remain effective");
+    }
+
+    function test_ZeroHeadroomFeeCheckpointAllowsJuniorBurnAndForgivesConsumedHours() public {
+        uint256 supplyCeiling = type(uint256).max - VIRTUAL_SHARES;
+        _poolMint(juniorVault, supplyCeiling - juniorVault.totalSupply(), LP);
+        _enableFee(juniorVault, 1000, FEE_RECIPIENT);
+        vm.warp(juniorVault.maintenanceFeeCheckpointBoundary() + 24 hours);
+
+        uint256 redeemShares = juniorVault.balanceOf(LP) / 10;
+        vm.prank(LP);
+        uint256 requestId = juniorVault.requestRedeem(redeemShares, LP, LP);
+        _matureAsyncRequest(requestId);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 0, "no fee shares fit before the burn");
+        uint256 completedBoundary = block.timestamp - block.timestamp % 1 hours;
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+
+        assertEq(result.juniorFundedShares, redeemShares);
+        assertGt(result.juniorFundedAssets, 0);
+        assertEq(juniorVault.totalSupply(), supplyCeiling - redeemShares);
+        assertEq(juniorVault.balanceOf(FEE_RECIPIENT), 0);
+        assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), completedBoundary);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 0, "forgiven hours must not reappear after the burn");
+
+        vm.prank(LP);
+        uint256 claimedAssets = juniorVault.claimRedeem(requestId, redeemShares, LP, LP);
+        assertEq(settlementToken.balanceOf(LP), claimedAssets);
+        assertEq(claimedAssets, result.juniorFundedAssets);
+
+        vm.warp(completedBoundary + 1 hours);
+        assertGt(juniorVault.pendingMaintenanceFeeShares(), 0, "new hours accrue on the post-burn supply");
+        assertLt(juniorVault.pendingMaintenanceFeeShares(), redeemShares, "one new hour must not consume all headroom");
+    }
+
+    function test_CappedJuniorFeeDoesNotBlockSeniorExit() public {
+        _assertSeniorExitWithCappedJuniorFee(false);
+    }
+
+    function test_CappedJuniorFeeDoesNotBlockFrozenSeniorExit() public {
+        _assertSeniorExitWithCappedJuniorFee(true);
+    }
+
     function test_RecipientRotationPaysOldAccrualBeforeNewRecipientStarts() public {
         _enableFee(juniorVault, 500, FEE_RECIPIENT);
         uint256 startBoundary = juniorVault.maintenanceFeeCheckpointBoundary();
@@ -1093,6 +1160,34 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         vault.proposeMaintenanceFeeConfig(aprBps, recipient);
         vm.warp(vault.maintenanceFeeConfigActivationTime());
         vault.finalizeMaintenanceFeeConfig();
+    }
+
+    function _assertSeniorExitWithCappedJuniorFee(
+        bool frozen
+    ) internal {
+        _fundSenior(LP, 100_000e6);
+        uint256 supplyCeiling = type(uint256).max - VIRTUAL_SHARES;
+        _poolMint(juniorVault, supplyCeiling - 100 - juniorVault.totalSupply(), RECEIVER);
+        _enableFee(juniorVault, 1000, FEE_RECIPIENT);
+        vm.warp(frozen ? SATURDAY_ORACLE_FREEZE : juniorVault.maintenanceFeeCheckpointBoundary() + 1 hours);
+
+        uint256 redeemShares = seniorVault.balanceOf(LP) / 10;
+        vm.prank(LP);
+        uint256 requestId = seniorVault.requestRedeem(redeemShares, LP, LP);
+        _matureAsyncRequest(requestId);
+        assertEq(engine.isOracleFrozen(), frozen, "fixture must exercise the intended market mode");
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 100);
+        assertEq(juniorVault.accruedTotalSupply(), supplyCeiling);
+        assertGt(seniorVault.totalAssets(), 0, "Senior valuation must survive saturated Junior fees");
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+
+        assertEq(result.seniorFundedShares, redeemShares);
+        assertGt(result.seniorFundedAssets, 0);
+        vm.prank(LP);
+        uint256 claimedAssets = seniorVault.claimRedeem(requestId, redeemShares, LP, LP);
+        assertEq(claimedAssets, result.seniorFundedAssets);
+        assertEq(settlementToken.balanceOf(LP), claimedAssets, "Senior LP must actually receive the funded exit");
     }
 
     function _poolMint(

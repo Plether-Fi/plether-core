@@ -358,6 +358,26 @@ Required consequences:
 - a wiped tranche cannot be silently revived by an ordinary asynchronous deposit,
 - seeded ownership continuity is preferred over governance re-assignment.
 
+Ordinary Junior entry has a fixed minimum price of `0.000001 USDG` per whole nine-decimal share. Let `A` be projected
+deposit-pricing assets in six-decimal units and `S` the fee-inclusive pricing supply. Including the existing virtual
+offsets, entry requires `(A + 1) * 1e9 >= S + 1000`; equality is allowed. The implementation compares
+`A >= floor((S + 999) / 1e9)` after bounding supply, so the floor check cannot overflow. Empty initial seeding remains
+available. This is an entry gate: it does not write down principal, reprice existing shares, or restrict redemption
+pricing. Ordinary discounted entry above the floor remains available.
+
+Deposit quotes also reserve the virtual-share offset: with `C = uint256.max - 1000`, a cumulative phase quote must
+fit `C - S`. The quote checks headroom before a potentially unrepresentable `mulDiv` result and computes retained
+assets before adding them to pricing assets. All epochs retain the same frozen phase price and cumulative basis;
+headroom is measured against that frozen `S`, not the live supply after earlier epochs mint.
+
+A positive-NAV Junior epoch below the floor, or an epoch whose quote exceeds supply headroom, returns zero shares.
+The existing settlement path rejects the whole epoch, leaves its assets in refundable escrow, and continues other
+eligible settlement work, including Senior funding. Actual zero NAV with surviving shares keeps its existing
+deferral and cancellation rules. Junior request admission closes below the floor or at the pricing-safe supply ceiling;
+accepted requests are still repriced and may be rejected at activation. Explicit owner bootstrap retains its
+existing ability to restore backing below the ordinary-entry floor. Bootstrap quotes share the numeric and supply
+headroom checks, and every Junior mint checks remaining headroom after maintenance-fee checkpointing.
+
 ### Senior/Junior waterfall and coupon
 
 `seniorPrincipal` and `juniorPrincipal` are the current NAV attributed to the two tranches, not immutable records of
@@ -415,7 +435,8 @@ factor:
 ```text
 hourlyFeeRay = floor(r * 1e27 / (10_000 * 8_760))
 retentionRay = rayPowUp(1e27 - hourlyFeeRay, chargeableHours)
-feeShares    = floor(rawSupply * (1e27 - retentionRay) / retentionRay)
+nominalFeeShares = floor(rawSupply * (1e27 - retentionRay) / retentionRay)
+feeShares = min(nominalFeeShares, max((uint256.max - 1000) - rawSupply, 0))
 effectiveSupply = rawSupply + pendingFeeShares
 ```
 
@@ -423,6 +444,11 @@ Retention rounds up and fee shares round down, so the protocol does not exceed t
 charges at most `8_760` hours; if more time elapsed, older hours are explicitly forgiven and the boundary advances to
 the latest completed Unix hour. The nominal APR is therefore not an exact annual dilution percentage: at `1_000 bps`,
 hourly retention produces approximately `9.516%` dilution over a flat year.
+
+Pending quotes and checkpoint mints use the same supply cap, reserving the 1,000 virtual shares added by pricing.
+The cap is checked before evaluating a potentially overflowing nominal fee. A successful checkpoint consumes the
+elapsed hours even when the cap reduces the mint to zero; excess fee shares are forgiven and cannot reappear after
+a later burn. `forgivenHours` continues to report only hours beyond the one-year catch-up window.
 
 Integer rounding can make split checkpoints differ from a single checkpoint by a small number of share atoms.
 The [maintenance-fee math tests](test/perps/accounting/fees/JuniorMaintenanceFeeMathLib.t.sol) specify and check that
