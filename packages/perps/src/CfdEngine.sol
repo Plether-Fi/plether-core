@@ -19,6 +19,7 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
+import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {VpiAccrualAccountingLib} from "@plether/perps/libraries/VpiAccrualAccountingLib.sol";
 
@@ -134,12 +135,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     /// @notice One-time-configured router authorized to reserve bounties and execute orders and liquidations.
     address public orderRouter;
 
-    /// @notice Whether a Unix day number is configured as an all-day FAD and oracle-frozen override.
+    /// @notice Whether a Unix day number is configured as an all-day FAD override.
+    /// @dev The override adds frozen-oracle policy only before that day's 17:00 New York boundary.
     mapping(uint256 => bool) public fadDayOverrides;
     uint256[] private _fadOverrideDays;
     /// @notice Maximum accepted mark age during an oracle-frozen window, in seconds.
     uint256 public fadMaxStaleness = 3 days;
-    /// @notice Look-ahead interval before an override day during which FAD restrictions begin, in seconds.
+    /// @notice Look-ahead interval before an override day or a scheduled closure during which FAD restrictions begin.
     uint256 public fadRunwaySeconds = 1 hours;
     /// @notice Engine component of the live cached-mark age limit, in seconds.
     /// @dev Live checks use this value when the HousePool bound is zero, otherwise the smaller of the two bounds.
@@ -152,6 +154,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     /// @notice Protected headroom required per unit of maximum directional liability, in basis points.
     /// @dev This affects open/increase admission and LP withdrawals, but not raw insolvency or terminal NAV.
     uint256 public settlementBufferBps = 25;
+
+    /// @notice Active scheduled closures, ordered by start time and non-overlapping.
+    MarketClosure[] public marketClosures;
 
     function _sideIndex(
         CfdTypes.Side side
@@ -682,10 +687,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         settlementBufferBps = config.settlementBufferBps;
     }
 
-    /// @notice Applies finalized FAD calendar overrides from the timelocked engine admin.
-    /// @dev Callable only by `admin`. Replaces the complete existing override set, normalizes each timestamp to its
-    ///      Unix day number, and ignores duplicate days. The admin is responsible for validation and timelock policy.
-    /// @param config Complete FAD day timestamp set and runway duration in seconds.
+    /// @notice Applies the finalized calendar from the timelocked engine admin.
+    /// @dev Replaces both override sets. Day timestamps are normalized to Unix day numbers and duplicates are ignored.
+    ///      The admin validates scheduled closures and enforces the timelock.
+    /// @param config Complete day override and scheduled closure sets, and runway duration in seconds.
     function applyCalendarConfig(
         ICfdEngineAdminHost.EngineCalendarConfig calldata config
     ) external onlyAdmin {
@@ -703,6 +708,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             }
         }
         fadRunwaySeconds = config.fadRunwaySeconds;
+        delete marketClosures;
+        for (uint256 i; i < config.marketClosures.length; ++i) {
+            marketClosures.push(config.marketClosures[i]);
+        }
+    }
+
+    /// @notice Returns the number of configured scheduled closures.
+    function marketClosureCount() external view returns (uint256) {
+        return marketClosures.length;
     }
 
     /// @notice Applies finalized mark freshness limits from the timelocked engine admin.
@@ -839,9 +853,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Reports whether Friday Afternoon Deleverage restrictions are currently active.
     /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after
-    ///      Sunday's 17:00 New York FX open. FAD is also active throughout an admin-configured override day and during
-    ///      `fadRunwaySeconds` immediately before an override day.
-    /// @return True when the recurring window, an override day, or its configured runway is active.
+    ///      Sunday's 17:00 New York FX open. FAD also covers override days, scheduled closures, the
+    ///      `fadRunwaySeconds` before either, and 15 minutes after a scheduled closure.
+    /// @return True during any applicable FAD window.
     function isFadWindow() public view returns (bool) {
         (bool fadWindow,) = _marketStatus();
         return fadWindow;
@@ -849,9 +863,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Reports whether the engine is in the oracle-frozen regime where freshness policy can be relaxed.
     /// @dev The recurring window is Friday 17:00 New York time through Sunday 16:59:59 New York time, following the
-    ///      US daylight-saving transition. An admin-configured override freezes its entire UTC day. Unlike FAD, the
-    ///      frozen regime does not include the pre-override runway.
-    /// @return True during the recurring oracle closure or an override day.
+    ///      US daylight-saving transition. An admin-configured override adds freezing from UTC midnight until that
+    ///      day's 17:00 New York boundary (exclusive). Scheduled closures freeze from their start until their end
+    ///      (exclusive). These intervals are combined with the recurring weekend, and FAD shoulders do not freeze.
+    /// @return True during any applicable frozen-oracle window.
     function isOracleFrozen() public view returns (bool) {
         (, bool oracleFrozen) = _marketStatus();
         return oracleFrozen;
@@ -863,10 +878,42 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         }
         uint256 timestamp = block.timestamp;
         uint256 today = timestamp / 86_400;
-        return
-            planner.marketCalendarStatus(
-                timestamp, fadDayOverrides[today], fadDayOverrides[today + 1], fadRunwaySeconds
-            );
+        uint256 runway = fadRunwaySeconds;
+        (fadWindow, oracleFrozen) =
+            planner.marketCalendarStatus(timestamp, fadDayOverrides[today], fadDayOverrides[today + 1], runway);
+        if (oracleFrozen) {
+            return (fadWindow, oracleFrozen);
+        }
+        (bool closureFad, bool closureFrozen) = _scheduledClosureStatus(timestamp, runway);
+        return (fadWindow || closureFad, closureFrozen);
+    }
+
+    function _scheduledClosureStatus(
+        uint256 timestamp,
+        uint256 runway
+    ) private view returns (bool fadWindow, bool oracleFrozen) {
+        uint256 count = marketClosures.length;
+        uint256 next;
+        uint256 high = count;
+        // Find the first closure that has not started. The admin caps the array at 64 sorted intervals.
+        while (next < high) {
+            uint256 mid = (next + high) / 2;
+            if (marketClosures[mid].startTime <= timestamp) {
+                next = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        if (next != 0) {
+            uint256 end = marketClosures[next - 1].endTime;
+            if (timestamp < end) {
+                return (true, true);
+            }
+            if (timestamp - end < MarketCalendarLib.FAD_LAG) {
+                return (true, false);
+            }
+        }
+        return (next < count && marketClosures[next].startTime - timestamp <= runway, false);
     }
 
     /// @notice Returns the canonical current position tuple for an account.
