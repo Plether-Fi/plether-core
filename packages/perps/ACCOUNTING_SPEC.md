@@ -803,10 +803,19 @@ Rules:
 - only still-unpaid carry enters the subsequent action settlement, using eligible action sources or withheld new gains.
   Full closes also collect from released surplus as specified below; partial-close rejection and liquidation waiver
   rules remain unchanged,
-- realized carry is booked as LP trading revenue once. Receipts and financial bounds include the direct collection once,
-  in addition to the residual action settlement; carried-forward arrears are not counted as newly accrued carry,
+- realized carry is booked as LP trading revenue once. Open and close receipts and financial bounds include the direct
+  collection once, in addition to the residual action settlement; carried-forward arrears are not counted as newly
+  accrued carry,
 - margin-consuming collection updates the terminal curve atomically with collateral and pool changes; the
   maximum-profit carry basis stays unchanged. Terminal-NAV reads are blocked during intermediate accounting, and a revert restores the entire change.
+
+Opening commitments measure settlement custody before bounty and committed-margin reservations and after both.
+The reservations only reclassify custody; any decrease is carry actually collected by their checkpoints. The Book
+retains that collection, outstanding carry, and final settlement/free-settlement snapshots after both reservations.
+Commitment checks include collected carry in the gross-debit and action-charge limits; execution includes the same
+recorded collection once alongside its remaining charges. A rejected commitment rolls back collection and reservations.
+If commitment succeeds but execution exceeds the combined limit, the trade fails and the earlier carry payment remains.
+Receipt custody snapshots still describe execution; charge totals also include the recorded commitment collection.
 
 `CarryRealized` reports collection and retained arrears whenever nonzero carry is due, including zero collection when
 no backing remains.

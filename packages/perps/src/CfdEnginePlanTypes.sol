@@ -17,8 +17,9 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 ///      and timestamps are Unix seconds.
 library CfdEnginePlanTypes {
 
-    /// @notice Carry and custody effects computed when a close is committed.
-    /// @dev Close commitments have no bounty; open-order commitments can fund one from free settlement.
+    /// @notice Carry and custody effects recorded when an order is committed.
+    /// @dev Close commitments have no bounty; open-order commitments can fund one from free settlement and
+    ///      record custody after both bounty and committed-margin reservations.
     struct CloseCommitment {
         uint256 carryCollectedAssets;
         uint256 carryOutstandingAssets;
