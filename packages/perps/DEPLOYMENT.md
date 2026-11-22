@@ -66,7 +66,7 @@ transaction evidence unset and must not be marked deployed or active.
 | Environment template | `.env.arbitrum-sepolia-perps.example` |
 | Full-stack manifest template | `deployments/arbitrum-sepolia-perps.template.json` |
 | Consumer ABI and build-evidence export | `scripts/export-perps-release.py` |
-| One bounded LP settlement pass | `script/LpEpochKeeper.s.sol` |
+| Order pass followed by one bounded LP settlement pass | `scripts/settle-lp-epoch.sh` |
 
 The full-stack manifest includes 30 contracts, including constructor-created children. Save the exact source commit,
 compiler settings, deployment block, transaction receipts, addresses, runtime hashes, creation inputs, and active
@@ -570,15 +570,22 @@ and every basket component to meet the current epoch boundary. Frozen replay use
 repair a mark older than the frozen freshness limit. See [Oracle synchronization](ORACLE_SYNCHRONIZATION.md).
 
 For the keeper script, set `SETTLEMENT_MONITOR_LENS`, `PERPS_ORDER_ROUTER`, `OBSERVED_EPOCH`, and
-`KEEPER_PRIVATE_KEY`. For the atomic route, also set `PYTH_UPDATE_DATA` as an ABI-encoded `bytes[]`; an empty array is
-usable only when accepted-basket or frozen replay policy permits it. Then run:
+`KEEPER_PRIVATE_KEY`. Set `ORDER_PYTH_UPDATE_DATA` to an ABI-encoded `bytes[]` with historical price updates for
+the queued orders. Set `PYTH_UPDATE_DATA` separately with a current basket for atomic settlement. Supply it even
+when the Pool is flat if the order pass may open a position. The atomic route can use an empty array only when
+accepted-basket or frozen replay policy permits it. Then run:
 
 ```bash
-forge script script/LpEpochKeeper.s.sol --tc LpEpochKeeper \
-  --rpc-url "$ARB_SEPOLIA_RPC_URL" --broadcast
+bash scripts/settle-lp-epoch.sh --rpc-url "$ARB_SEPOLIA_RPC_URL" --broadcast
 ```
 
-The script checks monitor/Router binding and the hold before decoding payloads or quoting fees. Do not use
+The runner attempts at most one order transaction over four consecutive IDs starting at the FIFO head. Without
+historical data in live mode, it uses oracle-free cleanup for expired or invalid orders. Frozen execution can use
+the cached mark. When live settlement initially uses the cached route and no current basket is supplied, the order
+pass is limited to cleanup so it cannot open the first position. The runner re-reads the settlement route after the
+order pass and attempts settlement even if the pass fails or leaves orders pending.
+
+Both phases check monitor/Router binding and the hold before decoding payloads or quoting fees. Do not use
 `--skip-simulation`. Confirm `LpEpochSettled`, re-read remaining work, and repeat as needed. Each tranche phase is
-bounded to 16 nonempty epochs per call; every atomic pass revalidates its oracle input. A no-progress or
-oracle-rejected call rolls back the transaction's state changes.
+bounded to 16 nonempty epochs per call. Every atomic pass revalidates its oracle input. A no-progress or
+oracle-rejected LP call rolls back that transaction's state changes.
