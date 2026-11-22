@@ -1191,6 +1191,8 @@ Required properties:
 - partial closes retain the current health- and terminal-cap-safe pledge funding policy, but cannot use released
   liquidation reserve or committed-order margin for action charges and still reject a shortfall. Liquidation's
   separate charge and bounty allocation is unchanged,
+- when a partial close nets a price loss against a same-account claim, the final residual must also retain at least
+  its positive pre-close equity-to-notional ratio at the execution price, measured after carry and rounded up,
 - price-loss write-off never creates a receivable; a partial close still requires a healthy residual position and
   full collection of its required action charges,
 - a price payout, after any action charge withheld from the gain, is paid in full only when unreserved pool cash
