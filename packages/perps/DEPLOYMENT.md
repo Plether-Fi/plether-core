@@ -28,6 +28,10 @@ for populated immutable contracts. Export the new guarded `vpiAccountingSnapshot
 from the candidate build. The terminal price book's eight-word snapshot remains price-only. Preserve historical ABI
 and release files for their original deployments.
 
+Manual shutdown uses the existing `OrderRouterAdmin` and `HousePool` entry pauses, left in place while obligations
+are settled. Do not use the LP epoch settlement hold as a permanent stop because it also blocks redemption funding.
+The source adds no automatic wipeout latch or irreversible restart restriction.
+
 Generate consumer ABIs from the release build. Current requests and client-intent hashes use V3; receipts and execution
 configuration hashes use V5. Pin the manifest and runtime hashes with those ABIs. Keep historical manifests, decoders,
 and services available until their positions and pending work are resolved; do not redirect old requests or receipt

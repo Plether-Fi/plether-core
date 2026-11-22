@@ -102,11 +102,9 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
     // Measured after the token-neutral API rename (solc 0.8.35, via-IR, optimizer runs 200).
     uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_571;
     uint256 internal constant REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT = 1200;
-    // Measured after adding signed VPI aggregates and guarded snapshots (solc 0.8.35, via-IR, optimizer runs 200).
-    // The 23,596-byte runtime remains 980 bytes below EIP-170.
-    uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 23_596;
-    // Snapshot construction lives in the immutable planning reader. The measured sidecar is 20,056 bytes;
-    // cap maintenance growth at 20 KiB so at least 4 KiB remains below EIP-170.
+    // Keep the existing production budget after adding signed VPI accounting.
+    uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 23_524;
+    // Snapshot construction lives in the immutable planning reader. Keep at least 4 KiB of headroom.
     uint256 internal constant CFD_ENGINE_SETTLEMENT_SIDECAR_RUNTIME_TARGET = 20_480;
 
     address internal constant ALICE = address(0xA11CE);

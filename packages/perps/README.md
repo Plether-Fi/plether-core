@@ -56,6 +56,10 @@ Positions that no longer meet margin requirements or have uncovered carry can be
 If the pool cannot immediately pay realized profits, the unpaid amount becomes a trader claim that can be
 settled once pool cash covers all outstanding trader claims. A claim is an unpaid liability, not wallet cash.
 
+Operators can shut down new business by pausing Router and Pool entry and leaving those pauses in place. Existing
+closes, liquidations, claims, redemptions and refunds continue under their normal checks; there is no automatic
+permanent wipeout latch.
+
 ## Providing liquidity
 
 LPs deposit USDG through one of two vaults that share a common pool:

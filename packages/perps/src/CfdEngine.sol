@@ -227,16 +227,16 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         }
 
         claimAmountAssets = amount;
-        _payTraderClaim(account, claimAmountAssets, positionRemainsOpen);
+        pool.payOutTraderClaim(address(clearinghouse), claimAmountAssets);
+        _creditPaidTraderClaim(account, claimAmountAssets, positionRemainsOpen);
     }
 
-    /// @dev Caller validates liquidity before this common pool payout and corresponding custody credit.
-    function _payTraderClaim(
+    /// @dev Credits a pool-funded trader payment to margin or free settlement custody.
+    function _creditPaidTraderClaim(
         address account,
         uint256 amountAssets,
         bool positionRemainsOpen
     ) private {
-        pool.payOut(address(clearinghouse), amountAssets);
         if (positionRemainsOpen) {
             clearinghouse.creditPnlPledge(account, amountAssets);
         } else {
@@ -810,7 +810,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         }
 
         if (_canPayFreshPoolPayout(amountAssets)) {
-            _payTraderClaim(account, amountAssets, positionRemainsOpen);
+            pool.payOut(address(clearinghouse), amountAssets);
+            _creditPaidTraderClaim(account, amountAssets, positionRemainsOpen);
         } else {
             traderClaimBalanceAssets[account] += amountAssets;
             totalTraderClaimBalanceAssets += amountAssets;

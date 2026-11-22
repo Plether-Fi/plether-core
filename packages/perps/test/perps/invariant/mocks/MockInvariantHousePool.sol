@@ -87,6 +87,16 @@ contract MockInvariantHousePool is IHousePool {
         settlementToken.safeTransfer(recipient, amount);
     }
 
+    function payOutTraderClaim(
+        address recipient,
+        uint256 amount
+    ) external {
+        if (msg.sender != engine) {
+            revert("unauthorized");
+        }
+        settlementToken.safeTransfer(recipient, amount);
+    }
+
     function recordClaimantInflow(
         uint256 amountAssets,
         IHousePool.ClaimantInflowKind kind,

@@ -324,7 +324,7 @@ This view determines tranche equity for share pricing and revenue distribution:
   pricing,
 - ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, Junior requests
   are cancellable before maturity, and Senior requests commit capacity at admission. Senior refunds require epoch
-  rejection, projected terminal wipe, Senior impairment, or an explicit LP settlement hold,
+  rejection, projected terminal wipe, Senior impairment, a Pool entry pause, or an explicit LP settlement hold,
 - `OrderRouter.settleLpEpoch(bytes[])` validates a `PoolReconcile` Pyth basket, installs its neutral Engine mark, and
   invokes the Router-only HousePool settlement callback in one rollback frame; with live open positions, the basket's
   earliest publish time must be at or after the current round-hour epoch boundary,
@@ -367,9 +367,23 @@ loss. With both tranches owned, reconciliation applies these rules:
 1. Checkpoint the elapsed Senior coupon as a transfer from Junior principal to Senior principal.
 2. Compare terminal equity, excluding reserved pending claimant inflows and `unassignedAssets`, with total principal.
 3. Charge a shortfall to Junior first, then Senior. Losses do not reduce the Senior high-water mark.
-4. Route surplus first to restore Senior principal to its high-water mark, then to Junior.
-5. Route pending recapitalization and trading-revenue buckets according to their explicit ownership intent, described
-   below. Reserving them in step 2 prevents counting the same inflow twice.
+4. Apply settleable pending recapitalization to the remaining Senior recovery gap, leaving any excess unassigned.
+5. Route ordinary positive surplus to any remaining Senior recovery gap, then to Junior.
+6. Route settleable pending trading revenue last under the same Senior-first revenue rules. Reserving pending value
+   in step 2 prevents counting it twice.
+
+A fresh inflow and an already-considered residual are distinct for reservation purposes. With unchanged economic
+inputs and coupon time, another reconciliation cannot consume the same backing again or move value between
+Senior, Junior, and unassigned assets. Recapitalization restores Senior only up to its existing high-water mark;
+it does not replace that recovery target after a loss.
+
+Recapitalization must precede ordinary positive revenue within the same reconciliation. If both can restore a
+Senior gap, revenue applied first can consume recovery capacity reserved for recapitalization and incorrectly leave
+the recapitalization unassigned. Starting from the same completed first partial-recap reconciliation, with the same
+Senior gap, pending balances and coupon interval and no intervening losses or withdrawals, splitting only subsequent
+ordinary positive revenue around pending settlement must not reroute Junior gains to unassigned assets. This does
+not change the existing policy for when losses and profits are first reconciled before that initial allocation;
+it is not a receipt-time ownership ledger.
 
 For elapsed seconds `dt`, the coupon calculation is:
 
@@ -470,7 +484,7 @@ Rules:
   amount to active senior principal without rechecking later capacity drift,
 - a governance reduction, coupon, or loss can passively move the book above current limits, closing new Senior
   admission. A settlement hold stops new Senior requests and permits controllers to recover pending escrow; projected
-  terminal wipe, Senior impairment, and rejected epochs also permit refunds,
+  terminal wipe, Senior impairment, rejected epochs, and a Pool entry pause also permit refunds,
 - funded junior redemptions of net assets `w` must additionally preserve
   `(X + R) * 10_000 <= Q * (X + R + J - w)` using active protected exposure plus pending commitments,
 - funded Senior redemptions and Junior deposits improve capacity and may cure an overage,
@@ -676,7 +690,14 @@ Governance funds recapitalization through `CfdEngine.recapitalizePool(amountAsse
 the engine for USDG; the call checkpoints carry through the current timestamp, transfers from the owner's wallet directly to
 the pool, and verifies exact receipt before recording `Recapitalization` with `CashArrived`. Transfer and recording
 are atomic. Normal reconciliation allocates the queued amount to senior restoration or unassigned assets;
-the funding call mints no LP shares and does not automatically clear degraded mode.
+the funding call mints no LP shares and does not automatically clear degraded mode or lift operator pauses.
+Recapitalization preserves Senior's existing high-water mark. A trader-claim payment records a bounded debit against
+pending claimant value because the terminal book may still be mid-mutation. An ordinary pool payout does not record
+that debit. The next mark-valid preview/reconcile retires paid claim backing before allocating later gains, then
+retires fresh pending intent that has neither physical cash nor distributable equity behind it. With open positions,
+an expired or future mark retains the debit for a later valid observation; ordinary reconciliation and coupon
+freshness rules remain separate. Physical cash alone cannot determine support: collectible terminal receivables may
+still back claimant intent, while remaining unavailable for cash withdrawals.
 
 Rules:
 
@@ -1304,6 +1325,21 @@ Required properties:
 
 - both close and liquidation re-check containment,
 - preview and simulation should expose both `triggersDegradedMode` and `postOpDegradedMode`.
+
+## Manual Shutdown
+
+After a severe loss, the operator may stop new business by pausing `OrderRouterAdmin` and `HousePool` and leaving
+both entry pauses in place. This is an operational policy using the existing reversible controls; there is no
+automatic wipeout trigger, irreversible terminal flag, or separate restart mechanism.
+
+Router pause blocks new risk and invalidates queued opens through the existing risk-off refund path. Pool pause
+blocks new LP deposit requests and activation. Both tranches may cancel unfinalized deposits while Pool entry is
+paused, including matured Junior and committed Senior requests; Senior cancellation releases its reservation.
+
+Keep closes, liquidations, margin support, trader claims, redemption requests, eligible redemption funding, funded
+claims and refunds available under their normal safety checks. Do not use the LP epoch settlement hold as a
+permanent shutdown control: it also stops redemption funding. Later funding or market recovery can support
+existing obligations without requiring the operator to reopen entries.
 
 ## Oracle And Freshness Policy
 
