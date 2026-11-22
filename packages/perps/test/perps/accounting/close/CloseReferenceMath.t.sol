@@ -341,7 +341,8 @@ contract CloseReferenceMathTest is Test {
         assertEq(v.carryWithheld, 0);
         assertEq(v.carryWaived, 0);
         assertEq(v.rebatePaid, 9e6);
-        assertEq(v.poolCashAfter, 999_991e6);
+        assertEq(v.treasuryCredit, 1e6);
+        assertEq(v.poolCashAfter, 999_990e6);
         assertEq(v.remainingCash, 29e6);
     }
 
