@@ -264,9 +264,10 @@ interface IPletherOracle {
     /// @notice Applies order-execution update data and returns a validated execution price.
     /// @dev Outside frozen-oracle policy, resolves a unique historical basket in
     ///      `[commitTime + minOrderSettlementDelay, min(commitTime + orderSettlementWindow, block.timestamp)]`.
-    ///      Frozen policy replays the Engine mark at zero fee under the frozen age limit. Historical resolution also
-    ///      updates storage from the same payload and verifies coverage before returning. `price` is shifted against
-    ///      the requested side by aggregate confidence, except for a frozen voluntary close; `markPrice` stays neutral.
+    ///      Frozen policy instead replays the Engine mark at zero fee under the frozen age limit. Historical resolution
+    ///      also updates storage from the same payload and verifies coverage before returning. The raw price is shifted
+    ///      against the requested side by aggregate confidence and then capped. Frozen voluntary closes skip the shift.
+    ///      `markPrice` is the neutral capped price.
     ///      This function reports but does not enforce close-only policy and ignores `request.targetPrice`. Successful
     ///      historical calls do not refund overpayment; supply exactly `getOrderExecutionFee`. Frozen calls refund
     ///      overpayment. If Pyth reports no qualifying update in the supplied payload and the request permits it,

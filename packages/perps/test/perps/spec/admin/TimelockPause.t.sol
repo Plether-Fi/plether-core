@@ -379,6 +379,8 @@ contract TimelockPauseTest is BasePerpTest {
     function test_CfdEngineAdmin_OwnershipTransferRequiresPendingOwnerAcceptance() public {
         engineAdmin.transferOwnership(alice);
 
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        engineAdmin.renounceOwnership();
         assertEq(engineAdmin.owner(), address(this));
         assertEq(engineAdmin.pendingOwner(), alice);
 
@@ -398,6 +400,10 @@ contract TimelockPauseTest is BasePerpTest {
 
         assertEq(engineAdmin.owner(), alice);
         assertEq(engineAdmin.pendingOwner(), address(0));
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        engineAdmin.renounceOwnership();
 
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
         engineAdmin.cancelRiskConfig();

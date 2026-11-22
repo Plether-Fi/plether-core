@@ -834,8 +834,8 @@ Rules:
 - projected price-risk health uses the remaining margin plus same-account claim and exact price PnL. Fully collected
   carry is not an independent delinquency, but its margin debit can cause a maintenance breach,
 - carry left uncovered by the withdrawal projection blocks withdrawal. Carry left uncovered by the liquidation
-  projection independently makes the account liquidatable,
-- claim payments and keeper bounty credits first collect carry from eligible active pledge and free settlement,
+  projection independently makes the account liquidatable. A trader claim cannot pay that remainder,
+- claim payments and cross-account bounty credits first collect carry from eligible active pledge and free settlement,
   retaining any unpaid remainder. Then the full credit is applied: paid claims become pledge for live positions,
   bounties become free settlement. No second collection pass or waiver occurs; a later checkpoint can collect that
   credit even at the same timestamp, without reassessing elapsed carry,

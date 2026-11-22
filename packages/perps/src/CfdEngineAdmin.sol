@@ -103,6 +103,11 @@ contract CfdEngineAdmin is Ownable2Step {
         engine = ICfdEngineAdminHost(engine_);
     }
 
+    /// @notice Ownership cannot be renounced because governance must retain control of the engine configuration.
+    function renounceOwnership() public view override onlyOwner {
+        revert OwnableInvalidOwner(address(0));
+    }
+
     /// @notice Validates and stages risk parameters, execution fee, oracle-frozen close spread, and settlement buffer.
     /// @dev Callable only by the current owner. Replaces any pending risk proposal and resets its delay. Maintenance
     ///      margin must be nonzero; initial margin must be at least maintenance; FAD margin must be at least maintenance;

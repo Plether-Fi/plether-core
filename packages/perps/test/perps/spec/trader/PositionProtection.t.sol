@@ -355,7 +355,7 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
-    function test_ShortProtection_ZeroAdjustedPricePreservesAttemptAndAllowsExpiryRetry() public {
+    function test_ShortProtection_InvalidConfidencePreservesAttemptAndAllowsExpiryRetry() public {
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.SHORT, SHORT_TAKE_PROFIT, 0);
         uint64 linkedOrderId = _triggerAt(protectionId, SHORT_TAKE_PROFIT);
         CfdTypes.Order memory order = _orderRecord(linkedOrderId).core;
@@ -366,13 +366,13 @@ contract PositionProtectionTest is BasePerpTest {
         vm.warp(uint256(order.commitTime) + 1);
         vm.roll(block.number + 1);
         baseMockPyth.setAllUniquePrices(
-            _basePythFeedIds(), 1_000_000_000_000, 1_000_000_000, -8, order.commitTime + 1, order.commitTime
+            _basePythFeedIds(), 100_000_000, 50_000_000, -8, order.commitTime + 1, order.commitTime
         );
         bytes[] memory data = new bytes[](1);
         data[0] = hex"01";
 
         vm.prank(EXECUTION_KEEPER);
-        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector);
         router.executeOrder(linkedOrderId, data);
 
         assertEq(router.nextExecuteId(), linkedOrderId, "invalid observation leaves the close queued");
@@ -898,6 +898,65 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
         _assertStoredCloseLimits(protectionId, params.closeLimits);
         _assertPendingCloseLimits(retryOrderId, params.closeLimits);
+    }
+
+    function test_SelfTriggerKeepsCarrySubjectToCloseBounds() public {
+        _startRecordingLogs();
+        uint64 orderId = _selfTriggerWithAccruedCarry(0);
+        uint256 balanceBefore = _settlementBalance(ALICE);
+        bytes[] memory updateData = _mockPythUpdateData(LONG_TAKE_PROFIT);
+        uint256 carry = _expectedIndexedCarryAssets(ALICE);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.ConstraintViolation));
+        OrderV3Types.OrderReceipt memory receipt =
+            _verifiedReceipt(IOrderLifecycleBook(address(router.lifecycleBook())), orderId);
+        assertEq(uint8(receipt.failure.constraint), uint8(OrderV3Types.ConstraintKind.GrossAccountDebit));
+        assertEq(receipt.failure.actual, carry);
+        assertEq(_settlementBalance(ALICE), balanceBefore);
+        (uint256 size,,,,,,) = engine.positions(ALICE);
+        assertEq(size, POSITION_SIZE);
+    }
+
+    function test_SelfTriggerReportsCarryInLinkedCloseReceipt() public {
+        _startRecordingLogs();
+        uint64 orderId = _selfTriggerWithAccruedCarry(type(uint256).max);
+        bytes[] memory updateData = _mockPythUpdateData(LONG_TAKE_PROFIT);
+        uint256 carry = _expectedIndexedCarryAssets(ALICE);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        OrderV3Types.OrderReceipt memory receipt =
+            _verifiedReceipt(IOrderLifecycleBook(address(router.lifecycleBook())), orderId);
+        assertEq(receipt.economics.carryAssets, int256(carry));
+        assertGe(receipt.economics.grossAccountDebitAssets, carry);
+        (uint256 size,,,,,,) = engine.positions(ALICE);
+        assertEq(size, 0);
+    }
+
+    function _selfTriggerWithAccruedCarry(
+        uint256 maxGrossDebit
+    ) private returns (uint64 orderId) {
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, MARK_PRICE);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
+        params.closeLimits.maxGrossAccountDebitAssets = maxGrossDebit;
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(params);
+        uint256 bounty = protectionViews.getPositionProtection(protectionId).triggerBountyAssets;
+        assertGt(bounty, 0);
+
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        _mockPythUpdateData(LONG_TAKE_PROFIT);
+        bytes[] memory updateData = _livePriceData(LONG_TAKE_PROFIT);
+        uint256 carry = _expectedIndexedCarryAssets(ALICE);
+        assertGt(carry, 0);
+        uint256 balance = _settlementBalance(ALICE);
+        uint256 free = _freeSettlementAssets(ALICE);
+        uint256 pledge = clearinghouse.pnlPledgeAssets(ALICE);
+        vm.prank(ALICE);
+        orderId = protectionActions.triggerPositionProtection(protectionId, updateData);
+        assertEq(_settlementBalance(ALICE), balance);
+        assertEq(_freeSettlementAssets(ALICE), free + bounty);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), pledge);
+        assertEq(_expectedIndexedCarryAssets(ALICE), carry);
     }
 
     function test_ProtectionCloseLimits_ExcessExecutionNotionalFailsWithoutSettlingPosition() public {

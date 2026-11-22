@@ -123,9 +123,9 @@ interface ICfdEngineCore is ICfdEngineTypes {
     ) external;
 
     /// @notice Credits a reserved execution bounty into the beneficiary's clearinghouse account.
-    /// @dev Callable only by the router. For a beneficiary with an open position, carry is checkpointed before the
-    ///      credit changes reachable collateral: collect available margin and free settlement, then retain arrears.
-    ///      The incoming bounty remains untouched until a later checkpoint. A strictly newer mark is capped and cached; zero is a no-op.
+    /// @dev Callable only by the router. A same-account credit releases the reserve without collecting carry.
+    ///      A credit to another account can cache a newer mark and collects carry from the beneficiary's live position
+    ///      and free settlement before crediting the bounty, retaining any arrears. Zero is a no-op.
     /// @param sourceAccount Account whose reserved settlement bounty funds the credit
     /// @param beneficiary Account receiving the clearinghouse settlement credit
     /// @param amountAssets Reserved settlement token amount to transfer

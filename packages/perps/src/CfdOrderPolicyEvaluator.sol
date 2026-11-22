@@ -91,8 +91,9 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
     ) external view returns (OrderV3Types.ExecutionAssessment memory assessment) {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
         address router = engine.orderRouter();
-        OrderV3Types.PendingIntent memory pending = _pending(router, orderId);
-        ICommittedPolicyRouter(router).lifecycleBook().validateBountyFunding(orderId);
+        IOrderLifecycleBook book = ICommittedPolicyRouter(router).lifecycleBook();
+        OrderV3Types.PendingIntent memory pending = _pending(book, orderId);
+        book.validateBountyFunding(orderId);
         (IOrderRouterAccounting.PendingOrderView memory viewOrder,) =
             IOrderRouterAccounting(router).getPendingOrderView(orderId);
         CfdTypes.Order memory order = CfdTypes.Order({
@@ -112,7 +113,8 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
             executionPrice,
             IHousePool(engine.pool()).totalAssets(),
             pending.executionBountyAssets,
-            order.isClose && IOrderRouterAccounting(router).pendingOrderCounts(order.account) == 1
+            order.isClose && IOrderRouterAccounting(router).pendingOrderCounts(order.account) == 1,
+            pending.commitment.carryCollectedAssets
         );
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
@@ -125,14 +127,19 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         snapshot.accountBuckets.totalLockedMarginAssets -= release;
         snapshot.accountBuckets.freeSettlementAssets += release;
         assessment = _assessSnapshot(context, order, pending.bounds, planner, snapshot, viewOrder.committedMarginAssets);
-        _includeCommitment(assessment, pending.commitment, pending.bounds, pending.executionBountyAssets);
+        if (order.isClose && assessment.postPositionSize != 0 && book.closeRequiresFullExit(orderId)) {
+            revert ICfdEngineTypes.CfdEngine__TypedOrderFailure(
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                uint8(CfdEnginePlanTypes.CloseRevertCode.DUST_POSITION),
+                true
+            );
+        }
     }
 
     function _pending(
-        address router,
+        IOrderLifecycleBook book,
         uint64 orderId
     ) private view returns (OrderV3Types.PendingIntent memory pending) {
-        IOrderLifecycleBook book = ICommittedPolicyRouter(router).lifecycleBook();
         pending = book.pendingIntent(orderId);
         if (pending.account == address(0)) {
             revert CfdOrderPolicyEvaluator__ReservationMismatch(orderId);
@@ -177,7 +184,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
         return
             _evaluateOpen(
-                snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false, deltaCopy.marginDeltaAssets
+                snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false, deltaCopy.marginDeltaAssets, 0
             );
     }
 
@@ -191,7 +198,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         CfdEnginePlanTypes.RawSnapshot memory snapshotCopy = snapshot;
         CfdEnginePlanTypes.CloseDelta memory deltaCopy = delta;
         OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
-        return _evaluateClose(snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false, false);
+        return _evaluateClose(snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false, false, 0);
     }
 
 }

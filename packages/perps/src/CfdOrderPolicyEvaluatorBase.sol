@@ -124,6 +124,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         uint256 poolDepthAssets;
         uint256 executionBountyAssets;
         bool drainsAccountQueue;
+        uint256 commitmentCarryAssets;
     }
 
     function _assessOrder(
@@ -158,7 +159,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
                 boundsCopy,
                 context.executionBountyAssets,
                 bountyReturnsToAccount,
-                context.drainsAccountQueue
+                context.drainsAccountQueue,
+                context.commitmentCarryAssets
             );
         }
 
@@ -169,7 +171,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             boundsCopy,
             context.executionBountyAssets,
             bountyReturnsToAccount,
-            availableOrderMarginAssets
+            availableOrderMarginAssets,
+            context.commitmentCarryAssets
         );
     }
 
@@ -179,12 +182,17 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyAssets,
         bool bountyReturnsToAccount,
-        uint256 availableOrderMarginAssets
+        uint256 availableOrderMarginAssets,
+        uint256 commitmentCarryAssets
     ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidOpenDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
         assessment =
             _buildOpenAssessment(snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode);
+        assessment.grossAccountDebitAssets += commitmentCarryAssets;
+        assessment.actionChargeAssessedAssets += commitmentCarryAssets;
+        assessment.actionChargeCollectedAssets += commitmentCarryAssets;
+        assessment.carryAssets += commitmentCarryAssets;
         _requireStandaloneOpenFunding(snapshot, delta, bounds, availableOrderMarginAssets);
         _enforceBounds(assessment, bounds, executionBountyAssets, false);
     }
@@ -227,13 +235,19 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyAssets,
         bool bountyReturnsToAccount,
-        bool drainsAccountQueue
+        bool drainsAccountQueue,
+        uint256 commitmentCarryAssets
     ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidCloseDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
         assessment = _buildCloseAssessment(
             snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode, drainsAccountQueue
         );
+        // The snapshot already reflects commitment carry collection. Include it in the order totals before checking bounds.
+        assessment.grossAccountDebitAssets += commitmentCarryAssets;
+        assessment.actionChargeAssessedAssets += commitmentCarryAssets;
+        assessment.actionChargeCollectedAssets += commitmentCarryAssets;
+        assessment.carryAssets += commitmentCarryAssets;
         _enforceBounds(assessment, bounds, executionBountyAssets, delta.deletePosition);
     }
 
@@ -507,22 +521,6 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             delta.actionChargeFromReleasedMarginAssets
         );
     }
-
-    function _includeCommitment(
-        OrderV3Types.ExecutionAssessment memory assessment,
-        CfdEnginePlanTypes.CloseCommitment memory effects,
-        OrderV3Types.ExecutionBounds memory bounds,
-        uint256 bounty
-    ) internal pure {
-        assessment.grossAccountDebitAssets += effects.carryCollectedAssets;
-        assessment.actionChargeAssessedAssets += effects.carryCollectedAssets;
-        assessment.actionChargeCollectedAssets += effects.carryCollectedAssets;
-        assessment.carryAssets += effects.carryCollectedAssets;
-        // Zero residual size identifies a full close; strict partial bounds apply to every positive remainder.
-        // slither-disable-next-line incorrect-equality
-        _enforceBounds(assessment, bounds, bounty, assessment.postPositionSize == 0);
-    }
-
     /// @dev Bound precedence is deliberately identical to the order of `ConstraintKind` values.
     function _enforceBounds(
         OrderV3Types.ExecutionAssessment memory assessment,
