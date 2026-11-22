@@ -745,6 +745,7 @@ contract PletherOracleTest is Test {
                 orderExecutionStalenessLimit: oracle.orderExecutionStalenessLimit(),
                 liquidationStalenessLimit: oracle.liquidationStalenessLimit(),
                 basketMaxConfidenceRatioBps: confidenceLimitBps,
+                minOrderSettlementDelay: oracle.minOrderSettlementDelay(),
                 orderSettlementWindow: oracle.orderSettlementWindow(),
                 maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
                 adverseConfidenceMultiplierBps: multiplier
@@ -767,6 +768,7 @@ contract PletherOracleTest is Test {
             orderExecutionStalenessLimit: 120,
             liquidationStalenessLimit: 30,
             basketMaxConfidenceRatioBps: 500,
+            minOrderSettlementDelay: oracle.minOrderSettlementDelay(),
             orderSettlementWindow: oracle.orderSettlementWindow(),
             maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
             adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
@@ -792,6 +794,7 @@ contract PletherOracleTest is Test {
                 orderExecutionStalenessLimit: 120,
                 liquidationStalenessLimit: 30,
                 basketMaxConfidenceRatioBps: ratios[i],
+                minOrderSettlementDelay: 1,
                 orderSettlementWindow: 15,
                 maxComponentPublishTimeDivergence: 5,
                 adverseConfidenceMultiplierBps: multipliers[i]
@@ -822,6 +825,7 @@ contract PletherOracleTest is Test {
             orderExecutionStalenessLimit: 120,
             liquidationStalenessLimit: 30,
             basketMaxConfidenceRatioBps: 500,
+            minOrderSettlementDelay: oracle.minOrderSettlementDelay(),
             orderSettlementWindow: oracle.orderSettlementWindow(),
             maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
             adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()

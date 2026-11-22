@@ -822,6 +822,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(deployed.housePool.maxSeniorExposureAssets(), 40_000_000e6);
         assertEq(deployed.housePool.maxSeniorShareBps(), 8000);
         assertEq(deployed.router.minOpenNotionalAssets(), 1000e6);
+        assertEq(deployed.router.pletherOracle().minOrderSettlementDelay(), 1);
         assertEq(deployed.router.pletherOracle().adverseConfidenceMultiplierBps(), 2500);
         assertEq(deployed.housePool.poolConfigActivationTime(), 0);
         OrderRouterAdmin routerAdmin = OrderRouterAdmin(deployed.router.admin());
@@ -864,6 +865,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
         config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.minOrderSettlementDelay = router.pletherOracle().minOrderSettlementDelay();
         config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();

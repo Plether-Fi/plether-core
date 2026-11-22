@@ -42,6 +42,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
     uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_ASSETS = 1000e6;
     uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
+    uint256 internal constant RELEASE_MIN_ORDER_SETTLEMENT_DELAY = 1;
     uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 0;
 
     bytes32 internal constant PHASE_DEPLOYED = keccak256("deployed");
@@ -420,6 +421,10 @@ contract VerifyPerpsArbitrumSepolia is Script {
         require(deployed.engine.executionFeeBps() == 4, "Execution fee mismatch");
         require(deployed.engine.frozenCloseSpreadBps() == 50, "Frozen-close spread mismatch");
         require(deployed.oracle.basketMaxConfidenceRatioBps() == 10, "Basket confidence mismatch");
+        require(
+            deployed.oracle.minOrderSettlementDelay() == RELEASE_MIN_ORDER_SETTLEMENT_DELAY,
+            "Minimum order settlement delay mismatch"
+        );
         require(
             deployed.oracle.adverseConfidenceMultiplierBps() == RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS,
             "Adverse multiplier mismatch"

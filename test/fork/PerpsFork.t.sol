@@ -218,6 +218,7 @@ contract PerpsForkTest is ForkTrancheFunding {
         config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
         config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.minOrderSettlementDelay = router.pletherOracle().minOrderSettlementDelay();
         config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();

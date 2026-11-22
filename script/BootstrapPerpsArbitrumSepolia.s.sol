@@ -71,6 +71,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
     uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_ASSETS = 1000e6;
     uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
+    uint256 internal constant RELEASE_MIN_ORDER_SETTLEMENT_DELAY = 1;
     uint256 internal constant RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS = 10;
     uint256 internal constant RELEASE_MAX_PENDING_ORDERS = 5;
     uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 0;
@@ -287,6 +288,10 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(
             router.pletherOracle().basketMaxConfidenceRatioBps() == RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS,
             "Basket confidence changed"
+        );
+        require(
+            router.pletherOracle().minOrderSettlementDelay() == RELEASE_MIN_ORDER_SETTLEMENT_DELAY,
+            "Unexpected minimum order settlement delay"
         );
         require(router.maxPendingOrders() == RELEASE_MAX_PENDING_ORDERS, "Pending-order limit changed");
         require(routerAdmin.routerConfigActivationTime() == 0, "Outstanding Router config proposal");

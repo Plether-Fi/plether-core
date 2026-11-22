@@ -107,9 +107,8 @@ checks the actual Router address against the prediction. If the sequence breaks,
 new dependencies; their immutable bindings cannot be repaired.
 
 The release wrappers initialize HousePool's `$40M/80%` Senior limits, the Oracle's `2,500`-bps adverse multiplier,
-and the Router's `$1,000` opening minimum. The deploy script checks the Oracle multiplier before creating the Router.
-These wrappers add no post-deployment configuration surface. Later economic configuration changes use the applicable
-72-hour governance paths.
+and the Router's `$1,000` opening minimum. The release oracle inherits the one-second minimum settlement delay.
+Later configuration changes use the applicable 72-hour governance paths.
 
 Record and verify children as well as top-level deployments:
 
@@ -171,6 +170,7 @@ six decimals; basis points use `10,000 = 100%`.
 | `positionSizeQuantum` | `1e20` raw units (100 synthetic tokens) |
 | `fadRunwaySeconds` | `1 hours` |
 | `basketMaxConfidenceRatioBps` | `10` |
+| `minOrderSettlementDelay` | `1` second |
 | `adverseConfidenceMultiplierBps` | `2_500` (release-oracle constructor initialization) |
 | `minOpenNotionalAssets` | `1_000e6` (release-Router constructor initialization) |
 | `maxPendingOrders` | `5` |

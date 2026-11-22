@@ -350,7 +350,8 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     ) private pure {
         if (
             config.orderExecutionStalenessLimit == 0 || config.liquidationStalenessLimit == 0
-                || config.orderSettlementWindow == 0 || config.orderSettlementWindow > config.maxExecutionWindowSeconds
+                || config.minOrderSettlementDelay == 0 || config.minOrderSettlementDelay > config.orderSettlementWindow
+                || config.orderSettlementWindow > config.maxExecutionWindowSeconds
                 || config.maxComponentPublishTimeDivergence == 0
                 || config.maxComponentPublishTimeDivergence > config.orderSettlementWindow
         ) {

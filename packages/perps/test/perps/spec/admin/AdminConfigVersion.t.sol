@@ -261,6 +261,7 @@ contract AdminConfigVersionTest is Test {
         config.orderExecutionStalenessLimit = 60;
         config.liquidationStalenessLimit = 60;
         config.basketMaxConfidenceRatioBps = 100;
+        config.minOrderSettlementDelay = 1;
         config.orderSettlementWindow = 30;
         config.maxComponentPublishTimeDivergence = 10;
         config.adverseConfidenceMultiplierBps = 10_000;

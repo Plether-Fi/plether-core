@@ -224,7 +224,7 @@ Call `IPerpsKeeper` on the Router:
 | `settleLpEpoch(pythUpdateData)` | Atomically refresh the mark and settle eligible LP epoch work |
 
 The keeper supplies Pyth payloads rather than an arbitrary execution price. Live and FAD orders use a unique
-historical basket in `(commitTime, min(commitTime + orderSettlementWindow, block.timestamp)]`, with predecessor
+historical basket in `[commitTime + minOrderSettlementDelay, min(commitTime + orderSettlementWindow, block.timestamp)]`, with predecessor
 checks that prevent skipping an earlier eligible tick. The Oracle applies adverse confidence adjustment and price
 caps; the Router enforces the target boundary. Frozen closes use the stored-mark policy and frozen-close spread.
 Quote the applicable oracle fee and simulate the exact call with sufficient gas for settlement and receipt creation.

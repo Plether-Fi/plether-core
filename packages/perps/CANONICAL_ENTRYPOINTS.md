@@ -71,7 +71,8 @@ With the configured lifetime at 60 seconds, a request with `submitBy = 12:02:00`
 `maxExecutionWindowSeconds` is retained, but callers must echo its exact value; the Router does not normalize signed
 bounds. Configuration changes do not rewrite stored timing. FIFO, oracle, MEV, gas and financial checks still apply.
 The execution lifetime is separate from the Oracle's post-commit `orderSettlementWindow`; the signed historical
-price must qualify in that window even if execution happens later. Frozen execution follows the
+price must qualify in that window even if execution happens later. The live execution duration should cover
+`minOrderSettlementDelay` so a qualifying tick can arrive before the deadline. Frozen execution follows the
 [stored-mark policy](ORACLE_SYNCHRONIZATION.md#frozen-operation).
 
 Expiry makes an order eligible for cleanup; it does not automatically release reservations. `expireOrder` and

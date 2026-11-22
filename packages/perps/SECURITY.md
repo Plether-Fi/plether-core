@@ -99,7 +99,7 @@ size quantum.
 | `seniorFrozenLpFeeBps`, `juniorFrozenLpFeeBps` | `HousePool` | `onlyOwner`, 72-hour timelock; each fee is capped at `1,000` bps |
 | `maxSeniorExposureAssets`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 72-hour timelock; finalized values must be finite and below 100%, respectively |
 | Junior `maintenanceFeeAprBps`, `maintenanceFeeRecipient` | `TrancheVault` | current `HousePool.owner()` only, 72-hour timelock; fee is capped at `10,000` bps (100%) nominal APR |
-| `RouterConfig` (`maxExecutionWindowSeconds`, staleness limits, confidence policy, historical settlement window, component skew, opening minimum, bounty rates/limits, pending-order cap, minimum execution gas, cleanup cap) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 72-hour timelock |
+| `RouterConfig` (`maxExecutionWindowSeconds`, staleness limits, confidence policy, historical settlement delay and window, component skew, opening minimum, bounty rates/limits, pending-order cap, minimum execution gas, cleanup cap) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 72-hour timelock |
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 72-hour timelock |
 
 Each successful Engine/Router finalization therefore changes
@@ -421,7 +421,9 @@ The protocol assumes Pyth provides timely and correct FX feed data for the baske
 
 Mitigations:
 
-- delayed-order execution that settles against the first unique Pyth tick strictly after the recorded `commitTime` while the oracle is live, subject to the acknowledged [Arbitrum and Pyth clock alignment limitation](#arbitrum-and-pyth-clock-alignment),
+- delayed-order execution that settles against the first eligible Pyth update per feed at or after
+  `commitTime + minOrderSettlementDelay` while the oracle is live, subject to the
+  [Arbitrum and Pyth clock alignment limitation](#arbitrum-and-pyth-clock-alignment),
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
 - timelocked rotation of the router's `PletherOracle` address if the Pyth endpoint or basket-feed set must be replaced,
@@ -649,9 +651,9 @@ Security properties:
 - the account/client-id mapping is permanent and hashes the chain, Router, account, and every request field; exact
   replay is a side-effect-free resolution even after terminal settlement, while conflicting reuse reverts,
 - trader intent is committed before keeper execution,
-- live-market execution uses Pyth's unique historical parse over `(commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, so settlement is bound to the first tick after the recorded `commitTime` rather than the keeper's reveal-time tick; this is timestamp ordering, subject to the clock limitation below,
-- the unique historical parse rejects skipped ticks because the parsed update must prove its previous publish time is no later than the order's `commitTime`,
-- batch execution may reuse a parsed historical basket only for later FIFO orders whose `commitTime` is strictly before the cached tick and falls within its proven coverage,
+- live-market execution uses Pyth's unique historical parse over `[commitTime + minOrderSettlementDelay, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, so settlement is bound to the first tick at or after the configured delay rather than the keeper's reveal-time tick; this is timestamp ordering, subject to the clock limitation below,
+- the unique historical parse rejects skipped ticks because the parsed update must prove its previous publish time is earlier than `commitTime + minOrderSettlementDelay`,
+- batch execution may reuse a parsed historical basket only for later FIFO orders whose settlement range covers every cached component and whose commit falls within the cache’s proven coverage,
 - the neutral pre-cap basket is accepted only when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`; equality passes, each weighted component contribution is floored before summation, and no independent component-confidence ceiling applies,
 - confidence configuration is validated at proposal and oracle application: ratio <= 10,000 bps, multiplier <= 30,000
   bps, and their product < 100,000,000; accepted adjustments cannot consume the entire raw basket value,
@@ -705,16 +707,15 @@ times; tightening the window reduces, but does not eliminate, caller choice. See
 
 ### Arbitrum and Pyth clock alignment
 
-`OrderRouter` records `commitTime` from Arbitrum `block.timestamp`. `PletherOracle` selects the first unique
-eligible Pyth basket after that timestamp. These checks do not prove that the price first became publicly
+`OrderRouter` records `commitTime` from Arbitrum `block.timestamp`. `PletherOracle` starts the unique Pyth
+price search at `commitTime + minOrderSettlementDelay`. These checks do not prove that the price first became publicly
 observable after the trader submitted the order. If the sequencer timestamp trails an already-observed Pyth
 update, that update may qualify. References to "post-commit" ticks describe this timestamp rule, not a
 guarantee about when the trader first learned the price.
 
-The implementation adds no fixed delay to compensate for this clock mismatch. A qualifying tick can already be
-known at submission, so integrations must not describe the historical-price rule as a guarantee of an unknown future
-price. Whether a particular mismatch creates an economic advantage depends on the observed timestamps, order, and
-settlement path.
+The configured delay gives the oracle time to reflect new information. An update can still qualify if the timestamp
+skew or oracle lag is large enough relative to the delay. Whether a particular mismatch creates an economic
+advantage depends on the observed timestamps, order, and settlement path.
 
 ### Queue failure handling
 
