@@ -29,6 +29,8 @@ interface ICfdEngineTypes {
     error CfdEngine__UnexpectedTransferAmount(uint256 expected, uint256 received);
     /// @notice The account attempted to settle a zero trader-claim balance.
     error CfdEngine__NoTraderClaim();
+    /// @notice The account must finish its pending orders before settling a trader claim.
+    error CfdEngine__PendingOrdersExist();
     /// @notice HousePool cash cannot presently service the selected trader claim under aggregate claim priority.
     error CfdEngine__InsufficientPoolLiquidity();
     /// @notice A close commitment requested more than the live position size.

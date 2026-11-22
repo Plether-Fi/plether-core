@@ -49,8 +49,8 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    /// @dev Probe the real settlement transaction, then restore the campaign state. Flat accounts isolate the cash
-    ///      gate from live-position carry collection. PerpIndependentClaimInvariant covers live claim routing at
+    /// @dev Probe the real settlement transaction, then restore the campaign state. Flat accounts isolate the queue
+    ///      and cash gates from live-position carry collection. PerpIndependentClaimInvariant covers live claim routing at
     ///      fixed time; EngineTraderClaims covers accrued-carry settlement. No legacy status struct or production
     ///      payout helper supplies the answer.
     function _assertInvariant_FlatClaimsSettleOnlyWhenAllClaimsAreFunded() internal {
@@ -74,7 +74,8 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
             clearinghouseCash: settlementToken.balanceOf(address(clearinghouse)),
             settlement: clearinghouse.balanceAssets(account)
         });
-        bool shouldSettle = before.claim > 0 && before.poolCash >= before.totalClaims;
+        bool hasPendingOrders = router.pendingOrderCounts(account) != 0;
+        bool shouldSettle = !hasPendingOrders && before.claim > 0 && before.poolCash >= before.totalClaims;
         uint256 snapshot = vm.snapshotState();
         vm.prank(account);
         (bool settled, bytes memory reason) = address(engine).call(abi.encodeCall(engine.settleTraderClaim, (account)));
@@ -89,7 +90,9 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         } else if (!settled) {
             bytes4 expectedError = before.claim == 0
                 ? ICfdEngineTypes.CfdEngine__NoTraderClaim.selector
-                : ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector;
+                : hasPendingOrders
+                    ? ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector
+                    : ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector;
             outcomeMatches = outcomeMatches && keccak256(reason) == keccak256(abi.encodeWithSelector(expectedError));
             cashMatches = engine.traderClaimBalanceAssets(account) == before.claim
                 && engine.totalTraderClaimBalanceAssets() == before.totalClaims
@@ -125,6 +128,28 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
     function test_ClaimInvariantDetectsSuccessDuringAggregateShortfall() public {
         address account = handler.actorAt(0);
         handler.setPoolAssets(engine.traderClaimBalanceAssets(account));
+        vm.mockCall(address(engine), abi.encodeCall(engine.settleTraderClaim, (account)), bytes(""));
+        vm.expectRevert(abi.encodeWithSelector(ClaimSettlementOutcomeMismatch.selector, account));
+        this.invariant_ObservedClaimsAndLiquidityGatingReconcile();
+        vm.clearMockedCalls();
+        _assertAllInvariants();
+    }
+
+    function test_ClaimSettlementProbeRejectsPendingFlatOrdersWithoutChangingState() public {
+        address account = handler.actorAt(0);
+        handler.restoreSolvencyAndClearDegradedMode();
+        handler.setPoolAssets(1_000_000_000e6);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 100, 1000e6, 1e8);
+        (uint256 size,,,,,,) = engine.positions(account);
+        assertEq(size, 0, "Claimant must remain flat");
+        assertEq(router.pendingOrderCounts(account), 1, "Claimant must have an actual pending order");
+        assertGt(engine.traderClaimBalanceAssets(account), 0, "Claimant must have a funded claim");
+        _assertAllInvariants();
+
+        handler.settleTraderClaim(0);
+        assertEq(handler.lastCaughtRevertSelector(), ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        _assertAllInvariants();
+
         vm.mockCall(address(engine), abi.encodeCall(engine.settleTraderClaim, (account)), bytes(""));
         vm.expectRevert(abi.encodeWithSelector(ClaimSettlementOutcomeMismatch.selector, account));
         this.invariant_ObservedClaimsAndLiquidityGatingReconcile();
