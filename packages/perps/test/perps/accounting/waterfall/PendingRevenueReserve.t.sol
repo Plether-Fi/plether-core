@@ -180,7 +180,7 @@ contract PendingRevenueReserveTest is BasePerpTest {
         assertEq(pool.pendingTradingRevenueAssets(), 0, "wipe checkpoint must precede new pending revenue");
 
         checkpoint.reserve = pool.unassignedAssets();
-        assertApproxEqAbs(checkpoint.reserve, 976_000e6, 1000e6, "wipe must leave the intended large reserve");
+        assertEq(checkpoint.reserve, 980_000e6, "wipe must preserve the full unassigned reserve");
         checkpoint.poolCash = settlementToken.balanceOf(address(pool));
         checkpoint.holderShares = juniorVault.balanceOf(HOLDER);
         checkpoint.seniorSupply = seniorVault.totalSupply();

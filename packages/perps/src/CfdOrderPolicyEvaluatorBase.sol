@@ -147,30 +147,46 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         uint256 availableOrderMarginAssets
     ) internal view returns (OrderV3Types.ExecutionAssessment memory) {
-        bool bountyReturnsToAccount = context.executor == order.account;
-        OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
-
         if (order.isClose) {
-            CfdEnginePlanTypes.CloseDelta memory closeDelta =
-                planner.planClose(snapshot, order, context.currentOraclePrice);
-            return _evaluateClose(
-                snapshot,
-                closeDelta,
-                boundsCopy,
-                context.executionBountyAssets,
-                bountyReturnsToAccount,
-                context.drainsAccountQueue,
-                context.commitmentCarryAssets
-            );
+            return _assessCloseSnapshot(context, order, bounds, planner, snapshot);
         }
+        return _assessOpenSnapshot(context, order, bounds, planner, snapshot, availableOrderMarginAssets);
+    }
 
+    function _assessCloseSnapshot(
+        AssessmentContext memory context,
+        CfdTypes.Order memory order,
+        OrderV3Types.ExecutionBounds memory bounds,
+        ICfdEnginePlanner planner,
+        CfdEnginePlanTypes.RawSnapshot memory snapshot
+    ) private pure returns (OrderV3Types.ExecutionAssessment memory) {
+        CfdEnginePlanTypes.CloseDelta memory closeDelta = planner.planClose(snapshot, order, context.currentOraclePrice);
+        return _evaluateClose(
+            snapshot,
+            closeDelta,
+            bounds,
+            context.executionBountyAssets,
+            context.executor == order.account,
+            context.drainsAccountQueue,
+            context.commitmentCarryAssets
+        );
+    }
+
+    function _assessOpenSnapshot(
+        AssessmentContext memory context,
+        CfdTypes.Order memory order,
+        OrderV3Types.ExecutionBounds memory bounds,
+        ICfdEnginePlanner planner,
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        uint256 availableOrderMarginAssets
+    ) private pure returns (OrderV3Types.ExecutionAssessment memory) {
         CfdEnginePlanTypes.OpenDelta memory openDelta = planner.planOpen(snapshot, order, context.currentOraclePrice);
         return _evaluateOpen(
             snapshot,
             openDelta,
-            boundsCopy,
+            bounds,
             context.executionBountyAssets,
-            bountyReturnsToAccount,
+            context.executor == order.account,
             availableOrderMarginAssets,
             context.commitmentCarryAssets
         );

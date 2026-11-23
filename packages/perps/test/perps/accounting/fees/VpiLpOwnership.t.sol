@@ -116,6 +116,8 @@ contract VpiLpOwnershipTest is BasePerpTest {
 
         // Both marks give 400,000 settlement units of skew and LONG endpoint liability.
         uint256 size = price == 1e8 ? 400_000e18 : 500_000e18;
+        vm.prank(address(router));
+        engine.updateMarkPrice(price, uint64(vm.getBlockTimestamp()));
         vm.prank(trader);
         uint64 openId = router.commitOrder(CfdTypes.Side.LONG, size, 20_000e6, price, false);
         router.executeOrder(openId, _mockPythUpdateData(price));
@@ -276,10 +278,9 @@ contract VpiLpOwnershipFuzzTest is BasePerpTest {
             assertEq(funded, c.requestedShares, "unconstrained request must fund fully");
         }
         _claimFunded(c.epoch);
-        // A close fee offset against the VPI refund stays in the pool. Charge only the portion owned by outside
-        // shares (including the specified 1,000 virtual shares); the controlled remaining shares receive the rest.
-        uint256 closeFee = (c.size * c.price / 1e20) * engine.executionFeeBps() / 10_000;
-        c.retainedFeeCost = closeFee - closeFee * (c.ownershipShares - funded) / (juniorVault.totalSupply() + 1000);
+        // Close fee offset against the VPI refund is paid to protocol treasury (PR #165), so it is already
+        // accounted for in external cash rather than retained in the pool.
+        c.retainedFeeCost = 0;
         _closeOrder(c.trader, c.size, c.price);
         _exitAllShares(c.epoch, c.price);
         _assertTerminalWealth(c.trader, c.lpCapital + TRADER_CAPITAL, c.externalCashBefore, c.retainedFeeCost);
@@ -344,6 +345,13 @@ contract VpiLpOwnershipFuzzTest is BasePerpTest {
         uint256 size,
         uint256 price
     ) private {
+        if (engine.lastMarkPrice() != price) {
+            if (vm.getBlockTimestamp() <= engine.lastMarkTime()) {
+                vm.warp(engine.lastMarkTime() + 1);
+            }
+            vm.prank(address(router));
+            engine.updateMarkPrice(price, uint64(vm.getBlockTimestamp()));
+        }
         vm.prank(trader);
         uint64 order = router.commitOrder(side, size, 20_000e6, price, false);
         router.executeOrder(order, _mockPythUpdateData(price));

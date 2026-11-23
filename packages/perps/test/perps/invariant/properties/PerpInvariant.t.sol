@@ -1638,6 +1638,11 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             abi.encodeWithSelector(CfdEngineLens.previewOpenRevertCode.selector),
             abi.encode(uint8(CfdEnginePlanTypes.OpenRevertCode.OK))
         );
+        vm.mockCall(
+            router.engineLensForCommit(),
+            abi.encodeWithSelector(CfdEngineLens.previewOpenCommitRevertCode.selector),
+            abi.encode(uint8(CfdEnginePlanTypes.OpenRevertCode.OK))
+        );
         uint256 custodyBefore = settlementToken.balanceOf(address(clearinghouse));
         uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint256[4] memory balancesBefore;

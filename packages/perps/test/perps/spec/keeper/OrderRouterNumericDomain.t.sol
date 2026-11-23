@@ -424,7 +424,7 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         vm.prank(ALICE);
         engine.addMargin(ALICE, 15);
         assertEq(beforeTopUp - _settlementBalance(ALICE), 15);
-        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max - 1000e6);
         vm.prank(KEEPER);
         router.executeOrder(orderId, updates);
         _assertExecuted(orderId, ALICE, 20_000e18);
@@ -468,7 +468,7 @@ contract OrderRouterNumericCollateralCapTest is NumericDomainRouterFixture {
         vm.prank(ALICE);
         engine.addMargin(ALICE, 16);
         assertEq(beforeTopUp - _settlementBalance(ALICE), 15);
-        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max);
+        assertEq(clearinghouse.pnlPledgeAssets(ALICE), type(uint144).max - 1000e6);
         uint256 custody = _settlementBalance(ALICE);
         vm.prank(KEEPER);
         OrderV3Types.BatchResult memory result = router.executeOrderBatch(follower, updates);

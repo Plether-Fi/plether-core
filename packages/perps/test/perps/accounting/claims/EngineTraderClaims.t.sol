@@ -82,9 +82,9 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        // The 100,000 USDG open requires 1,500 USDG initial margin, so its 1,000 USDG margin relies on the claim.
+        // Standalone open funding requires own margin at commit, while the claim stays locked until execution.
         vm.prank(account);
-        uint64 orderId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 1000e6, 1e8, false);
+        uint64 orderId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
         bytes[] memory updateData = _mockPythUpdateData();
         uint256 poolBefore = pool.totalAssets();
         uint256 settlementBefore = clearinghouse.balanceAssets(account);
@@ -100,7 +100,7 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         assertEq(pool.totalAssets(), poolBefore, "Blocked settlement must not pay pool cash");
         assertEq(clearinghouse.balanceAssets(account), settlementBefore);
         assertEq(_freeSettlementAssets(account), freeBefore, "Claim must not become withdrawable");
-        assertEq(clearinghouse.getOrderReservation(orderId).remainingAmountAssets, 1000e6);
+        assertEq(clearinghouse.getOrderReservation(orderId).remainingAmountAssets, 2000e6);
         assertEq(clearinghouse.totalBountyReservationsAssets(account), bountyBefore);
         assertEq(router.pendingOrderCounts(account), 1);
 
@@ -118,13 +118,13 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        // Stale-mark admission can queue zero-margin orders without a committed-margin reservation.
+        // Stale-mark admission still requires standalone funding; multiple queued opens keep blocking until drained.
         vm.warp(block.timestamp + router.pletherOracle().orderExecutionStalenessLimit() + 1);
         vm.startPrank(account);
-        uint64 firstOrderId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 2e8, false);
-        uint64 secondOrderId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 2e8, false);
+        uint64 firstOrderId = router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 200e6, 2e8, false);
+        uint64 secondOrderId = router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 200e6, 2e8, false);
         vm.stopPrank();
-        assertEq(router.getAccountReservations(account).committedMarginAssets, 0);
+        assertEq(router.getAccountReservations(account).committedMarginAssets, 400e6);
 
         vm.prank(account);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
@@ -179,7 +179,7 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         _seedAuthenticatedTraderClaim(account, claimAssets);
 
         vm.prank(account);
-        uint64 orderId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 1000e6, 1e8, false);
+        uint64 orderId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
         uint256 pledgeBefore = clearinghouse.pnlPledgeAssets(account);
         uint256 freeBefore = _freeSettlementAssets(account);
 
@@ -214,7 +214,7 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         vm.startPrank(account);
         uint64 closeId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
-        uint64 reopenId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 1000e6, 1e8, false);
+        uint64 reopenId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
         vm.stopPrank();
         assertEq(router.pendingOrderCounts(account), 2);
 

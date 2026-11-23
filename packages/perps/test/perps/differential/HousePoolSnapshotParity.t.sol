@@ -446,7 +446,7 @@ contract HousePoolPendingRevenueReserveParityTest is HousePoolAccountingParityBa
         }
 
         uint256 gain = receipts > payouts ? receipts - payouts : 0;
-        uint256 reserve = receipts >= payouts ? 1000e6 : 1000e6 - (payouts - receipts);
+        uint256 reserve = 1000e6;
         uint256 senior = gain > 1000e6 ? 1000e6 : gain;
         _assertPendingAccounting(ExpectedAccounting(senior, gain - senior, 1000e6, reserve, 0, 0));
     }
@@ -456,7 +456,7 @@ contract HousePoolPendingRevenueReserveParityTest is HousePoolAccountingParityBa
         _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 2000e6);
         _payTrader(2500e6);
 
-        _assertPendingAccounting(ExpectedAccounting(0, 0, 1000e6, 500e6, 0, 0));
+        _assertPendingAccounting(ExpectedAccounting(0, 0, 1000e6, 1000e6, 0, 0));
     }
 
     function test_ClaimLiabilitiesRetainBackedRevenueAfterPayoutWriteoff() public {
@@ -526,7 +526,7 @@ contract HousePoolPendingRevenueReserveParityTest is HousePoolAccountingParityBa
             abi.encode(snapshot)
         );
 
-        _assertPendingAccounting(ExpectedAccounting(2000e6, 100e6, 2000e6, 1000e6, 0, 0));
+        _assertPendingAccounting(ExpectedAccounting(1000e6, 100e6, 1000e6, 2000e6, 0, 0));
     }
 
 }

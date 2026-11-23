@@ -238,10 +238,11 @@ contract FullCloseActionChargePlanTest is Test {
 
     function _rebateFeeSnapshot() private pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         snap = _snapshot(0, 0, 1e6, 0, 0);
-        snap.poolAssets = 25_000e6;
+        snap.poolAssets = 25_100e6;
         snap.poolCashAssets = snap.poolAssets;
         snap.riskParams.vpiFactor = 0.01e18;
         snap.position.vpiAccrued = 100e6;
+        snap.totalPositiveVpiAccruedAssets = 100e6;
     }
 
     function testFuzz_FullClose_CashPlacementDoesNotChangeRecovery(

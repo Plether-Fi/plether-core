@@ -140,17 +140,10 @@ contract CfdRawSnapshotParityTest is Test {
             vm.prank(ENGINE);
             assertEq(abi.encode(reader.buildRawSnapshot(ACCOUNT, DEPTH, false)), abi.encode(expected), "Reader fields");
             assertEq(abi.encode(policy.build(ENGINE, ACCOUNT, DEPTH)), abi.encode(expected), "Policy fields");
-            vm.mockCallRevert(
-                CLEARINGHOUSE,
-                abi.encodeWithSignature("getPnlIsolationBuckets(address)", ACCOUNT),
-                bytes("Lens keeps legacy collateral reads")
-            );
-
-            // Lens simulations retain hypothetical cash, absent commitment marks, and the Engine tuple's margin.
+            // Lens simulations retain hypothetical cash and absent commitment marks.
             expected.poolCashAssets = DEPTH;
             expected.lastMarkPrice = 0;
             expected.lastMarkTime = 0;
-            expected.position.margin = 12e6;
             assertEq(
                 abi.encode(lens.build(ACCOUNT, DEPTH)), abi.encode(expected), "Lens fields and intentional context"
             );

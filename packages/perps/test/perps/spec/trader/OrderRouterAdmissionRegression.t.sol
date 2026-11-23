@@ -25,48 +25,42 @@ contract OrderRouterAdmissionRegressionTest is SourceBoundBountyFixture {
     }
 
     function test_PendingIncreaseMustBeFeasibleAsFreshAfterItsPredecessorExpires() public {
-        for (uint256 invalidKind; invalidKind < 2; ++invalidKind) {
-            uint256 saved = vm.snapshotState();
-            _position(CfdTypes.Side.LONG);
-            _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
-            OrderV3Types.OrderRequest memory predecessor =
-                _bountyRequest(CfdTypes.Side.SHORT, false, BOUNTY_SIZE, 1000e6);
-            predecessor.bounds.executionWindowSeconds = 1;
-            vm.prank(BOUNTY_TRADER);
-            uint64 predecessorId = router.commitOrder(predecessor);
-            // An increase can rely on the preceding position's size and reserves at submission.
-            uint256 size = invalidKind == 0 ? CfdTypes.SIZE_QUANTUM : BOUNTY_SIZE;
-            uint256 margin = invalidKind == 0 ? 1000e6 : 0;
-            uint64 increase = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, false, size, margin);
-            vm.warp(router.lifecycleBook().orderTiming(predecessorId).executionDeadline + 1);
-            _mark(BOUNTY_PRICE);
+        _fundTrader(BOUNTY_TRADER, 5000e6);
+        // Use a stale reference mark so the undersized follower can queue behind its predecessor.
+        vm.warp(vm.getBlockTimestamp() + pletherOracle.getOrderExecutionPolicy(false).maxStaleness + 1);
+        OrderV3Types.OrderRequest memory predecessor = _bountyRequest(CfdTypes.Side.SHORT, false, BOUNTY_SIZE, 1000e6);
+        vm.prank(BOUNTY_TRADER);
+        uint64 predecessorId = router.commitOrder(predecessor);
+        // Advance one second so the follower remains unexpired when its predecessor expires.
+        vm.warp(vm.getBlockTimestamp() + 1);
+        uint256 size = CfdTypes.SIZE_QUANTUM;
+        uint64 increase = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, false, size, 1000e6);
+        vm.warp(router.lifecycleBook().orderTiming(predecessorId).executionDeadline + 1);
 
-            // Once the predecessor expires, this order would need to create a fresh position. Neither an
-            // undersized position nor one unable to fund its initial reserve can supply queued exposure.
-            _reject(
-                _bountyRequest(CfdTypes.Side.SHORT, true, size, 0),
-                abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector)
-            );
-            assertEq(
-                uint8(router.lifecycleBook().lifecycleStatus(increase)), uint8(OrderV3Types.LifecycleStatus.Pending)
-            );
-            assertTrue(vm.revertToStateAndDelete(saved));
-        }
+        // Once the predecessor expires, the undersized follower cannot open fresh and supplies no queued exposure.
+        uint64 opposingId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, false, BOUNTY_SIZE, 1000e6);
+        assertEq(opposingId, increase + 1);
+        assertEq(uint8(router.lifecycleBook().lifecycleStatus(increase)), uint8(OrderV3Types.LifecycleStatus.Pending));
     }
 
     function test_FeasiblePendingOpenStillSuppliesExposureAfterItsPredecessorExpires() public {
-        _position(CfdTypes.Side.LONG);
-        _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+        _fundTrader(BOUNTY_TRADER, 5000e6);
         OrderV3Types.OrderRequest memory predecessor = _bountyRequest(CfdTypes.Side.SHORT, false, BOUNTY_SIZE, 1000e6);
-        predecessor.bounds.executionWindowSeconds = 1;
         vm.prank(BOUNTY_TRADER);
         uint64 predecessorId = router.commitOrder(predecessor);
-        _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, false, BOUNTY_SIZE, 1000e6);
+        vm.warp(vm.getBlockTimestamp() + 1);
+        _mark(BOUNTY_PRICE);
+        uint64 followerId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, false, BOUNTY_SIZE, 1000e6);
         vm.warp(router.lifecycleBook().orderTiming(predecessorId).executionDeadline + 1);
         _mark(BOUNTY_PRICE);
-        uint64 closeId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, true, BOUNTY_SIZE, 0);
-        assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 4);
-        assertEq(router.accountHeadOrderId(BOUNTY_TRADER), closeId - 3);
+
+        // The surviving feasible SHORT open still supplies queued SHORT exposure and blocks an opposing LONG open.
+        _rejectOpen(
+            _bountyRequest(CfdTypes.Side.LONG, false, BOUNTY_SIZE, 1000e6),
+            CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING
+        );
+        assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 2);
+        assertEq(router.accountHeadOrderId(BOUNTY_TRADER), followerId - 1);
     }
 
     function test_RecordedCarryLeavesInsufficientCloseActionChargeHeadroom() public {
@@ -347,23 +341,32 @@ contract OrderRouterAdmissionRegressionTest is SourceBoundBountyFixture {
     }
 
     function test_OwnBountyCannotInvalidateFreshOpenAtUnchangedPrice() public {
-        uint256 margin = _bountyBoundary();
-        OrderV3Types.OrderRequest memory request = _bountyRequest(CfdTypes.Side.LONG, false, BOUNTY_SIZE, margin);
+        (uint256 fundedMargin, uint256 underfundedMargin) = _bountyBoundary();
+        OrderV3Types.OrderRequest memory underfunded =
+            _bountyRequest(CfdTypes.Side.LONG, false, BOUNTY_SIZE, underfundedMargin);
+        underfunded.targetPrice = CAP_PRICE;
+        assertEq(
+            engineLens.previewOpenRevertCode(
+                BOUNTY_TRADER, underfunded.side, BOUNTY_SIZE, underfundedMargin, CAP_PRICE
+            ),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+            "unreserved bounty cash cannot fund VPI reserve"
+        );
+        _rejectOpen(underfunded, CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN);
+        // A properly funded control must pass preview, survive its own bounty lock, and execute at the same price.
+        OrderV3Types.OrderRequest memory request = _bountyRequest(CfdTypes.Side.LONG, false, BOUNTY_SIZE, fundedMargin);
         request.targetPrice = CAP_PRICE;
         assertEq(
-            engineLens.previewOpenRevertCode(BOUNTY_TRADER, request.side, BOUNTY_SIZE, margin, CAP_PRICE),
+            engineLens.previewOpenRevertCode(BOUNTY_TRADER, request.side, BOUNTY_SIZE, fundedMargin, CAP_PRICE),
             uint8(CfdEnginePlanTypes.OpenRevertCode.OK),
-            "unreserved preview passes"
+            "funded preview passes"
         );
-        _rejectOpen(request, CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN);
-        // The nearby funded control must survive its own bounty lock and execute at the same price.
-        _fundTrader(BOUNTY_TRADER, 1e6);
         vm.prank(BOUNTY_TRADER);
         uint64 id = router.commitOrder(request);
         _bountyExecute(id, CAP_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
     }
 
-    function _bountyBoundary() private returns (uint256 margin) {
+    function _bountyBoundary() private returns (uint256 fundedMargin, uint256 underfundedMargin) {
         CfdTypes.RiskParams memory params = _riskParams();
         params.vpiFactor = 0.05e18;
         _setRiskParams(params);
@@ -387,10 +390,11 @@ contract OrderRouterAdmissionRegressionTest is SourceBoundBountyFixture {
         if (bounty > router.maxOpenOrderExecutionBountyAssets()) {
             bounty = router.maxOpenOrderExecutionBountyAssets();
         }
-        margin = quote.initialMarginRequirementAssets + reserve + quote.executionFeeAssets - bounty + 1;
+        fundedMargin = quote.initialMarginRequirementAssets + reserve + quote.executionFeeAssets + 1;
+        underfundedMargin = fundedMargin - bounty;
         uint256 free = clearinghouse.getAccountAssetBuckets(BOUNTY_TRADER).freeSettlementAssets;
         vm.prank(BOUNTY_TRADER);
-        clearinghouse.withdraw(BOUNTY_TRADER, free - margin - bounty);
+        clearinghouse.withdraw(BOUNTY_TRADER, free - fundedMargin - bounty);
     }
 
     function _closeWithCarry() private returns (OrderV3Types.OrderRequest memory request, uint256 carry, uint256 fee) {

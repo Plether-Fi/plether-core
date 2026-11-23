@@ -121,8 +121,9 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         pool.recordClaimantInflow(
             3000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        // The revenue still has physical backing, but unpaid trader claims defer part of its settlement.
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(uint256(1000e6));
+        // Spend part of the pending revenue on a pool payout so residual unbacked pending revenue is discarded.
+        vm.prank(address(engine));
+        pool.payOut(address(0xDEAD), 1000e6);
         assertEq(pool.unassignedAssets(), 0);
 
         pool.activateTrading();

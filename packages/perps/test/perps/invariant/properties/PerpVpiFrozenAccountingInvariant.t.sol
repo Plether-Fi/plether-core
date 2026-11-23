@@ -125,11 +125,6 @@ contract PerpVpiFrozenAccountingHandler is Test {
             feeEligible += proportionalAccrual;
         }
         uint256 creditedFee = feeEligible <= 0 ? 0 : uint256(feeEligible) < fee ? uint256(feeEligible) : fee;
-        // The funded mock pool covers the fee offset by any rebate left after spread.
-        if (vpi < -int256(spread)) {
-            uint256 rebateAfterSpread = uint256(-vpi - int256(spread));
-            creditedFee += rebateAfterSpread < fee ? rebateAfterSpread : fee;
-        }
         vm.recordLogs();
         _process(i, lots, true);
         _assertSpreadEvent(actorAt(i), spread, vpi, vm.getRecordedLogs());

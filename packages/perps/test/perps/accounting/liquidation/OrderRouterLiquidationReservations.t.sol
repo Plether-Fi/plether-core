@@ -414,12 +414,12 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         uint64 nextId = router.nextCommitId();
         vm.expectRevert(abi.encodeWithSignature("OrderRouter__PredictableOpenInvalid(uint8)", uint8(6)));
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 500e18, 700_000, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 500e18, 700_000, CAP_PRICE, false);
         assertEq(router.nextCommitId(), nextId);
         assertEq(router.pendingOrderCounts(trader), 0);
 
         vm.prank(trader);
-        uint64 fundedOrder = router.commitOrder(CfdTypes.Side.LONG, 500e18, 10e6, type(uint256).max, false);
+        uint64 fundedOrder = router.commitOrder(CfdTypes.Side.LONG, 500e18, 10e6, CAP_PRICE, false);
         policyEvaluator.assessCommittedOrder(address(engine), fundedOrder, address(this), 1e8);
     }
 

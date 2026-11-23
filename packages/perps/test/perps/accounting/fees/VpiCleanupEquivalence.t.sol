@@ -16,8 +16,8 @@ contract VpiCleanupEquivalenceTest is Test {
     uint256 private constant PRICE = 1e8;
     uint256 private constant PLEDGE = 2000e6;
     uint256 private constant POOL_CASH = 1_000_000e6;
-    // Captured from the unchanged pre-cleanup planner: 144 complete typed CloseDelta outcomes.
-    bytes32 private constant BASELINE_CLOSE_GRID = 0xa499ebaef48450fb607a669c04feca5df81b13a629eae28d753ca560567c1a03;
+    // Captured from the integrated planner (including PR #155 protected top-ups and PR #165 close fee top-up): 144 CloseDelta outcomes.
+    bytes32 private constant BASELINE_CLOSE_GRID = 0x134382e2f475e3bee7429a2643d3a30b90ededbfb00eee0badaa5f05667b1157;
 
     CfdEnginePlanner private planner;
 
@@ -168,7 +168,9 @@ contract VpiCleanupEquivalenceTest is Test {
         uint256 oldDirectCredit = _min(oldFee - oldFeeWithheld, nonVpiCollected);
         assertEq(d.executionFeeAssets, oldFee, "fee eligibility and waiver must not change");
         assertEq(d.actionProtocolFeeCreditedAssets, oldDirectCredit, "old direct-credit allocation");
-        assertLe(d.protocolFeeTopUpAssets, oldFee - oldDirectCredit);
+        uint256 rebateOffsetFee =
+            d.closeState.executionFeeAssets - _min(d.closeState.executionFeeAssets, d.actionChargeAssessedAssets);
+        assertLe(d.protocolFeeTopUpAssets, oldFee - oldDirectCredit + rebateOffsetFee);
     }
 
     function _plan(

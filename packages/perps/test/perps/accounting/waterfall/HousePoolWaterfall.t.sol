@@ -491,7 +491,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         _fundJunior(bob, 50_000e6);
         _fundTrader(carol, 50_000e6);
         uint256 openingMark = 1e8;
-        _open(carol, CfdTypes.Side.LONG, 200_000e18, 20_000e6, openingMark);
+        _open(carol, CfdTypes.Side.LONG, 100_000e18, 10_000e6, openingMark);
 
         uint256 holderShares = juniorVault.balanceOf(bob);
         uint256 supplyBefore = juniorVault.totalSupply();
@@ -499,13 +499,29 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         uint256 claimBeforeWipe = juniorVault.convertToAssets(sharesToRedeem);
         assertGt(claimBeforeWipe, 0);
 
+        // Align post-coupon Junior principal to a multiple of Carol's 1,000 lots so the oracle mark wipes Junior
+        // without impairing Senior (which would rightly block Junior assignment).
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        uint256 oneSecondCoupon = (pool.seniorPrincipal() * 800 * 1) / (10_000 * uint256(365 days));
+        uint256 juniorAfterCoupon = pool.juniorPrincipal() - oneSecondCoupon;
+        uint256 alignmentPad = (1000 - (juniorAfterCoupon % 1000)) % 1000;
+        if (alignmentPad > 0) {
+            _mintAndAccountPoolExcess(alignmentPad);
+            vm.prank(address(juniorVault));
+            pool.reconcile();
+            juniorAfterCoupon = pool.juniorPrincipal() - oneSecondCoupon;
+        }
+        uint256 wipeMark = openingMark - juniorAfterCoupon / 1000;
+
         // Supply quarantined cash as a fixture. Oracle marks drive the Junior NAV changes.
         uint256 unassigned = 1000e6;
         _mintAndAccountPoolExcess(unassigned);
         stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(unassigned);
 
-        router.updateMarkPrice(_mockPythUpdateData(0.5e8));
+        router.updateMarkPrice(_mockPythUpdateData(wipeMark));
         assertEq(juniorVault.totalAssets(), 0);
+        assertEq(pool.seniorPrincipal(), pool.seniorHighWaterMark());
         assertEq(juniorVault.balanceOf(bob), holderShares);
 
         pool.assignUnassignedAssets(false, alice);
@@ -562,10 +578,10 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
 
         uint256 pendingRecap = 3000e6;
         _queueRecapitalization(pendingRecap);
-        // Terminal equity is now 6,000 USDG. Pending recapitalization claims 3,000 USDG of it for Senior.
-        _setTotalTraderClaim(4000e6);
+        // Terminal equity is now 4,000 USDG, which is below the 5,000 USDG unassigned reserve.
+        _setTotalTraderClaim(6000e6);
         (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
-        assertEq(pendingSenior, pendingRecap);
+        assertEq(pendingSenior, 0);
 
         vm.expectRevert(IHousePool.HousePool__UnassignedAssetsUnderbacked.selector);
         pool.assignUnassignedAssets(false, carol);

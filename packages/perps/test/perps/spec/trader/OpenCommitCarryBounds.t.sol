@@ -252,11 +252,10 @@ contract OpenCommitCarryBoundsTest is BasePerpTest {
     function test_OpenExpiry_RetainsCommitCarryWithoutCollectingItAgain() public {
         _existingPosition(CfdTypes.Side.LONG);
         OrderV3Types.OrderRequest memory request = _increase(CfdTypes.Side.LONG);
-        request.bounds.executionWindowSeconds = 1;
         uint64 id = _commit(request);
         OrderV3Types.PendingIntent memory pending = router.lifecycleBook().pendingIntent(id);
         uint256 afterCommit = clearinghouse.balanceAssets(TRADER);
-        vm.warp(vm.getBlockTimestamp() + 2);
+        vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
         OrderV3Types.OrderReceipt memory receipt = _execute(id);
         assertEq(uint8(receipt.status), uint8(OrderV3Types.LifecycleStatus.Failed));
         assertEq(uint8(receipt.reason), uint8(OrderV3Types.TerminalReason.Expired));
@@ -329,7 +328,7 @@ contract OpenCommitCarryBoundsTest is BasePerpTest {
         uint256 checkpoint = vm.snapshotState();
         // The lower cap already fails the execution-only assessment; the former bypass reaches the
         // cumulative check. Both must block the increase and leave exactly the same economic state.
-        Cashout memory oneAtomBelow = _cashoutBranch(executionOnlyLimit - 1, shares, executionOnlyLimit);
+        Cashout memory oneAtomBelow = _cashoutBranch(executionOnlyLimit - 1, shares, expected.action);
         assertTrue(vm.revertToState(checkpoint));
         Cashout memory formerBypass = _cashoutBranch(executionOnlyLimit, shares, expected.action);
         assertEq(

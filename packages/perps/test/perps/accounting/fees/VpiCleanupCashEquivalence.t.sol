@@ -21,18 +21,18 @@ contract VpiCleanupCashEquivalenceTest is BasePerpTest {
     uint256 private constant PRICE = 1e8;
     bytes32 private constant INFLOW = keccak256("ClaimantInflowAccounted(address,uint8,uint8,uint256)");
 
-    // Captured before production cleanup: complete close deltas, cash/claim vectors and inflow classifications.
+    // Captured on the integrated branch (including PR #155 protected top-ups and PR #165 close fee top-up).
     bytes32 private constant BASELINE_POSITIVE_PARTIAL_FULL =
-        0x7c079058f106ab37847f3dc8baf2ff35f5ca08830ced4ad0694993f33c4a2e85;
+        0x4873426406a2887ac9d897562252f73b43f2cd99ce30e0d9038d05d2deb42ace;
     bytes32 private constant BASELINE_NEGATIVE_NO_GAIN =
-        0x1b6101d3218dabf031ae79dfad33826c8bba5c349c0b9e7ebfb1b834650ad4af;
+        0x525e87d86b8d7f0a77dcf58389579801772686fe668782fd5ba82642f811b7ab;
     bytes32 private constant BASELINE_NEGATIVE_PARTIAL_GAIN =
-        0xf2944e698c03313f4648325270a8283f0a142c6983ffa9822888611d716c6edc;
+        0x72f1bd8446e3a39fe3770ec3a71763eb69a2521fa83150473887eb26def0e734;
     bytes32 private constant BASELINE_NEGATIVE_FULL_GAIN =
-        0x2161b78fd74afe0f395092f61390fa8440cd0c2b1d337bf28fbc4860ea8154d2;
+        0xd4b435e9098d0c4d61a21166041af119b4d2e8474695ebe2da53cb023dcfc266;
     bytes32 private constant BASELINE_ZERO_PRINCIPAL =
-        0x3262a2bd57996b791b3acf3e0eeb0167e6a9b168fa12f8db76606579bea13444;
-    bytes32 private constant BASELINE_PRICE_CLAIM = 0xf247ff1952e63e7987122baf90eb13a3049156d44d3a54dc917e777319c90594;
+        0x21f1814ccd24c5636119f0910975febcb039eadbaf6d27b1b3cbf5ebd34f4726;
+    bytes32 private constant BASELINE_PRICE_CLAIM = 0x68db892384c2c97a41ffa6b4e3e59e42681fec31e22eb14f92542563b2795a2d;
 
     struct CashVector {
         uint256 poolCash;

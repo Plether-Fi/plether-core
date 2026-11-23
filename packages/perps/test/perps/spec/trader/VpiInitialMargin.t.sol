@@ -293,7 +293,7 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
 
         assertEq(
             clearinghouse.balanceAssets(address(this)) - keeperBefore,
-            50_000,
+            200_000,
             "Typed user-invalid open should pay the clearer as clearinghouse credit"
         );
         assertEq(

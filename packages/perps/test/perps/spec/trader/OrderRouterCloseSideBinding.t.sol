@@ -205,7 +205,8 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
     function test_RouterRejectsIncreaseWithInsufficientEligibleMargin() public {
         address trader = BOUNTY_TRADER;
         _openFunded(CfdTypes.Side.LONG);
-        uint64 orderId = _bountyCommit(trader, CfdTypes.Side.LONG, false, 100_000e18, 1000e6);
+        _fundTrader(trader, 5000e6);
+        uint64 orderId = _bountyCommit(trader, CfdTypes.Side.LONG, false, 100_000e18, 1660e6);
         vm.prank(trader);
         engine.addMargin(trader, 1000e6);
         uint256 pledgeBefore = clearinghouse.pnlPledgeAssets(trader);
