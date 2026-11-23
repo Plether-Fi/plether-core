@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {IPerpsLPActions} from "@plether/perps/interfaces/IPerpsLPActions.sol";
 import {IPerpsLPViews} from "@plether/perps/interfaces/IPerpsLPViews.sol";

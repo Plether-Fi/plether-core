@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Input-only calendar for the mixed fixture, whose administrative override set is empty.
 /// @dev Find Gregorian year boundaries from elapsed leap days, then construct the two US DST transition

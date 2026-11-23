@@ -88,7 +88,7 @@ class SelectionTests(unittest.TestCase):
         inventory_module.TEST_ROOT = self.original_root
         self.temp.cleanup()
 
-    def add(self, path, text="pragma solidity 0.8.35; contract Example {}"):
+    def add(self, path, text="pragma solidity 0.8.39; contract Example {}"):
         target = self.test_root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)

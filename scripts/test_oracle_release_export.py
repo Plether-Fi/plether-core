@@ -36,7 +36,7 @@ def artifact(creation=b"\x60\x00", runtime=b"\x00", source=SOURCE_PATH, name="Ex
         "abi": [{"type": "constructor", "inputs": [{"name": "owner", "type": "address"}]}],
         "bytecode": {"object": "0x" + creation.hex()},
         "deployedBytecode": {"object": "0x" + runtime.hex()},
-        "metadata": {"compiler": {"version": "0.8.35+commit.47b9dedd"}, "settings": {
+        "metadata": {"compiler": {"version": "0.8.39+commit.ce47f2c8"}, "settings": {
             "viaIR": True, "optimizer": {"enabled": True, "runs": 200}, "evmVersion": "prague",
             "compilationTarget": {source: name},
         }, "sources": {source: {"keccak256": synthetic_keccak(content)}}},
@@ -385,7 +385,7 @@ class ExportWorkflowTest(unittest.TestCase):
                 elif corruption == "abi":
                     value["abi"] = []
                 else:
-                    value["metadata"]["compiler"]["version"] = "0.8.35+commit.ffffffff"
+                    value["metadata"]["compiler"]["version"] = "0.8.39+commit.ffffffff"
                 self.build_artifacts[IDENTIFIER] = value
                 with self.assertRaises(ValueError):
                     self.export()

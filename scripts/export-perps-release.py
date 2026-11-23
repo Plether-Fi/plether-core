@@ -21,7 +21,7 @@ SIZE_TEST_PATH = "test/scripts/PerpsReleaseDeploymentSize.t.sol"
 SIZE_TEST_SUITE = SIZE_TEST_PATH + ":PerpsReleaseDeploymentSizeTest"
 SIZE_TEST = "test_AllReleaseContractsFitFullDeploymentLimits()"
 LOG_PREFIX = "RELEASE_SIZE "
-SOLC_VERSION = "0.8.35+commit.47b9dedd"
+SOLC_VERSION = "0.8.39+commit.ce47f2c8"
 
 
 def artifact_identifier(key, entry):

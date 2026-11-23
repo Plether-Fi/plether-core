@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Input-driven reference ledger for the LP-capital carry specification.
 /// @dev This test model imports no production contracts or arithmetic. Initialize it from fixture inputs, then

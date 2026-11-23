@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {ArbitrumEventEmitterRuntime} from "../fixtures/across-direct-funding/ArbitrumEventEmitterRuntime.sol";
 import {ArbitrumMulticallHandlerRuntime} from "../fixtures/across-direct-funding/ArbitrumMulticallHandlerRuntime.sol";

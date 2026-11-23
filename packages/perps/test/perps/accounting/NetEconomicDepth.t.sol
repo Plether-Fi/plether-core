@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 // Category: regression/spec. Source: ACCOUNTING_SPEC.md#lp-capital-carry.
 // Authenticated seeded claims below are capability fixtures, not externally reachable claim-creation proofs.

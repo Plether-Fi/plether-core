@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {LpEpochKeeper} from "../../script/LpEpochKeeper.s.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";

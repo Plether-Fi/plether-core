@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Two-tranche settlement token pool that acts as counterparty to CFD traders.
 ///         Senior tranche earns a junior-funded target coupon; junior absorbs first-loss and excess profit.

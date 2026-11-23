@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @title HousePoolSeedLifecycleLib
 /// @notice Pure predicates for HousePool tranche seeding and trading activation.

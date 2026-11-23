@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Additive interface for routing finalized deposit shares directly into asynchronous redemption.
 /// @dev This extension deliberately remains separate from `IAsyncTrancheVault` so its existing ERC-165 interface id

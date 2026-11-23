@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Independent liquidation arithmetic for the mixed campaign's fixed risk configuration.
 /// @dev Inputs are the action ledger after direct margin-first/free-second carry collection. No production

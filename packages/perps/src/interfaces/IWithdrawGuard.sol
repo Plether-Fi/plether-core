@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Post-debit hook that enforces open-position collateralization on clearinghouse withdrawals.
 interface IWithdrawGuard {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 // Historical V2 intent / V3 receipt tuples from the pre-change checkout. Never substitute current tuples.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @title CashPriorityLib
 /// @notice Computes cash reserved for existing trader claims before fresh protocol payouts.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 // Category: accounting. All cases assert current documented behavior and are expected to pass.
 // Source of truth: packages/perps/ACCOUNTING_SPEC.md#liquidation-settlement

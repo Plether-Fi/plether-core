@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {OracleMathPolicyFixture, PletherOracleMathHarness} from "../../shared/PletherOracleMathHarness.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";

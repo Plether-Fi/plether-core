@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Shared input-driven waterfall reference for persistent accounting campaigns.
 /// @dev Extracted from the existing waterfall campaign. Callers independently derive distributable assets from

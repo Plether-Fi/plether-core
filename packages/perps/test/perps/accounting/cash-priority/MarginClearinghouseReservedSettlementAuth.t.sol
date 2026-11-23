@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";

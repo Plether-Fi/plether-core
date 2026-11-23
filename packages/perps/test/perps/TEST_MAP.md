@@ -505,7 +505,7 @@ with [Close settlement](../../ACCOUNTING_SPEC.md#close-settlement), rather than 
 
 ## Running and replaying
 
-Run from the repository root with Foundry and Solc 0.8.35 available. The recorded runners use `--offline`, so the
+Run from the repository root with Foundry and Solc 0.8.39 available. The recorded runners use `--offline`, so the
 compiler must already be cached. CI currently installs Foundry 1.5.1.
 
 ```bash

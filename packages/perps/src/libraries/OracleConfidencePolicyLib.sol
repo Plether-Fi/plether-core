@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Shared confidence bounds for router proposals and oracle configuration application.
 library OracleConfidencePolicyLib {

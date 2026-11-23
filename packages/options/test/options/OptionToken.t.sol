@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {OptionToken} from "@plether/options/OptionToken.sol";

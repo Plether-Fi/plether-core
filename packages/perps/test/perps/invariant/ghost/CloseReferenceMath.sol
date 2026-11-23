@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Input-only close ledger for the mixed campaign's fixed risk configuration.
 /// @dev Inputs describe custody AFTER the ordinary margin/free carry checkpoint and BEFORE the executing order's
