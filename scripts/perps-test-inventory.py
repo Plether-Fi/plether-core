@@ -36,6 +36,8 @@ PRODUCTION_SENSITIVE_TESTS = {
     "test_UpdatePrice_GasBurningRefundRecipientAccruesAndClaimsDeferredRefund",
     "test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating",
     "test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund",
+    "test_Batch_ArmedProtectionTerminalizesAndForfeitsTriggerBountyExactlyOnce",
+    "test_Batch_SolventItemRollsBackBookAndReserveBeforeLaterProtectedSuccess",
     "test_DeferredAdminRefundIsBackedUntilBeneficiaryClaimsExactlyOnce",
     # These properties run a setup prelude with fixed callback gas caps and burners.
     # Keep that prelude under production codegen in PRs as well as full CI/audit.
@@ -47,8 +49,13 @@ PRODUCTION_SENSITIVE_TESTS = {
 COVERAGE_EXCLUSIONS = [
     (PROPERTY_TESTS, "Random/stateful campaigns run in correctness lanes; coverage uses deterministic scenarios."),
     (GAS_TESTS + "|" + SIZE_TESTS, "Instrumented bytecode cannot measure production gas or deployment size."),
-    (r"test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating|test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund",
-     "Instrumentation changes bounded batch gas admission; execute under production codegen."),
+    (
+        r"test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating|"
+        r"test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund|"
+        r"test_Batch_ArmedProtectionTerminalizesAndForfeitsTriggerBountyExactlyOnce|"
+        r"test_Batch_SolventItemRollsBackBookAndReserveBeforeLaterProtectedSuccess",
+        "Instrumentation changes bounded batch gas admission; execute under production codegen.",
+    ),
     (r"test_Batch_MaxConfigReservesEip150GasBeforeDispatch",
      "Instrumentation changes the EIP-150 gas boundary; execute under production codegen."),
 ]
