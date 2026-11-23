@@ -14,6 +14,7 @@ contract MockInvariantHousePool is IHousePool {
     MockSettlementToken public immutable settlementToken;
     address public immutable engine;
     bool public lpEpochSettlementPaused;
+    uint256 public juniorPrincipal;
     uint256 public pendingRecapitalizationAssets;
     uint256 public pendingTradingRevenueAssets;
 
@@ -140,11 +141,13 @@ contract MockInvariantHousePool is IHousePool {
         return true;
     }
 
-    function seniorPrincipal() external pure returns (uint256) {
-        return 0;
+    function setJuniorPrincipal(
+        uint256 amountAssets
+    ) external {
+        juniorPrincipal = amountAssets;
     }
 
-    function juniorPrincipal() external pure returns (uint256) {
+    function seniorPrincipal() external pure returns (uint256) {
         return 0;
     }
 

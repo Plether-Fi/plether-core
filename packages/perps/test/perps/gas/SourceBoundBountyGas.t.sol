@@ -9,6 +9,10 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
+import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
+import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 /// @dev Production-codegen gas selection. Public V3 fixture transitions; zero carry/VPI isolate
@@ -116,6 +120,55 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
 
     function test_Gas_SourceBoundSuccessfulPartialClose() public {
         _measureSuccess(BOUNTY_SIZE / 2, "source_bound_success_partial_close");
+    }
+
+    function test_Gas_ArmedProtectionBatchLiquidationFitsDefaultBudget() public {
+        _fundTrader(BOUNTY_TRADER, 5000e6);
+        _open(BOUNTY_TRADER, CfdTypes.Side.LONG, BOUNTY_SIZE, 250e6, BOUNTY_PRICE);
+        router.updateMarkPrice(_mockPythUpdateData(BOUNTY_PRICE));
+
+        PositionProtectionTypes.PositionProtectionParams memory params;
+        params.stopLossTriggerPrice = 110_000_000;
+        params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max
+        });
+        IPositionProtectionActions protectionActions =
+            IPositionProtectionActions(address(router.positionProtectionBook()));
+        IPositionProtectionViews protectionViews = IPositionProtectionViews(address(router.positionProtectionBook()));
+        vm.prank(BOUNTY_TRADER);
+        uint64 protectionId = protectionActions.createPositionProtection(params);
+        uint256 free = clearinghouse.getAccountAssetBuckets(BOUNTY_TRADER).freeSettlementAssets;
+        vm.prank(BOUNTY_TRADER);
+        clearinghouse.withdraw(BOUNTY_TRADER, free);
+
+        uint256 expectedForfeitureAssets = router.positionProtectionTriggerBountyAssets();
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
+        address[] memory accounts = new address[](2);
+        accounts[0] = BOUNTY_TRADER;
+        accounts[1] = BOUNTY_TRADER;
+        bytes[] memory data = _mockPythUpdateData(150_000_000);
+        _coolBountyProtocol();
+
+        vm.recordLogs();
+        vm.prank(BOUNTY_KEEPER);
+        uint256 start = gasleft();
+        uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, data);
+        uint256 used = start - gasleft();
+
+        assertEq(nextIndex, accounts.length, "armed protection batch must process every candidate");
+        _assertLiquidationBatchEvidence(vm.getRecordedLogs(), accounts);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Liquidated),
+            "armed protection must terminalize"
+        );
+        assertEq(protectionViews.activePositionProtectionId(BOUNTY_TRADER), 0);
+        assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore, expectedForfeitureAssets);
+        assertLe(used, 1_000_000, "armed-protection batch liquidation must stay well under the 1.75M item cap");
+        emit log_named_uint("armed_protection_batch_liquidation", used);
     }
 
     function test_Gas_SourceBoundSuccessfulFullClose() public {

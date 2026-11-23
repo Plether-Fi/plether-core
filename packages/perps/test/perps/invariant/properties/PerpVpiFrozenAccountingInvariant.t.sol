@@ -24,6 +24,7 @@ contract PerpVpiFrozenAccountingHandler is Test {
     MockSettlementToken internal immutable settlementToken;
     address internal immutable router;
     address internal immutable pool;
+    bool public immutable poolFunded;
 
     uint256[4] public ghostLots;
     int256[4] public ghostVpiAccrued;
@@ -40,6 +41,8 @@ contract PerpVpiFrozenAccountingHandler is Test {
     uint256 public positiveVpiActions;
     uint256 public negativeVpiActions;
     uint256 public lifetimeClampedCloses;
+    uint256 public openFeeTopUpActions;
+    uint256 public closeFeeTopUpActions;
     uint256 public skippedOpens;
     uint256 public skippedCloses;
 
@@ -48,13 +51,15 @@ contract PerpVpiFrozenAccountingHandler is Test {
         MarginClearinghouse clearinghouse_,
         MockSettlementToken settlementToken_,
         address router_,
-        address pool_
+        address pool_,
+        bool poolFunded_
     ) {
         engine = engine_;
         clearinghouse = clearinghouse_;
         settlementToken = settlementToken_;
         router = router_;
         pool = pool_;
+        poolFunded = poolFunded_;
         ghostPoolCash = 1_000_000e6;
         for (uint256 i; i < 4; ++i) {
             address account = actorAt(i);
@@ -91,10 +96,14 @@ contract PerpVpiFrozenAccountingHandler is Test {
         ghostLots[i] += lots;
         ghostSideLots[i % 2] += lots;
         ghostVpiAccrued[i] += vpi;
-        // The mock has zero stored tranche principal. Pool-funded fee top-ups are forgone; only cash collected
-        // directly from this action can credit treasury when negative VPI offsets the assessed execution fee.
+        // When stored tranche principal is zero, pool-funded fee top-ups are forgone; when funded, free pool cash
+        // covers the portion of the execution fee offset by negative VPI.
         int256 collected = vpi + int256(fee);
         uint256 creditedFee = collected <= 0 ? 0 : uint256(collected) < fee ? uint256(collected) : fee;
+        if (poolFunded && creditedFee < fee) {
+            creditedFee = fee;
+            ++openFeeTopUpActions;
+        }
         _bookCash(i, vpi, fee, 0, creditedFee);
         ++opens;
         assertModel();
@@ -125,6 +134,15 @@ contract PerpVpiFrozenAccountingHandler is Test {
             feeEligible += proportionalAccrual;
         }
         uint256 creditedFee = feeEligible <= 0 ? 0 : uint256(feeEligible) < fee ? uint256(feeEligible) : fee;
+        // With stored tranche principal, free pool cash covers the close fee offset by any rebate left after spread.
+        if (poolFunded && vpi < -int256(spread)) {
+            uint256 rebateAfterSpread = uint256(-vpi - int256(spread));
+            uint256 topUp = rebateAfterSpread < fee ? rebateAfterSpread : fee;
+            if (topUp > 0) {
+                creditedFee += topUp;
+                ++closeFeeTopUpActions;
+            }
+        }
         vm.recordLogs();
         _process(i, lots, true);
         _assertSpreadEvent(actorAt(i), spread, vpi, vm.getRecordedLogs());
@@ -318,10 +336,14 @@ contract PerpVpiFrozenAccountingInvariantTest is BasePerpInvariantTest {
         return 1_000_000e6;
     }
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
+        bool funded = _poolHasStoredPrincipal();
+        if (funded) {
+            housePool.setJuniorPrincipal(_initialHousePoolAssets());
+        }
         handler = new PerpVpiFrozenAccountingHandler(
-            engine, clearinghouse, settlementToken, address(router), address(housePool)
+            engine, clearinghouse, settlementToken, address(router), address(housePool), funded
         );
         handler.openOrIncrease(0, 1000);
         handler.openOrIncrease(1, 500);
@@ -332,6 +354,10 @@ contract PerpVpiFrozenAccountingInvariantTest is BasePerpInvariantTest {
         selectors[3] = handler.enterLiveWindow.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
+    }
+
+    function _poolHasStoredPrincipal() internal pure virtual returns (bool) {
+        return false;
     }
 
     /// forge-config: default.invariant.fail-on-revert = true
@@ -374,6 +400,25 @@ contract PerpVpiFrozenAccountingInvariantTest is BasePerpInvariantTest {
         assertEq(handler.partialCloses(), 2, "partial closes survive subsequent actions");
         assertEq(handler.fullCloses(), 2, "terminal closes must execute");
         assertEq(handler.opens(), 4, "positions can reopen after thaw");
+    }
+
+}
+
+/// @notice Exercises the same persistent VPI/frozen-spread campaign with stored tranche principal so pool-funded
+///         protocol-fee top-ups on both negative-VPI opens and rebate-offset closes are verified statefully.
+contract PerpVpiFundedPoolAccountingInvariantTest is PerpVpiFrozenAccountingInvariantTest {
+
+    function _poolHasStoredPrincipal() internal pure override returns (bool) {
+        return true;
+    }
+
+    function test_FundedPoolCloseAndOpenRebatesTopUpProtocolTreasury() public {
+        // Actor 0 is LONG 1000 lots (paid positive VPI), Actor 1 is SHORT 500 lots (received negative VPI).
+        assertGt(handler.openFeeTopUpActions(), 0, "negative-VPI open must trigger pool-funded fee top-up");
+        // Closing Actor 0's LONG reduces skew and earns a VPI rebate that offsets the close fee -> pool tops up fee.
+        handler.close(0, 500);
+        handler.assertModel();
+        assertGt(handler.closeFeeTopUpActions(), 0, "rebate-offset close must trigger pool-funded fee top-up");
     }
 
 }

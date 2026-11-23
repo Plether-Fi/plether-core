@@ -146,7 +146,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         ICfdEnginePlanner planner,
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         uint256 availableOrderMarginAssets
-    ) internal view returns (OrderV3Types.ExecutionAssessment memory) {
+    ) internal pure returns (OrderV3Types.ExecutionAssessment memory) {
         if (order.isClose) {
             return _assessCloseSnapshot(context, order, bounds, planner, snapshot);
         }

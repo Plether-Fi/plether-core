@@ -205,6 +205,46 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         assertEq(clearinghouse.pnlPledgeAssets(account), pledgeAfterOpen + claimAssets);
     }
 
+    function test_SettleTraderClaim_UnderwaterIncreaseReliesOnLockedClaimCollateral() public {
+        address account = address(0xD30255);
+        uint256 claimAssets = 2000e6;
+        _fundTrader(account, 6000e6);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
+        _seedAuthenticatedTraderClaim(account, claimAssets);
+
+        // Move price adversely (+1.5% on LONG = 1,500 USDG unrealized loss) so the existing position's own equity
+        // (~360 USDG) plus the standalone increase's equity (~1,858 USDG) falls short of combined IMR (~3,045 USDG)
+        // unless the locked 2,000 USDG trader claim stays in place.
+        uint256 adversePrice = 101_500_000;
+        vm.warp(block.timestamp + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(adversePrice, uint64(block.timestamp));
+
+        vm.prank(account);
+        uint64 orderId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, adversePrice, false);
+        assertEq(router.pendingOrderCounts(account), 1);
+
+        // Settling the claim while the increase is queued must stay blocked.
+        vm.prank(account);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        engine.settleTraderClaim(account);
+        assertEq(engine.traderClaimBalanceAssets(account), claimAssets);
+
+        // With the claim still locked, combined post-open equity clears IMR and the increase executes.
+        bytes[] memory updateData = _mockPythUpdateData(adversePrice);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Executed));
+        (uint256 size,,,,,,) = engine.positions(account);
+        assertEq(size, 200_000e18, "underwater increase must execute using locked claim collateral");
+
+        // Once the queue drains, settling the claim converts it into active position pledge.
+        uint256 pledgeBeforeSettle = clearinghouse.pnlPledgeAssets(account);
+        vm.prank(account);
+        engine.settleTraderClaim(account);
+        assertEq(engine.traderClaimBalanceAssets(account), 0);
+        assertEq(clearinghouse.pnlPledgeAssets(account), pledgeBeforeSettle + claimAssets);
+    }
+
     function test_SettleTraderClaim_LiveCloseThenReopenCannotReleaseClaimCollateral() public {
         address account = address(0xD3026);
         uint256 claimAssets = 2000e6;

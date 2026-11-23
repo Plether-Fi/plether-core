@@ -23,6 +23,7 @@ PINS = {
     "PerpMultiAccountInvariant.t.sol": 3,
     "PerpHousePoolLifecycleInvariant.t.sol": 3,
     "PerpIndependentClaimInvariant.t.sol": 0,
+    "PerpIntegratedLifecycleInvariant.t.sol": 0,
     "PerpVpiFrozenAccountingInvariant.t.sol": 1,
     "PerpWaterfallReferenceInvariant.t.sol": 2,
 }

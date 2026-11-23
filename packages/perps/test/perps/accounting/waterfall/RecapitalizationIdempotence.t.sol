@@ -272,7 +272,8 @@ contract RecapitalizationIdempotenceTest is HousePoolTestBase {
         assertEq(pool.seniorPrincipal(), 1000e6);
         assertEq(pool.juniorPrincipal(), 0, "owner recap cannot become Junior revenue");
         assertEq(pool.unassignedAssets(), 5800e6);
-        assertEq(pool.pendingRecapitalizationAssets(), 3000e6);
+        assertEq(pool.pendingRecapitalizationAssets(), 0, "preserved unassigned deficit must not leave zombie recap");
+        assertEq(pool.getMaxSeniorWithdraw(), 1000e6, "Senior liquidity must not stay frozen after claims clear");
     }
 
     function test_TemporaryMarkedLossCannotEraseFreshRecapAfterOrdinaryPayout() public {

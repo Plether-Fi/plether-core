@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdOrderPolicyEvaluatorBase, ICfdOrderPolicyEngineView} from "@plether/perps/CfdOrderPolicyEvaluatorBase.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
@@ -17,6 +18,7 @@ import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {OpenOrderFundingLib} from "@plether/perps/libraries/OpenOrderFundingLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
+import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 interface ICommittedPolicyRouter {
 
@@ -67,20 +69,108 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
             }
         }
 
-        // VPI may be unquoted after an early planner failure. The explicit fee is known at the reference mark.
+        _validateOpenCommitFunding(
+            engine,
+            account,
+            request,
+            commitPrice,
+            preview.vpiAssets,
+            code == CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING
+        );
+    }
+
+    function _validateOpenCommitFunding(
+        ICfdOrderPolicyEngineView engine,
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 commitPrice,
+        int256 previewVpiAssets,
+        bool isQueuedFlip
+    ) private view {
+        // When a live opposing position is scheduled to close first, `previewOpen` stops at MUST_CLOSE_OPPOSING
+        // before quoting VPI. Quote the post-close VPI at `commitPrice` so underfunded flips fail at commit.
+        CfdTypes.RiskParams memory riskParams = engine.riskParams();
+        int256 vpiAssets = isQueuedFlip
+            ? _queuedFlipVpiAssets(engine, account, request.side, request.sizeDelta, commitPrice, riskParams.vpiFactor)
+            : previewVpiAssets;
         uint256 notionalAssets = request.sizeDelta / CfdTypes.SIZE_QUANTUM * commitPrice;
-        code = OpenOrderFundingLib.validate(
-            engine.riskParams(),
+        CfdEnginePlanTypes.OpenRevertCode fundingCode = OpenOrderFundingLib.validate(
+            riskParams,
             engine.isFadWindow(),
             notionalAssets,
             notionalAssets * engine.executionFeeBps() / 10_000,
-            preview.vpiAssets,
+            vpiAssets,
             request.marginDelta,
             request.bounds
         );
-        if (code != CfdEnginePlanTypes.OpenRevertCode.OK) {
-            revert IOrderRouterErrors.OrderRouter__PredictableOpenInvalid(uint8(code));
+        if (fundingCode != CfdEnginePlanTypes.OpenRevertCode.OK) {
+            revert IOrderRouterErrors.OrderRouter__PredictableOpenInvalid(uint8(fundingCode));
         }
+    }
+
+    function _queuedFlipVpiAssets(
+        ICfdOrderPolicyEngineView engine,
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 commitPrice,
+        uint256 vpiFactor
+    ) private view returns (int256) {
+        if (vpiFactor == 0 || commitPrice == 0) {
+            return 0;
+        }
+        uint256 price = commitPrice > engine.CAP_PRICE() ? engine.CAP_PRICE() : commitPrice;
+        uint256 netDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
+            IHousePool(engine.pool()).totalAssets(),
+            engine.totalTraderClaimBalanceAssets(),
+            engine.totalPositiveVpiAccruedAssets()
+        );
+        if (netDepthAssets == 0) {
+            return 0;
+        }
+        (bool fits, uint256 preSkewAssets, uint256 postSkewAssets) =
+            _queuedFlipSkewAssets(engine, account, side, sizeDelta, price);
+        if (!fits) {
+            return 0;
+        }
+        (bool valid, int256 vpiAssets) =
+            CfdMath.tryCalculateVPI(preSkewAssets, postSkewAssets, netDepthAssets, vpiFactor);
+        return valid ? vpiAssets : int256(0);
+    }
+
+    function _queuedFlipSkewAssets(
+        ICfdOrderPolicyEngineView engine,
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 price
+    ) private view returns (bool fits, uint256 preSkewAssets, uint256 postSkewAssets) {
+        (uint256 liveSize,,,, CfdTypes.Side liveSide,,) = engine.positions(account);
+        (, uint256 longOi,,) = engine.sides(uint256(CfdTypes.Side.LONG));
+        (, uint256 shortOi,,) = engine.sides(uint256(CfdTypes.Side.SHORT));
+        if (liveSide == CfdTypes.Side.LONG) {
+            longOi = longOi > liveSize ? longOi - liveSize : 0;
+        } else {
+            shortOi = shortOi > liveSize ? shortOi - liveSize : 0;
+        }
+        uint256 postLongOi = side == CfdTypes.Side.LONG ? longOi + sizeDelta : longOi;
+        uint256 postShortOi = side == CfdTypes.Side.SHORT ? shortOi + sizeDelta : shortOi;
+        if (postLongOi > type(uint256).max / price || postShortOi > type(uint256).max / price) {
+            return (false, 0, 0);
+        }
+        preSkewAssets = _absOiDiffAssets(longOi, shortOi, price);
+        postSkewAssets = _absOiDiffAssets(postLongOi, postShortOi, price);
+        fits = true;
+    }
+
+    function _absOiDiffAssets(
+        uint256 longOi,
+        uint256 shortOi,
+        uint256 price
+    ) private pure returns (uint256) {
+        uint256 longAssets = (longOi * price) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        uint256 shortAssets = (shortOi * price) / CfdMath.ASSETS_TO_TOKEN_SCALE;
+        return longAssets > shortAssets ? longAssets - shortAssets : shortAssets - longAssets;
     }
 
     function assessCommittedOrder(

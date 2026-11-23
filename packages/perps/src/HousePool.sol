@@ -710,7 +710,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             revert HousePool__NoUnassignedAssets();
         }
         uint256 distributable = HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot).distributable;
-        if (distributable < seniorPrincipal + juniorPrincipal + amount) {
+        if (distributable < seniorPrincipal + juniorPrincipal + amount + _pendingClaimantBucketAssets()) {
             revert HousePool__UnassignedAssetsUnderbacked();
         }
         if (toSenior) {
@@ -1839,16 +1839,37 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         );
         remainingClaimantBuckets =
             HousePoolPendingPreviewLib.subtractClaimantBuckets(claimantBuckets, settleableClaimantBuckets);
-        if (markValid && freshAssets != 0) {
-            uint256 physicalAssets = Math.min(rawAssets(), accountedAssets);
-            uint256 backingAssets =
-                physicalAssets > reconcileSnapshot.distributable ? physicalAssets : reconcileSnapshot.distributable;
-            // Settled buckets already fit within distributable, so only fresh intent above total backing is lost.
-            uint256 unsupportedFreshAssets = freshAssets > backingAssets ? freshAssets - backingAssets : 0;
-            uint256 remainingAssets = _pendingClaimantBucketAssets(remainingClaimantBuckets);
-            remainingClaimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(
-                remainingClaimantBuckets, remainingAssets - Math.min(unsupportedFreshAssets, remainingAssets)
-            );
+        if (markValid) {
+            if (freshAssets != 0) {
+                uint256 physicalAssets = Math.min(rawAssets(), accountedAssets);
+                uint256 backingAssets =
+                    physicalAssets > reconcileSnapshot.distributable ? physicalAssets : reconcileSnapshot.distributable;
+                // Settled buckets already fit within distributable, so only fresh intent above total backing is lost.
+                uint256 unsupportedFreshAssets = freshAssets > backingAssets ? freshAssets - backingAssets : 0;
+                uint256 remainingAssets = _pendingClaimantBucketAssets(remainingClaimantBuckets);
+                remainingClaimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(
+                    remainingClaimantBuckets, remainingAssets - Math.min(unsupportedFreshAssets, remainingAssets)
+                );
+            }
+            // Residual claimant intent can remain deferred only to the extent unpaid claims, deferred positive VPI,
+            // or an adverse mark actually defer settlement; any overlap with preserved unassigned reserves must not
+            // linger and freeze LP liquidity.
+            uint256 remainingAssetsAfterFresh = _pendingClaimantBucketAssets(remainingClaimantBuckets);
+            if (remainingAssetsAfterFresh != 0) {
+                uint256 adverseMarkAssets = accountingSnapshot.terminalLpPriceDeltaAssets < 0
+                    ? uint256(-(accountingSnapshot.terminalLpPriceDeltaAssets + 1)) + 1
+                    : 0;
+                uint256 deferredCapacityAssets =
+                    Math.min(accountingSnapshot.traderClaimBalanceAssets, remainingAssetsAfterFresh);
+                deferredCapacityAssets += Math.min(
+                    accountingSnapshot.totalPositiveVpiAccruedAssets, remainingAssetsAfterFresh - deferredCapacityAssets
+                );
+                deferredCapacityAssets += Math.min(
+                    adverseMarkAssets, remainingAssetsAfterFresh - deferredCapacityAssets
+                );
+                remainingClaimantBuckets =
+                    HousePoolPendingPreviewLib.capClaimantBuckets(remainingClaimantBuckets, deferredCapacityAssets);
+            }
         }
     }
 

@@ -366,6 +366,45 @@ contract OrderRouterAdmissionRegressionTest is SourceBoundBountyFixture {
         _bountyExecute(id, CAP_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
     }
 
+    function test_QueuedFlipRejectsUnderfundedPositiveVpiAtCommit() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0.05e18;
+        _setRiskParams(params);
+        _mark(BOUNTY_PRICE);
+
+        // Build existing SHORT skew so the queued flip into SHORT incurs a material positive VPI charge.
+        _fundTrader(BOUNTY_OTHER, 100_000e6);
+        _open(BOUNTY_OTHER, CfdTypes.Side.SHORT, 200_000e18, 50_000e6, BOUNTY_PRICE);
+        _fundTrader(BOUNTY_TRADER, 50_000e6);
+        _open(BOUNTY_TRADER, CfdTypes.Side.LONG, BOUNTY_SIZE, 2000e6, BOUNTY_PRICE);
+        _mark(BOUNTY_PRICE);
+
+        uint64 closeId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+
+        uint256 flipSize = 100_000e18;
+        uint256 notional = (flipSize / CfdTypes.SIZE_QUANTUM) * BOUNTY_PRICE;
+        uint256 fee = (notional * engine.executionFeeBps()) / 10_000;
+        uint256 reserve = (notional * params.bountyBps) / 10_000;
+        if (reserve < params.minBountyAssets) {
+            reserve = params.minBountyAssets;
+        }
+        uint256 imr = (notional * params.initMarginBps) / 10_000;
+        // Margin covers IMR + reserve + fee (+1), but not the positive VPI charge on the post-close SHORT flip.
+        uint256 zeroVpiMargin = imr + reserve + fee + 1;
+        _rejectOpen(
+            _bountyRequest(CfdTypes.Side.SHORT, false, flipSize, zeroVpiMargin),
+            CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN
+        );
+
+        // Funding the positive VPI charge allows both commit and full flip execution.
+        uint64 flipId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, false, flipSize, zeroVpiMargin + 5000e6);
+        _bountyExecute(closeId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        _bountyExecute(flipId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        (uint256 liveSize,,,, CfdTypes.Side liveSide,,) = engine.positions(BOUNTY_TRADER);
+        assertEq(liveSize, flipSize);
+        assertEq(uint8(liveSide), uint8(CfdTypes.Side.SHORT));
+    }
+
     function _bountyBoundary() private returns (uint256 fundedMargin, uint256 underfundedMargin) {
         CfdTypes.RiskParams memory params = _riskParams();
         params.vpiFactor = 0.05e18;

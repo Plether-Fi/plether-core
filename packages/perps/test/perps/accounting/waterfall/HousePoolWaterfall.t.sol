@@ -578,10 +578,11 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
 
         uint256 pendingRecap = 3000e6;
         _queueRecapitalization(pendingRecap);
-        // Terminal equity is now 4,000 USDG, which is below the 5,000 USDG unassigned reserve.
-        _setTotalTraderClaim(6000e6);
+        // Terminal equity is 6,000 USDG: 1,000 USDG restores Senior, 5,000 USDG backs the unassigned reserve,
+        // and 2,000 USDG of pending recapitalization remains deferred behind trader claims.
+        _setTotalTraderClaim(4000e6);
         (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
-        assertEq(pendingSenior, 0);
+        assertEq(pendingSenior, SEEDED_SENIOR);
 
         vm.expectRevert(IHousePool.HousePool__UnassignedAssetsUnderbacked.selector);
         pool.assignUnassignedAssets(false, carol);
