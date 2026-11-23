@@ -191,7 +191,8 @@ contract CfdEngineLens is ICfdEngineLens {
             side: side,
             isClose: false
         });
-        return engineContract.planner().planOpenCommit(snap, order, oraclePrice, executionBountyAssets);
+        snap = orderAdmissionValidator.prepareOpenCommitSnapshot(snap, executionBountyAssets);
+        return uint8(engineContract.planner().planOpen(snap, order, oraclePrice).revertCode);
     }
 
     /// @notice Classifies the same open plan for commit-time and execution-only router failure policy.

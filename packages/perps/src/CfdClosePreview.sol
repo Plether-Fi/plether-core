@@ -159,9 +159,8 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         preview.commitment = CloseCommitmentLib.project(snapshot, order.sizeDelta);
         preview.commitmentCarryAssets = preview.commitment.carryCollectedAssets;
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snapshot, order, executionPrice);
-        preview.assessment = _evaluateClose(
-            snapshot, delta, bounds, 0, executor == order.account, false, preview.commitmentCarryAssets
-        );
+        preview.assessment =
+            _evaluateClose(snapshot, delta, bounds, 0, executor == order.account, false, preview.commitmentCarryAssets);
     }
 
     /// @dev The router checks side and partial-close dust before reserving even a zero bounty. Its queued-position

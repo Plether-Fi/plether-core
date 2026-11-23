@@ -1246,7 +1246,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     ) internal view returns (uint256) {
         // A reserved deposit can activate after Junior settles, bringing the whole Senior balance back under the ratio.
         if (reservedSeniorDepositAssets == 0 && _isSeniorSeedOnly(seniorSupply)) {
-            return _min(freeAssets, state.juniorPrincipal);
+            return Math.min(freeAssets, state.juniorPrincipal);
         }
         uint256 ratioCap = HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(
             state.seniorPrincipal,
@@ -1817,8 +1817,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             HousePoolPendingPreviewLib.ClaimantPendingBuckets memory remainingClaimantBuckets
         )
     {
-        uint256 claimDebit =
-            markValid ? Math.min(pendingClaimantPayoutDebitAssets, _pendingClaimantBucketAssets(claimantBuckets)) : 0;
+        uint256 claimDebit = markValid
+            ? Math.min(pendingClaimantPayoutDebitAssets, _pendingClaimantBucketAssets(claimantBuckets))
+            : 0;
         claimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(
             claimantBuckets, _pendingClaimantBucketAssets(claimantBuckets) - claimDebit
         );
@@ -1831,14 +1832,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             claimantBuckets.revenueAssets
         );
         uint256 freshAssets = Math.min(freshlyQueuedClaimantAssets, _pendingClaimantBucketAssets(claimantBuckets));
-        uint256 distributableToClaims = reconcileSnapshot.distributable > unassignedAssets
-            ? reconcileSnapshot.distributable - unassignedAssets
-            : 0;
+        uint256 distributableToClaims =
+            reconcileSnapshot.distributable > unassignedAssets ? reconcileSnapshot.distributable - unassignedAssets : 0;
         settleableClaimantBuckets = HousePoolPendingPreviewLib.settleableClaimantBuckets(
-            claimantBuckets,
-            distributableToClaims,
-            seniorPrincipal + juniorPrincipal,
-            freshAssets
+            claimantBuckets, distributableToClaims, seniorPrincipal + juniorPrincipal, freshAssets
         );
         remainingClaimantBuckets =
             HousePoolPendingPreviewLib.subtractClaimantBuckets(claimantBuckets, settleableClaimantBuckets);
@@ -1854,6 +1851,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             );
         }
     }
+
     function _getHousePoolInputSnapshot()
         internal
         view

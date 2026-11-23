@@ -68,15 +68,6 @@ interface ICfdEnginePlanner {
         uint256 executionPrice
     ) external pure returns (CfdEnginePlanTypes.OpenDelta memory delta);
 
-    /// @notice Plans OPEN admission after carry checkpointing and reservation of this order's execution bounty.
-    /// @dev Does not reserve committed margin, which is released again before execution assessment.
-    function planOpenCommit(
-        CfdEnginePlanTypes.RawSnapshot memory snap,
-        CfdTypes.Order memory order,
-        uint256 executionPrice,
-        uint256 executionBountyAssets
-    ) external pure returns (uint8 code);
-
     /// @notice Plans a close or decrease order from a raw engine snapshot.
     /// @dev Caps the execution price at `snap.capPrice`. A side mismatch with a live position returns `SIDE_MISMATCH`
     ///      before carry; zero and non-quantized close sizes return `INVALID_SIZE_QUANTUM`. A size exceeding the

@@ -521,6 +521,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             delta.actionChargeFromReleasedMarginAssets
         );
     }
+
     /// @dev Bound precedence is deliberately identical to the order of `ConstraintKind` values.
     function _enforceBounds(
         OrderV3Types.ExecutionAssessment memory assessment,

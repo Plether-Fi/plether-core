@@ -87,6 +87,26 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
         return (position.exists, position.side, position.size, position.closeableSize);
     }
 
+    /// @inheritdoc ICfdOrderAdmissionValidator
+    function prepareOpenCommitSnapshot(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 executionBountyAssets
+    ) external pure returns (CfdEnginePlanTypes.RawSnapshot memory) {
+        // Match the clearinghouse's carry checkpoint before locking reserved settlement.
+        CfdEnginePlanLib.projectCloseCommitCarry(snap);
+        if (snap.accountBuckets.freeSettlementAssets < executionBountyAssets) {
+            revert OrderRouter__InsufficientFreeEquity();
+        }
+        snap.accountBuckets.freeSettlementAssets -= executionBountyAssets;
+        snap.accountBuckets.otherLockedMarginAssets += executionBountyAssets;
+        snap.accountBuckets.totalLockedMarginAssets += executionBountyAssets;
+        snap.lockedBuckets.reservedSettlementAssets += executionBountyAssets;
+        snap.lockedBuckets.totalLockedMarginAssets += executionBountyAssets;
+        snap.actionReserveAssets += executionBountyAssets;
+        snap.protectedExecutionBountyAssets += executionBountyAssets;
+        return snap;
+    }
+
     function _validateRequest(
         OrderV3Types.OrderRequest calldata request,
         OrderValidationLib.ExecutionDomain memory domain

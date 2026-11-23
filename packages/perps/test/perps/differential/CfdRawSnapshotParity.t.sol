@@ -257,6 +257,8 @@ contract CfdRawSnapshotParityTest is Test {
             actionReserveAssets: 26e6,
             vpiRebateReserveAssets: 27e5,
             protectedExecutionBountyAssets: 28e5,
+            protectedPositionMarginAssets: 11e6,
+            protectedReleasedMarginAssets: 13e6,
             unsettledCarryAssets: 65e6,
             totalTraderClaimBalanceAssets: 44e6,
             totalPositiveVpiAccruedAssets: 45e6,
@@ -323,7 +325,9 @@ contract CfdRawSnapshotParityTest is Test {
                     actionReserveAssets: 26e6,
                     vpiRebateReserveAssets: 27e5,
                     totalLockedAssets: 98e6,
-                    freeSettlementAssets: 902e6
+                    freeSettlementAssets: 902e6,
+                    protectedPledgeAssets: 11e6,
+                    protectedReleasedAssets: 13e6
                 })
             )
         );

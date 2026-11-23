@@ -246,17 +246,25 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     );
 
     modifier onlyPool() {
-        if (msg.sender != address(POOL)) {
-            revert TrancheVault__NotPool();
-        }
+        _checkPool();
         _;
     }
 
     modifier onlyPoolOwner() {
+        _checkPoolOwner();
+        _;
+    }
+
+    function _checkPool() internal view {
+        if (msg.sender != address(POOL)) {
+            revert TrancheVault__NotPool();
+        }
+    }
+
+    function _checkPoolOwner() internal view {
         if (msg.sender != IHousePoolMaintenanceFeeAdminView(address(POOL)).owner()) {
             revert TrancheVault__NotPoolOwner();
         }
-        _;
     }
 
     constructor(

@@ -182,10 +182,9 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         CfdEnginePlanTypes.RawSnapshot memory snapshotCopy = snapshot;
         CfdEnginePlanTypes.OpenDelta memory deltaCopy = delta;
         OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
-        return
-            _evaluateOpen(
-                snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false, deltaCopy.marginDeltaAssets, 0
-            );
+        return _evaluateOpen(
+            snapshotCopy, deltaCopy, boundsCopy, executionBountyAssets, false, deltaCopy.marginDeltaAssets, 0
+        );
     }
 
     /// @inheritdoc ICfdOrderPolicyEvaluator

@@ -158,12 +158,11 @@ library CfdEnginePlanLib {
             return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.None;
         }
 
-        if (
-            code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
-                || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
-                || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
-                || code == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED
-        ) {
+        uint256 protocolInvalidMask = (1 << uint8(CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE))
+            | (1 << uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH))
+            | (1 << uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED))
+            | (1 << uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
+        if (protocolInvalidMask & (uint256(1) << uint8(code)) != 0) {
             return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated;
         }
 
@@ -1138,16 +1137,18 @@ library CfdEnginePlanLib {
         uint256 vpiClawbackWithheldAssets;
         if (actionNetAssets > 0) {
             delta.actionChargeAssessedAssets = uint256(actionNetAssets);
-            delta.actionChargeWithheldAssets = delta.priceGainAssets < delta.actionChargeAssessedAssets
-                ? delta.priceGainAssets
-                : delta.actionChargeAssessedAssets;
-            delta.actionChargeToCollectAssets = delta.actionChargeAssessedAssets - delta.actionChargeWithheldAssets;
             // Canonical proportional removal has the prior accrual's sign and cannot exceed its magnitude.
-            uint256 vpiClawbackAssets = _negativeVpiReserveTarget(delta.posVpiAccruedReduction);
-            vpiClawbackWithheldAssets = delta.actionChargeWithheldAssets < vpiClawbackAssets
-                ? delta.actionChargeWithheldAssets
-                : vpiClawbackAssets;
-            delta.vpiRebateReserveConsumedAssets = vpiClawbackAssets - vpiClawbackWithheldAssets;
+            (
+                delta.actionChargeWithheldAssets,
+                delta.actionChargeToCollectAssets,
+                vpiClawbackWithheldAssets,
+                delta.vpiRebateReserveConsumedAssets
+            ) =
+                _splitWithheldActionCharge(
+                    delta.priceGainAssets,
+                    delta.actionChargeAssessedAssets,
+                    _negativeVpiReserveTarget(delta.posVpiAccruedReduction)
+                );
             _planCloseCashSources(snap, delta, cs.remainingSize == 0);
         } else if (actionNetAssets < 0) {
             delta.actionRebateAssets = uint256(-actionNetAssets);
@@ -1156,13 +1157,10 @@ library CfdEnginePlanLib {
         delta.netReleasedMarginAssets = delta.unlockMarginAssets - delta.actionChargeFromReleasedMarginAssets;
         uint256 nonClawbackWithheldAssets = delta.actionChargeWithheldAssets - vpiClawbackWithheldAssets;
         uint256 nonVpiReserveCollectedAssets = delta.actionChargeCollectedAssets - delta.vpiRebateReserveConsumedAssets;
-        uint256 executionFeeEligibleAssets = nonClawbackWithheldAssets + nonVpiReserveCollectedAssets;
         delta.executionFeeAssets =
-            cs.executionFeeAssets < executionFeeEligibleAssets ? cs.executionFeeAssets : executionFeeEligibleAssets;
+            Math.min(cs.executionFeeAssets, nonClawbackWithheldAssets + nonVpiReserveCollectedAssets);
         // The eligibility cap already bounds this remainder by non-VPI collected cash.
-        delta.actionProtocolFeeCreditedAssets = delta.executionFeeAssets > nonClawbackWithheldAssets
-            ? delta.executionFeeAssets - nonClawbackWithheldAssets
-            : 0;
+        delta.actionProtocolFeeCreditedAssets = Math.saturatingSub(delta.executionFeeAssets, nonClawbackWithheldAssets);
     }
 
     function _postCloseHealthy(
@@ -1214,45 +1212,72 @@ library CfdEnginePlanLib {
         }
     }
 
+    function _splitWithheldActionCharge(
+        uint256 priceGainAssets,
+        uint256 assessedAssets,
+        uint256 vpiClawbackAssets
+    )
+        private
+        pure
+        returns (
+            uint256 withheldAssets,
+            uint256 toCollectAssets,
+            uint256 vpiClawbackWithheldAssets,
+            uint256 vpiRebateReserveConsumedAssets
+        )
+    {
+        withheldAssets = Math.min(priceGainAssets, assessedAssets);
+        toCollectAssets = assessedAssets - withheldAssets;
+        vpiClawbackWithheldAssets = Math.min(withheldAssets, vpiClawbackAssets);
+        vpiRebateReserveConsumedAssets = vpiClawbackAssets - vpiClawbackWithheldAssets;
+    }
+
+    function _consumeSpendableActionReserve(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 actionChargeToCollectAssets,
+        uint256 vpiRebateReserveBeforeAssets,
+        uint256 vpiRebateReserveAfterAssets,
+        uint256 vpiRebateReserveConsumedAssets
+    )
+        private
+        pure
+        returns (uint256 actionReserveConsumedAssets, uint256 remainingAfterReserve, uint256 releasedVpiReserveAssets)
+    {
+        uint256 chargeExcludingVpi = actionChargeToCollectAssets - vpiRebateReserveConsumedAssets;
+        uint256 protectedActionReserveAssets = snap.protectedExecutionBountyAssets + snap.vpiRebateReserveAssets;
+        actionReserveConsumedAssets =
+            Math.min(chargeExcludingVpi, Math.saturatingSub(snap.actionReserveAssets, protectedActionReserveAssets));
+        remainingAfterReserve = chargeExcludingVpi - actionReserveConsumedAssets;
+        releasedVpiReserveAssets =
+            vpiRebateReserveBeforeAssets - vpiRebateReserveAfterAssets - vpiRebateReserveConsumedAssets;
+    }
+
     function _planCloseCashSources(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.CloseDelta memory delta,
         bool terminal
     ) private pure {
-        uint256 remainingActionChargeToCollectAssets =
-            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
-        uint256 protectedActionReserveAssets = snap.protectedExecutionBountyAssets + snap.vpiRebateReserveAssets;
-        uint256 spendableActionReserveAssets = snap.actionReserveAssets > protectedActionReserveAssets
-            ? snap.actionReserveAssets - protectedActionReserveAssets
-            : 0;
-        delta.actionReserveConsumedAssets = remainingActionChargeToCollectAssets < spendableActionReserveAssets
-            ? remainingActionChargeToCollectAssets
-            : spendableActionReserveAssets;
-        uint256 actionChargeAfterReserveAssets =
-            remainingActionChargeToCollectAssets - delta.actionReserveConsumedAssets;
-        uint256 releasedVpiReserveAssets = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
-            - delta.vpiRebateReserveConsumedAssets;
-        uint256 collectibleFreeSettlementAssets = snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets;
+        uint256 remaining;
+        uint256 releasedVpiReserveAssets;
+        (delta.actionReserveConsumedAssets, remaining, releasedVpiReserveAssets) = _consumeSpendableActionReserve(
+            snap,
+            delta.actionChargeToCollectAssets,
+            delta.vpiRebateReserveBeforeAssets,
+            delta.vpiRebateReserveAfterAssets,
+            delta.vpiRebateReserveConsumedAssets
+        );
+        uint256 collectibleFree = snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets
+            + (terminal ? delta.liquidationReserveReleaseAssets : 0);
+        remaining = Math.saturatingSub(remaining, collectibleFree);
+        delta.actionChargeFromReleasedMarginAssets = Math.min(remaining, delta.unlockMarginAssets);
+        remaining = Math.saturatingSub(
+            remaining - delta.actionChargeFromReleasedMarginAssets, snap.protectedReleasedMarginAssets
+        );
         if (terminal) {
-            // The full-close reserve is released before pledge attribution and cash collection.
-            collectibleFreeSettlementAssets += delta.liquidationReserveReleaseAssets;
+            delta.actionCommittedMarginConsumedAssets =
+                Math.min(remaining, snap.lockedBuckets.committedOrderMarginAssets);
         }
-        uint256 freeConsumedAssets = actionChargeAfterReserveAssets < collectibleFreeSettlementAssets
-            ? actionChargeAfterReserveAssets
-            : collectibleFreeSettlementAssets;
-        uint256 actionChargeAfterFreeAssets = actionChargeAfterReserveAssets - freeConsumedAssets;
-        delta.actionChargeFromReleasedMarginAssets = actionChargeAfterFreeAssets < delta.unlockMarginAssets
-            ? actionChargeAfterFreeAssets
-            : delta.unlockMarginAssets;
-        actionChargeAfterFreeAssets -= delta.actionChargeFromReleasedMarginAssets;
-        actionChargeAfterFreeAssets -= Math.min(actionChargeAfterFreeAssets, snap.protectedReleasedMarginAssets);
-        if (terminal) {
-            delta.actionCommittedMarginConsumedAssets = actionChargeAfterFreeAssets
-                < snap.lockedBuckets.committedOrderMarginAssets
-                ? actionChargeAfterFreeAssets
-                : snap.lockedBuckets.committedOrderMarginAssets;
-        }
-        delta.actionChargeWaivedAssets = actionChargeAfterFreeAssets - delta.actionCommittedMarginConsumedAssets;
+        delta.actionChargeWaivedAssets = remaining - delta.actionCommittedMarginConsumedAssets;
         delta.actionChargeCollectedAssets = delta.actionChargeToCollectAssets - delta.actionChargeWaivedAssets;
     }
 
@@ -1690,13 +1715,8 @@ library CfdEnginePlanLib {
         delta.vpiRebateReserveBeforeAssets = snap.vpiRebateReserveAssets;
         delta.vpiRebateReserveAfterAssets = 0;
         delta.actionChargeAssessedAssets = delta.pendingCarryAssets - delta.realizedCarryAssets + vpiClawbackAssets;
-        delta.actionChargeWithheldAssets = delta.priceGainAssets < delta.actionChargeAssessedAssets
-            ? delta.priceGainAssets
-            : delta.actionChargeAssessedAssets;
-        delta.actionChargeToCollectAssets = delta.actionChargeAssessedAssets - delta.actionChargeWithheldAssets;
-        uint256 vpiClawbackWithheldAssets =
-            delta.actionChargeWithheldAssets < vpiClawbackAssets ? delta.actionChargeWithheldAssets : vpiClawbackAssets;
-        delta.vpiRebateReserveConsumedAssets = vpiClawbackAssets - vpiClawbackWithheldAssets;
+        (delta.actionChargeWithheldAssets, delta.actionChargeToCollectAssets,, delta.vpiRebateReserveConsumedAssets) =
+            _splitWithheldActionCharge(delta.priceGainAssets, delta.actionChargeAssessedAssets, vpiClawbackAssets);
         _collectLiquidationActionCharge(snap, delta);
     }
 
@@ -1705,17 +1725,19 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.LiquidationDelta memory delta
     ) private pure {
-        uint256 chargeExcludingVpi = delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
-        uint256 protectedActionReserveAssets = snap.protectedExecutionBountyAssets + snap.vpiRebateReserveAssets;
-        delta.actionReserveConsumedAssets =
-            Math.min(chargeExcludingVpi, Math.saturatingSub(snap.actionReserveAssets, protectedActionReserveAssets));
-        uint256 releasedVpiReserveAssets = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
-            - delta.vpiRebateReserveConsumedAssets;
-        uint256 chargeAfterCash = Math.saturatingSub(
-            chargeExcludingVpi - delta.actionReserveConsumedAssets,
+        uint256 remaining;
+        uint256 releasedVpiReserveAssets;
+        (delta.actionReserveConsumedAssets, remaining, releasedVpiReserveAssets) = _consumeSpendableActionReserve(
+            snap,
+            delta.actionChargeToCollectAssets,
+            delta.vpiRebateReserveBeforeAssets,
+            delta.vpiRebateReserveAfterAssets,
+            delta.vpiRebateReserveConsumedAssets
+        );
+        delta.actionChargeWaivedAssets = Math.saturatingSub(
+            remaining,
             snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets + snap.protectedReleasedMarginAssets
         );
-        delta.actionChargeWaivedAssets = chargeAfterCash;
         delta.actionChargeCollectedAssets = delta.actionChargeToCollectAssets - delta.actionChargeWaivedAssets;
     }
 
