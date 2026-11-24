@@ -1713,6 +1713,8 @@ Checked-in historical reports:
 
 - [SC Audit Studio pre-audit report](../../audits/plether-pre-audit-report.pdf)
 - [Collaborative audit report, May 12, 2026](../../audits/plether-collaborative-audit-report-2026-05-12.pdf)
+- [Cecuro AI audit report, October 26, 2026](../../audits/plether-ai-audit-report-2026-10-26.pdf)
+- [Immunefi audit competition report, November 2–16, 2026](../../audits/plether-immunefi-audit-competition-report-2026-11-16.pdf)
 
 Each report applies to its stated scope and reviewed revision. Subsequent changes to order execution, accounting,
 LP settlement, and deployment wiring require review against the exact release commit. These reports and historical
