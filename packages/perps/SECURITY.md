@@ -156,10 +156,12 @@ without a new deployment.
 
 `CfdEngine.recapitalizePool(amountAssets)` is an immediate, owner-only, non-reentrant recovery action.
 The engine owner approves the engine to pull USDG from its own wallet directly into the configured HousePool.
-The engine checkpoints carry against the old pool depth, verifies the exact token balance increase, and records
+The engine checkpoints carry through the current timestamp, verifies the exact token balance increase, and records
 `Recapitalization` with `CashArrived` atomically. Existing excess cannot substitute for the incoming transfer.
 The pool queues claimant allocation for normal reconciliation; no shares are minted and degraded mode is not
 automatically cleared. Funding remains available with stale marks, frozen markets, and LP pause or settlement holds.
+Recapitalization restores only the existing Senior entitlement; it does not establish a new high-water mark after
+a wipeout or lift operator entry pauses.
 `CfdEngineAdmin` retains its configuration-only role.
 
 ### One-time wiring
@@ -318,7 +320,7 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
 | `HousePool.reconcile()` | Either configured tranche vault | Internal integration hook; users enter and claim through the vault |
 | `HousePool.settleLpEpoch(...)` | Configured Router when positions exist outside frozen mode; otherwise permissionless | Live route binds the Router's exact mark/time; every route respects the settlement hold |
 
-The no-carry release methods change reservation buckets only. Carry remains derived from canonical Engine indexes and
+The no-carry release methods change reservation buckets only. Carry remains derived from the canonical Engine global index and
 is assessed by the planner/Engine. On a retryable order item failure, the self-call revert restores the released
 reservation, so a classifier cannot strand value between custody buckets.
 
@@ -344,6 +346,8 @@ These are the highest-value properties an auditor should expect to hold.
 | Funded-claim backing | Every claimable LP asset is held one-for-one in vault escrow and cannot be reused by `HousePool` |
 | Trader claim liabilities are senior | Trader claim balance remains a senior claim on pool liquidity until serviced; keeper bounties are not pool liabilities |
 | Explicit terminal deficit | Signed terminal liabilities above physical assets and collectible terminal receivables are persisted on fresh reconcile and block LP entry |
+| Claimant allocation once | Unchanged repeated reconciliation cannot re-reserve already credited backing; a bounded payout debit retires unsupported pending value at the next mark-valid stable canonical preview/reconcile without treating marked receivables as withdrawal cash |
+| Senior restoration once | Coupon and loss precede pending recapitalization, ordinary positive revenue follows it, and pending revenue is last; pending recapitalization fills the existing Senior recovery gap before later revenue can fill the same gap |
 
 ### Position and engine accounting
 
@@ -388,7 +392,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Invariant | Description |
 |-----------|-------------|
 | Canonical asset boundary | Pool depth is based on `min(rawAssets, accountedAssets)`, not raw token balance alone |
-| Economic depth | Carry, skew capacity, and VPI use canonical assets minus outstanding trader claims, floored at zero; physical custody and solvency inputs remain gross |
+| Economic depth | Skew capacity and VPI use canonical assets minus outstanding trader claims, floored at zero; flat carry is independent of depth; physical custody and solvency inputs remain gross |
 | Symmetric terminal NAV | LP entry and exit pricing use the same signed exact terminal price delta and waterfall snapshot |
 | Receivable/cash separation | Positive marked receivables are capped by account PnL pledge and nettable same-account claim, and never increase physical redemption funding before collection |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
@@ -490,9 +494,8 @@ governance owns the coordinator and assigns its guardian.
   reuses the exact single-order Clearinghouse reversal for each invalidated open; this is bounded by the 32-order
   account cap and remains inside one rollback frame.
 - HousePool pause blocks LP entry only. Redemptions, synchronized redemption funding, and funded claims remain live.
-  It does not itself unlock cancellation of a matured deposit; that request still needs an existing rejection,
-  projected wipe, Senior impairment, or explicit settlement hold for a committed Senior request, or later activation
-  after recovery.
+  While Pool entry is paused, both tranches may cancel unfinalized deposits, including matured Junior and committed
+  Senior requests. Cancellation preserves escrow accounting and releases any Senior reservation.
 - The independent settlement hold makes every synchronized epoch call revert before mutation, including direct
   cached/no-position and Router atomic-refresh routes. It stops new Senior requests and reservations while allowing
   existing Senior commitments to be refunded. Junior requests, redemptions, trading,
@@ -877,7 +880,7 @@ Security consequences:
 
 Ordinary LP entry remains asynchronous: assets are funded into request escrow, a complete pending Junior deposit is
 cancellable before maturity, and an accepted Senior deposit is a firm commitment. Senior refunds require epoch
-rejection, projected terminal wipe, Senior impairment, or an explicit LP settlement hold. Shares are
+rejection, projected terminal wipe, Senior impairment, a Pool entry pause, or an explicit LP settlement hold. Shares are
 minted only after synchronized `HousePool` settlement fixes the batch price. ERC-4626 `deposit` and `mint` only claim
 already activated shares. The one-hour cooldown is timestamped at that successful activation, not at claim. A claim is
 therefore an administrative transfer that propagates the source activation timestamp with
@@ -946,25 +949,41 @@ still latches only at `E < L` and may be cleared at `E >= L`; the full buffer ne
 
 The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
 
-- carry base: `max(positionMaxProfitAssets - activePositionMarginAssets, 0)`
-- utilization denominator: `max(pool.totalAssets() - totalTraderClaimBalanceAssets, 0)`; a positive base at zero depth
-  uses full utilization. Claim creation, consumption, and payment checkpoint both side indexes before changing depth
-- accrual clock: wall-clock time
+- carry exposure: canonical `position.maxProfitAssets`, including fully and over-margined positions; there is no
+  separate cached exposure or directional carry aggregate
+- annual rate: flat `baseCarryBps`, with release default `500 bps` (5% over 365 days), independent of margin, pool
+  utilization, pool availability, claims, and the opposite side. Both sides pay independently; carry is not allocated
+  from a shared-reserve bill. Zero maximum-profit exposure accrues zero position carry
+- governance: the existing annual-rate parameter remains timelocked and bounded. Checkpoint the old rate before a
+  new rate takes effect; changes must not reprice historical intervals
+- accrual clock: one global `carryIndex` and `carryTimestamp` shared by both directions. The index advances at the
+  flat annual rate while either side has positive maximum-profit exposure; when both are zero, its timestamp
+  checkpoints without index growth. New and reopened positions capture the current index and never inherit
+  pre-entry accrual, including when their own direction was previously idle
+- deployment compatibility: the single-index storage layout, singular `checkpointCarryIndex()` entrypoint, and
+  reduced planner/view interfaces require a fresh compatible stack. Do not mix prior directional-index contracts or
+  assume their storage can be upgraded into this layout
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
 - claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryAssets`,
   then apply the full incoming credit. The credit can fund retained arrears at a later checkpoint, including at the same
   timestamp; it is not collected or waived in this call. Claim liquidity checks run after collection, and any failure
   rolls back the collection and credit
-- realization points: open, close, add margin, pool-asset changes, risk-parameter changes, and owner clearinghouse
-  `deposit` / `depositMargin` / withdraw paths before the carry base/rate denominator changes. Owner deposits may
+- realization points: open, close, liquidation, add margin, and owner clearinghouse
+  `deposit` / `depositMargin` / withdraw paths. Exposure/rate changes checkpoint the old interval; Engine-owned
+  claim and recapitalization hooks retain their index checkpoints. Margin and pool changes do not change the carry
+  basis or rate. Owner deposits may
   collect realized carry from post-deposit settlement in the same transaction; withdrawals realize carry before
   reducing settlement. Credit-only `depositFor` makes no carry checkpoint and leaves accrued carry due
+- LP liquidity independence: HousePool excess accounting, seed initialization, and LP epoch settlement make no
+  Engine carry-checkpoint call and leave the stored global index and timestamp unchanged. They do not collect
+  account debt; projected flat-rate carry remains due at the next Engine or explicit checkpoint. An atomic Router
+  settlement may separately advance carry while synchronizing the oracle mark
 - destination: realized carry becomes LP trading revenue
 - collection priority: active position margin first, then free settlement; all other locked buckets and trader claims
   remain protected during carry collection
 - projection: planners and account views share `projectCarryLoss` for post-carry buckets. Its output must not alias
-  raw custody; ledger diagnostics retain raw values. The planner updates side margin, borrowing bases, carry indexes,
-  arrears and pool revenue together, using carry accrued against live depth even for hypothetical trade simulations
+  raw custody; ledger diagnostics retain raw values. The planner updates side margin, the position carry checkpoint,
+  arrears and pool revenue together, using maximum profit directly and one global index in the raw snapshot. Actual and hypothetical pool depth must not alter accrued carry
 - health: project margin consumption before evaluating exact price risk. Fully paid carry is not delinquency, but a
   reduced pledge may breach maintenance. Carry uncovered by both margin and free settlement independently blocks
   withdrawal and makes the account liquidatable; claims cannot fund carry. Stored arrears alone are not delinquency
@@ -1395,7 +1414,7 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
 - governance can prospectively reduce senior limits below live exposure, closing new senior entry and potentially
   reducing Junior redemption-funding capacity until the covenant is cured; it cannot force existing Senior capital out,
 - accepted senior reservations are grandfathered against later cap or accounting changes; an explicit settlement hold,
-  projected terminal wipe, Senior impairment, or epoch rejection allows escrow recovery,
+  projected terminal wipe, Senior impairment, epoch rejection, or a Pool entry pause allows escrow recovery,
 - wallet shares remain governed by the latest applicable activation timestamp, so voluntarily combining a newer lot
   with an older wallet balance preserves the newer lot's remaining cooldown. Administrative claims do not manufacture
   a claim-time delay, and the direct route can consume an independently aged source lot without mixing it into the
@@ -1427,7 +1446,7 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
   The checkpoint advances even when the result is zero, without retaining the fractional remainder. Each such
   conversion can discard less than one USDG atom (`0.000001 USDG`). User-triggered checkpoints, including
   zero-amount withdrawals, can therefore reduce LP carry revenue; an interval whose entire accrual is below one atom
-  contributes no collectible carry. Practical savings depend on borrow size, utilization, checkpoint frequency, and
+  contributes no collectible carry. Practical savings depend on maximum-profit exposure, annual rate, checkpoint frequency, and
   transaction costs. The implementation does not persist fractional carry.
 - **Zero-share Junior maintenance-fee checkpoints:** With a nonzero maintenance-fee rate and sufficiently
   small raw Junior share supply, the fee for completed chargeable hours can round down to zero shares. The checkpoint
@@ -1505,13 +1524,16 @@ This runbook concerns actual negative terminal LP equity or trader payout claims
 service. A terminal price-loss write-off above an account's collectible cap and a waived terminal action remainder
 create neither condition; the current accounting model has no accumulated-debt ledger to clear.
 
-1. Let closes and liquidations continue.
-2. Prevent further risk expansion via degraded mode when `E < L`, or through the ordinary `E >= L + B` admission
-   gate when raw solvency remains intact; use admin pause if additional containment is needed.
-3. Consider stricter risk settings to accelerate cleanup.
-4. Recapitalize or clear positions.
-5. Clear degraded mode only after raw solvency `E >= L` is genuinely restored; buffer restoration is not required
-   for clearing, although new risk remains blocked until `E >= L + B`.
+1. Keep closes, liquidations, claims and refunds available under their normal safety checks.
+2. For a manual shutdown, pause `OrderRouterAdmin` and `HousePool` entry and leave them paused. Router risk-off
+   cleanup refunds queued opens; Pool entry pause lets both tranches refund unfinalized deposits, including matured
+   Junior and committed Senior requests.
+3. Do not leave the LP epoch settlement hold active as the shutdown mechanism: it prevents redemption funding.
+   Preserve eligible redemption requests, funding and already-funded claims.
+4. Fund or settle existing obligations as needed. Funding does not reset Senior's HWM or lift either entry pause.
+5. Clear degraded mode only after raw solvency `E >= L` is genuinely restored when needed for remaining settlement.
+   Keep the entry pauses in place even if cash or prices recover. This is an operator policy; the contracts add no
+   automatic wipeout latch or irreversible shutdown/restart feature.
 
 ## Asset Isolation
 

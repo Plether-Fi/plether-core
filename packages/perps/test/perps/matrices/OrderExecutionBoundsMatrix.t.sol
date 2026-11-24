@@ -583,11 +583,11 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
             Row memory row = Row(2, 0, CfdTypes.Side(side), false);
             _prepare(row);
             vm.warp(vm.getBlockTimestamp() + 1200);
-            // Independent integer-rational vectors, with $1,002,000 depth, $3,977.60 pledge and 500 bps:
-            // Long borrow12,022.40 / utilization119bps ->272 atoms in1200s, then68 in301s.
-            // Short borrow20,022.40 / utilization199bps ->758 atoms, then190. Collection changes basis/depth.
-            uint256 commitmentCarry = side == 0 ? 272 : 758;
-            uint256 delayedCarry = side == 0 ? 68 : 190;
+            // Independent integer-rational vectors at 5% annually, unaffected by pledge or depth:
+            // Long maximum profit $16,000 ->30,441 atoms in1200s, then7,635 in301s.
+            // Short maximum profit $24,000 ->45,662 atoms, then11,453. Collection does not reprice carry.
+            uint256 commitmentCarry = side == 0 ? 30_441 : 45_662;
+            uint256 delayedCarry = side == 0 ? 7635 : 11_453;
             executionDelay = 300; // MockPyth update advances one additional second.
             _carryLimits(row, commitmentCarry, delayedCarry);
             assertTrue(vm.revertToState(scenario));
@@ -723,8 +723,8 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                 clearinghouse.vpiRebateReserveAssets(ACCOUNT)
             )
         );
-        (uint256 borrowBase, uint256 index, uint64 timestamp) = engine.positionCarryState(ACCOUNT);
-        s.carryState = keccak256(abi.encode(borrowBase, index, timestamp));
+        (uint256 maxProfitAssets, uint256 index, uint64 timestamp) = engine.positionCarryState(ACCOUNT);
+        s.carryState = keccak256(abi.encode(maxProfitAssets, index, timestamp));
         s.nextCommit = router.nextCommitId();
         s.nextExecute = router.nextExecuteId();
     }

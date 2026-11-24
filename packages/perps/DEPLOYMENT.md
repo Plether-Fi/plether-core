@@ -22,6 +22,10 @@ Immutable and one-time bindings prevent a Router-only replacement or an in-place
 There is no live-state migration tool. Cutover needs a separate plan for existing positions, queued orders,
 protections, balances, claims, and LP obligations.
 
+Manual shutdown uses the existing `OrderRouterAdmin` and `HousePool` entry pauses, left in place while obligations
+are settled. Do not use the LP epoch settlement hold as a permanent stop because it also blocks redemption funding.
+The source adds no automatic wipeout latch or irreversible restart restriction.
+
 Generate consumer ABIs from the release build. Current requests and client-intent hashes use V3; receipts and execution
 configuration hashes use V5. Pin the manifest and runtime hashes with those ABIs. Keep historical manifests, decoders,
 and services available until their positions and pending work are resolved; do not redirect old requests or receipt
@@ -122,6 +126,19 @@ creation evidence. Bootstrap's supplied-sidecar check proves code and
 
 ## Initial release parameters
 
+The current source charges flat carry independently of margin and pool utilization. Historical deployment manifests
+identify immutable earlier contracts and do not acquire this behavior through a rate-parameter update. Verify the
+source and runtime of the intended deployment rather than inferring carry semantics from `baseCarryBps = 500` alone.
+
+The carry cleanup also changes storage and interfaces: the Engine exposes one `carryIndex`, `carryTimestamp`,
+`currentCarryIndex()` projection, and singular `checkpointCarryIndex()`. Position exposure comes directly from
+`maxProfitAssets`; obsolete exposure caches and directional carry getters are removed. The planner's
+`computeCurrentCarryIndex(storedIndex, previousTimestamp, currentTimestamp, baseCarryBps)` takes four arguments.
+Carry amount calculation is internal, so the planner ABI no longer exposes `computeIndexedCarryAssets`.
+The raw planner snapshot carries one global index; directional snapshots contain no carry fields. Deploy and
+verify a fresh internally compatible stack, and regenerate consumer bindings for these interfaces. Existing
+Sepolia contracts and their storage do not acquire this layout through a rate update or an in-place migration.
+
 These are the checked-in script and constructor defaults, not a claim about any live deployment. USDG values use
 six decimals; basis points use `10,000 = 100%`.
 
@@ -134,7 +151,7 @@ six decimals; basis points use `10,000 = 100%`.
 | `maintMarginBps` | `10` |
 | `initMarginBps` | `20` |
 | `fadMarginBps` | `300` |
-| `baseCarryBps` | `500` |
+| `baseCarryBps` | `500` (flat 5% annual carry on full maximum-profit exposure) |
 | `minBountyAssets` | `1e6` |
 | `bountyBps` | `10` total liquidation-charge rate |
 | `keeperShareBps` | `5_000` (50% of collected charge to keeper) |

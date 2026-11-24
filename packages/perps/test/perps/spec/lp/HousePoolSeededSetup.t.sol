@@ -66,7 +66,7 @@ contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
         assertEq(pool.seniorPrincipal(), 0, "Senior principal should be wiped out before recap");
         assertGt(pool.seniorHighWaterMark(), 0, "Stored HWM should remain stale until reconcile applies the recap");
 
-        uint256 recapAmount = 500e6;
+        uint256 recapAmount = pool.seniorHighWaterMark();
         settlementToken.mint(address(pool), recapAmount);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
@@ -85,7 +85,7 @@ contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        uint256 juniorBacking = 1e6;
+        uint256 juniorBacking = 100e6;
         settlementToken.mint(address(pool), juniorBacking);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
@@ -95,7 +95,8 @@ contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
         pool.reconcile();
 
         assertEq(pool.juniorPrincipal(), juniorBacking, "Junior revenue should supply ratio backing");
-        assertTrue(pool.canAcceptTrancheDeposits(true), "Senior deposits should reopen with junior backing");
+        assertGe(pool.getSeniorDepositCapacity(), 1000e6, "Restored backing should support the requested depth");
+        assertTrue(pool.canAcceptTrancheDeposits(true), "Senior deposits should reopen with restored backing");
 
         uint256 totalBeforeDeposit = pool.totalAssets();
         settlementToken.mint(dave, 1000e6);
@@ -108,6 +109,7 @@ contract HousePoolSeededBaseSetupTest is HousePoolAsyncTestBase {
         uint256 shares = _claimAsyncDeposit(seniorVault, requestId, dave);
 
         assertGt(shares, 0, "Senior deposit should succeed after reconcile consumes the pending recap");
+        assertEq(pool.pendingRecapitalizationAssets(), 0, "Recap should settle into existing claimant value");
         assertEq(
             pool.totalAssets(), totalBeforeDeposit + 1000e6, "Live state should include the recap plus the new deposit"
         );

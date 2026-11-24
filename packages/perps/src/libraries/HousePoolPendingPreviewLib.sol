@@ -30,32 +30,6 @@ library HousePoolPendingPreviewLib {
         uint256 juniorSupply;
     }
 
-    /// @notice Applies settleable recapitalization first and settleable revenue second to a memory preview.
-    /// @dev Zero buckets are skipped. `claimantIntentBuckets.revenueAssets` is intentionally unused. Mutates `state` in
-    ///      place; it does not decrement either input bucket.
-    /// @param state In-memory accounting state to update.
-    /// @param claimantBuckets Settleable recapitalization and revenue amounts to apply.
-    /// @param claimantIntentBuckets Full outstanding intent used to establish the recapitalization bootstrap target.
-    /// @param allowRevenueContinuation Whether revenue may be routed into already-claimed waterfall equity.
-    function applyPendingClaimantBucketsPreview(
-        PendingAccountingState memory state,
-        ClaimantPendingBuckets memory claimantBuckets,
-        ClaimantPendingBuckets memory claimantIntentBuckets,
-        bool allowRevenueContinuation
-    ) internal pure {
-        if (claimantBuckets.recapitalizationAssets > 0) {
-            applyClaimantRecapitalizationIntent(
-                state, claimantBuckets.recapitalizationAssets, claimantIntentBuckets.recapitalizationAssets
-            );
-            // Recapitalization can restore a claimant path for revenue in this same batch.
-            allowRevenueContinuation =
-                allowRevenueContinuation || state.waterfall.seniorPrincipal + state.waterfall.juniorPrincipal != 0;
-        }
-        if (claimantBuckets.revenueAssets > 0) {
-            applyRevenueIntent(state, claimantBuckets.revenueAssets, allowRevenueContinuation);
-        }
-    }
-
     /// @notice Sums recapitalization and revenue assets in a claimant bucket.
     /// @param claimantBuckets Buckets to total.
     /// @return Total pending assets in 6-decimal settlement token.
@@ -81,6 +55,23 @@ library HousePoolPendingPreviewLib {
             claimantBuckets.revenueAssets > remaining ? remaining : claimantBuckets.revenueAssets;
     }
 
+    /// @notice Limits pending allocation to new claimant inflows or value not yet assigned to a pool owner.
+    /// @dev A residual pending bucket cannot reserve principal already credited by an earlier reconcile. Freshly
+    ///      queued inflows may still be applied while earlier principal is impaired by an unrelated loss.
+    function settleableClaimantBuckets(
+        ClaimantPendingBuckets memory claimantBuckets,
+        uint256 distributableAssets,
+        uint256 bookedAssets,
+        uint256 freshlyQueuedAssets
+    ) internal pure returns (ClaimantPendingBuckets memory settleableBuckets) {
+        uint256 unbookedAssets = distributableAssets > bookedAssets ? distributableAssets - bookedAssets : 0;
+        uint256 allocationCapacity = freshlyQueuedAssets > unbookedAssets ? freshlyQueuedAssets : unbookedAssets;
+        if (allocationCapacity > distributableAssets) {
+            allocationCapacity = distributableAssets;
+        }
+        return capClaimantBuckets(claimantBuckets, allocationCapacity);
+    }
+
     /// @notice Subtracts independently settled pending buckets using saturating subtraction.
     /// @dev If a settled component exceeds its corresponding claimant component, that residual component is zero;
     ///      excess from one component is not applied to the other.
@@ -101,34 +92,24 @@ library HousePoolPendingPreviewLib {
     }
 
     /// @notice Routes recapitalization to senior restoration or to unassigned assets.
-    /// @dev With senior owners and zero claimed principal, all `amount` bootstraps senior principal and sets the
-    ///      high-water mark to `max(recapitalizationTargetAssets, amount)`. Otherwise, senior principal is restored only
-    ///      up to its high-water mark. Any remainder, including all value when there are no senior owners, becomes
+    /// @dev With senior owners, recapitalization restores principal only up to the existing high-water mark.
+    ///      Any remainder, including all value after a full wipeout with no surviving Senior entitlement, becomes
     ///      unassigned; recapitalization never accrues to junior principal. Mutates `state` in place.
     /// @param state In-memory accounting state to update.
     /// @param amount Settleable recapitalization assets to apply.
-    /// @param recapitalizationTargetAssets Full recapitalization intent used as the high-water mark on an empty bootstrap.
     function applyClaimantRecapitalizationIntent(
         PendingAccountingState memory state,
-        uint256 amount,
-        uint256 recapitalizationTargetAssets
+        uint256 amount
     ) internal pure {
         uint256 remaining = amount;
         if (state.seniorSupply > 0) {
-            if (state.waterfall.seniorPrincipal == 0 && state.waterfall.juniorPrincipal == 0) {
-                state.waterfall.seniorPrincipal += remaining;
-                state.waterfall.seniorHighWaterMark =
-                    recapitalizationTargetAssets > remaining ? recapitalizationTargetAssets : remaining;
-                remaining = 0;
-            } else {
-                uint256 gap = state.waterfall.seniorHighWaterMark > state.waterfall.seniorPrincipal
-                    ? state.waterfall.seniorHighWaterMark - state.waterfall.seniorPrincipal
-                    : 0;
-                if (gap > 0) {
-                    uint256 seniorAssignedAssets = remaining > gap ? gap : remaining;
-                    state.waterfall.seniorPrincipal += seniorAssignedAssets;
-                    remaining -= seniorAssignedAssets;
-                }
+            uint256 gap = state.waterfall.seniorHighWaterMark > state.waterfall.seniorPrincipal
+                ? state.waterfall.seniorHighWaterMark - state.waterfall.seniorPrincipal
+                : 0;
+            if (gap > 0) {
+                uint256 seniorAssignedAssets = remaining > gap ? gap : remaining;
+                state.waterfall.seniorPrincipal += seniorAssignedAssets;
+                remaining -= seniorAssignedAssets;
             }
         }
         if (remaining > 0) {
@@ -136,35 +117,16 @@ library HousePoolPendingPreviewLib {
         }
     }
 
-    /// @notice Applies revenue with continuation into already-claimed equity disabled.
-    /// @dev Mutates `state` in place.
+    /// @notice Routes revenue through senior restoration, junior principal, and unassigned assets.
+    /// @dev Revenue first restores senior principal up to its high-water mark when senior owners exist, then accrues
+    ///      to junior principal when junior owners exist, and leaves any remainder unassigned.
+    ///      Mutates `state` in place.
     /// @param state In-memory accounting state to update.
     /// @param amount Revenue assets to apply, in 6-decimal settlement token.
     function applyRevenueIntent(
         PendingAccountingState memory state,
         uint256 amount
     ) internal pure {
-        applyRevenueIntent(state, amount, false);
-    }
-
-    /// @notice Routes revenue through senior restoration, junior principal, and unassigned assets.
-    /// @dev Unless `allowClaimedEquity` is true, any nonzero claimed principal causes the entire amount to become
-    ///      unassigned. Otherwise revenue first restores senior principal up to its high-water mark when senior owners
-    ///      exist, then accrues to junior principal when junior owners exist, and leaves any remainder unassigned.
-    ///      Mutates `state` in place.
-    /// @param state In-memory accounting state to update.
-    /// @param amount Revenue assets to apply, in 6-decimal settlement token.
-    /// @param allowClaimedEquity Whether revenue may continue into a waterfall that already has claimed principal.
-    function applyRevenueIntent(
-        PendingAccountingState memory state,
-        uint256 amount,
-        bool allowClaimedEquity
-    ) internal pure {
-        if (!allowClaimedEquity && state.waterfall.seniorPrincipal + state.waterfall.juniorPrincipal != 0) {
-            state.unassignedAssets += amount;
-            return;
-        }
-
         uint256 remaining = amount;
         if (state.seniorSupply > 0) {
             uint256 gap = state.waterfall.seniorHighWaterMark > state.waterfall.seniorPrincipal
