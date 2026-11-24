@@ -217,7 +217,8 @@ contract MarginFirstCarryTest is BasePerpTest {
         vm.warp(block.timestamp + 1 days);
         assertFalse(engineAccountLens.getAccountLedgerSnapshot(TRADER).liquidatable);
         assertFalse(engineLens.previewLiquidation(TRADER, 1e8).liquidatable);
-        vm.warp(block.timestamp + 300 * 365 days);
+        // One year costs $5,000: it exhausts the roughly $2,860 pledge, but $47k free cash covers the rest.
+        vm.warp(block.timestamp + 365 days);
         assertTrue(engineAccountLens.getAccountLedgerSnapshot(TRADER).liquidatable);
         assertTrue(engineLens.previewLiquidation(TRADER, 1e8).liquidatable);
         _checkpoint(TRADER);
@@ -243,7 +244,7 @@ contract MarginFirstCarryTest is BasePerpTest {
         assertEq(_margin(TRADER), preview.postMarginAssets);
         (,,, uint256 sideMargin) = engine.sides(0);
         assertEq(sideMargin, _margin(TRADER));
-        assertEq(engine.sideBorrowBaseAssets(0), _positionBorrowBaseAssets(TRADER));
+        assertEq(_sideState(CfdTypes.Side.LONG).maxProfitAssets, _positionMaxProfitAssets(TRADER));
         _authenticate(TRADER);
     }
 

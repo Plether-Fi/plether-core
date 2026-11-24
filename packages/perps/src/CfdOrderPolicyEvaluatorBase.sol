@@ -39,23 +39,13 @@ interface ICfdOrderPolicyEngineView {
 
     function positionCarryState(
         address account
-    ) external view returns (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
+    ) external view returns (uint256 maxProfitAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
 
     function sides(
         uint256 index
     ) external view returns (uint256 maxProfitAssets, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
 
-    function sideBorrowBaseAssets(
-        uint256 index
-    ) external view returns (uint256);
-
-    function sideCarryIndex(
-        uint256 index
-    ) external view returns (uint256);
-
-    function sideCarryTimestamp(
-        uint256 index
-    ) external view returns (uint64);
+    function currentCarryIndex() external view returns (uint256);
 
     function planner() external view returns (address);
 
@@ -136,7 +126,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(context.engineAddress);
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
-            _buildRawSnapshot(engine, planner, order.account, context.poolDepthAssets);
+            _buildRawSnapshot(engine, order.account, context.poolDepthAssets);
         return _assessSnapshot(context, order, bounds, planner, snapshot);
     }
 
@@ -191,18 +181,16 @@ abstract contract CfdOrderPolicyEvaluatorBase {
 
     function _buildRawSnapshot(
         ICfdOrderPolicyEngineView engine,
-        ICfdEnginePlanner planner,
         address account,
         uint256 poolDepthAssets
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
-        return _buildRawSnapshot(engine, planner, account, poolDepthAssets, IHousePool(engine.pool()).totalAssets());
+        return _buildRawSnapshot(engine, account, poolDepthAssets, IHousePool(engine.pool()).totalAssets());
     }
 
     /// @dev Authoritative assessment already read canonical pool cash. Reuse that observation; simulation callers
-    ///      may supply a different pricing depth and must use the four-argument overload to read historical carry cash.
+    ///      may supply a different pricing depth and use the three-argument overload to read canonical settlement cash.
     function _buildRawSnapshot(
         ICfdOrderPolicyEngineView engine,
-        ICfdEnginePlanner planner,
         address account,
         uint256 poolDepthAssets,
         uint256 poolCashAssets
@@ -217,8 +205,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             snapshot.position.vpiAccrued
         ) = engine.positions(account);
         snapshot.positionEntryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
-        (snapshot.positionBorrowBaseAssets, snapshot.positionLastCarryIndex, snapshot.position.lastCarryTimestamp) =
-            engine.positionCarryState(account);
+        (, snapshot.positionLastCarryIndex, snapshot.position.lastCarryTimestamp) = engine.positionCarryState(account);
+        snapshot.carryIndex = engine.currentCarryIndex();
 
         snapshot.account = account;
         snapshot.currentTimestamp = block.timestamp;
@@ -232,13 +220,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
         snapshot.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
         snapshot.totalTraderClaimBalanceAssets = engine.totalTraderClaimBalanceAssets();
-        uint256 carryDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
-            snapshot.poolCashAssets, snapshot.totalTraderClaimBalanceAssets
-        );
-        snapshot.longSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.LONG, carryDepthAssets, snapshot.riskParams.baseCarryBps);
-        snapshot.shortSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.SHORT, carryDepthAssets, snapshot.riskParams.baseCarryBps);
+        snapshot.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG);
+        snapshot.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT);
         snapshot.poolAssets = poolDepthAssets;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
@@ -257,23 +240,11 @@ abstract contract CfdOrderPolicyEvaluatorBase {
 
     function _sideSnapshot(
         ICfdOrderPolicyEngineView engine,
-        ICfdEnginePlanner planner,
-        CfdTypes.Side side,
-        uint256 poolDepthAssets,
-        uint256 baseCarryBps
+        CfdTypes.Side side
     ) private view returns (CfdEnginePlanTypes.SideSnapshot memory snapshot) {
         uint256 index = uint256(side);
         (snapshot.maxProfitAssets, snapshot.openInterest, snapshot.entryNotional, snapshot.totalMargin) =
             engine.sides(index);
-        snapshot.borrowBaseAssets = engine.sideBorrowBaseAssets(index);
-        snapshot.carryIndex = planner.computeCurrentCarryIndex(
-            engine.sideCarryIndex(index),
-            engine.sideCarryTimestamp(index),
-            block.timestamp,
-            snapshot.borrowBaseAssets,
-            poolDepthAssets,
-            baseCarryBps
-        );
     }
 
     function _requireValidOpenDelta(

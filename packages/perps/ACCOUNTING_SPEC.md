@@ -63,8 +63,8 @@ Use these terms consistently:
 - `accountedAssets`: canonical protocol-owned USDG recognized by pool accounting
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: conservative economic pool backing
-- `economicDepth = max(physicalAssets - totalTraderClaimBalanceAssets, 0)`: depth for carry utilization, skew capacity,
-  and VPI. Do not also subtract open-position liabilities, the settlement buffer, or LP principal.
+- `economicDepth = max(physicalAssets - totalTraderClaimBalanceAssets, 0)`: depth for skew capacity and VPI.
+  Do not also subtract open-position liabilities, the settlement buffer, or LP principal.
 - `protocolTreasuryBalance = clearinghouse.balanceAssets(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
 - `netPhysicalAssets = physicalAssets`: the retained snapshot field reports canonical pool backing. Treasury
   settlement is held in the clearinghouse, outside pool custody, so subtracting it here would understate backing.
@@ -292,7 +292,7 @@ This view determines tranche equity for share pricing and revenue distribution:
   pricing,
 - ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, Junior requests
   are cancellable before maturity, and Senior requests commit capacity at admission. Senior refunds require epoch
-  rejection, projected terminal wipe, Senior impairment, or an explicit LP settlement hold,
+  rejection, projected terminal wipe, Senior impairment, a Pool entry pause, or an explicit LP settlement hold,
 - `OrderRouter.settleLpEpoch(bytes[])` validates a `PoolReconcile` Pyth basket, installs its neutral Engine mark, and
   invokes the Router-only HousePool settlement callback in one rollback frame; with live open positions, the basket's
   earliest publish time must be at or after the current round-hour epoch boundary,
@@ -335,9 +335,23 @@ loss. With both tranches owned, reconciliation applies these rules:
 1. Checkpoint the elapsed Senior coupon as a transfer from Junior principal to Senior principal.
 2. Compare terminal equity, excluding reserved pending claimant inflows and `unassignedAssets`, with total principal.
 3. Charge a shortfall to Junior first, then Senior. Losses do not reduce the Senior high-water mark.
-4. Route surplus first to restore Senior principal to its high-water mark, then to Junior.
-5. Route pending recapitalization and trading-revenue buckets according to their explicit ownership intent, described
-   below. Reserving them in step 2 prevents counting the same inflow twice.
+4. Apply settleable pending recapitalization to the remaining Senior recovery gap, leaving any excess unassigned.
+5. Route ordinary positive surplus to any remaining Senior recovery gap, then to Junior.
+6. Route settleable pending trading revenue last under the same Senior-first revenue rules. Reserving pending value
+   in step 2 prevents counting it twice.
+
+A fresh inflow and an already-considered residual are distinct for reservation purposes. With unchanged economic
+inputs and coupon time, another reconciliation cannot consume the same backing again or move value between
+Senior, Junior, and unassigned assets. Recapitalization restores Senior only up to its existing high-water mark;
+it does not replace that recovery target after a loss.
+
+Recapitalization must precede ordinary positive revenue within the same reconciliation. If both can restore a
+Senior gap, revenue applied first can consume recovery capacity reserved for recapitalization and incorrectly leave
+the recapitalization unassigned. Starting from the same completed first partial-recap reconciliation, with the same
+Senior gap, pending balances and coupon interval and no intervening losses or withdrawals, splitting only subsequent
+ordinary positive revenue around pending settlement must not reroute Junior gains to unassigned assets. This does
+not change the existing policy for when losses and profits are first reconciled before that initial allocation;
+it is not a receipt-time ownership ledger.
 
 For elapsed seconds `dt`, the coupon calculation is:
 
@@ -438,7 +452,7 @@ Rules:
   amount to active senior principal without rechecking later capacity drift,
 - a governance reduction, coupon, or loss can passively move the book above current limits, closing new Senior
   admission. A settlement hold stops new Senior requests and permits controllers to recover pending escrow; projected
-  terminal wipe, Senior impairment, and rejected epochs also permit refunds,
+  terminal wipe, Senior impairment, rejected epochs, and a Pool entry pause also permit refunds,
 - funded junior redemptions of net assets `w` must additionally preserve
   `(X + R) * 10_000 <= Q * (X + R + J - w)` using active protected exposure plus pending commitments,
 - funded Senior redemptions and Junior deposits improve capacity and may cure an overage,
@@ -637,10 +651,17 @@ Keep these categories separate:
 - `accountExcess()`: owner-governed admission of unsolicited raw pool cash into canonical assets
 
 Governance funds recapitalization through `CfdEngine.recapitalizePool(amountAssets)`. The engine owner approves
-the engine for USDG; the call checkpoints carry at the old depth, transfers from the owner's wallet directly to
+the engine for USDG; the call checkpoints carry through the current timestamp, transfers from the owner's wallet directly to
 the pool, and verifies exact receipt before recording `Recapitalization` with `CashArrived`. Transfer and recording
 are atomic. Normal reconciliation allocates the queued amount to senior restoration or unassigned assets;
-the funding call mints no LP shares and does not automatically clear degraded mode.
+the funding call mints no LP shares and does not automatically clear degraded mode or lift operator pauses.
+Recapitalization preserves Senior's existing high-water mark. A trader-claim payment records a bounded debit against
+pending claimant value because the terminal book may still be mid-mutation. An ordinary pool payout does not record
+that debit. The next mark-valid preview/reconcile retires paid claim backing before allocating later gains, then
+retires fresh pending intent that has neither physical cash nor distributable equity behind it. With open positions,
+an expired or future mark retains the debit for a later valid observation; ordinary reconciliation and coupon
+freshness rules remain separate. Physical cash alone cannot determine support: collectible terminal receivables may
+still back claimant intent, while remaining unavailable for cash withdrawals.
 
 Rules:
 
@@ -653,16 +674,16 @@ Rules:
 
 ## Economic Depth For Carry And Risk Pricing
 
-Carry utilization, the opening skew cap, and open/close VPI use `economicDepth`, not gross physical assets. Paying a
-flat account's existing claim reduces assets and liabilities equally and therefore does not change these quantities
-when no other state changes. Physical custody, payout affordability, solvency snapshots, Router depth/receipt fields,
-and hypothetical preview inputs remain gross; each risk-pricing consumer subtracts claims once.
+The opening skew cap and open/close VPI use `economicDepth`, not gross physical assets. Paying a flat account's
+existing claim reduces assets and liabilities equally and therefore does not change this depth when no other state
+changes. Physical custody, payout affordability, solvency snapshots, Router depth/receipt fields, and hypothetical
+preview inputs remain gross; each risk-pricing consumer subtracts claims once.
 
-Carry uses actual live economic depth even when a simulation supplies hypothetical gross assets for trade pricing.
-Projected carry collection adds cash before the trade's net-depth calculation. Both directional indexes checkpoint
-against the old depth before claim creation, claim consumption/netting, claim payment, or a physical-asset change.
+Carry is independent of economic depth. The heading is retained for existing links. Neither actual nor hypothetical
+pool depth, claim changes, recapitalization, LP activity, or passive balance shocks change the annual carry rate or
+full maximum-profit basis. Projected carry collection still adds cash before a trade's net-depth calculation.
 
-At zero economic depth, a positive borrow base accrues carry at full utilization. Opens/increases reject with
+At zero economic depth, open positions accrue the same flat annual carry. Opens/increases reject with
 `SOLVENCY_EXCEEDED` after projecting carry collection, even if the proposed order would reduce market skew. Maximum-open
 quotes return zero capacity. Protective closes and liquidations remain available under their existing health and
 settlement rules. A zero-depth close creates no fresh VPI charge or rebate, but still recovers any negative lifetime
@@ -670,29 +691,45 @@ VPI allocated to the closed size; fees, frozen spreads, and claim seniority rema
 
 ## LP-Capital Carry
 
-The protocol uses LP-capital carry instead of a side-to-side rate mechanism.
+The protocol charges flat simple annual carry on every position's full maximum-profit exposure. The release rate is
+`baseCarryBps = 500`, or 5% over 365 days. The existing governed rate remains configurable; a rate change checkpoints
+elapsed time under the old rate before applying the new rate prospectively. Posted margin and pool utilization do
+not enter the accrual formula. Both sides pay independently; there is no shared-reserve allocation or offset between
+them. Payout-reserve and settlement-buffer checks continue to constrain risk admission and LP withdrawals separately.
 
 Definitions:
 
-- `borrowBaseAssets = max(positionMaxProfitAssets - activePositionMarginAssets, 0)`
-- `sideBorrowBaseAssets`: sum of open-position borrow bases for one side
-- `sideUtilizationBps = min(floor(sideBorrowBaseAssets * 10_000 / economicDepth), 10_000)`; a positive base at zero depth uses 10,000 bps
-- `pendingCarryAssets = unsettledCarryAssets + floor(borrowBaseAssets * (currentSideCarryIndex - positionLastCarryIndex) / 1e18)`
-- `unsettledCarryAssets[account]`: carry that has been checkpointed at a basis change but not yet physically collected
+- `position.maxProfitAssets`: the canonical position's full maximum-profit exposure, in settlement-token atoms; no separate carry-exposure cache is stored
+- `carryIndex`: the single cumulative flat annual rate, scaled by `1e18`, shared by both directions
+- `carryTimestamp`: wall-clock timestamp through which the stored global index has advanced
+- `currentCarryIndex()`: read-only projection of the global index through the current block timestamp
+- `positionLastCarryIndex`: the global index last checkpointed for the position
+- `pendingCarryAssets = unsettledCarryAssets + floor(position.maxProfitAssets * (currentCarryIndex - positionLastCarryIndex) / 1e18)`
+- `unsettledCarryAssets[account]`: carry that has been checkpointed but not yet physically collected
 
-For elapsed seconds `dt` at fixed borrow base and economic depth, the side index increases by:
+For elapsed seconds `dt`, the global index increases while either side has positive maximum-profit exposure:
 
 ```text
-indexDelta = floor(baseCarryBps * sideUtilizationBps * 1e18 * dt / (365 days * 10_000 * 10_000))
+indexDelta = floor(baseCarryBps * 1e18 * dt / (365 days * 10_000))
 ```
 
-The implementation combines this division so it does not prematurely round the utilization-adjusted rate.
+The pure `computeCurrentCarryIndex(storedIndex, previousTimestamp, currentTimestamp, baseCarryBps)` helper takes
+only index, time and rate inputs. Engine projection handles the idle state: if both directional maximum-profit
+aggregates are zero, the index stays fixed while `checkpointCarryIndex()` still advances `carryTimestamp`.
+
+At a constant rate and position exposure, the economic charge before integer rounding is
+`position.maxProfitAssets * baseCarryBps * dt / (365 days * 10_000)`. Accrual is simple, not compounded. A fully or
+over-margined position pays the same carry as an otherwise identical position with less margin. Collection that
+reduces margin does not increase maximum profit. Size and entry-basis changes can change maximum profit, so their
+old interval must be assessed before installing the new exposure. A zero maximum-profit endpoint position accrues
+no carry. A position opened or reopened after either direction has used the common clock captures the current
+global index and pays only for time after its own execution.
 
 Rules:
 
 - carry accrues continuously by wall-clock time,
 - carry does not pause when the oracle is stale or frozen,
-- both sides pay when they have nonzero borrow base,
+- both sides pay when they have nonzero maximum-profit exposure, regardless of margin or pool depth,
 - guard, open/modify, withdrawal, close, and liquidation paths allocate pending carry to canonical active position
   margin first, then free settlement. Collection protects all other locked buckets and same-account trader claims,
 - projected price-risk health uses the remaining margin plus same-account claim and exact price PnL. Fully collected
@@ -707,10 +744,12 @@ Rules:
   collection from current buckets; stored arrears alone do not prove carry delinquency,
 - claim service still requires pool cash to cover all outstanding trader claims after carry collection. Collected carry
   may enable that payout; insufficient cash or any later failure reverts the entire collection and credit,
-- side carry indexes advance before borrowing-base, pool-asset, trader-claim, or risk-parameter mutations change their rate or
-  denominator. Account collection remains lazy; an LP deposit or redemption does not collect every trader's debt,
-- a flat-to-open transition advances both side indexes to execution wall-clock time using the old borrowing bases
-  and pool depth before inserting new exposure. This also applies to historical-price fills that retain a newer
+- the global carry index advances before position-exposure or annual-rate changes. Engine-owned collateral,
+  trader-claim, and recapitalization hooks may also advance it without changing the rate. HousePool excess accounting,
+  seed initialization, and LP epoch settlement do not call the carry checkpoint or collect trader debt. Their
+  liquidity changes leave the stored global index and timestamp untouched; projected carry continues to accrue,
+- a flat-to-open transition advances the global index to execution wall-clock time before inserting new exposure.
+  This also applies to historical-price fills that retain a newer
   cached accounting mark: the new position must not accrue carry for time before it opened,
 - on owner `deposit` / `depositMargin`, realized carry may be collected from post-deposit settlement in the same
   transaction. Credit-only `depositFor` skips the checkpoint and leaves existing carry due,
@@ -722,11 +761,14 @@ Rules:
   rules remain unchanged,
 - realized carry is booked as LP trading revenue once. Receipts and financial bounds include the direct collection once,
   in addition to the residual action settlement; carried-forward arrears are not counted as newly accrued carry,
-- margin-consuming collection updates the terminal curve atomically with collateral, borrowing-base, and pool
-  changes. Terminal-NAV reads are blocked during intermediate accounting, and a revert restores the entire change.
+- margin-consuming collection updates the terminal curve atomically with collateral and pool changes; the
+  maximum-profit carry basis stays unchanged. Terminal-NAV reads are blocked during intermediate accounting, and a revert restores the entire change.
 
 `CarryRealized` reports collection and retained arrears whenever nonzero carry is due, including zero collection when
 no backing remains.
+
+An atomic LP settlement through the Router may separately synchronize an oracle mark. That Engine operation can
+advance carry under its existing rules; the subsequent HousePool liquidity step does not call the carry checkpoint.
 
 LP ownership follows collection time. Indexed pending carry and retained `unsettledCarryAssets` are trader debt, not
 LP NAV receivables. Cash collection becomes pool revenue and the existing tranche waterfall prices it at the next
@@ -1085,8 +1127,9 @@ withdrawal-capacity quote: account reservations, carry, and Engine withdrawal gu
 
 ### Open projection
 
-The planner projects carry collection before pricing a trade or evaluating its resulting collateral. It updates the
-position and side borrow bases consistently and adds only collected cash to pool assets. Net VPI rebates credit free
+The planner projects carry collection before pricing a trade or evaluating its resulting collateral. It reads
+exposure directly from the canonical position maximum profit and uses the one projected `carryIndex` in the raw
+snapshot. Only collected cash is added to pool assets. Margin collection alone does not change maximum profit. Net VPI rebates credit free
 settlement and may fund the dedicated VPI reserve; they do not directly become price-risk pledge.
 
 Admission then checks the resulting pledge plus same-account claim, after the VPI-reserve funding and
@@ -1236,6 +1279,21 @@ Required properties:
 
 - both close and liquidation re-check containment,
 - preview and simulation should expose both `triggersDegradedMode` and `postOpDegradedMode`.
+
+## Manual Shutdown
+
+After a severe loss, the operator may stop new business by pausing `OrderRouterAdmin` and `HousePool` and leaving
+both entry pauses in place. This is an operational policy using the existing reversible controls; there is no
+automatic wipeout trigger, irreversible terminal flag, or separate restart mechanism.
+
+Router pause blocks new risk and invalidates queued opens through the existing risk-off refund path. Pool pause
+blocks new LP deposit requests and activation. Both tranches may cancel unfinalized deposits while Pool entry is
+paused, including matured Junior and committed Senior requests; Senior cancellation releases its reservation.
+
+Keep closes, liquidations, margin support, trader claims, redemption requests, eligible redemption funding, funded
+claims and refunds available under their normal safety checks. Do not use the LP epoch settlement hold as a
+permanent shutdown control: it also stops redemption funding. Later funding or market recovery can support
+existing obligations without requiring the operator to reopen entries.
 
 ## Oracle And Freshness Policy
 

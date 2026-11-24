@@ -6,10 +6,13 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 import {HousePoolAsyncTestBase} from "../../shared/HousePoolTestBase.sol";
 
 contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
+
+    using stdStorage for StdStorage;
 
     address alice = address(0x111);
 
@@ -107,7 +110,7 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         assertTrue(pool.canIncreaseRisk());
     }
 
-    function test_ActivateTradingRejectsResidualPendingClaimantAssets() public {
+    function test_ActivateTradingAcceptsPendingRevenueSpentOnPayout() public {
         _seedBothTranches();
         settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
@@ -122,6 +125,25 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         pool.payOut(address(0xDEAD), 1000e6);
         assertEq(pool.unassignedAssets(), 0);
 
+        pool.activateTrading();
+        assertTrue(pool.canIncreaseRisk(), "Spent pending revenue should not block pretrading activation");
+    }
+
+    function test_ActivateTradingRejectsResidualPendingClaimantAssets() public {
+        _seedBothTranches();
+        settlementToken.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        settlementToken.mint(address(pool), 3000e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            3000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(1000e6);
+        assertEq(engine.totalTraderClaimBalanceAssets(), 1000e6, "Trader liability should reduce settleable revenue");
+        assertEq(pool.pendingTradingRevenueAssets(), 3000e6);
+        assertEq(pool.unassignedAssets(), 0);
         vm.expectRevert(IHousePool.HousePool__PendingBootstrap.selector);
         pool.activateTrading();
         assertFalse(pool.isTradingActive());

@@ -159,19 +159,10 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         address account,
         uint256 marginAssets
     ) internal view returns (uint256) {
-        (,,,, CfdTypes.Side side,,) = engine.positions(account);
-        (uint256 borrowBaseAssets, uint256 startIndex,) = engine.positionCarryState(account);
-        (,,,,, uint256 baseCarryBps,,,,) = engine.riskParams();
-        uint256 endIndex = PositionRiskAccountingLib.computeCurrentCarryIndex(
-            engine.sideCarryIndex(uint256(side)),
-            engine.sideCarryTimestamp(uint256(side)),
-            block.timestamp,
-            engine.sideBorrowBaseAssets(uint256(side)),
-            housePool.totalAssets(),
-            baseCarryBps
-        );
+        (uint256 maxProfitAssets, uint256 startIndex,) = engine.positionCarryState(account);
+        uint256 endIndex = engine.currentCarryIndex();
         uint256 pendingCarryAssets = engine.unsettledCarryAssets(account)
-            + PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, endIndex - startIndex);
+            + PositionRiskAccountingLib.computeIndexedCarryAssets(maxProfitAssets, endIndex - startIndex);
         return pendingCarryAssets < marginAssets ? pendingCarryAssets : marginAssets;
     }
 
