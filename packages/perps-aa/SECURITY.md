@@ -74,11 +74,14 @@ It limits sponsored operations to nonce key zero and atomic ERC-7579 single or b
 v0.9 optional paymaster-signature suffix and block-based validity windows. The signature binds the exact operation.
 
 Kernel UUPS accounts can change their implementation and root. The paymaster checks the proxy runtime and the
-configured implementation and validator code hashes. The gateway must independently attest the sender's live
-implementation and beacon slots, root and validator owner at agreed canonical state before issuance and submission.
-The constructor restricts this UUPS pilot to Arbitrum Sepolia. Use controlled accounts, a small dedicated deposit
-and short-lived authorizations. A production profile requires immutable execution or an irreversible upgrade lock
-and qualification under the production bundler validation rules.
+configured implementation and validator code hashes. The gateway attests the sender's live implementation and beacon
+slots, root and validator owner at agreed state before issuance and submission, but because `EntryPoint.handleOps` is
+permissionless, a malicious UUPS owner who already holds a signed `paymasterAndData` could upgrade via a parallel
+nonce key and submit directly to EntryPoint without passing through the gateway. Gateway submission checks are
+therefore a defense-in-depth guardrail, not an enforceable boundary against a malicious account owner. The constructor
+restricts this UUPS pilot to Arbitrum Sepolia. Use controlled accounts, a small dedicated deposit and short-lived
+authorizations. A production profile requires immutable execution or an irreversible upgrade lock and qualification
+under the production bundler validation rules.
 
 ETH-paid operations run without a paymaster, signer approval, or sponsor reservation. Continue checking account
 identity, approved actions, nonce and canonical receipt evidence throughout this path.
