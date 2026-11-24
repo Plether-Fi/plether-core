@@ -150,6 +150,9 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
     error ValidityWindowTooLong(uint48 actualWindow, uint48 maximumWindow);
     error SignedCostLimitExceeded(uint256 actualMaxCost, uint128 signedMaxCost);
     error PaymasterCostLimitExceeded(uint256 actualMaxCost, uint256 paymasterMaxCost);
+    error OwnershipRenunciationDisabled();
+    error InvalidRecipient(address recipient);
+    error PostOpNotSupported();
 
     event SponsorSignerUpdated(address indexed previousSigner, address indexed newSigner);
     event MaxSponsoredCostUpdated(uint256 previousMaxSponsoredCost, uint256 newMaxSponsoredCost);
@@ -261,7 +264,9 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
         bytes calldata,
         uint256,
         uint256
-    ) external view override onlyEntryPoint {}
+    ) external view override onlyEntryPoint {
+        revert PostOpNotSupported();
+    }
 
     /// @notice Returns the exact EIP-712 digest the policy service must sign.
     /// @dev This remains callable before a counterfactual sender is deployed. EntryPoint creates the sender before
@@ -310,10 +315,17 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
         return entryPoint.balanceOf(address(this));
     }
 
+    function renounceOwnership() public pure override {
+        revert OwnershipRenunciationDisabled();
+    }
+
     function withdrawTo(
         address payable recipient,
         uint256 amount
     ) external onlyOwner {
+        if (recipient == address(0)) {
+            revert InvalidRecipient(address(0));
+        }
         entryPoint.withdrawTo(recipient, amount);
     }
 
@@ -330,6 +342,9 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
     function withdrawStake(
         address payable recipient
     ) external onlyOwner {
+        if (recipient == address(0)) {
+            revert InvalidRecipient(address(0));
+        }
         entryPoint.withdrawStake(recipient);
     }
 
@@ -408,7 +423,7 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
             revert RootValidatorCodeHashMismatch(actualRootValidatorCodeHash, rootValidatorCodeHash);
         }
         if (userOp.initCode.length != 0) {
-            _validateFactoryCall(userOp.initCode);
+            _validateFactoryCall(userOp.sender, userOp.initCode);
         }
 
         // Kernel v4 uses the top 192 bits to select validation mode, validator, and nonce key.
@@ -427,6 +442,7 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
     }
 
     function _validateFactoryCall(
+        address sender,
         bytes calldata initCode
     ) internal view {
         address initCodeFactory = initCode.length < 20 ? address(0) : address(bytes20(initCode[0:20]));
@@ -452,6 +468,7 @@ contract PletherKernelVerifyingPaymaster is IPaymaster, Ownable2Step, Pausable, 
                 || address(bytes20(pkg.moduleData)) == address(0) || pkg.internalData.length != 0
                 || keccak256(factoryCall)
                     != keccak256(abi.encodeCall(IKernelV4FactoryProfile.deploy, (packages, index)))
+                || IKernelV4FactoryProfile(accountFactory).getAddress(packages, index) != sender
         ) {
             revert InvalidFactoryCall();
         }

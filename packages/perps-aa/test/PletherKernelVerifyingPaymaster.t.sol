@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC4337Utils} from "@openzeppelin/contracts/account/utils/draft-ERC4337Utils.sol";
-import {IEntryPoint, PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
+import {IEntryPoint, IPaymaster, PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {
     IKernelV4FactoryProfile,
     PletherKernelVerifyingPaymaster
@@ -11,11 +13,64 @@ import {Test} from "forge-std/Test.sol";
 
 contract MockKernelV09EntryPoint {
 
+    mapping(address account => uint256 balance) public deposits;
+    uint256 public stakeAmount;
+    uint32 public unstakeDelay;
+    bool public stakeUnlocked;
+    address public lastWithdrawRecipient;
+    uint256 public lastWithdrawAmount;
+
     function supportsInterface(
         bytes4 interfaceId
     ) external pure returns (bool) {
         // XOR of the seven methods defined directly on the upstream v0.9 interface.
         return interfaceId == 0x283f5489;
+    }
+
+    function depositTo(
+        address account
+    ) external payable {
+        deposits[account] += msg.value;
+    }
+
+    function balanceOf(
+        address account
+    ) external view returns (uint256) {
+        return deposits[account];
+    }
+
+    function withdrawTo(
+        address payable recipient,
+        uint256 amount
+    ) external {
+        deposits[msg.sender] -= amount;
+        lastWithdrawRecipient = recipient;
+        lastWithdrawAmount = amount;
+        (bool ok,) = recipient.call{value: amount}("");
+        require(ok, "withdraw failed");
+    }
+
+    function addStake(
+        uint32 unstakeDelaySec
+    ) external payable {
+        stakeAmount += msg.value;
+        unstakeDelay = unstakeDelaySec;
+        stakeUnlocked = false;
+    }
+
+    function unlockStake() external {
+        stakeUnlocked = true;
+    }
+
+    function withdrawStake(
+        address payable recipient
+    ) external {
+        uint256 amount = stakeAmount;
+        stakeAmount = 0;
+        lastWithdrawRecipient = recipient;
+        lastWithdrawAmount = amount;
+        (bool ok,) = recipient.call{value: amount}("");
+        require(ok, "stake withdraw failed");
     }
 
 }
@@ -24,11 +79,30 @@ contract MockKernelV4Factory {
 
     // forge-lint: disable-next-line(screaming-snake-case-immutable)
     address public immutable UUPS;
+    address public immutable EXPECTED_OWNER;
+    address public immutable EXPECTED_ACCOUNT;
 
     constructor(
-        address implementation
+        address implementation,
+        address expectedOwner,
+        address expectedAccount
     ) {
         UUPS = implementation;
+        EXPECTED_OWNER = expectedOwner;
+        EXPECTED_ACCOUNT = expectedAccount;
+    }
+
+    function getAddress(
+        IKernelV4FactoryProfile.Install[] calldata packages,
+        uint256 index
+    ) external view returns (address) {
+        if (
+            index == 0 && packages.length == 1 && packages[0].moduleData.length == 20
+                && address(bytes20(packages[0].moduleData)) == EXPECTED_OWNER
+        ) {
+            return EXPECTED_ACCOUNT;
+        }
+        return address(uint160(uint256(keccak256(abi.encode(packages, index)))));
     }
 
 }
@@ -62,7 +136,7 @@ contract PletherKernelVerifyingPaymasterTest is Test {
         vm.etch(rootValidator, hex"60006000f3");
         vm.etch(implementation, hex"60016000f3");
         vm.etch(account, hex"60026000f3");
-        factory = address(new MockKernelV4Factory(implementation));
+        factory = address(new MockKernelV4Factory(implementation, signer, account));
         paymaster = _deploy();
         assertTrue(paymaster.paused());
         paymaster.unpause();
@@ -230,7 +304,7 @@ contract PletherKernelVerifyingPaymasterTest is Test {
 
         vm.chainId(421_614);
         address otherImplementation = rootValidator;
-        factory = address(new MockKernelV4Factory(otherImplementation));
+        factory = address(new MockKernelV4Factory(otherImplementation, signer, account));
         vm.expectRevert(
             abi.encodeWithSelector(
                 PletherKernelVerifyingPaymaster.AccountFactoryImplementationMismatch.selector,
@@ -258,6 +332,185 @@ contract PletherKernelVerifyingPaymasterTest is Test {
                 PletherKernelVerifyingPaymaster.RootValidatorCodeHashMismatch.selector,
                 rootValidator.codehash,
                 expectedCodeHash
+            )
+        );
+        _validate(op);
+    }
+
+    function testRejectsCounterfactualFactoryAddressMismatch() public {
+        PackedUserOperation memory op = _operation(bytes32(0));
+        IKernelV4FactoryProfile.Install[] memory packages = new IKernelV4FactoryProfile.Install[](1);
+        packages[0] = IKernelV4FactoryProfile.Install(1, rootValidator, abi.encodePacked(makeAddr("other owner")), "");
+        op.initCode = abi.encodePacked(factory, abi.encodeCall(IKernelV4FactoryProfile.deploy, (packages, 0)));
+        op = _signed(op, VALID_AFTER, VALID_UNTIL);
+        vm.expectRevert(PletherKernelVerifyingPaymaster.InvalidFactoryCall.selector);
+        _validate(op);
+    }
+
+    function testDisablesRenounceOwnershipAndGuardsZeroRecipientsAndPostOp() public {
+        vm.expectRevert(PletherKernelVerifyingPaymaster.OwnershipRenunciationDisabled.selector);
+        paymaster.renounceOwnership();
+
+        vm.expectRevert(abi.encodeWithSelector(PletherKernelVerifyingPaymaster.InvalidRecipient.selector, address(0)));
+        paymaster.withdrawTo(payable(address(0)), 1);
+
+        vm.expectRevert(abi.encodeWithSelector(PletherKernelVerifyingPaymaster.InvalidRecipient.selector, address(0)));
+        paymaster.withdrawStake(payable(address(0)));
+
+        vm.prank(entryPoint);
+        vm.expectRevert(PletherKernelVerifyingPaymaster.PostOpNotSupported.selector);
+        paymaster.postOp(IPaymaster.PostOpMode.opSucceeded, "", 0, 0);
+    }
+
+    function testEnforcesAccessControlPauseOwnable2StepAndEntryPointWrappers() public {
+        address outsider = makeAddr("outsider");
+        address nextOwner = makeAddr("next owner");
+        address recipient = makeAddr("recipient");
+        PackedUserOperation memory op = _signed(_operation(bytes32(0)), VALID_AFTER, VALID_UNTIL);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(PletherKernelVerifyingPaymaster.CallerNotEntryPoint.selector, outsider));
+        paymaster.validatePaymasterUserOp(op, bytes32(0), MAX_COST);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(PletherKernelVerifyingPaymaster.CallerNotEntryPoint.selector, outsider));
+        paymaster.postOp(IPaymaster.PostOpMode.opSucceeded, "", 0, 0);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, outsider));
+        paymaster.pause();
+
+        paymaster.pause();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        _validate(op);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(PletherKernelVerifyingPaymaster.InvalidSponsorSigner.selector, address(0))
+        );
+        paymaster.setSponsorSigner(address(0));
+        address rotatedSigner = makeAddr("rotated signer");
+        paymaster.setSponsorSigner(rotatedSigner);
+        assertEq(paymaster.sponsorSigner(), rotatedSigner);
+
+        paymaster.unpause();
+        vm.expectRevert(Pausable.ExpectedPause.selector);
+        paymaster.setSponsorSigner(signer);
+
+        vm.deal(address(this), 2 ether);
+        paymaster.deposit{value: 0.5 ether}();
+        assertEq(paymaster.getDeposit(), 0.5 ether);
+        paymaster.withdrawTo(payable(recipient), 0.2 ether);
+        assertEq(recipient.balance, 0.2 ether);
+        assertEq(paymaster.getDeposit(), 0.3 ether);
+
+        paymaster.addStake{value: 1 ether}(86_400);
+        paymaster.unlockStake();
+        paymaster.withdrawStake(payable(recipient));
+        assertEq(recipient.balance, 1.2 ether);
+
+        paymaster.transferOwnership(nextOwner);
+        assertEq(paymaster.pendingOwner(), nextOwner);
+        vm.prank(nextOwner);
+        paymaster.acceptOwnership();
+        assertEq(paymaster.owner(), nextOwner);
+    }
+
+    function testRejectsEnvelopePolicyCostAndProfileViolations() public {
+        PackedUserOperation memory op = _signed(_operation(bytes32(0)), VALID_AFTER, VALID_AFTER);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PletherKernelVerifyingPaymaster.InvalidValidityWindow.selector, VALID_AFTER, VALID_AFTER
+            )
+        );
+        _validate(op);
+
+        uint48 tooLongUntil = VALID_AFTER + 601;
+        op = _signed(_operation(bytes32(0)), VALID_AFTER, tooLongUntil);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PletherKernelVerifyingPaymaster.ValidityWindowTooLong.selector, uint48(601), uint48(600)
+            )
+        );
+        _validate(op);
+
+        // Paymaster cost cap lower than signed maxCost
+        paymaster.setMaxSponsoredCost(MAX_COST - 1);
+        op = _signed(_operation(bytes32(0)), VALID_AFTER, VALID_UNTIL);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PletherKernelVerifyingPaymaster.PaymasterCostLimitExceeded.selector, MAX_COST, MAX_COST - 1
+            )
+        );
+        _validate(op);
+        paymaster.setMaxSponsoredCost(MAX_COST);
+
+        // Wrong paymaster address in paymasterAndData header
+        op = _signed(_operation(bytes32(0)), VALID_AFTER, VALID_UNTIL);
+        bytes memory wrongHeader = op.paymasterAndData;
+        bytes20 otherPaymaster = bytes20(makeAddr("other paymaster"));
+        for (uint256 i = 0; i < 20; ++i) {
+            wrongHeader[i] = otherPaymaster[i];
+        }
+        op.paymasterAndData = wrongHeader;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PletherKernelVerifyingPaymaster.InvalidPaymaster.selector, makeAddr("other paymaster")
+            )
+        );
+        _validate(op);
+
+        // DELEGATECALL mode (0xff << 248) rejected
+        bytes32 delegateCallMode = bytes32(uint256(0xff) << 248);
+        op = _signed(_operation(delegateCallMode), VALID_AFTER, VALID_UNTIL);
+        vm.expectRevert(
+            abi.encodeWithSelector(PletherKernelVerifyingPaymaster.InvalidExecutionMode.selector, delegateCallMode)
+        );
+        _validate(op);
+
+        // Wrong call selector rejected
+        op = _operation(bytes32(0));
+        op.callData = abi.encodeWithSelector(bytes4(0xdeadbeef), bytes32(0), new bytes(64));
+        op = _signed(op, VALID_AFTER, VALID_UNTIL);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PletherKernelVerifyingPaymaster.InvalidAccountCallSelector.selector, bytes4(0xdeadbeef)
+            )
+        );
+        _validate(op);
+
+        // High-s malleable ECDSA signature returns SIG_VALIDATION_FAILED
+        op = _operation(bytes32(0));
+        bytes memory policyData = abi.encodePacked(
+            address(paymaster),
+            uint128(100_000),
+            uint128(0),
+            VALID_UNTIL,
+            VALID_AFTER,
+            MAX_COST,
+            POLICY,
+            account.codehash
+        );
+        op.paymasterAndData = abi.encodePacked(policyData, new bytes(65));
+        (uint8 origV, bytes32 origR, bytes32 origS) = vm.sign(SIGNER_KEY, paymaster.getSponsorshipHash(op));
+        uint256 secp256k1N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+        bytes32 highS = bytes32(secp256k1N - uint256(origS));
+        uint8 flippedV = origV == 27 ? 28 : 27;
+        op.paymasterAndData = abi.encodePacked(policyData, origR, highS, flippedV);
+        (, uint256 validity) = _validate(op);
+        (address signatureStatus,,) = ERC4337Utils.parseValidationData(validity);
+        assertEq(signatureStatus, address(1));
+
+        // EIP-7702 delegated EOA sender codehash rejected
+        address delegatedSender = makeAddr("delegated eoa");
+        vm.etch(delegatedSender, abi.encodePacked(bytes3(0xef0100), makeAddr("delegate")));
+        op = _operation(bytes32(0));
+        op.sender = delegatedSender;
+        op = _signed(op, VALID_AFTER, VALID_UNTIL);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PletherKernelVerifyingPaymaster.AccountCodeHashMismatch.selector,
+                delegatedSender.codehash,
+                account.codehash
             )
         );
         _validate(op);

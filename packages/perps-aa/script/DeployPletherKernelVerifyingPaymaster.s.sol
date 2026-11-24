@@ -38,6 +38,8 @@ contract DeployPletherKernelVerifyingPaymaster is Script {
     error UnsupportedDeploymentChain(uint256 actual);
     error InvalidProfileCodeHash(address account, bytes32 actual, bytes32 expected);
     error InvalidSampleAccount(address account);
+    error InvalidMaxSponsoredCost(uint256 cost);
+    error OwnerMatchesSponsorSigner(address account);
 
     function run() external returns (PletherKernelVerifyingPaymaster paymaster) {
         if (block.chainid != ARBITRUM_SEPOLIA_CHAIN_ID) {
@@ -49,6 +51,12 @@ contract DeployPletherKernelVerifyingPaymaster is Script {
         address sponsorSigner = vm.envAddress("SPONSOR_SIGNER");
         uint256 maxSponsoredCost = vm.envUint("MAX_SPONSORED_COST_WEI");
         bytes32 policyId = vm.envBytes32("KERNEL_PAYMASTER_POLICY_ID");
+        if (maxSponsoredCost == 0) {
+            revert InvalidMaxSponsoredCost(0);
+        }
+        if (owner == sponsorSigner) {
+            revert OwnerMatchesSponsorSigner(owner);
+        }
 
         vm.startBroadcast(deployerPrivateKey);
         paymaster = new PletherKernelVerifyingPaymaster(
