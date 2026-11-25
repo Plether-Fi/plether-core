@@ -46,7 +46,7 @@ contract SeniorWithdrawalMathTest is Test {
         // Independent cross-products bound protection by both principal and real-share ownership.
         assertGe(nextHwm * p, h * nextPrincipal);
         uint256 principalRounding = nextHwm * p - h * nextPrincipal;
-        if (h > p && assets > 0 && assets < p) {
+        if (h > p && assets > 0 && shares < s) {
             assertGe(nextHwm * s, h * (s - shares));
             uint256 shareRounding = nextHwm * s - h * (s - shares);
             assertTrue(principalRounding < p || shareRounding < s, "one protection bound must be tight");
@@ -68,7 +68,11 @@ contract SeniorWithdrawalMathTest is Test {
         (nextPrincipal, nextHwm) = Waterfall.scaleSeniorOnWithdraw(nextPrincipal, nextHwm, 1, 1, 5);
         assertEq(nextPrincipal, 4);
         assertEq(nextHwm, 7);
-        (nextPrincipal, nextHwm) = Waterfall.scaleSeniorOnWithdraw(nextPrincipal, nextHwm, 4, 3, 4);
+        (uint256 partialPrincipal, uint256 partialHwm) =
+            Waterfall.scaleSeniorOnWithdraw(nextPrincipal, nextHwm, 4, 3, 4);
+        assertEq(partialPrincipal, 0);
+        assertEq(partialHwm, 2);
+        (nextPrincipal, nextHwm) = Waterfall.scaleSeniorOnWithdraw(nextPrincipal, nextHwm, 4, 4, 4);
         assertEq(nextPrincipal, 0);
         assertEq(nextHwm, 0);
     }

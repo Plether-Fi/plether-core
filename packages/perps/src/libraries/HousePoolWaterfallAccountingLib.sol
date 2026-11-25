@@ -134,7 +134,7 @@ library HousePoolWaterfallAccountingLib {
         }
         nextPrincipal = seniorPrincipal - fundedAssets;
         uint256 removedHwm = Math.mulDiv(seniorHighWaterMark, fundedAssets, seniorPrincipal);
-        if (seniorHighWaterMark > seniorPrincipal && nextPrincipal != 0) {
+        if (seniorHighWaterMark > seniorPrincipal && fundedShares < pricingSupply) {
             removedHwm = Math.min(removedHwm, Math.mulDiv(seniorHighWaterMark, fundedShares, pricingSupply));
         }
         // The checked principal debit proves fundedAssets <= seniorPrincipal, so removedHwm <= seniorHighWaterMark.

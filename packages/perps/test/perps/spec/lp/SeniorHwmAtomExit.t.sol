@@ -132,8 +132,53 @@ contract SeniorHwmAtomExitTest is BasePerpTest {
         assertGt(paid, 250_000e6, "recapitalization-first control has an ordinary-scale payout");
     }
 
+    function test_PartialShareFullPrincipalSeniorExitPreservesRemainingHwm() public {
+        _drainPoolToAtoms(1);
+        engine.clearDegradedMode();
+        _settleWithJunior(JUNIOR_A);
+
+        uint256 hwmBefore = pool.seniorHighWaterMark();
+        assertEq(pool.seniorPrincipal(), 1, "loss must leave one Senior principal atom");
+        assertEq(pool.juniorPrincipal(), 0);
+        assertGt(hwmBefore, 600_000e6, "loss preserves the pre-loss recovery claim");
+        uint256 snapshot = vm.snapshotState();
+
+        uint256 stayControl = _recapitalizeAndValueOf(STAY, hwmBefore);
+        assertEq(pool.seniorPrincipal(), hwmBefore, "no-exit control restores Senior to its HWM");
+        assertTrue(vm.revertToState(snapshot));
+
+        uint256 exitShares = seniorVault.balanceOf(EXIT);
+        uint256 supplyBefore = seniorVault.totalSupply();
+        vm.prank(EXIT);
+        uint256 requestId = seniorVault.requestRedeem(exitShares, EXIT, EXIT);
+        _settle(requestId);
+
+        uint256 hwmAfter = pool.seniorHighWaterMark();
+        uint256 shareProportionalHwm = hwmBefore - hwmBefore * exitShares / supplyBefore;
+        assertEq(seniorVault.totalSupply(), supplyBefore - exitShares, "only funded shares are burned");
+        assertEq(pool.seniorPrincipal(), 0, "single remaining atom funds the partial-share exit");
+        assertEq(hwmAfter, shareProportionalHwm, "partial-share full-principal exit must preserve remaining HWM");
+
+        vm.prank(EXIT);
+        uint256 paid = seniorVault.claimRedeem(requestId, exitShares, EXIT, EXIT);
+        assertEq(paid, 1, "redeeming holder receives the single USDG atom");
+
+        uint256 stayAfter = _recapitalizeAndValueOf(STAY, hwmBefore);
+        assertEq(
+            pool.seniorPrincipal(), hwmAfter, "recapitalization restores remaining Senior holders to preserved HWM"
+        );
+        assertEq(pool.juniorPrincipal(), 0, "recapitalization must not leak to Junior");
+        assertApproxEqAbs(stayAfter, stayControl, 1, "remaining holder recovers the no-exit control value");
+    }
+
     /// @dev Public opposing positions consume both tranches; the final one-lot close sets the three-atom remainder.
     function _drainPoolToThreeAtoms() internal {
+        _drainPoolToAtoms(3);
+    }
+
+    function _drainPoolToAtoms(
+        uint256 targetAtoms
+    ) internal {
         _mark(1e8);
         _deposit(juniorVault, JUNIOR_A, 100_000e6);
         _deposit(juniorVault, JUNIOR_B, 100_000e6);
@@ -150,18 +195,18 @@ contract SeniorHwmAtomExitTest is BasePerpTest {
         _closeShortLeaving(20, 200e6);
         _closeShortLeaving(7, 60e6);
 
-        uint256 price = 1e8 + _equity() - 3;
+        uint256 price = 1e8 + _equity() - targetAtoms;
         for (uint256 i; i < 16; ++i) {
             uint256 snapshot = vm.snapshotState();
             _trade(SHORT_TRADER, true, CfdTypes.Side.SHORT, 1, 0, price);
             uint256 remaining = _equity();
-            if (remaining == 3) {
+            if (remaining == targetAtoms) {
                 break;
             }
             assertTrue(vm.revertToState(snapshot));
-            price = remaining > 3 ? price + (remaining - 3) : price - (3 - remaining);
+            price = remaining > targetAtoms ? price + (remaining - targetAtoms) : price - (targetAtoms - remaining);
         }
-        assertEq(_equity(), 3, "final public close leaves three atoms");
+        assertEq(_equity(), targetAtoms, "final public close leaves target atoms");
         assertTrue(engine.degradedMode(), "owner must clear the terminal-loss latch before settlement");
     }
 

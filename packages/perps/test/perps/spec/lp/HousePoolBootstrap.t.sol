@@ -5,10 +5,13 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 import {HousePoolAsyncTestBase} from "../../shared/HousePoolTestBase.sol";
 
 contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
+
+    using stdStorage for StdStorage;
 
     address alice = address(0x111);
     address bob = address(0x222);
@@ -706,6 +709,39 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(pool.seniorPrincipal(), 30_000e6, "Implicit retained revenue should restore seeded senior first");
         assertEq(pool.juniorPrincipal(), 5000e6, "Residual implicit retained revenue should attach to seeded junior");
         assertEq(pool.unassignedAssets(), 0, "Seeded implicit retained revenue should avoid quarantine");
+    }
+
+    function test_AssignUnassignedAssets_WipedSeniorCreditsExistingHoldersWithoutDilution() public {
+        settlementToken.mint(address(this), 20_000e6);
+        settlementToken.approve(address(pool), 20_000e6);
+        pool.initializeSeedPosition(false, 10_000e6, address(this));
+        pool.initializeSeedPosition(true, 10_000e6, address(this));
+        uint256 seniorSupplyBefore = seniorVault.totalSupply();
+        assertGt(seniorSupplyBefore, 0);
+
+        // Wipe both tranches to zero principal while preserving Senior's HWM and share supply.
+        uint256 totalBefore = pool.totalAssets();
+        vm.prank(address(engine));
+        pool.payOut(bob, totalBefore);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 0);
+        assertEq(pool.seniorHighWaterMark(), 10_000e6);
+
+        // Fund unassignedAssets and Junior backing so Senior capacity check passes while Senior principal is 0.
+        uint256 assignmentAssets = 2000e6;
+        settlementToken.mint(address(pool), 10_000e6 + assignmentAssets);
+        pool.accountExcess();
+        stdstore.target(address(pool)).sig("juniorPrincipal()").checked_write(uint256(10_000e6));
+        stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(assignmentAssets);
+
+        pool.assignUnassignedAssets(true, alice);
+
+        assertEq(pool.seniorPrincipal(), assignmentAssets, "Wiped senior assignment must credit senior principal");
+        assertEq(pool.seniorHighWaterMark(), 10_000e6, "Wiped senior assignment must preserve higher existing HWM");
+        assertEq(pool.unassignedAssets(), 0, "Assignment must clear unassignedAssets");
+        assertEq(seniorVault.balanceOf(alice), 0, "Wiped senior assignment must not mint dilutive shares");
+        assertEq(seniorVault.totalSupply(), seniorSupplyBefore, "Senior share supply must remain unchanged");
     }
 
 }

@@ -555,16 +555,19 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         stdstore.target(address(pool)).sig("accountedAssets()").checked_write(juniorAssets + strandedAssets);
         stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(strandedAssets);
 
+        uint256 seniorSupplyBefore = seniorVault.totalSupply();
         pool.assignUnassignedAssets(true, alice);
 
         assertEq(
-            pool.seniorPrincipal(),
-            strandedAssets,
-            "Bootstrap should seed fresh senior principal from unassigned assets"
+            pool.seniorPrincipal(), strandedAssets, "Assignment should restore senior principal from unassigned assets"
         );
         assertEq(
-            pool.seniorHighWaterMark(), strandedAssets, "Fresh senior bootstrap must replace the stale HWM baseline"
+            pool.seniorHighWaterMark(),
+            legacySeniorHwm,
+            "Existing senior share owners must preserve their higher HWM baseline"
         );
+        assertEq(seniorVault.balanceOf(alice), 0, "Existing senior owners must not be diluted by zero-NAV mint");
+        assertEq(seniorVault.totalSupply(), seniorSupplyBefore, "Senior share supply should remain unchanged");
         assertEq(pool.juniorPrincipal(), juniorAssets, "Junior principal should remain untouched");
         assertEq(pool.unassignedAssets(), 0, "Assignment should consume the unassigned bucket");
     }

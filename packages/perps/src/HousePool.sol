@@ -723,10 +723,19 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (targetVault == address(0)) {
             revert HousePool__ZeroAddress();
         }
-        if (!toSenior && juniorPrincipal == 0 && _juniorShareSupply() != 0) {
-            juniorPrincipal = amount;
+        if (toSenior
+                ? seniorPrincipal == 0 && _seniorShareSupply() != 0
+                : juniorPrincipal == 0 && _juniorShareSupply() != 0) {
+            if (toSenior) {
+                seniorPrincipal = amount;
+                if (amount > seniorHighWaterMark) {
+                    seniorHighWaterMark = amount;
+                }
+            } else {
+                juniorPrincipal = amount;
+            }
             unassignedAssets = 0;
-            emit UnassignedAssetsAssigned(false, receiver, amount, 0);
+            emit UnassignedAssetsAssigned(toSenior, receiver, amount, 0);
             return;
         }
 

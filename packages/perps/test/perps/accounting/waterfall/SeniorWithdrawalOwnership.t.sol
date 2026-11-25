@@ -138,8 +138,9 @@ contract SeniorWithdrawalOwnershipTest is HousePoolTestBase {
         assertEq(result.seniorFundedAssets, 3);
         assertEq(result.seniorFundedShares, shares);
         _assertWithdrawal(beforeState, result);
-        assertEq(pool.seniorHighWaterMark(), 0, "full-principal funding keeps the existing clearing rule");
-        assertGt(seniorVault.totalSupply(), 0, "remaining shares do not change the full-funding exception");
+        uint256 expectedHwm = beforeState.hwm - beforeState.hwm * shares / beforeState.supply;
+        assertEq(pool.seniorHighWaterMark(), expectedHwm, "partial-share full-principal exit preserves remaining HWM");
+        assertGt(seniorVault.totalSupply(), 0, "remaining shares keep their proportional recovery entitlement");
     }
 
     function test_WorkCapContinuationPreservesExistingConservativeRetention() public {
@@ -226,7 +227,7 @@ contract SeniorWithdrawalOwnershipTest is HousePoolTestBase {
         assertLe(hwmAfter, beforeState.hwm);
         if (result.seniorFundedAssets == 0) {
             assertEq(hwmAfter, beforeState.hwm);
-        } else if (principalAfter == 0) {
+        } else if (beforeState.supply == result.seniorFundedShares) {
             assertEq(hwmAfter, 0);
         } else {
             // Independent cross-products bound protection by both remaining principal and remaining ownership.
