@@ -272,6 +272,9 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         OrderV3Types.OrderRequest calldata request,
         bool enforceProtectionLock
     ) private view {
+        if (account == host.engine().protocolTreasury()) {
+            revert OrderRouter__CommitValidation(12);
+        }
         if (request.clientOrderId == bytes32(0)) {
             revert OrderRouter__ZeroClientOrderId();
         }

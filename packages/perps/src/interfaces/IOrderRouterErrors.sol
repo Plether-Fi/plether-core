@@ -37,7 +37,8 @@ interface IOrderRouterErrors {
     /// @notice An order size is not an exact multiple of the canonical 100-token position lot.
     error OrderRouter__InvalidSizeQuantum();
     /// @notice A commit failed a compact economic or planner-derived validation rule.
-    /// @param code Numeric validation code; current code `11` denotes a below-minimum notional or close-size floor.
+    /// @param code Numeric validation code; code `11` denotes a below-minimum notional or close-size floor, and
+    ///             code `12` denotes an order submitted by the protocol treasury account.
     error OrderRouter__CommitValidation(uint8 code);
 
     /// @notice A proposed Plether oracle has invalid code, Pyth, engine, or HousePool wiring.

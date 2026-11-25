@@ -642,6 +642,19 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(router.nextExecuteId(), 0);
     }
 
+    function test_ProtocolTreasuryCannotCommitFreshOrder() public {
+        address treasury = engine.protocolTreasury();
+        _fundTrader(treasury, 100_000e6);
+        uint64 nextCommitBefore = router.nextCommitId();
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("treasury-blocked"));
+
+        vm.prank(treasury);
+        vm.expectRevert(abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 12));
+        router.commitOrder(request);
+        assertEq(router.pendingOrderCounts(treasury), 0, "rejected treasury order must not queue");
+        assertEq(router.nextCommitId(), nextCommitBefore, "rejected treasury order must not consume an order id");
+    }
+
     function test_BulkCleanupRemovesNonHeadConfigMismatch() public {
         _startRecordingLogs();
         engineAdmin.proposeCalendarConfig(_engineCalendarConfig());
