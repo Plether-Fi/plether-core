@@ -308,6 +308,64 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(protectionId, nextProtectionId, "uncrossed current price should allow creation");
     }
 
+    function test_CreateAndReplacePositionProtection_SucceedAfterEngineMarkAdvancesAheadOfOracleCache() public {
+        // Advance the Engine mark via order execution while leaving PletherOracle's accepted live cache behind.
+        vm.warp(uint256(engine.lastMarkTime()) + 2);
+        uint256 fillPrice = 96_000_000;
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_ASSETS, fillPrice);
+
+        (bool accepted,, uint64 acceptedTime) = pletherOracle.getAcceptedBasketMark();
+        assertTrue(accepted, "setup should have an older accepted oracle basket");
+        assertLt(acceptedTime, engine.lastMarkTime(), "engine mark must be strictly newer than oracle cache");
+
+        // Trigger already met at the newer Engine mark must still be rejected.
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
+        protectionActions.createPositionProtection(_params(fillPrice, 0));
+
+        // Standalone creation succeeds without an intervening updateMarkPrice call and arms at Engine mark time.
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(94_000_000, 0));
+        PositionProtectionTypes.PositionProtectionView memory created =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(uint8(created.status), uint8(PositionProtectionTypes.PositionProtectionStatus.Armed));
+        assertEq(created.armedAt, block.timestamp);
+
+        // Another live order fill advances Engine mark further ahead; replacement still succeeds without mark refresh.
+        vm.warp(uint256(engine.lastMarkTime()) + 2);
+        _open(BOB, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_ASSETS, 95_000_000);
+        uint64 latestEngineMarkTime = engine.lastMarkTime();
+        assertLt(acceptedTime, latestEngineMarkTime);
+
+        vm.prank(ALICE);
+        protectionActions.replacePositionProtection(protectionId, _params(93_000_000, 0));
+        PositionProtectionTypes.PositionProtectionView memory replaced =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(replaced.takeProfitTriggerPrice, 93_000_000);
+        assertEq(replaced.armedAt, block.timestamp);
+
+        // Trigger publication at the Engine mark baseline must be rejected as not advanced.
+        vm.roll(block.number + 1);
+        baseMockPyth.setAllUniquePrices(_basePythFeedIds(), int64(95_000_000), 0, int32(-8), latestEngineMarkTime, 0);
+        bytes[] memory samePublicationData = new bytes[](1);
+        samePublicationData[0] = hex"01";
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TriggerPublishTimeNotAdvanced.selector);
+        protectionActions.triggerPositionProtection(protectionId, samePublicationData);
+
+        // A strictly newer publication at the TP threshold triggers cleanly.
+        vm.warp(uint256(latestEngineMarkTime) + 1);
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(93_000_000), 0, int32(-8), latestEngineMarkTime + 1, 0
+        );
+        vm.prank(TRIGGER_KEEPER);
+        protectionActions.triggerPositionProtection(protectionId, samePublicationData);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered)
+        );
+    }
+
     function test_LongTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);

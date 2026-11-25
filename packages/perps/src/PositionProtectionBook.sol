@@ -881,12 +881,16 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         ) {
             revert OrderRouter__ProtectionMarkTooStale();
         }
+        (bool accepted, uint256 acceptedPrice, uint64 acceptedTime) = oracle.getAcceptedBasketMark();
+        if (!accepted || acceptedTime < markTime) {
+            return (cachedMarkPrice, cachedMarkPrice, markTime);
+        }
+        if (acceptedTime > markTime || acceptedPrice != cachedMarkPrice) {
+            revert PositionProtectionBook__OracleMarkAhead();
+        }
         IPletherOracle.PriceSnapshot memory current = oracle.getLatestPrice(IPletherOracle.PriceMode.MarkRefresh);
         currentMarkPrice = current.markPrice;
         currentPublishTime = current.publishTime;
-        if (!_acceptedMarkInstalled()) {
-            revert PositionProtectionBook__OracleMarkAhead();
-        }
     }
 
     function _acceptedMarkInstalled() private view returns (bool) {
