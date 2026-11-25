@@ -1254,7 +1254,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         uint256 seniorSupply
     ) internal view returns (uint256) {
         // A reserved deposit can activate after Junior settles, bringing the whole Senior balance back under the ratio.
-        if (reservedSeniorDepositAssets == 0 && _isSeniorSeedOnly(seniorSupply)) {
+        if (
+            reservedSeniorDepositAssets == 0
+                && _isSeniorSeedOnly(seniorSupply, state.seniorPrincipal, state.seniorHighWaterMark)
+        ) {
             return Math.min(freeAssets, state.juniorPrincipal);
         }
         uint256 ratioCap = HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(
@@ -1693,7 +1696,13 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             currentState,
             reconcileSnapshot,
             settleableClaimantBuckets,
-            _isSeniorSeedOnly(currentState.seniorSupply) ? 0 : poolConfig.seniorRateBps,
+            _isSeniorSeedOnly(
+                currentState.seniorSupply,
+                currentState.waterfall.seniorPrincipal,
+                currentState.waterfall.seniorHighWaterMark
+            )
+                ? 0
+                : poolConfig.seniorRateBps,
             couponElapsed,
             markFresh
         );
@@ -1750,10 +1759,21 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     }
 
     function _isSeniorSeedOnly(
-        uint256 seniorSupply
+        uint256 seniorSupply,
+        uint256 seniorPrincipalAssets,
+        uint256 seniorHighWaterMarkAssets
     ) internal view returns (bool) {
         uint256 floor = _seniorSeedShareFloor;
-        return floor != 0 && seniorSupply == floor;
+        if (floor == 0) {
+            return false;
+        }
+        if (seniorSupply <= floor) {
+            return true;
+        }
+        uint256 exposure =
+            seniorHighWaterMarkAssets > seniorPrincipalAssets ? seniorHighWaterMarkAssets : seniorPrincipalAssets;
+        // Treat unburnable zero-payout share dust above the permanent seed floor as seed-only.
+        return Math.mulDiv(seniorSupply - floor, exposure + 1, seniorSupply + 1000) == 0;
     }
 
     function _buildWithdrawalSnapshot(
