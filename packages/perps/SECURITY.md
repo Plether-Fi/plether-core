@@ -1484,6 +1484,9 @@ remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and
 - During an oracle freeze, an eligible trader can trigger their own liquidation and receive the keeper reward.
   This can cost less than a voluntary close. The protocol accepts that pricing difference to keep liquidation
   available under its existing rules.
+- reaching or exceeding `CAP_PRICE` is treated as a protocol end-of-life boundary calling for operator-initiated
+  wind-down rather than continued frozen-market operation (see `Accepted Risks` below for post-cap frozen adverse
+  shift behavior),
 - full-close liveness takes priority over collecting an otherwise uncollectible spread; partial closes retain
   all-or-nothing rules for required charges but do not fail solely on uncollateralized price loss above the PnL cap,
 - scheduled provider closures require governance to configure the correct interval in advance. The recurring FX
@@ -1624,6 +1627,17 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
   can leave part of the positive VPI charge unfunded. Settlement waives the uncollectible portion, reducing pool
   revenue and potentially lowering Junior redemption payouts. Junior bears this collection risk. The tested round
   trip lost money overall even with the waiver. Immunefi report #99795 ([Plether Audit Competition](https://immunefi.com/audit-competition/plether/information/)).
+- **`CAP_PRICE` is a terminal end-of-life boundary (including frozen SHORT adverse shift at the cap).**
+  `CAP_PRICE` exists to bound maximum directional payoff for solvency accounting and is configured far outside
+  normal basket trading ranges. Reaching or exceeding `CAP_PRICE` is treated as a protocol end-of-life event
+  calling for operator-initiated wind-down (following the manual shutdown runbook below — pausing new risk on
+  `OrderRouterAdmin` and LP entries on `HousePool` while keeping closes, liquidations, and LP redemptions open),
+  not a supported steady-state trading regime. Accordingly, the protocol accepts post-cap edge behavior such as
+  `PletherOracle._frozenBasket` applying the synthetic SHORT-adverse confidence shift downward from the
+  `CAP_PRICE`-clamped `engine.lastMarkPrice()` when entering an `oracleFrozen` window at or above `CAP_PRICE`
+  (Immunefi report #99422, [Plether Audit Competition](https://immunefi.com/audit-competition/plether/information/)).
+  As with wipeout recovery, the contracts add no automatic end-of-life latch at `CAP_PRICE`; wind-down is an
+  operator policy.
 
 ## Emergency Procedures
 
