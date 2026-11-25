@@ -1638,6 +1638,14 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
   (Immunefi report #99422, [Plether Audit Competition](https://immunefi.com/audit-competition/plether/information/)).
   As with wipeout recovery, the contracts add no automatic end-of-life latch at `CAP_PRICE`; wind-down is an
   operator policy.
+- **Open admission uses physical cash net of recorded claims, not unrealized winners' PnL (`degradedMode` liveness).**
+  Open and increase admission enforces `E >= L + B + Rplus` using physical pool cash net of recorded trader claims
+  rather than subtracting open winners' unrealized marked gains (`terminalLpPriceDeltaAssets`). After a price move
+  at high utilization, closing an existing winning position can reduce `E` below `L` and latch `degradedMode`,
+  pausing new opens until positions close or additional backing arrives and the owner calls `clearDegradedMode`.
+  This causes no loss of funds or economic insolvency; the protocol accepts this liveness tradeoff and uses the
+  governance-configurable `settlementBufferBps` (72-hour timelocked, `0..1,000` bps) as its proactive headroom knob.
+  Immunefi report #97605 ([Plether Audit Competition](https://immunefi.com/audit-competition/plether/information/)).
 
 ## Emergency Procedures
 
