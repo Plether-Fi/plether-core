@@ -203,14 +203,24 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidOpenDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
-        assessment =
+        uint256 boundedActionChargeAssets;
+        (assessment, boundedActionChargeAssets) =
             _buildOpenAssessment(snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode);
         assessment.grossAccountDebitAssets += commitmentCarryAssets;
         assessment.actionChargeAssessedAssets += commitmentCarryAssets;
         assessment.actionChargeCollectedAssets += commitmentCarryAssets;
         assessment.carryAssets += commitmentCarryAssets;
         _requireStandaloneOpenFunding(snapshot, delta, bounds, availableOrderMarginAssets);
-        _enforceBounds(assessment, bounds, executionBountyAssets, false);
+        // Exclude execution-time accrued carry from debit/charge bounds so checkpointing carry cannot toggle fills.
+        boundedActionChargeAssets += commitmentCarryAssets;
+        _enforceBounds(
+            assessment,
+            bounds,
+            executionBountyAssets,
+            false,
+            boundedActionChargeAssets + executionBountyAssets,
+            boundedActionChargeAssets
+        );
     }
 
     /// @dev A queued increase must satisfy its own risk policy without an earlier position, claim, or free cash.
@@ -256,7 +266,9 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidCloseDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
-        assessment = _buildCloseAssessment(
+        uint256 boundedGrossDebitAssets;
+        uint256 boundedActionChargeAssets;
+        (assessment, boundedGrossDebitAssets, boundedActionChargeAssets) = _buildCloseAssessment(
             snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode, drainsAccountQueue
         );
         // The snapshot already reflects commitment carry collection. Include it in the order totals before checking bounds.
@@ -264,7 +276,15 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         assessment.actionChargeAssessedAssets += commitmentCarryAssets;
         assessment.actionChargeCollectedAssets += commitmentCarryAssets;
         assessment.carryAssets += commitmentCarryAssets;
-        _enforceBounds(assessment, bounds, executionBountyAssets, delta.deletePosition);
+        // Exclude execution-time accrued carry (both realized and uncovered) from debit/charge bounds.
+        _enforceBounds(
+            assessment,
+            bounds,
+            executionBountyAssets,
+            delta.deletePosition,
+            boundedGrossDebitAssets + commitmentCarryAssets,
+            boundedActionChargeAssets + commitmentCarryAssets
+        );
     }
 
     function _buildRawSnapshot(
@@ -350,7 +370,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         uint256 executionBountyAssets,
         bool bountyReturnsToAccount,
         OrderV3Types.ExecutionMode mode
-    ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
+    ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment, uint256 boundedActionChargeAssets) {
         assessment.mode = mode;
         assessment.executionNotionalAssets = delta.openState.notionalAssets;
         assessment.explicitFeesAssets = delta.executionFeeAssets;
@@ -363,6 +383,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             } else {
                 tradeRebateAssets = _negativeMagnitude(delta.tradeCostAssets);
             }
+            boundedActionChargeAssets = positiveTradeCostAssets;
 
             // A zero-size snapshot deliberately does not realize an inconsistent stale carry value during Engine apply.
             // slither-disable-next-line incorrect-equality
@@ -418,7 +439,15 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         bool bountyReturnsToAccount,
         OrderV3Types.ExecutionMode mode,
         bool drainsAccountQueue
-    ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
+    )
+        private
+        pure
+        returns (
+            OrderV3Types.ExecutionAssessment memory assessment,
+            uint256 boundedGrossDebitAssets,
+            uint256 boundedActionChargeAssets
+        )
+    {
         assessment.mode = mode;
         assessment.close = OrderV3Types.CloseEconomics({
             postFreeSettlementAssets: 0,
@@ -433,23 +462,36 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             actionChargeWaivedAssets: delta.actionChargeWaivedAssets
         });
         assessment.executionNotionalAssets = CfdMath.sizeToLots(delta.sizeDelta) * delta.price;
-        assessment.grossAccountDebitAssets = delta.pricePnlClaimConsumedAssets + delta.pricePnlPledgeConsumedAssets
-            + delta.realizedCarryAssets + delta.actionChargeCollectedAssets + executionBountyAssets;
-        assessment.actionChargeAssessedAssets = _netOpenActionCharge(
-            delta.realizedCarryAssets, int256(delta.actionChargeAssessedAssets) - int256(delta.actionRebateAssets)
-        );
-        assessment.actionChargeCollectedAssets = delta.realizedCarryAssets + delta.actionChargeCollectedAssets;
-        assessment.explicitFeesAssets = delta.closeState.executionFeeAssets + delta.closeState.frozenSpreadAssets;
-        assessment.preSettlementBalanceAssets = snapshot.accountBuckets.settlementBalanceAssets;
+        {
+            uint256 baseGrossDebitAssets =
+                delta.pricePnlClaimConsumedAssets + delta.pricePnlPledgeConsumedAssets + executionBountyAssets;
+            assessment.grossAccountDebitAssets =
+                baseGrossDebitAssets + delta.realizedCarryAssets + delta.actionChargeCollectedAssets;
+            boundedActionChargeAssets = Math.saturatingSub(
+                delta.actionChargeAssessedAssets,
+                Math.saturatingSub(delta.pendingCarryAssets, delta.realizedCarryAssets)
+            );
+            boundedGrossDebitAssets = baseGrossDebitAssets
+                + Math.min(
+                    delta.actionChargeCollectedAssets,
+                    Math.saturatingSub(boundedActionChargeAssets, delta.actionChargeWithheldAssets)
+                );
+            assessment.actionChargeAssessedAssets = _netOpenActionCharge(
+                delta.realizedCarryAssets, int256(delta.actionChargeAssessedAssets) - int256(delta.actionRebateAssets)
+            );
+            assessment.actionChargeCollectedAssets = delta.realizedCarryAssets + delta.actionChargeCollectedAssets;
+            assessment.explicitFeesAssets = delta.closeState.executionFeeAssets + delta.closeState.frozenSpreadAssets;
+            assessment.preSettlementBalanceAssets = snapshot.accountBuckets.settlementBalanceAssets;
 
-        uint256 postSettlementBalanceAssets = assessment.preSettlementBalanceAssets - delta.realizedCarryAssets
-            - delta.pricePnlPledgeConsumedAssets - delta.actionChargeCollectedAssets;
-        if (delta.pricePayoutIsImmediate) {
-            postSettlementBalanceAssets += delta.pricePayoutAssets;
+            uint256 postSettlementBalanceAssets = assessment.preSettlementBalanceAssets - delta.realizedCarryAssets
+                - delta.pricePnlPledgeConsumedAssets - delta.actionChargeCollectedAssets;
+            if (delta.pricePayoutIsImmediate) {
+                postSettlementBalanceAssets += delta.pricePayoutAssets;
+            }
+            postSettlementBalanceAssets += delta.actionRebatePaidAssets;
+            assessment.postSettlementBalanceAssets =
+                _settlementAfterBounty(postSettlementBalanceAssets, executionBountyAssets, bountyReturnsToAccount);
         }
-        postSettlementBalanceAssets += delta.actionRebatePaidAssets;
-        assessment.postSettlementBalanceAssets =
-            _settlementAfterBounty(postSettlementBalanceAssets, executionBountyAssets, bountyReturnsToAccount);
 
         assessment.realizedPnlAssets = delta.realizedPnlAssets;
         assessment.vpiAssets = delta.closeState.vpiDeltaAssets;
@@ -463,25 +505,28 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         }
         assessment.postPositionSize = delta.closeState.remainingSize;
         assessment.postPositionMarginAssets = delta.posMarginAfter;
-        uint256 actionReserveAfter = snapshot.actionReserveAssets - delta.actionReserveConsumedAssets
-            - (delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets);
-        // Pure simulation may omit the reservation; canonical close assessment always authenticates it.
-        actionReserveAfter = actionReserveAfter > executionBountyAssets ? actionReserveAfter - executionBountyAssets : 0;
-        uint256 lockedAfter = delta.posMarginAfter + snapshot.liquidationReserveAssets
-            - delta.liquidationReserveReleaseAssets + snapshot.lockedBuckets.committedOrderMarginAssets
-            - delta.actionCommittedMarginConsumedAssets + actionReserveAfter;
-        if (
-            !drainsAccountQueue
-                && (snapshot.protectedPositionMarginAssets != 0 || snapshot.protectedReleasedMarginAssets != 0)
-        ) {
-            lockedAfter += _protectedReleasedAfterClose(snapshot, delta);
+        {
+            uint256 actionReserveAfter = snapshot.actionReserveAssets - delta.actionReserveConsumedAssets
+                - (delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets);
+            // Pure simulation may omit the reservation; canonical close assessment always authenticates it.
+            actionReserveAfter =
+                actionReserveAfter > executionBountyAssets ? actionReserveAfter - executionBountyAssets : 0;
+            uint256 lockedAfter = delta.posMarginAfter + snapshot.liquidationReserveAssets
+                - delta.liquidationReserveReleaseAssets + snapshot.lockedBuckets.committedOrderMarginAssets
+                - delta.actionCommittedMarginConsumedAssets + actionReserveAfter;
+            if (
+                !drainsAccountQueue
+                    && (snapshot.protectedPositionMarginAssets != 0 || snapshot.protectedReleasedMarginAssets != 0)
+            ) {
+                lockedAfter += _protectedReleasedAfterClose(snapshot, delta);
+            }
+            assessment.close.postFreeSettlementAssets = assessment.postSettlementBalanceAssets > lockedAfter
+                ? assessment.postSettlementBalanceAssets - lockedAfter
+                : 0;
         }
-        assessment.close.postFreeSettlementAssets = assessment.postSettlementBalanceAssets > lockedAfter
-            ? assessment.postSettlementBalanceAssets - lockedAfter
-            : 0;
 
         if (delta.deletePosition) {
-            return assessment;
+            return (assessment, boundedGrossDebitAssets, boundedActionChargeAssets);
         }
 
         CfdTypes.Position memory projectedPosition = snapshot.position;
@@ -543,7 +588,9 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         OrderV3Types.ExecutionAssessment memory assessment,
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyAssets,
-        bool fullClose
+        bool fullClose,
+        uint256 boundedGrossAccountDebitAssets,
+        uint256 boundedActionChargeAssets
     ) private pure {
         _requireMaximum(
             OrderV3Types.ConstraintKind.ExecutionBounty, executionBountyAssets, bounds.maxExecutionBountyAssets
@@ -555,13 +602,11 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         );
         _requireMaximum(
             OrderV3Types.ConstraintKind.GrossAccountDebit,
-            assessment.grossAccountDebitAssets,
+            boundedGrossAccountDebitAssets,
             bounds.maxGrossAccountDebitAssets
         );
         _requireMaximum(
-            OrderV3Types.ConstraintKind.ActionCharge,
-            assessment.actionChargeAssessedAssets,
-            bounds.maxActionChargeAssets
+            OrderV3Types.ConstraintKind.ActionCharge, boundedActionChargeAssets, bounds.maxActionChargeAssets
         );
         _requireMaximum(
             OrderV3Types.ConstraintKind.ExplicitFees, assessment.explicitFeesAssets, bounds.maxExplicitFeesAssets

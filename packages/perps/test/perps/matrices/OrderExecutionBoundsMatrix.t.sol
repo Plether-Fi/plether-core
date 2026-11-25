@@ -651,7 +651,9 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                 router.commitOrder(tooSmall);
                 _assertCommitRollback(beforeCommit);
             }
-            uint256 actual = kind == 5 ? FEE : commitmentCarry + delayedCarry + FEE;
+            // Execution-time accrued carry (`delayedCarry`) is excluded from debit/charge bounds so carry
+            // checkpointing cannot toggle fills, while commitment carry remains bounded and receipts report both.
+            uint256 actual = kind == 5 ? FEE : commitmentCarry + FEE;
             for (uint8 adjacent; adjacent < 3; adjacent++) {
                 OrderV3Types.OrderRequest memory request = _request(row);
                 _setLimit(request, kind, adjacent == 0 ? actual : adjacent == 1 ? actual - 1 : actual + 1);

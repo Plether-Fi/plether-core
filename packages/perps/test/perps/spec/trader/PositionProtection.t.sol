@@ -902,19 +902,20 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_SelfTriggerKeepsCarrySubjectToCloseBounds() public {
         _startRecordingLogs();
+        // Self-triggering defers carry to the linked close; execution-time carry is excluded from debit bounds so
+        // accrued holding carry cannot brick or toggle a take-profit/stop-loss close, while still collected and
+        // reported on the linked close receipt.
         uint64 orderId = _selfTriggerWithAccruedCarry(0);
-        uint256 balanceBefore = _settlementBalance(ALICE);
         bytes[] memory updateData = _mockPythUpdateData(LONG_TAKE_PROFIT);
         uint256 carry = _expectedIndexedCarryAssets(ALICE);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
-        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.ConstraintViolation));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         OrderV3Types.OrderReceipt memory receipt =
             _verifiedReceipt(IOrderLifecycleBook(address(router.lifecycleBook())), orderId);
-        assertEq(uint8(receipt.failure.constraint), uint8(OrderV3Types.ConstraintKind.GrossAccountDebit));
-        assertEq(receipt.failure.actual, carry);
-        assertEq(_settlementBalance(ALICE), balanceBefore);
+        assertEq(receipt.economics.carryAssets, int256(carry));
+        assertGe(receipt.economics.grossAccountDebitAssets, carry);
         (uint256 size,,,,,,) = engine.positions(ALICE);
-        assertEq(size, POSITION_SIZE);
+        assertEq(size, 0);
     }
 
     function test_SelfTriggerReportsCarryInLinkedCloseReceipt() public {

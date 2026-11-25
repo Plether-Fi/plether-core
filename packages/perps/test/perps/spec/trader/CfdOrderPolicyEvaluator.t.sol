@@ -319,14 +319,16 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.CloseDelta memory delta = _baseCloseDelta();
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 4;
-        bounds.maxGrossAccountDebitAssets = 27e6 - 1;
+        // _baseCloseDelta has 5e6 claim + 15e6 pledge + 5e6 non-carry action charge + 1e6 bounty = 26e6
+        // (1e6 uncovered execution-time carry is reported on the receipt but excluded from debit bounds).
+        bounds.maxGrossAccountDebitAssets = 26e6 - 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
                 OrderV3Types.ConstraintKind.GrossAccountDebit,
-                27e6,
-                27e6 - 1
+                26e6,
+                26e6 - 1
             )
         );
         evaluator.evaluateClose(snapshot, delta, bounds, 1e6);

@@ -121,8 +121,8 @@ contract OpenCommitCarryBoundsTest is BasePerpTest {
         Calibration memory expected = _calibrate(CfdTypes.Side.LONG, 0);
         uint256 checkpoint = vm.snapshotState();
         OrderV3Types.OrderRequest memory request = _increase(CfdTypes.Side.LONG);
-        request.bounds.maxGrossAccountDebitAssets = expected.gross;
-        request.bounds.maxActionChargeAssets = expected.action;
+        request.bounds.maxGrossAccountDebitAssets = expected.boundedGross;
+        request.bounds.maxActionChargeAssets = expected.boundedAction;
         uint256 beforeBalance = clearinghouse.balanceAssets(TRADER);
         OrderV3Types.OrderReceipt memory receipt = _executeAndCompareCommitted(_commit(request));
         assertEq(uint8(receipt.status), uint8(OrderV3Types.LifecycleStatus.Executed));
@@ -132,21 +132,95 @@ contract OpenCommitCarryBoundsTest is BasePerpTest {
         assertEq(receipt.commitment.carryCollectedAssets, expected.carry);
 
         assertTrue(vm.revertToState(checkpoint));
-        request.bounds.maxGrossAccountDebitAssets = expected.gross - 1;
+        request.bounds.maxGrossAccountDebitAssets = expected.boundedGross - 1;
         request.bounds.maxActionChargeAssets = type(uint256).max;
         _assertFailure(
             _execute(_commit(request)),
             OrderV3Types.ConstraintKind.GrossAccountDebit,
-            expected.gross,
-            expected.gross - 1
+            expected.boundedGross,
+            expected.boundedGross - 1
         );
 
         assertTrue(vm.revertToState(checkpoint));
         request.bounds.maxGrossAccountDebitAssets = type(uint256).max;
-        request.bounds.maxActionChargeAssets = expected.action - 1;
+        request.bounds.maxActionChargeAssets = expected.boundedAction - 1;
         _assertFailure(
-            _execute(_commit(request)), OrderV3Types.ConstraintKind.ActionCharge, expected.action, expected.action - 1
+            _execute(_commit(request)),
+            OrderV3Types.ConstraintKind.ActionCharge,
+            expected.boundedAction,
+            expected.boundedAction - 1
         );
+    }
+
+    function test_OpenExecution_CarryCheckpointCannotToggleIncreaseBound() public {
+        _existingPosition(CfdTypes.Side.LONG);
+        // Zero commitment carry first, then commit an increase with exact non-carry trade-cost bounds.
+        vm.prank(TRADER);
+        clearinghouse.withdraw(TRADER, 0);
+        Calibration memory expected = _calibrateZeroCommit(CfdTypes.Side.LONG, 10 seconds);
+        assertGt(expected.execCarry, 0, "delayed execution must accrue carry");
+        uint256 checkpoint = vm.snapshotState();
+
+        // Path 1: No pre-execution carry checkpoint -> must still execute despite accrued execution-time carry.
+        OrderV3Types.OrderRequest memory request = _increase(CfdTypes.Side.LONG);
+        request.bounds.maxGrossAccountDebitAssets = expected.boundedGross;
+        request.bounds.maxActionChargeAssets = expected.boundedAction;
+        uint64 id1 = _commit(request);
+        vm.warp(vm.getBlockTimestamp() + 10 seconds);
+        OrderV3Types.OrderReceipt memory receiptNoCheckpoint = _execute(id1);
+        assertEq(uint8(receiptNoCheckpoint.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        assertEq(receiptNoCheckpoint.economics.carryAssets, int256(expected.execCarry));
+
+        // Path 2: Pre-execution withdraw(0) carry checkpoint -> identical execution outcome.
+        assertTrue(vm.revertToState(checkpoint));
+        uint64 id2 = _commit(request);
+        vm.warp(vm.getBlockTimestamp() + 10 seconds);
+        vm.prank(TRADER);
+        clearinghouse.withdraw(TRADER, 0);
+        OrderV3Types.OrderReceipt memory receiptWithCheckpoint = _execute(id2);
+        assertEq(uint8(receiptWithCheckpoint.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+    }
+
+    function test_CloseExecution_CarryCheckpointCannotToggleZeroDebitBound() public {
+        _existingPosition(CfdTypes.Side.LONG);
+        // Checkpoint carry, then commit a profitable full close (fee withheld from gain -> zero non-carry debit)
+        // with maxGrossAccountDebitAssets = 0. Accrued carry between commit and execution must not cancel it.
+        vm.prank(TRADER);
+        clearinghouse.withdraw(TRADER, 0);
+        uint256 checkpoint = vm.snapshotState();
+
+        OrderV3Types.OrderRequest memory closeReq = _increase(CfdTypes.Side.LONG);
+        closeReq.isClose = true;
+        closeReq.sizeDelta = INITIAL_SIZE;
+        closeReq.marginDelta = 0;
+        closeReq.targetPrice = CAP_PRICE;
+        closeReq.bounds.maxGrossAccountDebitAssets = 0;
+
+        // Path 1: Wait 30s so carry accrues, execute without checkpointing -> still executes (no free-option cancel).
+        uint64 id1 = _commit(closeReq);
+        vm.warp(vm.getBlockTimestamp() + 30 seconds);
+        bytes[] memory profitableUpdate = _mockPythUpdateData(90_000_000);
+        _startRecordingLogs();
+        vm.prank(KEEPER);
+        router.executeOrder(id1, profitableUpdate);
+        OrderV3Types.OrderReceipt memory receipt1 =
+            _verifiedReceipt(IOrderLifecycleBook(address(router.lifecycleBook())), id1);
+        assertEq(uint8(receipt1.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        assertGt(receipt1.economics.carryAssets, 0);
+
+        // Path 2: Checkpoint carry right before execute -> identical execution outcome.
+        assertTrue(vm.revertToState(checkpoint));
+        uint64 id2 = _commit(closeReq);
+        vm.warp(vm.getBlockTimestamp() + 30 seconds);
+        vm.prank(TRADER);
+        clearinghouse.withdraw(TRADER, 0);
+        bytes[] memory profitableUpdate2 = _mockPythUpdateData(90_000_000);
+        _startRecordingLogs();
+        vm.prank(KEEPER);
+        router.executeOrder(id2, profitableUpdate2);
+        OrderV3Types.OrderReceipt memory receipt2 =
+            _verifiedReceipt(IOrderLifecycleBook(address(router.lifecycleBook())), id2);
+        assertEq(uint8(receipt2.status), uint8(OrderV3Types.LifecycleStatus.Executed));
     }
 
     function test_OpenExecution_NewCarryAndCommittedCarryCountOnce() public {
@@ -323,14 +397,14 @@ contract OpenCommitCarryBoundsTest is BasePerpTest {
         _fundJuniorPublic(KEEPER, 100_000e6);
         _existingPosition(CfdTypes.Side.LONG);
         Calibration memory expected = _calibrate(CfdTypes.Side.LONG, 0);
-        uint256 executionOnlyLimit = expected.action - expected.carry;
+        uint256 executionOnlyLimit = expected.boundedAction - expected.carry;
         uint256 shares = juniorVault.balanceOf(KEEPER);
         uint256 checkpoint = vm.snapshotState();
         // The lower cap already fails the execution-only assessment; the former bypass reaches the
         // cumulative check. Both must block the increase and leave exactly the same economic state.
-        Cashout memory oneAtomBelow = _cashoutBranch(executionOnlyLimit - 1, shares, expected.action);
+        Cashout memory oneAtomBelow = _cashoutBranch(executionOnlyLimit - 1, shares, expected.boundedAction);
         assertTrue(vm.revertToState(checkpoint));
-        Cashout memory formerBypass = _cashoutBranch(executionOnlyLimit, shares, expected.action);
+        Cashout memory formerBypass = _cashoutBranch(executionOnlyLimit, shares, expected.boundedAction);
         assertEq(
             keccak256(abi.encode(formerBypass)),
             keccak256(abi.encode(oneAtomBelow)),
@@ -398,11 +472,22 @@ contract OpenCommitCarryBoundsTest is BasePerpTest {
     struct Calibration {
         uint256 gross;
         uint256 action;
+        uint256 boundedGross;
+        uint256 boundedAction;
         uint256 carry;
+        uint256 execCarry;
         uint256 bounty;
     }
 
     function _calibrate(
+        CfdTypes.Side side,
+        uint256 delay
+    ) private returns (Calibration memory result) {
+        result = _calibrateZeroCommit(side, delay);
+        assertGt(result.carry, 0);
+    }
+
+    function _calibrateZeroCommit(
         CfdTypes.Side side,
         uint256 delay
     ) private returns (Calibration memory result) {
@@ -418,7 +503,9 @@ contract OpenCommitCarryBoundsTest is BasePerpTest {
         assertEq(uint8(receipt.status), uint8(OrderV3Types.LifecycleStatus.Executed), "permissive control executes");
         result.gross = beforeBalance - clearinghouse.balanceAssets(TRADER);
         result.action = result.gross - result.bounty;
-        assertGt(result.carry, 0);
+        result.execCarry = uint256(receipt.economics.carryAssets) - result.carry;
+        result.boundedGross = result.gross - result.execCarry;
+        result.boundedAction = result.action - result.execCarry;
         assertTrue(vm.revertToState(checkpoint));
     }
 
@@ -428,7 +515,7 @@ contract OpenCommitCarryBoundsTest is BasePerpTest {
         _existingPosition(CfdTypes.Side.LONG);
         Calibration memory expected = _calibrate(CfdTypes.Side.LONG, 0);
         OrderV3Types.OrderRequest memory request = _increase(CfdTypes.Side.LONG);
-        uint256 actual = grossBound ? expected.gross : expected.action;
+        uint256 actual = grossBound ? expected.boundedGross : expected.boundedAction;
         uint256 executionOnlyLimit = actual - expected.carry;
         if (grossBound) {
             request.bounds.maxGrossAccountDebitAssets = executionOnlyLimit;
