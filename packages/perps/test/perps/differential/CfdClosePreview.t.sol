@@ -304,6 +304,38 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
         assertEq(size, SIZE);
     }
 
+    function test_DoomedSubminimumCloseDoesNotBlockFullPositionExit() public {
+        _setCloseFloor(1000e6);
+        _openNormally(CfdTypes.Side.LONG, 20e6);
+        uint256 residual = 9 * CfdTypes.SIZE_QUANTUM;
+        vm.prank(ACCOUNT);
+        uint64 firstId = router.commitOrder(CfdTypes.Side.LONG, SIZE - residual, 0, PRICE - 1, true);
+        vm.prank(ACCOUNT);
+        uint64 lastId = router.commitOrder(CfdTypes.Side.LONG, residual, 0, PRICE, true);
+        assertTrue(router.lifecycleBook().closeRequiresFullExit(lastId));
+
+        bytes[] memory update = _mockPythUpdateData(PRICE);
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory first = router.executeOrder(firstId, update);
+        assertEq(uint8(first.terminalReason), uint8(OrderV3Types.TerminalReason.Slippage));
+
+        // `lastId` is now guaranteed to fail with DUST_POSITION and must not shrink projected closeable size.
+        vm.prank(ACCOUNT);
+        uint64 fullExitId = router.commitOrder(CfdTypes.Side.LONG, SIZE, 0, type(uint256).max, true);
+
+        update = _mockPythUpdateData(PRICE);
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory last = router.executeOrder(lastId, update);
+        assertEq(uint8(last.terminalReason), uint8(OrderV3Types.TerminalReason.PlannerRejected));
+
+        update = _mockPythUpdateData(PRICE);
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory fullExit = router.executeOrder(fullExitId, update);
+        assertEq(uint8(fullExit.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        (uint256 size,,,,,,) = engine.positions(ACCOUNT);
+        assertEq(size, 0);
+    }
+
     function test_DustChecksRejectMissingMarkAndUseCappedMarkEvenWithZeroBounty() public {
         _setCloseFloor(1000e6);
         _openNormally(CfdTypes.Side.LONG, 20e6);

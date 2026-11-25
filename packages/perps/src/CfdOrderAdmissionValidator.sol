@@ -153,8 +153,9 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
                     && (intent.bounds.expectedConfigHash == bytes32(0)
                         || intent.bounds.expectedConfigHash == currentConfigHash)
             ) {
+                bool fullExitOnly = pending.isClose && book.closeRequiresFullExit(orderId);
                 domain.executionBountyAssets = intent.executionBountyAssets;
-                position = _projectPendingOrder(position, liveSide, pending, intent, domain, riskParams);
+                position = _projectPendingOrder(position, liveSide, pending, intent, fullExitOnly, domain, riskParams);
             }
             orderId = nextOrderId;
         }
@@ -165,19 +166,21 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
         CfdTypes.Side liveSide,
         IOrderRouterAccounting.PendingOrderView memory pending,
         OrderV3Types.PendingIntent memory intent,
+        bool fullExitOnly,
         OrderValidationLib.ExecutionDomain memory domain,
         CfdTypes.RiskParams memory riskParams
     ) private pure returns (QueuedPosition memory) {
         OrderV3Types.ExecutionBounds memory bounds = intent.bounds;
-        if (pending.isClose) {
-            uint256 carry = intent.commitment.carryCollectedAssets;
-            if (carry > bounds.maxActionChargeAssets) {
-                return position;
-            }
-            if (domain.vpiDisabled) {
-                // The collected carry is added to the assessed action charge at execution.
-                bounds.maxActionChargeAssets -= carry;
-            }
+        uint256 carry = intent.commitment.carryCollectedAssets;
+        if (carry > bounds.maxActionChargeAssets || carry > bounds.maxGrossAccountDebitAssets) {
+            return position;
+        }
+        if (domain.vpiDisabled) {
+            // The collected carry is added to the bounded debit and action charge at execution.
+            bounds.maxActionChargeAssets -= carry;
+            bounds.maxGrossAccountDebitAssets -= carry;
+        } else if (!pending.isClose && domain.executionBountyAssets > bounds.maxGrossAccountDebitAssets - carry) {
+            return position;
         }
         if (!OrderValidationLib.isRequestFeasible(
                 pending.side, pending.isClose, pending.sizeDelta, pending.targetPrice, bounds, domain
@@ -187,6 +190,7 @@ contract CfdOrderAdmissionValidator is ICfdOrderAdmissionValidator, IOrderRouter
         if (pending.isClose) {
             if (
                 position.exists && pending.side == position.side && pending.sizeDelta <= position.size
+                    && (!fullExitOnly || pending.sizeDelta == position.size)
                     && position.size - pending.sizeDelta <= bounds.maxPostPositionSize
                     && (position.size == pending.sizeDelta
                         || bounds.minPostPositionEquityAssets <= uint256(type(int256).max))
