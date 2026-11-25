@@ -619,7 +619,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertLe(pool.seniorPrincipal(), pool.juniorPrincipal(), "the final 50% Senior-share covenant must hold");
     }
 
-    function test_ImpairedSeniorFrozenExitScalesHwmByFundedPrincipal() public {
+    function test_ImpairedSeniorFrozenExitScalesHwmAndHealsDeficitFirst() public {
         (uint256 seniorShares,) = _fundPair(ALICE, 100_000e6, BOB, 100_000e6);
 
         vm.prank(address(pool));
@@ -644,12 +644,18 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         uint256 shareRemovedHwm = (hwmBefore * result.seniorFundedShares) / supplyBefore;
         uint256 expectedHwm = hwmBefore - (assetRemovedHwm < shareRemovedHwm ? assetRemovedHwm : shareRemovedHwm);
         uint256 exitFee = grossAssets - result.seniorFundedAssets;
+        uint256 deficitAfterGross = expectedHwm - (principalBefore - grossAssets);
+        uint256 expectedRestore = exitFee < deficitAfterGross ? exitFee : deficitAfterGross;
 
         assertGt(result.seniorFundedAssets, 0);
         assertEq(result.seniorFundedShares, seniorShares / 2);
         assertGt(exitFee, 0, "frozen Senior exit must charge a nonzero fee");
-        assertEq(pool.seniorPrincipal(), principalBefore - grossAssets, "gross Senior value must debit Senior");
-        assertEq(pool.juniorPrincipal(), exitFee, "routed Senior frozen exit fee must credit Junior");
+        assertEq(
+            pool.seniorPrincipal(),
+            principalBefore - grossAssets + expectedRestore,
+            "Senior exit fee must heal remaining Senior impairment up to HWM first"
+        );
+        assertEq(pool.juniorPrincipal(), exitFee - expectedRestore, "only overflow above Senior HWM may credit Junior");
         assertEq(pool.seniorHighWaterMark(), expectedHwm, "HWM must scale conservatively by gross principal removed");
     }
 

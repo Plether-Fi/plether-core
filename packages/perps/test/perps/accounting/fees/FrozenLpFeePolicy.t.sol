@@ -214,7 +214,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertGt(juniorPriceAfter, juniorPriceBefore, "Senior frozen exit fee must accrue to incumbent Junior LPs");
     }
 
-    function test_LastJuniorLpCanExitAfterSeniorSeedRetainsFrozenFee() public {
+    function test_LastJuniorLpCanExitAfterSeniorFrozenExitFeeRoutesToJunior() public {
         address seniorLp = address(0xA11CE);
         _setSeniorCapacity(4_000_000e6, 8000);
         _fundSenior(seniorLp, 2_000_000e6);
@@ -306,7 +306,7 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertEq(pool.accountedAssets(), pool.seniorPrincipal() + pool.juniorPrincipal());
     }
 
-    function test_SeniorFrozenExitFee_ImpairedSeniorPreservesHwmAndCreditsJunior() public {
+    function test_SeniorFrozenExitFee_ImpairedSeniorHealsDeficitBeforeJunior() public {
         address exitingSenior = address(0x5E12);
         address stayingSenior = address(0x5E13);
         _fundSenior(exitingSenior, 500_000e6);
@@ -337,8 +337,10 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         uint256 seniorExitFee = seniorGross - result.seniorFundedAssets;
 
         assertGt(seniorExitFee, 0);
-        assertEq(pool.seniorPrincipal(), seniorPrincipalBefore - seniorGross);
-        assertEq(pool.juniorPrincipal(), seniorExitFee, "Senior frozen exit fee adds first-loss cushion to Junior");
+        // Remaining Senior deficit far exceeds the 25 bps fee, so 100% heals remaining Senior up to HWM first.
+        assertEq(pool.seniorPrincipal(), seniorPrincipalBefore - result.seniorFundedAssets);
+        assertLt(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "Senior remains impaired below HWM");
+        assertEq(pool.juniorPrincipal(), 0, "Junior must not receive Senior exit fees while Senior is below HWM");
         assertEq(pool.accountedAssets(), accountedBefore - result.seniorFundedAssets);
         assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), pool.accountedAssets());
         assertGe(
@@ -346,6 +348,42 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
             seniorHwmBefore - (seniorHwmBefore * shares) / seniorSupplyBefore,
             "impaired remaining Senior HWM ownership must be preserved"
         );
+    }
+
+    function test_SeniorFrozenExitFee_ImpairedFullExternalExitHealsSeedAndRoutesOverflowToJunior() public {
+        address exitingSenior = address(0x5E14);
+        _fundSenior(exitingSenior, 500_000e6);
+        _fundJunior(address(0xB0B4), 500_000e6);
+
+        uint256 loss = pool.juniorPrincipal() + pool.seniorPrincipal() / 2;
+        vm.prank(address(engine));
+        pool.payOut(address(0xD00E), loss);
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+        assertEq(pool.juniorPrincipal(), 0);
+        assertLt(pool.seniorPrincipal(), pool.seniorHighWaterMark());
+
+        _enterFrozenWindow();
+        uint256 shares = seniorVault.balanceOf(exitingSenior);
+        uint256 reqId = _requestRedeem(seniorVault, exitingSenior, shares);
+        _prepareFrozenEpoch(reqId);
+
+        uint256 seniorPrincipalBefore = pool.seniorPrincipal();
+        uint256 seniorGross = seniorVault.convertToAssets(shares);
+        uint256 accountedBefore = pool.accountedAssets();
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+        uint256 seniorExitFee = seniorGross - result.seniorFundedAssets;
+        uint256 seedAfterGross = seniorPrincipalBefore - seniorGross;
+        uint256 seedRestore = pool.seniorHighWaterMark() - seedAfterGross;
+
+        assertEq(seniorVault.totalSupply(), seniorVault.seedShareFloor(), "only Senior seed remains");
+        assertGt(seedRestore, 0, "seed impairment is healed back to its HWM");
+        assertLt(seedRestore, seniorExitFee, "overflow above seed HWM must flow to Junior");
+        assertEq(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "Senior seed caps exactly at its HWM");
+        assertEq(pool.juniorPrincipal(), seniorExitFee - seedRestore, "overflow fee routes to Junior");
+        assertEq(pool.accountedAssets(), accountedBefore - result.seniorFundedAssets);
+        assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), pool.accountedAssets());
     }
 
     function test_FrozenWithdrawFee_RemainsJuniorLocal() public {

@@ -656,9 +656,11 @@ Accounting rules:
 - the fee does not become protocol revenue,
 - the fee does not increase `protocolTreasuryBalanceAssets`,
 - Junior frozen exit fees remain inside `juniorPrincipal` and therefore benefit incumbent Junior LPs; Senior frozen exit
-  fees are debited from `seniorPrincipal` as part of the gross exited share value and credited to `juniorPrincipal` (or
-  `unassignedAssets` when Junior share supply is zero), so Senior exits never inflate remaining Senior share price or
-  trap fee value on the permanent Senior seed floor while rewarding Junior LPs who remain through the frozen window.
+  fees are debited from `seniorPrincipal` as part of the gross exited share value and routed through the waterfall:
+  first restoring any remaining Senior impairment up to `seniorHighWaterMark`, with all overflow credited to
+  `juniorPrincipal` (or `unassignedAssets` when Junior share supply is zero). Healthy Senior exits therefore send 100%
+  of their frozen fee to Junior without inflating remaining Senior share price or trapping fee value on the permanent
+  Senior seed floor, while impaired Senior exits never pay Junior ahead of underwater remaining Senior LPs.
 
 Senior withdrawal protection follows the gross principal debit, with a share-ownership floor for impaired partial
 withdrawals. For pre-withdrawal principal `P`, high-water mark `H`, and gross exited Senior principal `G` (of which net

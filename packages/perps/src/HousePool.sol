@@ -895,7 +895,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             grossAssets: 0,
             processedEpochs: 0,
             backlog: false,
-            debitGrossFromPrincipal: true
+            debitGrossFromPrincipal: seniorHighWaterMark <= seniorPrincipal
         });
         seniorPhase = _fundRedemptionPhase(
             seniorVault, result.cutoffEpoch, seniorPhase, _settlementFeeBps(true, statusSnapshot.oracleFrozen)
@@ -910,10 +910,17 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             );
             uint256 seniorExitFee = seniorPhase.grossAssets - seniorPhase.fundedAssets;
             if (seniorExitFee > 0) {
-                if (juniorPhase.pricingSupply > 0) {
-                    juniorPrincipal += seniorExitFee;
-                } else {
-                    unassignedAssets += seniorExitFee;
+                if (seniorPrincipal < seniorHighWaterMark) {
+                    uint256 restore = Math.min(seniorExitFee, seniorHighWaterMark - seniorPrincipal);
+                    seniorPrincipal += restore;
+                    seniorExitFee -= restore;
+                }
+                if (seniorExitFee > 0) {
+                    if (juniorPhase.pricingSupply > 0) {
+                        juniorPrincipal += seniorExitFee;
+                    } else {
+                        unassignedAssets += seniorExitFee;
+                    }
                 }
             }
             accountedAssets -= seniorPhase.fundedAssets;

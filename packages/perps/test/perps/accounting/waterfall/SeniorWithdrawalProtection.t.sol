@@ -6,7 +6,7 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
 contract SeniorWithdrawalProtectionTest is HousePoolTestBase {
 
-    function test_FrozenExitRetainedFeeRecoversBeforeJuniorRevenue() public {
+    function test_FrozenExitGrossDebitRecoversBeforeJuniorRevenue() public {
         _assertWithdrawalRecovery(25);
     }
 

@@ -1545,8 +1545,10 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
 - a positive marked receivable is not cash, so share NAV can exceed immediately redeemable liquidity,
 - `TerminalNavBookV2` is intentionally non-upgradeable and has no owner repair path; a book/Engine invariant failure
   requires containment and a fresh-stack deployment rather than an in-place edit,
-- `oracleFrozen` keeps eligible synchronized LP settlement live under fixed tranche-local frozen fees rather than a
-  separate stale-action gate for exits; redemption funding is allowed to proceed while entry activation is deferred,
+- `oracleFrozen` keeps eligible synchronized LP settlement live under fixed frozen exit fees (Junior fees remain in
+  Junior; Senior fees debit gross Senior principal and route through the waterfall to restore any remaining Senior
+  impairment up to HWM first, with overflow to Junior or `unassignedAssets`) rather than a separate stale-action gate
+  for exits; redemption funding is allowed to proceed while entry activation is deferred,
 - each bounded live backlog pass pays a Pyth update fee and may use a later valid post-boundary mark than the previous
   pass; atomicity binds one call, not an arbitrarily large backlog,
 - senior coupon payments are capped by available junior principal,
@@ -1577,10 +1579,10 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
   HousePool as excess, and refundable-share dust goes to the seed receiver. It is not awarded to the final caller.
 - Each floor-rounded HWM-removal calculation retains less than one extra USDG atom relative to its exact fractional
   result. This rounding residual can accumulate across funded passes. It does not bound the difference between
-  net-principal-based and share-proportional protection: virtual-offset pricing, per-epoch asset rounding, and retained
-  fees can separate those fractions substantially at small principal. Impaired partial withdrawals cap HWM removal
-  by both fractions, but may still retain substantially more than share-proportional protection when the net-principal
-  bound wins. Full-principal funding intentionally clears HWM. These rules do not establish a universal LP dust bound.
+  gross-principal-based and share-proportional protection: virtual-offset pricing and per-epoch asset rounding can
+  separate those fractions substantially at small principal. Impaired partial withdrawals cap HWM removal by both
+  fractions, but may still retain substantially more than share-proportional protection when the gross-principal bound
+  wins. Full-principal removal intentionally clears HWM. These rules do not establish a universal LP dust bound.
 
 ### Rounding limitations
 
