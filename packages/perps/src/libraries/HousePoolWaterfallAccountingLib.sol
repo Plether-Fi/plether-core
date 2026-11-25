@@ -112,12 +112,12 @@ library HousePoolWaterfallAccountingLib {
     /// @notice Removes senior principal while conservatively preserving remaining high-water-mark entitlement.
     /// @dev Callers must supply `fundedAssets <= seniorPrincipal` and, for positive funding,
     ///      `0 < fundedShares <= pricingSupply`.
-    ///      HWM removal follows net principal, capped by funded-share ownership for impaired partial withdrawals.
-    ///      Both removals round down. Zero funding preserves even a wiped-out Senior's HWM; funding all principal
-    ///      clears it. Retained fees stay protected, and junior is unchanged.
+    ///      HWM removal follows removed principal, capped by funded-share ownership for impaired partial withdrawals.
+    ///      Both removals round down. Zero funding preserves even a wiped-out Senior's HWM; removing all principal
+    ///      clears it. Junior is unchanged here; callers credit any routed senior exit fee separately.
     /// @param seniorPrincipal Senior principal before withdrawal.
     /// @param seniorHighWaterMark Senior HWM before withdrawal.
-    /// @param fundedAssets Net senior principal funded in 6-decimal settlement token.
+    /// @param fundedAssets Senior principal removed on withdrawal (gross of any routed exit fee) in 6-decimal token.
     /// @param fundedShares Aggregate shares burned for this funding phase.
     /// @param pricingSupply Real senior share supply before any funding-phase burns.
     /// @return nextPrincipal Senior principal after funding.

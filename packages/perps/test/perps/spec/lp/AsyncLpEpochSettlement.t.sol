@@ -637,16 +637,20 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         uint256 principalBefore = pool.seniorPrincipal();
         uint256 hwmBefore = pool.seniorHighWaterMark();
         uint256 supplyBefore = seniorVault.totalSupply();
+        uint256 grossAssets = seniorVault.convertToAssets(seniorShares / 2);
 
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
-        uint256 expectedHwm = hwmBefore - (hwmBefore * result.seniorFundedAssets) / principalBefore;
-        uint256 noFeeAssets = (principalBefore * result.seniorFundedShares) / supplyBefore;
+        uint256 assetRemovedHwm = (hwmBefore * grossAssets) / principalBefore;
+        uint256 shareRemovedHwm = (hwmBefore * result.seniorFundedShares) / supplyBefore;
+        uint256 expectedHwm = hwmBefore - (assetRemovedHwm < shareRemovedHwm ? assetRemovedHwm : shareRemovedHwm);
+        uint256 exitFee = grossAssets - result.seniorFundedAssets;
 
         assertGt(result.seniorFundedAssets, 0);
         assertEq(result.seniorFundedShares, seniorShares / 2);
-        assertLt(result.seniorFundedAssets, noFeeAssets, "the frozen exit fee must stay in Senior principal");
-        assertEq(pool.seniorPrincipal(), principalBefore - result.seniorFundedAssets);
-        assertEq(pool.seniorHighWaterMark(), expectedHwm, "HWM must scale by the actual principal removed");
+        assertGt(exitFee, 0, "frozen Senior exit must charge a nonzero fee");
+        assertEq(pool.seniorPrincipal(), principalBefore - grossAssets, "gross Senior value must debit Senior");
+        assertEq(pool.juniorPrincipal(), exitFee, "routed Senior frozen exit fee must credit Junior");
+        assertEq(pool.seniorHighWaterMark(), expectedHwm, "HWM must scale conservatively by gross principal removed");
     }
 
     function test_PartialFundingAccumulatesAcrossClaims() public {

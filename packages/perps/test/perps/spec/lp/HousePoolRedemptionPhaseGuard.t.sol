@@ -22,17 +22,49 @@ contract HousePoolRedemptionPhaseHarness is HousePool {
         uint256 budget,
         uint256 feeBps
     ) external returns (uint256 fundedShares, uint256 fundedAssets, uint256 processedEpochs, bool backlog) {
+        (fundedShares, fundedAssets,, processedEpochs, backlog) =
+            _runRedemptionPhase(vault, cutoffEpoch, pricingPrincipal, pricingSupply, budget, feeBps, false);
+    }
+
+    function runSeniorRedemptionPhase(
+        address vault,
+        uint256 cutoffEpoch,
+        uint256 pricingPrincipal,
+        uint256 pricingSupply,
+        uint256 budget,
+        uint256 feeBps
+    )
+        external
+        returns (uint256 fundedShares, uint256 fundedAssets, uint256 grossAssets, uint256 processedEpochs, bool backlog)
+    {
+        return _runRedemptionPhase(vault, cutoffEpoch, pricingPrincipal, pricingSupply, budget, feeBps, true);
+    }
+
+    function _runRedemptionPhase(
+        address vault,
+        uint256 cutoffEpoch,
+        uint256 pricingPrincipal,
+        uint256 pricingSupply,
+        uint256 budget,
+        uint256 feeBps,
+        bool debitGrossFromPrincipal
+    )
+        internal
+        returns (uint256 fundedShares, uint256 fundedAssets, uint256 grossAssets, uint256 processedEpochs, bool backlog)
+    {
         RedemptionPhase memory phase = RedemptionPhase({
             pricingPrincipal: pricingPrincipal,
             pricingSupply: pricingSupply,
             budget: budget,
             fundedShares: 0,
             fundedAssets: 0,
+            grossAssets: 0,
             processedEpochs: 0,
-            backlog: false
+            backlog: false,
+            debitGrossFromPrincipal: debitGrossFromPrincipal
         });
         phase = _fundRedemptionPhase(vault, cutoffEpoch, phase, feeBps);
-        return (phase.fundedShares, phase.fundedAssets, phase.processedEpochs, phase.backlog);
+        return (phase.fundedShares, phase.fundedAssets, phase.grossAssets, phase.processedEpochs, phase.backlog);
     }
 
     function runDepositPhase(
@@ -355,6 +387,25 @@ contract HousePoolRedemptionPhaseGuardTest is Test {
         assertFalse(backlog);
         assertEq(feeVault.balanceOf(address(0xFEE)), accruedShares);
         assertEq(feeVault.totalSupply(), rawSupply + accruedShares + expectedDepositShares);
+    }
+
+    function test_SeniorRoutedFeePhaseTracksGrossDebitAndRefundsZeroRemainder() public {
+        (uint256 fundedShares, uint256 fundedAssets, uint256 grossAssets, uint256 processedEpochs, bool backlog) =
+            pool.runSeniorRedemptionPhase(address(vault), 2, PRINCIPAL, SUPPLY, 3, FEE_BPS);
+
+        assertEq(fundedShares, FIRST_HEAD_SHARES);
+        assertEq(fundedAssets, 2);
+        assertEq(grossAssets, 3, "gross Senior debit must include the routed 1-atom exit fee");
+        assertEq(
+            HousePoolRedemptionMathLib.netAssetsForShares(
+                SECOND_HEAD_SHARES, PRINCIPAL - grossAssets, SUPPLY - fundedShares, 1, 1000, FEE_BPS
+            ),
+            0,
+            "without retained fee in Senior, the second head still pays zero after burn"
+        );
+        assertEq(processedEpochs, 2, "second head must be refunded in the same phase");
+        assertFalse(backlog);
+        assertEq(vault.refundedShares(), SECOND_HEAD_SHARES);
     }
 
 }

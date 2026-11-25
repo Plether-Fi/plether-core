@@ -96,8 +96,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         uint256 budget;
         uint256 fundedShares;
         uint256 fundedAssets;
+        uint256 grossAssets;
         uint256 processedEpochs;
         bool backlog;
+        bool debitGrossFromPrincipal;
     }
 
     /// @dev Frozen pricing inputs and aggregate output for one tranche's deposit phase.
@@ -890,8 +892,10 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             budget: Math.min(freeAssets, seniorPrincipal),
             fundedShares: 0,
             fundedAssets: 0,
+            grossAssets: 0,
             processedEpochs: 0,
-            backlog: false
+            backlog: false,
+            debitGrossFromPrincipal: true
         });
         seniorPhase = _fundRedemptionPhase(
             seniorVault, result.cutoffEpoch, seniorPhase, _settlementFeeBps(true, statusSnapshot.oracleFrozen)
@@ -900,10 +904,18 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             (seniorPrincipal, seniorHighWaterMark) = HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(
                 seniorPhase.pricingPrincipal,
                 seniorHighWaterMark,
-                seniorPhase.fundedAssets,
+                seniorPhase.grossAssets,
                 seniorPhase.fundedShares,
                 seniorPhase.pricingSupply
             );
+            uint256 seniorExitFee = seniorPhase.grossAssets - seniorPhase.fundedAssets;
+            if (seniorExitFee > 0) {
+                if (juniorPhase.pricingSupply > 0) {
+                    juniorPrincipal += seniorExitFee;
+                } else {
+                    unassignedAssets += seniorExitFee;
+                }
+            }
             accountedAssets -= seniorPhase.fundedAssets;
             // Canonical redemption math caps aggregate funding by the phase budget, which cannot exceed freeAssets.
             unchecked {
@@ -1008,28 +1020,16 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             uint256 supplyBefore = vault.accruedTotalSupply();
             if (
                 REDEMPTION_MATH_SIDECAR.netAssetsForShares(
-                        remainingShares, phase.pricingPrincipal - phase.fundedAssets, supplyBefore, 1, 1000, feeBps
+                        remainingShares,
+                        phase.pricingPrincipal
+                            - (phase.debitGrossFromPrincipal ? phase.grossAssets : phase.fundedAssets),
+                        supplyBefore,
+                        1,
+                        1000,
+                        feeBps
                     ) == 0
             ) {
-                uint256 supplyBeforeRefund = IERC20(vaultAddress).totalSupply();
-                uint256 escrowSharesBeforeRefund = IERC20(vaultAddress).balanceOf(vaultAddress);
-                uint256 poolAssetsBeforeRefund = rawAssets();
-                uint256 vaultAssetsBeforeRefund = settlementToken.balanceOf(vaultAddress);
-                if (vault.refundRedeemEpochRemainder(epochId, remainingShares) != remainingShares) {
-                    revert HousePool__VaultSettlementInvariant();
-                }
-                if (IERC20(vaultAddress).totalSupply() != supplyBeforeRefund) {
-                    revert HousePool__VaultSettlementInvariant();
-                }
-                if (IERC20(vaultAddress).balanceOf(vaultAddress) != escrowSharesBeforeRefund) {
-                    revert HousePool__VaultSettlementInvariant();
-                }
-                if (rawAssets() != poolAssetsBeforeRefund) {
-                    revert HousePool__VaultSettlementInvariant();
-                }
-                if (settlementToken.balanceOf(vaultAddress) != vaultAssetsBeforeRefund) {
-                    revert HousePool__VaultSettlementInvariant();
-                }
+                _refundZeroPayoutRedeemEpoch(vault, vaultAddress, epochId, remainingShares);
                 unchecked {
                     // The loop bounds this counter below MAX_LP_EPOCHS_PER_PHASE.
                     ++phase.processedEpochs;
@@ -1068,6 +1068,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             }
             phase.fundedShares += fundedShares;
             phase.fundedAssets += fundedAssets;
+            phase.grossAssets += feeBps == 0
+                ? fundedAssets
+                : Math.mulDiv(fundedShares, phase.pricingPrincipal + 1, phase.pricingSupply + 1000);
             unchecked {
                 // The loop bounds this counter below MAX_LP_EPOCHS_PER_PHASE.
                 ++phase.processedEpochs;
@@ -1078,6 +1081,33 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         }
         phase.backlog = _hasMaturedRedeemHead(vaultAddress, cutoffEpoch);
         return phase;
+    }
+
+    function _refundZeroPayoutRedeemEpoch(
+        ITrancheVaultEpochSettlement vault,
+        address vaultAddress,
+        uint256 epochId,
+        uint256 remainingShares
+    ) internal {
+        uint256 supplyBeforeRefund = IERC20(vaultAddress).totalSupply();
+        uint256 escrowSharesBeforeRefund = IERC20(vaultAddress).balanceOf(vaultAddress);
+        uint256 poolAssetsBeforeRefund = rawAssets();
+        uint256 vaultAssetsBeforeRefund = settlementToken.balanceOf(vaultAddress);
+        if (vault.refundRedeemEpochRemainder(epochId, remainingShares) != remainingShares) {
+            revert HousePool__VaultSettlementInvariant();
+        }
+        if (IERC20(vaultAddress).totalSupply() != supplyBeforeRefund) {
+            revert HousePool__VaultSettlementInvariant();
+        }
+        if (IERC20(vaultAddress).balanceOf(vaultAddress) != escrowSharesBeforeRefund) {
+            revert HousePool__VaultSettlementInvariant();
+        }
+        if (rawAssets() != poolAssetsBeforeRefund) {
+            revert HousePool__VaultSettlementInvariant();
+        }
+        if (settlementToken.balanceOf(vaultAddress) != vaultAssetsBeforeRefund) {
+            revert HousePool__VaultSettlementInvariant();
+        }
     }
 
     function _settleDepositPhase(
