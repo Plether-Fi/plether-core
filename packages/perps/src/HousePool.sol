@@ -1826,12 +1826,15 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             HousePoolPendingPreviewLib.ClaimantPendingBuckets memory remainingClaimantBuckets
         )
     {
-        uint256 claimDebit = markValid
-            ? Math.min(pendingClaimantPayoutDebitAssets, _pendingClaimantBucketAssets(claimantBuckets))
-            : 0;
-        claimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(
-            claimantBuckets, _pendingClaimantBucketAssets(claimantBuckets) - claimDebit
-        );
+        uint256 totalPending = _pendingClaimantBucketAssets(claimantBuckets);
+        uint256 freshBeforeDebit = Math.min(freshlyQueuedClaimantAssets, totalPending);
+        uint256 distributableToClaims =
+            reconcileSnapshot.distributable > unassignedAssets ? reconcileSnapshot.distributable - unassignedAssets : 0;
+        // Claim settlement leaves net distributable unchanged; keep fresh claimant inflows still backed by
+        // distributable from being stripped into ordinary revenue before their first reconcile.
+        uint256 maxClaimDebit = totalPending - Math.min(freshBeforeDebit, distributableToClaims);
+        uint256 claimDebit = markValid ? Math.min(pendingClaimantPayoutDebitAssets, maxClaimDebit) : 0;
+        claimantBuckets = HousePoolPendingPreviewLib.capClaimantBuckets(claimantBuckets, totalPending - claimDebit);
         (claimantBuckets.revenueAssets,,) = REDEMPTION_MATH_SIDECAR.capPendingClaimantBuckets(
             accountingSnapshot.physicalAssets,
             accountingSnapshot.terminalLpPriceDeltaAssets,
@@ -1841,8 +1844,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             claimantBuckets.revenueAssets
         );
         uint256 freshAssets = Math.min(freshlyQueuedClaimantAssets, _pendingClaimantBucketAssets(claimantBuckets));
-        uint256 distributableToClaims =
-            reconcileSnapshot.distributable > unassignedAssets ? reconcileSnapshot.distributable - unassignedAssets : 0;
         settleableClaimantBuckets = HousePoolPendingPreviewLib.settleableClaimantBuckets(
             claimantBuckets, distributableToClaims, seniorPrincipal + juniorPrincipal, freshAssets
         );
