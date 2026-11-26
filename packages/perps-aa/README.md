@@ -96,3 +96,40 @@ against the deployment artifact, verify the pending/accepted Safe owner and sole
 amount, and deliberately call `unpause()`. Staking and depositing are separate operations. Fill
 `deployments/arbitrum-sepolia-perps-aa.template.json` with the source commit, bytecode hashes, transactions, signer
 address, ownership, deposit, stake, and readback evidence.
+
+## Kernel v4 on Arbitrum Sepolia
+
+`PletherKernelVerifyingPaymaster` supports one factory-created Kernel v4 UUPS profile with an ECDSA root,
+EntryPoint v0.9 and nonce key zero. The backend validates the reviewed profile, proof of ownership and inner Perps
+calls. The same Kernel account can pay with ETH by submitting an operation without any paymaster data.
+
+A first operation calls the pinned `KernelFactory.deploy` directly with the canonical index-zero ECDSA root
+initializer. The same factory, UUPS implementation and initializer produce the same account address as the
+previous Staker route. This Sepolia profile uses a private bundler with normal UserOperation validation and
+Alto SafeMode disabled. Neither the factory nor the paymaster needs a separate stake for this profile. The
+paymaster still needs a spending deposit. Its validation returns empty context and requires zero post-op gas.
+
+The Kernel verifier uses the same 209-byte envelope and EIP-712 domain name and version as the v0.8 verifier, with
+the Kernel paymaster address and EntryPoint v0.9 in the signed digest. The 65-byte sponsor signature stays inside
+the data committed by the account signature. The EntryPoint v0.9 optional paymaster-signature suffix is excluded
+from this profile. Install final sponsor data before owner signing. Verify the signed operation hash against the
+exact EntryPoint v0.9 implementation before use.
+
+Run `DeployPletherKernelVerifyingPaymaster.s.sol:DeployPletherKernelVerifyingPaymaster` initially as a dry run on
+Arbitrum Sepolia. The script requires `DEPLOYER_PRIVATE_KEY`, `PAYMASTER_OWNER`, `SPONSOR_SIGNER`,
+`MAX_SPONSORED_COST_WEI` and `KERNEL_PAYMASTER_POLICY_ID`. Set these profile fields from independent qualification
+evidence:
+
+| Variable | Reviewed input |
+| --- | --- |
+| `KERNEL_ENTRY_POINT_CODE_HASH` | Runtime hash at EntryPoint v0.9 `0x433709009B8330FDa32311DF1C2AFA402eD8D009` |
+| `KERNEL_FACTORY`, `KERNEL_FACTORY_CODE_HASH` | Kernel v4 factory and runtime hash |
+| `KERNEL_IMPLEMENTATION`, `KERNEL_IMPLEMENTATION_CODE_HASH` | Factory's Kernel v4 UUPS implementation and runtime hash |
+| `KERNEL_ROOT_VALIDATOR`, `KERNEL_ROOT_VALIDATOR_CODE_HASH` | ECDSA root module and runtime hash |
+| `KERNEL_PROXY_RUNTIME_CODE_HASH`, `KERNEL_SAMPLE_OWNER` | Runtime hash and owner of a qualified index-zero account |
+
+The script derives the sample account from the factory, then checks its runtime, implementation slot, beacon slot,
+root and registered owner. It deploys the paymaster paused. Attest its configuration to the gateway and initialize
+canonical reconciliation from the verified paymaster deployment block before funding and enabling the canary. Fund the new
+paymaster deposit separately. Keep the paymaster paused and gateway issuance off until the pinned deployment,
+funded signed UserOperations in both gas modes, and invalid-signature rejection pass with normal validation.

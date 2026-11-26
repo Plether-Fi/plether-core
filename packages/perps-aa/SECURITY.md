@@ -59,3 +59,29 @@ reduce the cost ceiling, and disable the frontend sponsorship flag.
 Before mainnet funding, complete an external review of the paymaster and service, test against the real EntryPoint v0.8
 and selected bundler/account implementation, validate EIP-7702 behavior on the target chain, load-test budget atomics,
 and rehearse pause/signer rotation/deposit withdrawal. Keep the legacy direct-wallet path available during rollout.
+
+## Kernel v4 pilot profile
+
+`PletherKernelVerifyingPaymaster` binds EntryPoint v0.9, the pinned KernelFactory, the expected Kernel UUPS
+implementation, validator and proxy runtime. It accepts one canonical index-zero ECDSA root initializer
+through a direct factory call. This Sepolia pilot uses a private, allowlisted Alto service with SafeMode
+disabled and normal UserOperation validation enabled. Canonical ERC-7562 storage restrictions are outside
+this private pilot's validation profile. Direct first deployment and the paymaster's validation-time storage reads
+require separate qualification before using a canonical ERC-7562 mempool. The paymaster spends its EntryPoint
+deposit and returns empty context with zero post-op gas.
+
+It limits sponsored operations to nonce key zero and atomic ERC-7579 single or batch execution. It rejects the
+v0.9 optional paymaster-signature suffix and block-based validity windows. The signature binds the exact operation.
+
+Kernel UUPS accounts can change their implementation and root. The paymaster checks the proxy runtime and the
+configured implementation and validator code hashes. The gateway attests the sender's live implementation and beacon
+slots, root and validator owner at agreed state before issuance and submission, but because `EntryPoint.handleOps` is
+permissionless, a malicious UUPS owner who already holds a signed `paymasterAndData` could upgrade via a parallel
+nonce key and submit directly to EntryPoint without passing through the gateway. Gateway submission checks are
+therefore a defense-in-depth guardrail, not an enforceable boundary against a malicious account owner. The constructor
+restricts this UUPS pilot to Arbitrum Sepolia. Use controlled accounts, a small dedicated deposit and short-lived
+authorizations. A production profile requires immutable execution or an irreversible upgrade lock and qualification
+under the production bundler validation rules.
+
+ETH-paid operations run without a paymaster, signer approval, or sponsor reservation. Continue checking account
+identity, approved actions, nonce and canonical receipt evidence throughout this path.
