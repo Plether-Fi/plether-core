@@ -95,6 +95,9 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (engine.degradedMode()) {
             revert ICfdEngineTypes.CfdEngine__DegradedMode();
         }
+        if (OrderSettlementFloorLib.pendingHeadOrderId(engine.orderRouter(), account) != 0) {
+            revert ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition();
+        }
 
         (bool priceFresh, uint256 price) = _liveMark(engine, host);
         if (!priceFresh) {

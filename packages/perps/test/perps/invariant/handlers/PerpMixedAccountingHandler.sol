@@ -1343,11 +1343,20 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (scenario == 10) {
             assertLt(traders[i].vpi, 0, "opposing open produces a backed lifetime rebate");
         }
+        _withdraw(i, _free(i));
         if (scenario == 11) {
+            uint256 nextBounty = 17 * currentPrice / 10_000;
+            if (nextBounty > 200_000) {
+                nextBounty = 200_000;
+            }
+            if (nextBounty < 10_000) {
+                nextBounty = 10_000;
+            }
+            _deposit(i, 1020e6 + nextBounty);
             assertGt(_commitTrade(i, 17, 1020e6, false), 0, "live pending margin predates accrued carry");
             assertEq(orders.margin(i), 1020e6);
+            assertEq(_free(i), 0);
         }
-        _withdraw(i, _free(i));
         restoredCash = expectedPoolCash;
         _setLiquidationPoolCash(0);
         vm.warp(_nextLiveTime(vm.getBlockTimestamp() + (scenario == 4 ? 10 * 365 days : 365 days)));
@@ -3405,11 +3414,20 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         _refresh(80_000_002);
         _trade(0, 600, 1800e6, false);
         _trade(1, 1100, 30_000e6, false);
+        _withdraw(0, _free(0));
+        uint256 nextBounty = 17 * currentPrice / 10_000;
+        if (nextBounty > 200_000) {
+            nextBounty = 200_000;
+        }
+        if (nextBounty < 10_000) {
+            nextBounty = 10_000;
+        }
+        _deposit(0, 75e6 + 2 * nextBounty);
         uint64 closeId = _commitTrade(0, 600, 0, true);
         uint64 first = _commitTrade(0, 17, 25e6, false);
         uint64 second = _commitTrade(0, 17, 50e6, false);
         assertEq(orders.head(), closeId);
-        _withdraw(0, _free(0));
+        assertEq(_free(0), 0);
         _refresh(140_000_002);
         uint256 keeperBefore = expectedKeeper;
         executeHead(false);

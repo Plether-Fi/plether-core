@@ -171,12 +171,12 @@ contract OpenCommitCarryBoundsTest is BasePerpTest {
         assertEq(uint8(receiptNoCheckpoint.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         assertEq(receiptNoCheckpoint.economics.carryAssets, int256(expected.execCarry));
 
-        // Path 2: Pre-execution withdraw(0) carry checkpoint -> identical execution outcome.
+        // Path 2: Pre-execution addMargin(1) carry checkpoint -> identical execution outcome.
         assertTrue(vm.revertToState(checkpoint));
         uint64 id2 = _commit(request);
         vm.warp(vm.getBlockTimestamp() + 10 seconds);
         vm.prank(TRADER);
-        clearinghouse.withdraw(TRADER, 0);
+        engine.addMargin(TRADER, 1);
         OrderV3Types.OrderReceipt memory receiptWithCheckpoint = _execute(id2);
         assertEq(uint8(receiptWithCheckpoint.status), uint8(OrderV3Types.LifecycleStatus.Executed));
     }
@@ -213,7 +213,7 @@ contract OpenCommitCarryBoundsTest is BasePerpTest {
         uint64 id2 = _commit(closeReq);
         vm.warp(vm.getBlockTimestamp() + 30 seconds);
         vm.prank(TRADER);
-        clearinghouse.withdraw(TRADER, 0);
+        engine.addMargin(TRADER, 1);
         bytes[] memory profitableUpdate2 = _mockPythUpdateData(90_000_000);
         _startRecordingLogs();
         vm.prank(KEEPER);

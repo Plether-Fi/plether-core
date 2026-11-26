@@ -143,11 +143,11 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
+        clearinghouse.withdraw(account, 70e6);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
             router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 200e6, CAP_PRICE, false);
         }
-        clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountReservationView memory reservationBefore = router.getAccountReservations(account);
@@ -194,11 +194,11 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
+        clearinghouse.withdraw(account, 70e6);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
             router.commitOrder(CfdTypes.Side.LONG, 100e18, 3e6, CAP_PRICE, false);
         }
-        clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);

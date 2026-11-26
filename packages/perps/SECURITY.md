@@ -1625,10 +1625,11 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
 
 ## Accepted Risks
 
-- **Incomplete VPI collection on a full close.** A withdrawal of free settlement while a full close is pending
-  can leave part of the positive VPI charge unfunded. Settlement waives the uncollectible portion, reducing pool
-  revenue and potentially lowering Junior redemption payouts. Junior bears this collection risk. The tested round
-  trip lost money overall even with the waiver. Immunefi report #99795 ([Plether Audit Competition](https://immunefi.com/audit-competition/plether/information/)).
+- **Incomplete VPI collection on an underfunded full close.** Free-settlement withdrawal is blocked while an
+  account with an open position has any pending order (`accountHeadOrderId != 0`), preventing post-commit cash
+  drainage on pending full or partial closes (Immunefi report #99795, [Plether Audit Competition](https://immunefi.com/audit-competition/plether/information/)).
+  If a full close's positive VPI charge still exceeds all reachable account collateral at execution, full-close
+  liveness takes priority and waives the uncollectible portion, which Junior bears.
 - **`CAP_PRICE` is a terminal end-of-life boundary (including frozen SHORT adverse shift at the cap).**
   `CAP_PRICE` exists to bound maximum directional payoff for solvency accounting and is configured far outside
   normal basket trading ranges. Reaching or exceeding `CAP_PRICE` is treated as a protocol end-of-life event

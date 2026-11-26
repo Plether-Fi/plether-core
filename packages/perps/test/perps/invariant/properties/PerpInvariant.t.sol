@@ -1607,13 +1607,24 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         handler.openPosition(0, 0, 250, 5000e6);
         handler.openPosition(1, 0, 250, 5000e6);
         handler.queueBadClose(1);
-        handler.openPosition(0, 0, 250, 4950e6);
 
         address actor = handler.actors(0);
-        uint256 free = clearinghouse.getFreeBuyingPowerAssets(actor);
-        assertGt(free, 0);
+        uint256 bounty = (250 * engine.lastMarkPrice() * router.openOrderExecutionBountyBps()) / 10_000;
+        uint256 minBounty = router.minOpenOrderExecutionBountyAssets();
+        if (bounty < minBounty) {
+            bounty = minBounty;
+        }
+        uint256 maxBounty = router.maxOpenOrderExecutionBountyAssets();
+        if (bounty > maxBounty) {
+            bounty = maxBounty;
+        }
+        uint256 freeBeforeCommit = clearinghouse.getFreeBuyingPowerAssets(actor);
+        assertGt(freeBeforeCommit, 4950e6 + bounty);
         vm.prank(actor);
-        clearinghouse.withdraw(actor, free);
+        clearinghouse.withdraw(actor, freeBeforeCommit - 4950e6 - bounty);
+
+        vm.prank(actor);
+        router.commitOrder(CfdTypes.Side.LONG, 250 * CfdTypes.SIZE_QUANTUM, 4950e6, 1e8, false);
         assertEq(clearinghouse.getFreeBuyingPowerAssets(actor), 0);
 
         uint64 nextCommitIdBefore = router.nextCommitId();

@@ -414,8 +414,10 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
     ) internal {
         router.updateMarkPrice(_freshData(ENTRY_PRICE, 0));
         uint256 free = _freeSettlementAssets(account);
-        vm.prank(account);
-        clearinghouse.withdraw(account, free);
+        if (free != 0 && router.accountHeadOrderId(account) == 0) {
+            vm.prank(account);
+            clearinghouse.withdraw(account, free);
+        }
         uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint64 protectionId = accounts[account].protectionId;
         ModelProtection storage p = protections[protectionId];

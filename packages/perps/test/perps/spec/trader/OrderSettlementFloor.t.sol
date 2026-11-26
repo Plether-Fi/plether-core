@@ -466,4 +466,50 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         _expectFloor(id, engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER) + 1, true);
     }
 
+    function test_OpenPositionWithPendingCloseOrIncreaseBlocksFreeSettlementWithdrawal() public {
+        uint64 openId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, false, BOUNTY_SIZE, 250e6);
+        _bountyExecute(openId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        assertGt(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0, "healthy open position can withdraw");
+
+        // Pending partial close must block free-settlement withdrawal on both APIs and report 0 withdrawable.
+        uint64 partialCloseId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
+        assertEq(router.accountHeadOrderId(BOUNTY_TRADER), partialCloseId);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
+
+        vm.prank(BOUNTY_TRADER);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdraw(BOUNTY_TRADER, 1e6);
+
+        vm.prank(BOUNTY_TRADER);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdrawMargin(1e6);
+
+        // Once the partial close executes and clears the queue, withdrawal resumes.
+        _bountyExecute(partialCloseId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        assertEq(router.accountHeadOrderId(BOUNTY_TRADER), 0);
+        assertGt(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
+        vm.prank(BOUNTY_TRADER);
+        clearinghouse.withdrawMargin(1e6);
+
+        // Pending increase on an open position also blocks withdrawal until settled/expired.
+        uint64 increaseId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, false, BOUNTY_SIZE / 2, 125e6);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
+        vm.prank(BOUNTY_TRADER);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdrawMargin(1e6);
+        _bountyExpire(increaseId, BOUNTY_KEEPER);
+
+        // Pending full close blocks withdrawal (prevents draining free settlement before positive VPI settlement).
+        uint64 fullCloseId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
+        vm.prank(BOUNTY_TRADER);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdraw(BOUNTY_TRADER, 1e6);
+
+        _bountyExecute(fullCloseId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        assertGt(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
+        vm.prank(BOUNTY_TRADER);
+        clearinghouse.withdrawMargin(1e6);
+    }
+
 }

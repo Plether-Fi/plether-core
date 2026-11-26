@@ -75,15 +75,15 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         _fundTrader(other, 1000e6);
         _open(otherAccount, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
+        vm.prank(other);
+        clearinghouse.withdraw(otherAccount, 70e6);
+
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 1, head
         vm.prank(other);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, CAP_PRICE, true); // order 2, non-head close
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 3, next live order
-
-        vm.prank(other);
-        clearinghouse.withdraw(otherAccount, 70e6);
 
         bytes[] memory pythPrice = new bytes[](1);
         pythPrice[0] = abi.encode(uint256(150_000_000));

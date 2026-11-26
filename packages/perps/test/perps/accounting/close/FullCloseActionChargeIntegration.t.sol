@@ -94,6 +94,20 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
         f.vpiBacking = clearinghouse.vpiRebateReserveAssets(ACCOUNT);
         assertEq(f.vpiBacking, uint256(-accruedVpi));
         assertGt(f.vpiBacking, 0);
+        uint256 singleBounty =
+            ((1000e18 / CfdTypes.SIZE_QUANTUM) * PRICE * router.openOrderExecutionBountyBps()) / 10_000;
+        uint256 minBounty = router.minOpenOrderExecutionBountyAssets();
+        if (singleBounty < minBounty) {
+            singleBounty = minBounty;
+        }
+        uint256 maxBounty = router.maxOpenOrderExecutionBountyAssets();
+        if (singleBounty > maxBounty) {
+            singleBounty = maxBounty;
+        }
+        uint256 neededFree = 120e6 + 2 * singleBounty;
+        uint256 excessFree = clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets - neededFree;
+        vm.prank(ACCOUNT);
+        clearinghouse.withdraw(ACCOUNT, excessFree);
         // Additional short interest makes the close's positive VPI exceed the original backed rebate.
         _openSkew(100_000e18, 10_000e6);
 
@@ -103,7 +117,6 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
         f.closeId = router.commitOrder(CfdTypes.Side.LONG, SIZE, 0, type(uint256).max, true);
         f.firstPendingId = router.commitOrder(CfdTypes.Side.LONG, 1000e18, 20e6, PRICE, false);
         f.secondPendingId = router.commitOrder(CfdTypes.Side.LONG, 1000e18, 100e6, PRICE, false);
-        clearinghouse.withdraw(ACCOUNT, clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets);
         vm.stopPrank();
         assertEq(clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets, 0);
         assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).committedOrderMarginAssets, 120e6);

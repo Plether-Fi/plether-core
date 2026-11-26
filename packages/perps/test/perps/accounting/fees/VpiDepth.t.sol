@@ -161,18 +161,15 @@ contract VpiDepthTest is BasePerpTest {
 
         assertTrue(vm.revertToState(committed));
         vm.prank(alice);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         clearinghouse.withdraw(alice, freeCash);
-        assertEq(_freeSettlementAssets(alice), 0);
-        (uint256 reserve, uint256 pledge) = _executeMinorityIncrease(increase);
-        assertEq(reserve, expectedReserve);
-        assertEq(pledge, expectedPledge);
 
         assertTrue(vm.revertToState(committed));
         uint256 nextMargin = freeCash - _quoteOpenOrderExecutionBountyAssets(1000e18);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 1000e18, nextMargin, 1e8, false);
         assertEq(_freeSettlementAssets(alice), 0);
-        (reserve, pledge) = _executeMinorityIncrease(increase);
+        (uint256 reserve, uint256 pledge) = _executeMinorityIncrease(increase);
         assertEq(reserve, expectedReserve);
         assertEq(pledge, expectedPledge);
     }
