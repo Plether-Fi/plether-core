@@ -4,6 +4,7 @@ pragma solidity 0.8.39;
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderRecoverySidecar} from "@plether/perps/OrderRecoverySidecar.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
@@ -35,6 +36,8 @@ interface IOrderLiquidationBatchHost {
     function lifecycleBook() external view returns (IOrderLifecycleBook);
 
     function policyEvaluator() external view returns (ICfdOrderPolicyEvaluator);
+
+    function executionSidecar() external view returns (address);
 
     function nextCommitId() external view returns (uint64);
 
@@ -87,6 +90,12 @@ interface IOrderDelegatedLogicRefundAdmin {
         address beneficiary,
         uint256 amount
     ) external payable;
+
+}
+
+interface IOrderExecutionSidecarRecovery {
+
+    function recoverySidecar() external view returns (address);
 
 }
 
@@ -235,7 +244,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         if (request.isClose) {
             _validateCloseAdmission(host, account, request.side, request.sizeDelta);
         } else {
-            executionBountyAssets = _validatedOpenBounty(host, account, request);
+            uint256 commitPrice;
+            (executionBountyAssets, commitPrice) = _validatedOpenBounty(host, account, request);
+            if (host.engine().minOpenSlippageToleranceBps() != 0) {
+                _delegateOpenToleranceBand(host, account, request, commitPrice, executionBountyAssets);
+            }
         }
         if (executionBountyAssets > request.bounds.maxExecutionBountyAssets) {
             revert IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound(
@@ -378,9 +391,9 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         IOrderLiquidationBatchHost host,
         address account,
         OrderV3Types.OrderRequest calldata request
-    ) private view returns (uint256 executionBountyAssets) {
+    ) private view returns (uint256 executionBountyAssets, uint256 commitPrice) {
         ICfdEngineCore engine = host.engine();
-        uint256 commitPrice = _commitReferencePrice(engine);
+        commitPrice = _commitReferencePrice(engine);
         {
             // Quantum and numeric domain were checked before this uint112-lot/uint32-price product.
             uint256 notionalAssets = (request.sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice;
@@ -405,6 +418,26 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
         host.engineLensForCommit().orderAdmissionValidator().validateOpen(account, request, executionBountyAssets);
         host.policyEvaluator().validateOpenCommit(account, request, commitPrice, executionBountyAssets);
+    }
+
+    function _delegateOpenToleranceBand(
+        IOrderLiquidationBatchHost host,
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 commitPrice,
+        uint256 executionBountyAssets
+    ) private {
+        address recovery = IOrderExecutionSidecarRecovery(host.executionSidecar()).recoverySidecar();
+        (bool success, bytes memory result) = recovery.delegatecall(
+            abi.encodeCall(
+                OrderRecoverySidecar.validateOpenToleranceBand, (account, request, commitPrice, executionBountyAssets)
+            )
+        );
+        if (!success) {
+            assembly ("memory-safe") {
+                revert(add(result, 32), mload(result))
+            }
+        }
     }
 
     function _commitReferencePrice(

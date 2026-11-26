@@ -6,16 +6,18 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 /// @notice Engine host surface called by the timelocked engine admin.
 interface ICfdEngineAdminHost {
 
-    /// @notice Risk parameters, execution fee, frozen close spread, and settlement buffer staged by governance.
+    /// @notice Risk parameters, execution fee, frozen close spread, settlement buffer, and open-slippage floor staged by governance.
     /// @param riskParams VPI, skew, margin, carry, and liquidation-bounty parameters.
     /// @param executionFeeBps Protocol fee charged on executed notional, in basis points.
     /// @param frozenCloseSpreadBps LP-owned spread charged on oracle-frozen voluntary close notional, in basis points.
     /// @param settlementBufferBps Protected headroom per unit of maximum directional liability, in basis points.
+    /// @param minOpenSlippageToleranceBps Minimum open/increase commit price/bound tolerance band around `lastMarkPrice`, in basis points (`0` disables).
     struct EngineRiskConfig {
         CfdTypes.RiskParams riskParams;
         uint256 executionFeeBps;
         uint256 frozenCloseSpreadBps;
         uint256 settlementBufferBps;
+        uint256 minOpenSlippageToleranceBps;
     }
 
     /// @notice Scheduled market closure as a half-open interval of Unix timestamps.

@@ -22,6 +22,8 @@ contract CfdEngineAdmin is Ownable2Step {
     uint256 public constant MAX_FROZEN_CLOSE_SPREAD_BPS = 1000;
     /// @notice Maximum protected settlement buffer, in basis points (10%).
     uint256 public constant MAX_SETTLEMENT_BUFFER_BPS = 1000;
+    /// @notice Maximum minimum-open-slippage tolerance floor, in basis points (5%).
+    uint256 public constant MAX_MIN_OPEN_SLIPPAGE_TOLERANCE_BPS = 500;
     /// @notice Maximum number of scheduled closures in a calendar configuration.
     uint256 public constant MAX_MARKET_CLOSURES = 64;
 
@@ -128,6 +130,9 @@ contract CfdEngineAdmin is Ownable2Step {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
         if (config.settlementBufferBps > MAX_SETTLEMENT_BUFFER_BPS) {
+            revert CfdEngineAdmin__InvalidRiskParams();
+        }
+        if (config.minOpenSlippageToleranceBps > MAX_MIN_OPEN_SLIPPAGE_TOLERANCE_BPS) {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
         pendingRiskConfig = config;

@@ -83,6 +83,10 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return Settlement buffer in basis points
     function settlementBufferBps() external view returns (uint256);
 
+    /// @notice Minimum open/increase commit tolerance band around `lastMarkPrice`, in basis points (`0` disables).
+    /// @return Minimum open slippage tolerance in basis points
+    function minOpenSlippageToleranceBps() external view returns (uint256);
+
     /// @notice Returns a live side's aggregate maximum profit and exposure during settlement.
     /// @dev Unlike terminal-NAV snapshots, this getter is usable while an accounting mutation is in progress.
     function sides(

@@ -91,7 +91,7 @@ size quantum.
 
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
-| `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseSpreadBps`, `settlementBufferBps`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
+| `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseSpreadBps`, `settlementBufferBps`, `minOpenSlippageToleranceBps`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
 | `EngineCalendarConfig` (`fadDayTimestamps`, `fadRunwaySeconds`, `marketClosures`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
 | `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 72-hour timelock |
@@ -107,6 +107,8 @@ Each successful Engine/Router finalization therefore changes
 not advance these versions.
 
 The release-script `frozenCloseSpreadBps` default is `50` bps (0.50%). Both construction and timelocked updates reject zero and values above the `1,000` bps (10%) hard cap.
+
+`minOpenSlippageToleranceBps` defaults to `0` (disabled) and is governance-tunable up to `500` bps (5%) via `CfdEngineAdmin`. When nonzero, open/increase commits delegate to `OrderRecoverySidecar.validateOpenToleranceBand` to enforce that directional `targetPrice`, V3 financial `ExecutionBounds`, and planner initial-margin headroom (via `CfdOrderPolicyEvaluator.assessOrder`, or `CfdOrderPolicyEvaluator.validateOpenCommit` + notional/fee bounds on queued flips) hold across `[floor(commitPrice * (10_000 - tol) / 10_000), min(CAP_PRICE, ceil(commitPrice * (10_000 + tol) / 10_000))]`, blocking tight-slippage, tight-bound, and 1-wei-margin free-option aborts inside that band.
 
 The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked updates accept the inclusive range
 `0..1,000` bps; zero disables the additional headroom without changing raw solvency or degraded-mode semantics.
@@ -1649,6 +1651,15 @@ indexer bindings. The deployment scripts do not migrate old protection or order-
   This causes no loss of funds or economic insolvency; the protocol accepts this liveness tradeoff and uses the
   governance-configurable `settlementBufferBps` (72-hour timelocked, `0..1,000` bps) as its proactive headroom knob.
   Immunefi report #97605 ([Plether Audit Competition](https://immunefi.com/audit-competition/plether/information/)).
+- **Order commitment references cached `engine.lastMarkPrice()` rather than a live Pyth update.**
+  `OrderRouter.commitOrder()` intentionally does not require a signed Pyth payload and instead evaluates commit-time
+  reference checks (opening notional floor, execution bounty sizing, commit-time funding/VPI preview, and any
+  reference-price tolerance) against the `CAP_PRICE`-clamped cached `engine.lastMarkPrice()`
+  (`OrderLiquidationBatchLogic._commitReferencePrice`). When live prices drift away from a stale cached mark,
+  commit-time checks can either understate live notional/bounty/headroom or reject valid orders relative to the live
+  price until `updateMarkPrice()` is called. Execution always validates fresh signed Pyth data and current risk
+  independently; the protocol accepts this commit-time staleness tradeoff so order submission stays cheap,
+  low-latency, and open to everyone rather than gated on paid Pyth feed subscription access.
 
 ## Emergency Procedures
 

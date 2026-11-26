@@ -819,6 +819,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.executionFeeBps = engine.executionFeeBps();
         config.settlementBufferBps = engine.settlementBufferBps();
+        config.minOpenSlippageToleranceBps = engine.minOpenSlippageToleranceBps();
     }
 
     function _engineCalendarConfig() internal view returns (ICfdEngineAdminHost.EngineCalendarConfig memory config) {
@@ -838,6 +839,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.settlementBufferBps = engine.settlementBufferBps();
+        config.minOpenSlippageToleranceBps = engine.minOpenSlippageToleranceBps();
         engineAdmin.proposeRiskConfig(config);
         vm.warp(block.timestamp + 72 hours + 1);
         engineAdmin.finalizeRiskConfig();

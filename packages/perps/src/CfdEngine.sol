@@ -155,6 +155,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     /// @notice Protected headroom required per unit of maximum directional liability, in basis points.
     /// @dev This affects open/increase admission and LP withdrawals, but not raw insolvency or terminal NAV.
     uint256 public settlementBufferBps = 25;
+    /// @notice Minimum price/bound tolerance band enforced on open/increase commits around cached `lastMarkPrice`, in basis points.
+    /// @dev Zero disables the band check. Governance can tune this via `CfdEngineAdmin` up to 500 bps.
+    uint256 public minOpenSlippageToleranceBps;
 
     /// @notice Active scheduled closures, ordered by start time and non-overlapping.
     MarketClosure[] public marketClosures;
@@ -717,6 +720,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         executionFeeBps = config.executionFeeBps;
         frozenCloseSpreadBps = config.frozenCloseSpreadBps;
         settlementBufferBps = config.settlementBufferBps;
+        minOpenSlippageToleranceBps = config.minOpenSlippageToleranceBps;
     }
 
     /// @notice Applies the finalized calendar from the timelocked engine admin.

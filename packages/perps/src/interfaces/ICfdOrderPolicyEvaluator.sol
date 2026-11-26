@@ -25,6 +25,11 @@ interface ICfdOrderPolicyEvaluator {
     error CfdOrderPolicyEvaluator__CommittedPolicyChanged(uint64 orderId);
 
     error CfdOrderPolicyEvaluator__ReservationMismatch(uint64 orderId);
+
+    /// @notice Opening order target price does not satisfy the configured minimum tolerance band around the commit mark.
+    /// @param targetPrice Caller-supplied directional target price (8 decimals).
+    /// @param requiredBound Directional target-price boundary required by `minOpenSlippageToleranceBps` (8 decimals).
+    error CfdOrderPolicyEvaluator__SlippageToleranceTooTight(uint256 targetPrice, uint256 requiredBound);
     function assessCommittedOrder(
         address engine,
         uint64 orderId,

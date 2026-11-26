@@ -62,6 +62,9 @@ Additional focused suites cover:
   direction validation occurs before policy evaluation.
 - [OrderSettlementFloor.t.sol](spec/trader/OrderSettlementFloor.t.sol)::`testFuzz_WithdrawalFloorBothApis`:
   funded settlement-floor boundaries. Positive floors support isolated funded flat opens.
+- [OpenSlippageToleranceBand.t.sol](spec/trader/OpenSlippageToleranceBand.t.sol)::`test_BandRejectsEveryTightV3BoundAndPlannerMarginHeadroom`:
+  timelocked `minOpenSlippageToleranceBps` rejects tight `targetPrice`, every tight V3 `ExecutionBounds` field,
+  thin-margin planner failures, adverse-side increases, queued flips, and stale-mark bypasses across `commitPrice * (1 ± tolBps)`.
 - [OrderRouterOracleConfiguration.t.sol](spec/admin/OrderRouterOracleConfiguration.t.sol)::`test_OracleRotation_UsesPolicyFinalizedDuringOracleTimelock`:
   rotation preserves the current policy and leaves older config-pinned orders subject to their binding.
 - [CarryLpOwnership.t.sol](accounting/carry/CarryLpOwnership.t.sol)::`test_EntryPricesCollectedCarryButSharesHistoricalCarryCollectedAfterActivation`:
