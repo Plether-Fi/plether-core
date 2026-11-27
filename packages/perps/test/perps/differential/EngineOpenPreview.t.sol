@@ -18,7 +18,7 @@ contract EngineOpenPreviewTest is CfdEngineTestBase {
         address trader = address(0xCA2212);
         _fundTrader(trader, 20_000e6);
         // Friday FAD start, followed by a weekday. At $0.80, 10,000 tokens have $8,000 notional.
-        uint256[2] memory times = [uint256(1_709_933_400), uint256(1_709_683_200)];
+        uint256[2] memory times = [uint256(1_709_934_600), uint256(1_709_683_200)];
         for (uint256 i; i < times.length; ++i) {
             vm.warp(times[i]);
             assertEq(engine.isFadWindow(), i == 0);

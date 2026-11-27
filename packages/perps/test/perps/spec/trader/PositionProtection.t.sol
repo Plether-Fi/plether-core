@@ -66,7 +66,7 @@ contract PositionProtectionTest is BasePerpTest {
     uint256 internal constant LONG_STOP_LOSS = 110_000_000;
     uint256 internal constant SHORT_TAKE_PROFIT = 110_000_000;
     uint256 internal constant SHORT_STOP_LOSS = 90_000_000;
-    uint256 internal constant FRIDAY_FAD_START = 1_709_933_400;
+    uint256 internal constant FRIDAY_FAD_START = 1_709_934_600;
     bytes32 internal constant RISK_OFF_RESERVES_REFUNDED_TOPIC =
         keccak256("RiskOffOrderReservesRefunded(address,uint256,uint256)");
 

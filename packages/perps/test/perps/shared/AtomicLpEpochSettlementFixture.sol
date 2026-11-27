@@ -117,7 +117,7 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
 
     uint256 internal constant MAINTENANCE_FEE_APR_BPS = 1000;
 
-    uint256 internal constant FRIDAY_FAD_ONLY = 1_709_934_300;
+    uint256 internal constant FRIDAY_FAD_ONLY = 1_709_934_900;
     uint256 internal constant SATURDAY_FROZEN = 1_709_985_600;
 
     uint256 internal stagedBasketPrice = 100_000_000;
