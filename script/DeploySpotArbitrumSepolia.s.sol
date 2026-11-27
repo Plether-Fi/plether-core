@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {IMorphoOwner, ZeroRateIrm} from "./DeployToSepolia.s.sol";
 import {DeployToTest, IMintableERC20} from "./DeployToTest.s.sol";

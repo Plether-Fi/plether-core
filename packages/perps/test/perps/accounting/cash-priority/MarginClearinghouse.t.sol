@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -1425,7 +1425,7 @@ contract MarginClearinghouseAccountHealthTest is BasePerpTest {
         _fundTrader(alice, 10_000 * 1e6);
         address account = alice;
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 1600e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 1700e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(address(router));

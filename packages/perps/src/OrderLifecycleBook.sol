@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IOrderRouterEmergencyAdmin} from "@plether/perps/interfaces/IOrderRouterEmergencyAdmin.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 /// @dev Minimal Router surface used to keep execution-config hashing outside size-constrained Router bytecode.
@@ -21,6 +23,8 @@ interface IOrderLifecycleRouterConfigView {
     function pletherOracle() external view returns (address);
 
     function admin() external view returns (address);
+
+    function minOpenNotionalAssets() external view returns (uint256);
 
 }
 
@@ -124,12 +128,17 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     /// @dev Packed storage representation expanded into the public PendingIntent tuple on reads.
     struct StoredPendingIntent {
         address account;
+        bool closeRequiresFullExit;
         bytes32 clientOrderId;
         bytes32 intentHash;
         uint256 executionBountyAssets;
         StoredCommitment commitment;
         StoredExecutionBounds bounds;
         OrderV3Types.OrderTiming timing;
+        uint128 reserveLots;
+        uint64 reserveCutoff;
+        CfdTypes.Side reserveSide;
+        bool reservesClose;
     }
 
     /// @notice Ephemeral policy and identity required to authenticate terminal settlement.
@@ -141,6 +150,115 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     /// @notice Permanent compact terminal outcomes.
     mapping(uint64 orderId => OrderV3Types.TerminalOutcome terminalOutcome) private _outcomes;
     mapping(uint64 orderId => OrderV3Types.OrderTiming timing) private _terminalTiming;
+
+    // Each successive level covers four buckets of the previous level. Absolute timestamp keys let late cleanup
+    // remove old lots without touching the same relative slot in a later interval.
+    uint256 private constant DEADLINE_LEVELS = 5;
+    uint256 private constant CLOSE_RESERVES = type(uint256).max;
+
+    struct ReserveWindow {
+        uint64 latestDeadline;
+        uint64 pendingCount;
+        uint64 riskOffCutoff;
+    }
+
+    ReserveWindow private _openReserveWindow;
+    ReserveWindow private _closeReserveWindow;
+    mapping(uint256 group => mapping(uint256 bucket => uint256[2] lotsBySide))[DEADLINE_LEVELS] private _lotsByDeadline;
+
+    /// @inheritdoc IOrderLifecycleBook
+    function unexpiredOpenLots() external view override returns (uint256 longLots, uint256 shortLots) {
+        ReserveWindow memory window = _openReserveWindow;
+        if (
+            window.pendingCount == 0 || block.timestamp > window.latestDeadline
+                || window.riskOffCutoff != _riskOffCutoff()
+        ) {
+            return (0, 0);
+        }
+        return _unexpiredLots(window.riskOffCutoff, window.latestDeadline);
+    }
+
+    /// @inheritdoc IOrderLifecycleBook
+    function unexpiredCloseLots() external view override returns (uint256 longLots, uint256 shortLots) {
+        ReserveWindow memory window = _closeReserveWindow;
+        if (window.pendingCount == 0 || block.timestamp > window.latestDeadline) {
+            return (0, 0);
+        }
+        return _unexpiredLots(CLOSE_RESERVES, window.latestDeadline);
+    }
+
+    function _unexpiredLots(
+        uint256 group,
+        uint64 latestDeadline
+    ) private view returns (uint256 longLots, uint256 shortLots) {
+        uint256 cursor = block.timestamp;
+        uint256 last = latestDeadline;
+
+        // Include the deadline itself. Sum the buckets before the next aligned boundary at each level, then sum
+        // 256-second buckets up to the latest committed deadline. The Router limits that horizon to one hour.
+        for (uint256 level; level < DEADLINE_LEVELS; ++level) {
+            uint256 end = level + 1 == DEADLINE_LEVELS ? last + 1 : ((cursor + 3) / 4) * 4;
+            for (; cursor < end; ++cursor) {
+                uint256[2] storage lots = _lotsByDeadline[level][group][cursor];
+                longLots += lots[0];
+                shortLots += lots[1];
+            }
+            cursor /= 4;
+            last /= 4;
+        }
+    }
+
+    function _updateReserveLots(
+        uint256 group,
+        CfdTypes.Side side,
+        uint128 lots,
+        uint64 deadline,
+        bool add
+    ) private {
+        uint256 sideIndex = uint256(side);
+        uint256 bucket = deadline;
+        for (uint256 level; level < DEADLINE_LEVELS; ++level) {
+            uint256 total = _lotsByDeadline[level][group][bucket][sideIndex];
+            _lotsByDeadline[level][group][bucket][sideIndex] = add ? total + lots : total - lots;
+            bucket /= 4;
+        }
+    }
+
+    function _riskOffCutoff() private view returns (uint64) {
+        return IOrderRouterEmergencyAdmin(IOrderLifecycleRouterConfigView(ROUTER).admin()).riskOffOrderCutoff();
+    }
+
+    function _addReserve(
+        StoredPendingIntent storage pending,
+        OrderV3Types.OrderRequest calldata request,
+        uint64 deadline
+    ) private {
+        uint256 lots = request.sizeDelta / CfdTypes.SIZE_QUANTUM;
+        if (lots == 0) {
+            return;
+        }
+        pending.reserveLots = request.isClose ? SafeCast.toUint128(lots) : SafeCast.toUint112(lots);
+        pending.reserveSide = request.side;
+        pending.reservesClose = request.isClose;
+
+        ReserveWindow storage window = _closeReserveWindow;
+        uint256 group = CLOSE_RESERVES;
+        if (!request.isClose) {
+            uint64 cutoff = _riskOffCutoff();
+            pending.reserveCutoff = cutoff;
+            group = cutoff;
+            if (_openReserveWindow.riskOffCutoff != cutoff) {
+                // All opens in the earlier group are permanently invalid, including after unpause.
+                _openReserveWindow = ReserveWindow({latestDeadline: 0, pendingCount: 0, riskOffCutoff: cutoff});
+            }
+            window = _openReserveWindow;
+        }
+        ++window.pendingCount;
+        if (deadline > window.latestDeadline) {
+            window.latestDeadline = deadline;
+        }
+        _updateReserveLots(group, request.side, pending.reserveLots, deadline, true);
+    }
 
     modifier onlyRouter() {
         if (msg.sender != ROUTER) {
@@ -302,6 +420,15 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         pending.intentHash = intentHash;
         pending.executionBountyAssets = executionBountyAssets;
         pending.timing = timing;
+        _addReserve(pending, request, timing.executionDeadline);
+        if (request.isClose && !protocolIntent) {
+            // Public registration follows admission, before any commitment effects. Pin the same capped mark test.
+            uint256 markPrice = ICfdEngineCore(ENGINE).lastMarkPrice();
+            uint256 capPrice = ICfdEngineCore(ENGINE).CAP_PRICE();
+            uint256 commitPrice = markPrice > capPrice ? capPrice : markPrice;
+            pending.closeRequiresFullExit = (request.sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice
+                < IOrderLifecycleRouterConfigView(ROUTER).minOpenNotionalAssets();
+        }
         pending.bounds = StoredExecutionBounds({
             submitBy: request.bounds.submitBy,
             executionWindowSeconds: request.bounds.executionWindowSeconds,
@@ -324,10 +451,52 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         return (proposedOrderId, intentHash, false);
     }
 
+    /// @inheritdoc IOrderLifecycleBook
+    function recordCommitment(
+        uint64 orderId,
+        CfdEnginePlanTypes.CloseCommitment calldata effects,
+        bool isClose
+    ) external onlyRouter {
+        if (isClose) {
+            _recordCommitment(orderId, effects);
+        } else {
+            _recordOpenCommitment(orderId, effects.settlementBeforeAssets);
+        }
+    }
+
+    function _recordOpenCommitment(
+        uint64 orderId,
+        uint256 settlementBeforeAssets
+    ) private {
+        StoredPendingIntent storage pending = _pendingIntents[orderId];
+        if (pending.account == address(0)) {
+            revert OrderLifecycleBook__OrderNotPending(orderId);
+        }
+        IMarginClearinghouse.AccountAssetBuckets memory afterBuckets =
+            IMarginClearinghouse(CLEARINGHOUSE).getAccountAssetBuckets(pending.account);
+        CfdEnginePlanTypes.CloseCommitment memory effects;
+        // Reservations only reclassify custody except for their carry checkpoints. Measure across both hooks,
+        // including a margin-only reservation, and retain the actual final custody classification.
+        effects.carryCollectedAssets = settlementBeforeAssets - afterBuckets.settlementBalanceAssets;
+        effects.carryOutstandingAssets = ICfdEngineCore(ENGINE).unsettledCarryAssets(pending.account);
+        effects.bountyFromFreeAssets = pending.executionBountyAssets;
+        effects.settlementBeforeAssets = settlementBeforeAssets;
+        effects.settlementAfterAssets = afterBuckets.settlementBalanceAssets;
+        effects.freeSettlementAfterAssets = afterBuckets.freeSettlementAssets;
+        _recordCommitment(orderId, effects);
+    }
+
     function recordCommitment(
         uint64 orderId,
         CfdEnginePlanTypes.CloseCommitment calldata effects
     ) external onlyRouter {
+        _recordCommitment(orderId, effects);
+    }
+
+    function _recordCommitment(
+        uint64 orderId,
+        CfdEnginePlanTypes.CloseCommitment memory effects
+    ) private {
         StoredPendingIntent storage pending = _pendingIntents[orderId];
         if (pending.account == address(0)) {
             revert OrderLifecycleBook__OrderNotPending(orderId);
@@ -449,8 +618,26 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             receiptHash: receiptHash
         });
         _terminalTiming[receipt.orderId] = pending.timing;
+        if (pending.reserveLots != 0) {
+            uint256 group = pending.reserveCutoff;
+            if (pending.reservesClose) {
+                group = CLOSE_RESERVES;
+                --_closeReserveWindow.pendingCount;
+            } else if (pending.reserveCutoff == _openReserveWindow.riskOffCutoff) {
+                --_openReserveWindow.pendingCount;
+            }
+            _updateReserveLots(group, pending.reserveSide, pending.reserveLots, pending.timing.executionDeadline, false);
+        }
         delete _pendingIntents[receipt.orderId];
         delete _protectionAttempts[receipt.orderId];
+
+        // The router unlinks the order before finalizing its receipt. The engine checks that the account queue is empty.
+        if (CLEARINGHOUSE.code.length != 0) {
+            (uint256 pledged, uint256 released) = IMarginClearinghouse(CLEARINGHOUSE).protectedTopUps(receipt.account);
+            if (pledged != 0 || released != 0) {
+                ICfdEngineCore(ENGINE).releaseProtectedTopUp(receipt.account);
+            }
+        }
 
         emit OrderFinalized(
             receipt.orderId, receipt.account, receipt.clientOrderId, receiptHash, terminalBlock, terminalTime, receipt
@@ -477,6 +664,13 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         intent.commitment = _expandCommitment(stored.commitment);
         intent.bounds = _expandBounds(stored.bounds);
         intent.timing = stored.timing;
+    }
+
+    /// @inheritdoc IOrderLifecycleBook
+    function closeRequiresFullExit(
+        uint64 orderId
+    ) external view override returns (bool) {
+        return _pendingIntents[orderId].closeRequiresFullExit;
     }
 
     function _expandCommitment(

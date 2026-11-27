@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
@@ -133,7 +133,7 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
 
     function test_ClaimBackedPartialCloseExecutesWithPledgeBelowMinimumLiquidationBounty() public {
         // Normalized bounded inputs from a reachable sequence: realize an unfunded price gain, recapitalize the
-        // pool, then reopen with small pledge backed by the same account's unclaimed gain. All transitions are live.
+        // pool, then reopen with funded margin. Accrued carry consumes the pledge while the claim remains.
         address account = handler.actorAt(1);
         handler.fundHousePool(165_528_592_431);
         handler.commitOpenOrder(1, 0, 876, 49_986_000_001, 113_699_324);
@@ -145,19 +145,20 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         assertEq(uint8(router.lifecycleBook().lifecycleStatus(2)), uint8(OrderV3Types.LifecycleStatus.Executed));
         assertEq(engine.traderClaimBalanceAssets(account), 12_097_368_296);
         handler.fundHousePool(221_020_557_746);
-        handler.commitOpenOrder(1, 0, 79, 11e6, 100_007_201);
+        handler.commitOpenOrder(1, 0, 79, 250e6, 100_007_201);
         handler.executeNextOrderBatch(1);
         assertEq(uint8(router.lifecycleBook().lifecycleStatus(3)), uint8(OrderV3Types.LifecycleStatus.Executed));
+        vm.warp(vm.getBlockTimestamp() + 5200 weeks);
+        handler.syncMarkNow(100_007_201);
+        handler.depositCollateral(1, 10_000e6);
         (uint256 size, uint256 pledge,,,,,) = engine.positions(account);
         assertEq(size, 7900e18);
-        assertEq(pledge, 729_262);
+        assertEq(pledge, 0);
         assertEq(clearinghouse.liquidationReserveAssets(account), 7_110_511);
         ICfdEngineTypes.ClosePreview memory oneLot =
             engineLens.previewClose(account, CfdTypes.SIZE_QUANTUM, 100_007_201);
         assertTrue(oneLot.valid);
-        assertEq(
-            oneLot.remainingMargin, 720_031, "Reachable healthy pledge may be below the separate bounty reserve floor"
-        );
+        assertEq(oneLot.remainingMargin, 0, "Reachable healthy pledge may be below the separate bounty reserve floor");
         _assertAllInvariants();
         _executeAndCheckClaimBackedPartialClose(account);
     }

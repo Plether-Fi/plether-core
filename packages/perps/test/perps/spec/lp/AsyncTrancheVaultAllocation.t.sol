@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -250,6 +250,58 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         assertEq(juniorVault.controllerRedeemTail(ALICE), secondRequestId);
     }
 
+    function test_RedemptionForDifferentControllerRequiresConsent() public {
+        _fundRedeemOwner();
+
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__NotControllerOrOperator.selector);
+        juniorVault.requestRedeem(USER_SHARES, BOB, ALICE);
+        assertEq(juniorVault.controllerRedeemHead(BOB), 0);
+        assertEq(juniorVault.balanceOf(ALICE), USER_SHARES);
+
+        vm.prank(BOB);
+        juniorVault.setOperator(ALICE, true);
+        vm.prank(ALICE);
+        uint256 id = juniorVault.requestRedeem(USER_SHARES, BOB, ALICE);
+        assertEq(juniorVault.controllerRedeemHead(BOB), id);
+        assertEq(juniorVault.pendingRedeemRequest(id, BOB), USER_SHARES);
+    }
+
+    function test_StandardRedeemClaimsSkipRefundedHeadAndPreserveRefund() public {
+        _fundRedeemOwner();
+        uint256 shares = USER_SHARES / 2;
+        uint256 assets = USER_ASSETS / 2;
+
+        vm.prank(ALICE);
+        uint256 refundId = juniorVault.requestRedeem(shares, ALICE, ALICE);
+        _warpToEpoch(refundId);
+        vm.prank(ALICE);
+        uint256 fundedId = juniorVault.requestRedeem(shares, ALICE, ALICE);
+        vm.prank(address(pool));
+        juniorVault.refundRedeemEpochRemainder(refundId, shares);
+
+        _warpToEpoch(fundedId);
+        settlementToken.mint(address(juniorVault), assets);
+        vm.prank(address(pool));
+        juniorVault.fundRedeemEpoch(fundedId, shares, assets);
+
+        assertEq(juniorVault.controllerRedeemHead(ALICE), refundId);
+        assertEq(juniorVault.maxWithdraw(ALICE), assets);
+        assertEq(juniorVault.maxRedeem(ALICE), shares);
+        uint256 initialCooldown = juniorVault.lastDepositTime(ALICE);
+        vm.prank(ALICE);
+        assertEq(juniorVault.withdraw(assets / 2, ALICE, ALICE), shares / 2);
+        vm.prank(ALICE);
+        assertEq(juniorVault.redeem(shares / 2, ALICE, ALICE), assets / 2);
+        assertEq(juniorVault.withdrawalEscrowAssets(), 0);
+        assertEq(juniorVault.lastDepositTime(ALICE), initialCooldown);
+        assertEq(juniorVault.refundableRedeemRequest(refundId, ALICE), shares);
+        vm.prank(ALICE);
+        assertEq(juniorVault.claimRedeemRefund(refundId, ALICE, ALICE), shares);
+        assertEq(juniorVault.controllerRedeemHead(ALICE), 0);
+        assertEq(juniorVault.pendingRedeemEscrowShares(), 0);
+    }
+
     function test_RefundAllocationSweepsShareDustAndSupportsZeroEntitlements() public {
         uint256 requestId = _prepareTwoControllerRedeem();
         uint256 fundedShares = USER_SHARES - 1;
@@ -317,6 +369,17 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
     }
 
     function _prepareTwoControllerRedeem() internal returns (uint256 requestId) {
+        _fundRedeemOwner();
+        vm.prank(ALICE);
+        juniorVault.transfer(BOB, 1);
+
+        vm.prank(ALICE);
+        requestId = _async().requestRedeem(USER_SHARES - 1, ALICE, ALICE);
+        vm.prank(BOB);
+        assertEq(_async().requestRedeem(1, BOB, BOB), requestId);
+    }
+
+    function _fundRedeemOwner() internal {
         uint256 depositId = _requestDeposit(ALICE, USER_ASSETS);
         _warpToEpoch(depositId);
         vm.prank(address(pool));
@@ -325,13 +388,6 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         assertEq(_async().claimDeposit(depositId, USER_ASSETS, ALICE, ALICE), USER_SHARES);
 
         _finishCooldown(ALICE);
-        vm.prank(ALICE);
-        juniorVault.transfer(BOB, 1);
-
-        vm.prank(ALICE);
-        requestId = _async().requestRedeem(USER_SHARES - 1, ALICE, ALICE);
-        vm.prank(BOB);
-        assertEq(_async().requestRedeem(1, BOB, BOB), requestId);
     }
 
     function _finishCooldown(

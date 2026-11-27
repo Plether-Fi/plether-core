@@ -13,7 +13,7 @@ This guide maps contract responsibilities, custody, and the flows between trader
 | `OrderLifecycleBook` | Permanent client-id identity, pending policy, timing, authenticated terminal outcomes | Only its bound Router registers and finalizes orders. It holds no tokens. |
 | `PositionProtectionBook` | Take-profit/stop-loss state, trigger reward, latest close-attempt linkage | Calls narrow Router hooks to create orders; it cannot execute a trade or move pool cash itself. |
 | `PletherOracle` | Signed basket validation, accepted live basket, historical execution prices | Only the configured Router updates the accepted current basket. Historical helpers do not authenticate arbitrary caller-supplied caches. |
-| `CfdEngine` | Positions, one global carry clock, risk admission, trader claims, settlement plans | Uses the Clearinghouse and HousePool for custody; holds no trader or LP funds itself. |
+| `CfdEngine` | Positions, gross positive/negative accrued VPI totals, one global carry clock, risk admission, trader claims, settlement plans | Uses the Clearinghouse and HousePool for custody; holds no trader or LP funds itself. |
 | `TerminalNavBookV2` | Aggregate account-capped price curves for LP NAV | Only the bound Engine can synchronize curves, deriving them from canonical Engine/Clearinghouse state. It does not measure available cash. |
 | `HousePool` | Recognized pool USDG, Senior/Junior waterfall, LP epoch clock and settlement | Engine/settlement sidecar may request trading payouts/inflows; configured vaults participate in LP settlement. |
 | `TrancheVault` | LP shares, deposit escrow, redemption queues and funded claims | Chooses request epochs using the Pool clock; only the Pool activates deposits or funds redemptions. |
@@ -81,15 +81,22 @@ liability and transfers Pool USDG to the Clearinghouse; payment into an open pos
 Do not conflate three measurements:
 
 - **Cash:** recognized Pool USDG, subject to reserves and payout priorities.
-- **Economic depth:** `max(pool assets - outstanding trader claims, 0)`, used by skew/VPI calculations. Carry uses each position's canonical maximum profit and one global index at the flat annual rate; no separate exposure cache or directional index is stored.
+- **Economic depth:** `max(pool assets - outstanding trader claims - positive accrued VPI, 0)`, used by skew/VPI calculations. Backed negative VPI is a clearinghouse receivable and cannot supply cash depth. Carry uses each position's canonical maximum profit and one global index at the flat annual rate; no separate exposure cache or directional index is stored.
 - **LP liquidity and carry:** HousePool liquidity accounting makes no carry-checkpoint call. Stored carry state can
   lag projected accrual until an Engine or explicit checkpoint; an atomic Router settlement may independently
   synchronize the mark and advance the Engine clock.
-- **LP NAV:** Pool assets minus trader claims plus the signed account-capped terminal price delta at the mark.
-  Distributable equity is floored at zero; any negative remainder is recorded separately as a terminal deficit.
+- **LP NAV:** Pool assets minus trader claims plus the signed account-capped terminal price delta, minus positive
+  accrued VPI plus backed negative accrued VPI. Distributable equity is floored once at zero; any negative remainder
+  is recorded separately as a terminal deficit.
 
 NAV can include collectible trader losses that are not yet Pool cash. Conversely, raw excess tokens are cash at the
 address but are not recognized Pool assets. [Accounting specification](ACCOUNTING_SPEC.md) defines each calculation.
+
+The Engine replaces each position's VPI contributions at canonical write/delete hooks. Stable accounting uses its
+guarded `vpiAccountingSnapshot()` alongside the price-only terminal snapshot. LP funding and pool-funded fee top-ups
+reserve gross positive VPI even when negative VPI offsets it in NAV. Incoming deferred VPI and collection of negative
+VPI backing are balance-only flows; the waterfall recognizes retained VPI through the corrected NAV when accrual
+is removed. Both LP directions therefore price the same deferred ownership.
 
 ## Trading flows
 
@@ -97,9 +104,11 @@ address but are not recognized Pool assets. [Accounting specification](ACCOUNTIN
    `depositFor` instead credits free settlement without a carry checkpoint or position-margin allocation. Neither
    deposit automatically adds isolated position margin; the owner uses `CfdEngine.addMargin` for that.
 2. **Commit:** the Router validates the request, checkpoints applicable carry, reserves opening margin/bounty or
-   records a zero close bounty, and appends the order to FIFO. The lifecycle Book retains identity, bounds and timing.
+   records a zero close bounty, and appends the order to FIFO. For opens, it records actual carry collection across
+   both reservations and their final custody snapshots. The lifecycle Book retains identity, bounds, timing and carry effects.
 3. **Execute:** the Router resolves the signed execution price, evaluates the pinned financial policy, and calls the
-   Engine. The Engine updates exposure and settles through Clearinghouse/Pool authority. The Book authenticates the
+   Engine. Open and close policy checks count recorded commitment carry once together with execution charges.
+   The Engine updates exposure and settles through Clearinghouse/Pool authority. The Book authenticates the
    terminal receipt. A retryable failure leaves the order pending.
 4. **Settle price P&L:** losses consume same-account claims and PnL pledge up to the collectible cap. Uncollectible
    price loss is reported as a write-off, not a new asset or debt. Profits become Clearinghouse cash or an unpaid
@@ -109,8 +118,9 @@ address but are not recognized Pool assets. [Accounting specification](ACCOUNTIN
    Clearinghouse margin. Terminal full-close waivers do not create future debt.
 
 A liquidation uses a current account-adverse price, settles the price channel and dedicated liquidation reserve,
-removes the position curve, and clears pending orders/protection. Its capped charge is split between keeper,
-protocol treasury and LPs. A liquidated account's remaining opening bounties may be forfeited; close bounties are zero.
+removes the position curve, and clears stale pending closes/protection. Its capped charge is split between keeper,
+protocol treasury and LPs. Valid opening orders retain their queue position and margin and bounty reservations;
+close bounties are zero.
 
 Risk-off cleanup is different: an invalidated opening order's remaining margin and bounties return to the same
 account's free settlement, with no cleaner payment, token transfer or carry/NAV checkpoint. Liquidation performs
@@ -158,14 +168,21 @@ twice. Funded redemption claims remain available independently of later Pool ent
 | Helper | Invocation and responsibility |
 | --- | --- |
 | `CfdEnginePlanner` and accounting libraries | Build deterministic plans from canonical snapshots. |
+| `CfdEngineRawSnapshotLib` | Internal shared loaders for position, pool ownership, risk, execution context and side fields used by planning, policy assessment and Lens snapshots. |
+| `CfdEnginePlanningReader` | Constructor-bound canonical snapshot construction. Planner requests retain the configured settlement sidecar as their snapshot source; its facade calls back into this read-only builder. |
 | `CfdOrderPolicyEvaluator` | Stateless evaluation of current Engine state against caller-pinned financial bounds. |
 | `CfdClosePreview` | Read-only pre-commit close projection, including commitment carry. It does not commit or execute. |
-| `CfdEngineSettlementSidecar` | Engine-authorized close/liquidation orchestration through Engine host hooks and custody contracts. |
+| `CfdEngineSettlementSidecar` | Engine-authorized open/close/liquidation orchestration through Engine host hooks and custody contracts. Its authorized snapshot facade forwards construction to the immutable planning reader. |
 | `OrderRouterExecutionSidecar` | Fixed delegate implementation for order preparation, isolated execution and receipts. |
 | `OrderRecoverySidecar` | Created by the execution sidecar; handles delegated expiry/invalid-order cleanup through Router host hooks. |
 | `OrderRouterLiquidationBatchSidecar` | Exactly Router-bound delegate implementation for commitments, mark refresh, protection-trigger orchestration, liquidations, atomic LP settlement and oracle configuration forwarding. |
 | `HousePoolRedemptionMathSidecar` | Immutable stateless pure redemption-budget calculations; no custody or settlement authority. |
 | `SettlementMonitorLensSidecar` | Constructor-bound read implementation called only by its monitor facade. |
+
+Raw-snapshot wrappers retain their distinct read policies: execution and assessment use live pool cash, while Lens
+simulation uses its supplied hypothetical cash and local carry projection. Close commitment reads only the exposed
+side and omits execution-only fields. Stable HousePool snapshots remain separate because their guarded reads are
+not interchangeable with reads performed during settlement.
 
 Integrators call the public Router, Engine, Book or Lens surface, not matching sidecar selectors. Router delegatecalls
 retain the Router execution/event address and use authenticated host callbacks. Engine settlement-sidecar calls use

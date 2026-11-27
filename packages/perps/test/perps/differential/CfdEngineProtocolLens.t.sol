@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEngineProtocolLens} from "@plether/perps/CfdEngineProtocolLens.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -26,8 +26,10 @@ contract CfdEngineProtocolLensTest is Test {
         );
         _mockSide(CfdTypes.Side.LONG, 20_000e6, 20_000e18);
         _mockSide(CfdTypes.Side.SHORT, 35_000e6, 35_000e18);
+        _mockVpiAccounting(0, 0);
         vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceAssets()"), abi.encode(uint256(5000e6)));
         vm.mockCall(ENGINE, abi.encodeWithSignature("settlementBufferBps()"), abi.encode(uint256(125)));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("orderRouter()"), abi.encode(address(0)));
         vm.mockCall(ENGINE, abi.encodeWithSignature("degradedMode()"), abi.encode(false));
         lens = new CfdEngineProtocolLens(ENGINE);
     }
@@ -41,6 +43,17 @@ contract CfdEngineProtocolLensTest is Test {
             ENGINE,
             abi.encodeWithSignature("sides(uint256)", uint256(side)),
             abi.encode(maxProfitAssets, openInterest, uint256(0), uint256(0))
+        );
+    }
+
+    function _mockVpiAccounting(
+        uint256 positiveVpiAssets,
+        uint256 negativeVpiAssets
+    ) internal {
+        vm.mockCall(ENGINE, abi.encodeWithSignature("totalPositiveVpiAccruedAssets()"), abi.encode(positiveVpiAssets));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("totalNegativeVpiAccruedAssets()"), abi.encode(negativeVpiAssets));
+        vm.mockCall(
+            ENGINE, abi.encodeWithSignature("vpiAccountingSnapshot()"), abi.encode(positiveVpiAssets, negativeVpiAssets)
         );
     }
 
@@ -71,6 +84,15 @@ contract CfdEngineProtocolLensTest is Test {
         _assertSnapshot(
             ProtocolLensViewTypes.ProtocolAccountingSnapshot(
                 100_000e6, 100_000e6, 35_000e6, 95_000e6, 40_437_500_000, 59_562_500_000, 10_000e6, 5000e6, false, true
+            )
+        );
+    }
+
+    function test_ProtocolSnapshotReservesPositiveVpiOnly() public {
+        _mockVpiAccounting(250e6, 400e6);
+        _assertSnapshot(
+            ProtocolLensViewTypes.ProtocolAccountingSnapshot(
+                100_000e6, 100_000e6, 35_000e6, 95_000e6, 40_687_500_000, 59_312_500_000, 10_000e6, 5000e6, false, true
             )
         );
     }

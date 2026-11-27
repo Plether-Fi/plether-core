@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
@@ -50,6 +50,8 @@ contract PletherOracleEngineMock {
         fadDayOverrides[dayNumber] = active;
     }
 
+    /// @dev Explicit per-day regime switch for isolated oracle policy tests, including synthetic pre-deployment
+    ///      timestamps. This mock does not model market hours; calendar transitions are tested with the real engine.
     function isOracleFrozen() external view returns (bool) {
         return fadDayOverrides[block.timestamp / 86_400];
     }

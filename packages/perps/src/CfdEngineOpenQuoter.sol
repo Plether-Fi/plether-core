@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
@@ -111,7 +111,9 @@ contract CfdEngineOpenQuoter {
         if (
             price == 0 || !carryCollectible || projected.degradedMode
                 || PositionRiskAccountingLib.computeNetPoolDepthAssets(
-                        projected.poolAssets, projected.totalTraderClaimBalanceAssets
+                        projected.poolAssets,
+                        projected.totalTraderClaimBalanceAssets,
+                        projected.totalPositiveVpiAccruedAssets
                     ) == 0 || (projected.position.size > 0 && projected.position.side != probe.order.side)
                 || projected.vpiRebateReserveAssets < _negativeReserve(projected.position.vpiAccrued)
         ) {
@@ -189,8 +191,9 @@ contract CfdEngineOpenQuoter {
         uint256 price
     ) private pure returns (Context memory ctx) {
         ctx.snap = snap;
-        ctx.netDepthAssets =
-            PositionRiskAccountingLib.computeNetPoolDepthAssets(snap.poolAssets, snap.totalTraderClaimBalanceAssets);
+        ctx.netDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
+            snap.poolAssets, snap.totalTraderClaimBalanceAssets, snap.totalPositiveVpiAccruedAssets
+        );
         ctx.price = price;
         ctx.marginDelta = order.marginDelta;
         ctx.currentLots = snap.position.size / CfdTypes.SIZE_QUANTUM;
@@ -209,7 +212,7 @@ contract CfdEngineOpenQuoter {
         ctx.preSkewCost = SafeCast.toInt256(_skewCost(ctx, _skew(ctx, 0)));
     }
 
-    /// @dev Pledge cannot grow by more than marginDelta, and exact price PnL is unchanged by an open at this price.
+    /// @dev Pledge can grow by at most marginDelta plus released liquidation reserve. Exact price PnL is unchanged.
     ///      Invert FLOOR(notional * IM / BPS) < equity using CEIL(equity * BPS / denominator) - 1.
     ///      Skew uses the carry-projected depth. Healing exceptions still cannot finish above opposing OI + the cap.
     function _upperBound(
@@ -220,7 +223,13 @@ contract CfdEngineOpenQuoter {
         uint256 collateralCeiling = Math.min(
             ctx.snap.position.margin + ctx.marginDelta + ctx.snap.traderClaimBalanceForAccount, type(uint144).max
         );
-        int256 equity = SafeCast.toInt256(collateralCeiling) + ctx.pricePnl;
+        uint256 minReserve = ctx.snap.riskParams.minBountyAssets;
+        if (ctx.snap.liquidationReserveAssets > minReserve) {
+            collateralCeiling += Math.min(
+                ctx.snap.liquidationReserveAssets - minReserve, type(uint144).max - collateralCeiling
+            );
+        }
+        int256 equity = SafeCast.toInt256(collateralCeiling - ctx.snap.protectedPositionMarginAssets) + ctx.pricePnl;
         if (equity <= 0) {
             return 0;
         }
@@ -242,8 +251,10 @@ contract CfdEngineOpenQuoter {
     ///      - the VPI extrema come from the min/max absolute skew, including zero when the interval crosses balance;
     ///      - fees, liquidation reserves, margin requirements and added liability are minimized at low;
     ///      - minimum action cost and maximum reserve release overestimate affordable pledge and free cash;
-    ///      - maximum VPI overestimates pool assets. Combining incompatible optimistic extrema is safe: it can only
-    ///        retain extra intervals, never discard a valid size. At a singleton these bounds become exact.
+    ///      - maximum VPI and the fee ceiling bound cash before any pool-funded fee top-up;
+    ///        minimum VPI minimizes the positive accrued reserve.
+    ///      Combining incompatible optimistic extrema can retain extra intervals but cannot discard a valid size.
+    ///      Each retained endpoint is tested with the exact canonical planner.
     function _mayContainValid(
         Context memory ctx,
         uint256 low,
@@ -258,14 +269,47 @@ contract CfdEngineOpenQuoter {
         if (maxVpi >= 0) {
             maxCash += uint256(maxVpi);
         } else {
-            uint256 debit = uint256(-maxVpi);
+            // The planner nets the execution fee against the rebate before spending pool cash. A later top-up
+            // can only reduce cash. Use the fee at the upper lot bound to keep this estimate optimistic.
+            uint256 feeCeiling = Math.mulDiv(high * ctx.price, ctx.snap.executionFeeBps, 10_000);
+            uint256 rebate = uint256(-maxVpi);
+            uint256 debit = rebate > feeCeiling ? rebate - feeCeiling : 0;
             maxCash = maxCash > debit ? maxCash - debit : 0;
         }
-        uint256 maxEffective =
-            maxCash > ctx.snap.totalTraderClaimBalanceAssets ? maxCash - ctx.snap.totalTraderClaimBalanceAssets : 0;
+        uint256 oldPositiveVpi = ctx.snap.position.vpiAccrued > 0 ? uint256(ctx.snap.position.vpiAccrued) : 0;
+        (bool reserveFits, uint256 minimumPositiveVpi) = Math.tryAdd(
+            ctx.snap.totalPositiveVpiAccruedAssets - oldPositiveVpi,
+            _positiveAccrualAfterDelta(ctx.snap.position.vpiAccrued, minVpi)
+        );
+        if (!reserveFits) {
+            return false;
+        }
+        uint256 maxEffective = PositionRiskAccountingLib.computeNetPoolDepthAssets(
+            maxCash, ctx.snap.totalTraderClaimBalanceAssets, minimumPositiveVpi
+        );
         uint256 minLiability = Math.max(ctx.selectedLiability + low * ctx.profitPerLot, ctx.opposingLiability);
         return
             SolvencyAccountingLib.hasRequiredSettlementBuffer(maxEffective, minLiability, ctx.snap.settlementBufferBps);
+    }
+
+    /// @dev Computes max(accrued + delta, 0) without a potentially overflowing signed addition. Both positive
+    ///      operands fit int256, so their unsigned sum fits uint256 even when the planner would reject the signed sum.
+    function _positiveAccrualAfterDelta(
+        int256 accrued,
+        int256 delta
+    ) private pure returns (uint256) {
+        if (delta >= 0) {
+            if (accrued >= 0) {
+                return uint256(accrued) + uint256(delta);
+            }
+            uint256 negativeAccrual = uint256(-(accrued + 1)) + 1;
+            return uint256(delta) > negativeAccrual ? uint256(delta) - negativeAccrual : 0;
+        }
+        if (accrued <= 0) {
+            return 0;
+        }
+        uint256 negativeDelta = uint256(-(delta + 1)) + 1;
+        return uint256(accrued) > negativeDelta ? uint256(accrued) - negativeDelta : 0;
     }
 
     function _optimisticCostPlan(
@@ -302,7 +346,9 @@ contract CfdEngineOpenQuoter {
         if (!affordable) {
             return false;
         }
-        int256 maxEquity = SafeCast.toInt256(maxMargin + ctx.snap.traderClaimBalanceForAccount) + ctx.pricePnl;
+        int256 maxEquity = SafeCast.toInt256(
+            maxMargin - ctx.snap.protectedPositionMarginAssets + ctx.snap.traderClaimBalanceForAccount
+        ) + ctx.pricePnl;
         uint256 minInitial = Math.max(
             Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.initMarginBps, 10_000),
             ctx.snap.riskParams.minBountyAssets
@@ -327,9 +373,7 @@ contract CfdEngineOpenQuoter {
 
         uint256 minVpiIncrease =
             minVpiReserve > ctx.snap.vpiRebateReserveAssets ? minVpiReserve - ctx.snap.vpiRebateReserveAssets : 0;
-        uint256 minVpiFromPledge = minVpiIncrease > cost.resultingFreeSettlementAssets
-            ? minVpiIncrease - cost.resultingFreeSettlementAssets
-            : 0;
+        uint256 minVpiFromPledge = CfdEnginePlanLib.vpiReserveFromNewPledge(cost, minVpiIncrease);
         totalNotionalFloor = (ctx.currentLots + low) * ctx.price;
         uint256 minLiquidationReserve = Math.max(
             Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.bountyBps, 10_000), ctx.snap.riskParams.minBountyAssets
@@ -342,6 +386,9 @@ contract CfdEngineOpenQuoter {
             return (false, 0, totalNotionalFloor);
         }
         maxMargin = cost.resultingPositionMarginAssets - minVpiFromPledge - minReserveIncrease;
+        if (ctx.snap.liquidationReserveAssets > minLiquidationReserve) {
+            maxMargin += ctx.snap.liquidationReserveAssets - minLiquidationReserve;
+        }
         return (true, maxMargin, totalNotionalFloor);
     }
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {Panic} from "@openzeppelin/contracts/utils/Panic.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
@@ -10,6 +10,15 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 /// @dev settlement token values use 6 decimals, prices use 8 decimals, sizes use 18 decimals, basis points use a 10,000
 ///      denominator, and VPI parameters use 18-decimal WAD precision. Integer divisions round down.
 library OpenAccountingLib {
+
+    /// @notice Computes the unfloored liquidation reserve used by minimum-size and reserve-funding policy.
+    function rawLiquidationRequirement(
+        uint256 lots,
+        uint256 price,
+        uint256 bountyBps
+    ) internal pure returns (uint256) {
+        return (lots * price * bountyBps) / 10_000;
+    }
 
     /// @notice Inputs needed to value an open or same-side position increase.
     /// @param currentSize Existing position size, or zero for a new position.
@@ -145,7 +154,7 @@ library OpenAccountingLib {
         ) {
             return (false, state, 0);
         }
-        rawLiquidationRequirementAssets = (resultingNotionalAssets * inputs.riskParams.bountyBps) / 10_000;
+        rawLiquidationRequirementAssets = rawLiquidationRequirement(newLots, inputs.price, inputs.riskParams.bountyBps);
         state.liquidationReserveTargetAssets = rawLiquidationRequirementAssets;
         if (state.liquidationReserveTargetAssets < inputs.riskParams.minBountyAssets) {
             state.liquidationReserveTargetAssets = inputs.riskParams.minBountyAssets;

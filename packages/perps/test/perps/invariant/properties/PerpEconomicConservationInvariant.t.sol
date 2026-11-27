@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpInvariantTest} from "../BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "../handlers/PerpAccountingHandler.sol";
@@ -202,6 +202,22 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
+    function test_WithdrawalReserveReconcilesAcrossPendingOpenExpiry() public {
+        uint64 orderId = router.nextCommitId();
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 20, 1000e6, 1e8);
+        uint256 deadline = router.lifecycleBook().orderTiming(orderId).executionDeadline;
+        assertGt(deadline, block.timestamp, "open must be pending");
+
+        vm.warp(deadline);
+        _assertAllInvariants();
+        uint256 reserveAtDeadline = _withdrawalReservedAssets();
+
+        vm.warp(deadline + 1);
+        _assertAllInvariants();
+        assertLt(_withdrawalReservedAssets(), reserveAtDeadline, "expiry must release the open reserve");
+        assertEq(router.nextExecuteId(), orderId, "expired order must still be queued");
+    }
+
     function _positionSize(
         address account
     ) internal view returns (uint256 size) {
@@ -230,25 +246,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function _assertInvariant_WithdrawalReserveIncludesKnownTraderClaimLiabilities() internal view {
-        uint256 maxLiability = _enumeratedLiability();
-        uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceAssets()
-            + _independentBuffer(maxLiability, engine.settlementBufferBps());
-
-        assertEq(
-            _withdrawalReservedAssets(),
-            expectedReserved,
-            "Withdrawal reserve must include liabilities, trader claims, and settlement headroom"
-        );
-    }
-
     /// @dev Reconstructs endpoint payouts from canonical positions, not the Engine's cached side liabilities.
     ///      This is independent aggregation over observed positions, not an independent trade-history model.
-    function _enumeratedLiability() internal view returns (uint256) {
-        uint256 longLiability;
-        uint256 shortLiability;
-        uint256 longSize;
-        uint256 shortSize;
+    function _enumeratedPositions() internal view returns (uint256[2] memory liabilities, uint256[2] memory sizes) {
         for (uint256 i; i < handler.actorCount(); ++i) {
             address account = handler.actorAt(i);
             (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
@@ -256,19 +256,84 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
                 continue;
             }
             uint256 basis = engine.positionEntryCostAssetAtoms(account);
+            sizes[uint256(side)] += size;
             if (side == CfdTypes.Side.LONG) {
-                longLiability += basis;
-                longSize += size;
+                liabilities[0] += basis;
             } else {
-                shortLiability += (size / CfdTypes.SIZE_QUANTUM) * CAP_PRICE - basis;
-                shortSize += size;
+                liabilities[1] += (size / CfdTypes.SIZE_QUANTUM) * CAP_PRICE - basis;
             }
         }
         (, uint256 actualLongSize,,) = engine.sides(uint8(CfdTypes.Side.LONG));
         (, uint256 actualShortSize,,) = engine.sides(uint8(CfdTypes.Side.SHORT));
-        assertEq(longSize, actualLongSize, "reserve actor domain must include every long");
-        assertEq(shortSize, actualShortSize, "reserve actor domain must include every short");
-        return longLiability > shortLiability ? longLiability : shortLiability;
+        assertEq(sizes[0], actualLongSize, "reserve actor domain must include every long");
+        assertEq(sizes[1], actualShortSize, "reserve actor domain must include every short");
+    }
+
+    function _enumeratedPendingLots() internal view returns (uint256[2] memory opens, uint256[2] memory closes) {
+        // Read the individual Router orders and their stored deadlines so the model can catch errors in the reserve index.
+        uint64 end = router.nextCommitId();
+        uint64 cutoff = routerAdmin.riskOffOrderCutoff();
+        for (uint64 orderId = 1; orderId < end; ++orderId) {
+            (IOrderRouterAccounting.PendingOrderView memory order,) = router.getPendingOrderView(orderId);
+            if (order.sizeDelta == 0 || block.timestamp > router.lifecycleBook().orderTiming(orderId).executionDeadline)
+            {
+                continue;
+            }
+            uint256 lots = order.sizeDelta / CfdTypes.SIZE_QUANTUM;
+            if (order.isClose) {
+                closes[uint256(order.side)] += lots;
+            } else if (orderId > cutoff) {
+                opens[uint256(order.side)] += lots;
+            }
+        }
+    }
+
+    /// @dev Computes the reserve before trader claims from positions, pending orders, and risk parameters.
+    function _expectedWithdrawalBacking(
+        uint256 poolAssets
+    ) internal view returns (uint256 liveLiability, uint256 backing) {
+        (uint256[2] memory liabilities, uint256[2] memory sizes) = _enumeratedPositions();
+        liveLiability = liabilities[0] > liabilities[1] ? liabilities[0] : liabilities[1];
+        uint256 bufferBps = engine.settlementBufferBps();
+        (uint256[2] memory pendingLots, uint256[2] memory closingLots) = _enumeratedPendingLots();
+        if (pendingLots[0] == 0 && pendingLots[1] == 0) {
+            return (liveLiability, liveLiability + _independentBuffer(liveLiability, bufferBps));
+        }
+
+        uint256 admissionSkew;
+        uint256 rebateSkew;
+        for (uint256 side; side < 2; ++side) {
+            liabilities[side] += pendingLots[side] * CAP_PRICE;
+            uint256 projectedLots = sizes[side] / CfdTypes.SIZE_QUANTUM + pendingLots[side];
+            uint256 oppositeLots = sizes[1 - side] / CfdTypes.SIZE_QUANTUM;
+            uint256 oppositeClosingLots = closingLots[1 - side];
+            oppositeLots = oppositeLots > oppositeClosingLots ? oppositeLots - oppositeClosingLots : 0;
+            if (projectedLots > oppositeLots) {
+                uint256 skew = (projectedLots - oppositeLots) * CAP_PRICE;
+                if (pendingLots[side] != 0 && skew > admissionSkew) {
+                    admissionSkew = skew;
+                }
+                if (pendingLots[1 - side] != 0 && skew > rebateSkew) {
+                    rebateSkew = skew;
+                }
+            }
+        }
+
+        uint256 projectedLiability = liabilities[0] > liabilities[1] ? liabilities[0] : liabilities[1];
+        backing = projectedLiability + _independentBuffer(projectedLiability, bufferBps);
+        (uint256 vpiFactor, uint256 maxSkewRatio,,,,,,,,) = engine.riskParams();
+        if (maxSkewRatio != 0 && backing < poolAssets) {
+            uint256 skewDepth = (admissionSkew * 1e18 + maxSkewRatio - 1) / maxSkewRatio;
+            if (skewDepth > backing) {
+                backing = skewDepth < poolAssets ? skewDepth : poolAssets;
+            }
+        }
+        if (vpiFactor != 0 && backing < poolAssets) {
+            // The fixture's bounded amounts fit checked arithmetic. Preserve the rounding of skew squared over depth.
+            uint256 scaledSkewSquaredOverDepth = rebateSkew * rebateSkew * 1e12 / backing;
+            uint256 withRebate = backing + scaledSkewSquaredOverDepth * vpiFactor / 2e30;
+            backing = withRebate < poolAssets ? withRebate : poolAssets;
+        }
     }
 
     function _independentBuffer(
@@ -305,7 +370,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             assertEq(
                 buckets.otherLockedMarginAssets,
                 isolationBuckets.liquidationReserveAssets + isolationBuckets.orderMarginAssets
-                    + isolationBuckets.actionReserveAssets,
+                    + isolationBuckets.actionReserveAssets + isolationBuckets.protectedReleasedAssets,
                 "Tracked account other locked margin must equal canonical non-position buckets"
             );
             assertEq(
@@ -503,7 +568,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             assertEq(
                 snapshot.otherLockedMarginAssets,
                 isolationBuckets.liquidationReserveAssets + isolationBuckets.orderMarginAssets
-                    + isolationBuckets.actionReserveAssets,
+                    + isolationBuckets.actionReserveAssets + isolationBuckets.protectedReleasedAssets,
                 "Account snapshot other locked margin must equal canonical non-position buckets"
             );
             assertEq(
@@ -689,15 +754,13 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function _assertInvariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets() internal view {
+        uint256 poolAssets = housePool.totalAssets();
+        (uint256 maxLiabilityAssets, uint256 expectedBacking) = _expectedWithdrawalBacking(poolAssets);
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(60 seconds);
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
-        uint256 poolAssets = housePool.totalAssets();
-        uint256 maxLiabilityAssets = _enumeratedLiability();
-        uint256 settlementBufferAssets = _independentBuffer(maxLiabilityAssets, engine.settlementBufferBps());
-        uint256 expectedWithdrawalReservedAssets =
-            maxLiabilityAssets + engine.totalTraderClaimBalanceAssets() + settlementBufferAssets;
+        uint256 expectedWithdrawalReservedAssets = expectedBacking + engine.totalTraderClaimBalanceAssets();
         uint256 expectedFreeAssets =
             poolAssets > expectedWithdrawalReservedAssets ? poolAssets - expectedWithdrawalReservedAssets : 0;
 
@@ -718,7 +781,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(
             protocolSnapshot.withdrawalReservedAssets,
             expectedWithdrawalReservedAssets,
-            "Protocol snapshot withdrawal reserve mismatch"
+            "Withdrawal reserve must reconcile live liabilities, claims, buffer, and unexpired opens"
         );
         assertEq(protocolSnapshot.freeAssets, expectedFreeAssets, "Protocol snapshot free settlementToken mismatch");
         assertEq(
@@ -729,7 +792,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(snapshot.maxLiabilityAssets, maxLiabilityAssets, "House-pool snapshot max liability mismatch");
         assertEq(
             snapshot.supplementalReservedAssets,
-            settlementBufferAssets,
+            expectedBacking - maxLiabilityAssets,
             "House-pool snapshot supplemental reserved amount mismatch"
         );
         assertEq(
@@ -767,12 +830,12 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(snapshot.degradedMode, engine.degradedMode(), "House-pool status degraded mode mismatch");
     }
 
-    function _assertInvariant_LiquidationClearsExecutionBounties() internal view {
+    function _assertInvariant_LiquidationClearsStaleCloseReserves() internal view {
         for (uint256 i; i < handler.actorCount(); ++i) {
             address account = _account(handler.actorAt(i));
             (, uint256 liveReserves, uint256 reserved) = handler.liquidatedGenerationExposure(account);
-            assertEq(liveReserves, 0, "Liquidated generations must forfeit all reservations");
-            assertEq(reserved, 0, "Liquidation must forfeit old-generation bounty and margin reserves");
+            assertEq(liveReserves, 0, "Liquidated generations must clear stale close reserves");
+            assertEq(reserved, 0, "Stale closes must not retain bounty or margin reserves");
             assertEq(
                 settlementToken.balanceOf(account),
                 handler.ghost().expectedWalletFromSubmittedFlows(account),
@@ -838,7 +901,6 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     function _assertAllInvariants() internal view {
         _assertInvariant_KnownActorAndProtocolBalancesConserveAssetsSupply();
         _assertInvariant_ClearinghouseCustodyMatchesTrackedAccountBalances();
-        _assertInvariant_WithdrawalReserveIncludesKnownTraderClaimLiabilities();
         _assertInvariant_TrackedAccountBucketsReconcileSettlementBalances();
         _assertInvariant_AccountLedgerViewMatchesUnderlyingBuckets();
         _assertInvariant_TrackedAccountLedgerTotalsMatchProtocolCustodyAndObligations();
@@ -850,7 +912,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         _assertInvariant_AccountLedgerSnapshotFullySubsumesCompactAndLegacyViews();
         _assertInvariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets();
         _assertInvariant_HousePoolStatusSnapshotMatchesEngineState();
-        _assertInvariant_LiquidationClearsExecutionBounties();
+        _assertInvariant_LiquidationClearsStaleCloseReserves();
         _assertInvariant_ObservedClaimsReconcileWithEngine();
     }
 

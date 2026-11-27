@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {PendingOrderReferenceLedger} from "../ghost/PendingOrderReferenceLedger.sol";
@@ -27,11 +27,12 @@ contract PerpMixedPendingOrdersTest is BasePerpTest {
     }
 
     function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
-        return 500_000e6;
+        return 499_999e6;
     }
 
     function setUp() public override {
         super.setUp();
+        _assignSeniorCapital(1e6);
         handler = new PerpMixedAccountingHandler(
             settlementToken,
             baseMockPyth,
@@ -101,15 +102,18 @@ contract PerpMixedPendingOrdersTest is BasePerpTest {
         handler.assertModel();
     }
 
-    function test_CloseOpenCloseProjectsQueuedResidualAndCreatesNewPositionEpoch() public {
+    function test_CloseAfterReopenUsesNewLivePositionEpoch() public {
         handler.openOrIncrease(0, 100, 80_000_002);
         handler.commitClose(0, 100, true);
         handler.commitOpen(0, 17, 80_000_002);
         handler.commitClose(0, 17, true);
-        assertEq(handler.orders().count(0), 3);
-        handler.executeBatch(3);
-        assertEq(handler.traderState(0).lots, 0);
+        assertEq(handler.orders().count(0), 2);
+        handler.executeBatch(2);
+        assertEq(handler.traderState(0).lots, 17);
         assertEq(handler.positionEpochs(0), 2);
+        handler.commitClose(0, 17, true);
+        handler.executeBatch(1);
+        assertEq(handler.traderState(0).lots, 0);
         handler.replayPending(0, false);
         handler.assertModel();
     }

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -85,7 +87,8 @@ contract OrderRouterSlippageTest is OrderRouterPythTestBase {
         uint256 adverseTarget
     ) public {
         _startRecordingLogs();
-        adverseTarget = bound(adverseTarget, 1, 99_999_999);
+        // 100 lots need at least $0.10 per token to support the $1 minimum liquidation reserve.
+        adverseTarget = bound(adverseTarget, 10_000_000, 99_999_999);
         vm.warp(3000);
 
         vm.prank(alice);
@@ -108,6 +111,30 @@ contract OrderRouterSlippageTest is OrderRouterPythTestBase {
             0,
             "Keeper reserve should not remain reserved after terminal failure"
         );
+    }
+
+    function testFuzz_UnreachableShortTargetRejectedBeforeReservation(
+        uint256 target
+    ) public {
+        target = bound(target, 1, 9_999_999);
+        vm.warp(3000);
+        uint256 balanceBefore = _settlementBalance(alice);
+        uint64 nextId = router.nextCommitId();
+        uint64 nextExecute = router.nextExecuteId();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL)
+            )
+        );
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000e18, 500e6, target, false);
+        assertEq(router.nextCommitId(), nextId);
+        assertEq(router.nextExecuteId(), nextExecute);
+        assertEq(router.pendingOrderCounts(alice), 0);
+        assertEq(_settlementBalance(alice), balanceBefore);
+        assertEq(router.getAccountReservations(alice).executionBountyAssets, 0);
+        assertEq(router.getAccountReservations(alice).committedMarginAssets, 0);
     }
 
     function test_Slippage_CloseOrders_Protected() public {

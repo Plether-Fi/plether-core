@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 // Category: accounting. All cases assert current documented behavior and are expected to pass.
 // Source of truth: packages/perps/ACCOUNTING_SPEC.md#liquidation-settlement
@@ -184,7 +184,7 @@ contract PriceAndActionReservePriorityLiquidationTest is BasePerpTest {
     address trader = address(0xC10A);
 
     /// @dev accounting; source: ACCOUNTING_SPEC.md#liquidation-settlement.
-    function test_LiquidationMustConsumeQueuedCommittedMarginBeforeWaivingActionCharge() public {
+    function test_LiquidationDoesNotDrainQueuedCommittedMarginForActionCharge() public {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
@@ -193,7 +193,7 @@ contract PriceAndActionReservePriorityLiquidationTest is BasePerpTest {
         uint64 queuedOrderId = router.nextCommitId();
         uint256 committedMarginAssets = _freeSettlementAssets(account) - 200_000;
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, committedMarginAssets, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, committedMarginAssets, CAP_PRICE, false);
 
         uint256 committedBefore = router.getAccountReservations(account).committedMarginAssets;
         assertEq(_freeSettlementAssets(account), 0, "Setup must shelter all non-bounty free settlement in the queue");
@@ -209,10 +209,10 @@ contract PriceAndActionReservePriorityLiquidationTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still clear the live insolvent position");
         assertEq(_executionBountyReserve(queuedOrderId), 200_000, "Queued execution bounty should remain reserved");
-        assertLt(
+        assertEq(
             router.getAccountReservations(account).committedMarginAssets,
             committedBefore,
-            "Liquidation should consume queued committed margin before waiving terminal carry"
+            "Liquidation keeps opening-order margin reserved even when terminal carry is unpaid"
         );
     }
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -63,7 +63,6 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         _startRecordingLogs();
         router.updateMarkPrice(_mockPythUpdateData(0.8e8));
         OrderV3Types.OrderRequest memory request = _openRequest(bytes32("expiry-context"));
-        request.bounds.executionWindowSeconds = 1;
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
         if (mismatch) {
@@ -138,6 +137,76 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidExecutionWindow.selector);
         vm.prank(ALICE);
         router.commitOrder(request);
+    }
+
+    function test_AllShorterExecutionWindowsRevertWithoutReservingFunds() public {
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("short-window"));
+        uint256 freeBefore = _freeSettlementAssets(ALICE);
+        uint64 nextBefore = router.nextCommitId();
+        uint32 configuredWindow = uint32(router.maxExecutionWindowSeconds());
+        for (uint32 window = 1; window < configuredWindow; ++window) {
+            request.bounds.executionWindowSeconds = window;
+            vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidExecutionWindow.selector);
+            vm.prank(ALICE);
+            router.commitOrder(request);
+        }
+        assertEq(router.nextCommitId(), nextBefore, "rejected windows must not consume order ids");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "rejected windows must not enter the queue");
+        assertEq(book.clientIntent(ALICE, request.clientOrderId).orderId, 0);
+        assertEq(_freeSettlementAssets(ALICE), freeBefore, "rejected windows must not reserve funds");
+    }
+
+    function test_ConfiguredExecutionWindowControlsNewOrdersAndPreservesReplayTiming() public {
+        OrderV3Types.OrderRequest memory original = _openRequest(bytes32("original-window"));
+        vm.prank(ALICE);
+        uint64 originalId = router.commitOrder(original);
+        OrderV3Types.OrderTiming memory originalTiming = book.orderTiming(originalId);
+
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxExecutionWindowSeconds = 300;
+        _setRouterConfig(config);
+
+        vm.prank(ALICE);
+        assertEq(router.commitOrder(original), originalId, "exact replay must retain the original identity");
+        assertEq(keccak256(abi.encode(book.orderTiming(originalId))), keccak256(abi.encode(originalTiming)));
+
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("configured-window"));
+        request.bounds.executionWindowSeconds = 60;
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidExecutionWindow.selector);
+        vm.prank(BOB);
+        router.commitOrder(request);
+
+        request.bounds.executionWindowSeconds = uint32(config.maxExecutionWindowSeconds);
+        uint256 committedAt = vm.getBlockTimestamp();
+        vm.prank(BOB);
+        uint64 orderId = router.commitOrder(request);
+        OrderV3Types.OrderTiming memory timing = book.orderTiming(orderId);
+        assertEq(timing.commitTimestamp, committedAt);
+        assertEq(timing.executionWindowSeconds, 300);
+        assertEq(timing.executionDeadline, committedAt + 300);
+        assertEq(book.pendingIntent(orderId).intentHash, book.hashOrderRequest(BOB, request));
+    }
+
+    function testFuzz_KeeperCanFillBeforeConfiguredExpiry(
+        uint8 latencySeed
+    ) public {
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("keeper-latency"));
+        vm.prank(ALICE);
+        uint64 orderId = router.commitOrder(request);
+        OrderV3Types.OrderTiming memory timing = book.orderTiming(orderId);
+        assertEq(timing.executionWindowSeconds, router.maxExecutionWindowSeconds());
+        assertEq(timing.executionDeadline, uint256(timing.commitTimestamp) + router.maxExecutionWindowSeconds());
+
+        bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
+        vm.warp(uint256(timing.commitTimestamp) + 4 + uint256(latencySeed) % 4);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotExpired.selector);
+        vm.prank(ALICE);
+        router.expireOrder(orderId);
+
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Executed));
+        assertEq(_positionSize(ALICE), OPEN_SIZE);
     }
 
     function test_TimingChangesConflictWithRegisteredIntent() public {
@@ -349,7 +418,6 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         OrderV3Types.OrderRequest memory request = _openRequest(bytes32("inclusive-equality"));
         request.bounds.maxExecutionNotionalAssets = OPEN_NOTIONAL_ASSETS;
         request.bounds.submitBy = uint64(block.timestamp + 1);
-        request.bounds.executionWindowSeconds = uint32(uint256(uint64(block.timestamp + 1)) - block.timestamp);
 
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
@@ -357,7 +425,8 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         uint256 keeperBefore = _settlementBalance(KEEPER);
 
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
-        assertEq(block.timestamp, request.bounds.submitBy, "setup must execute exactly at the inclusive deadline");
+        vm.warp(pending.timing.executionDeadline);
+        assertEq(vm.getBlockTimestamp(), pending.timing.executionDeadline, "setup must execute at the deadline");
         _startRecordingLogs();
         vm.prank(KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
@@ -461,14 +530,13 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _openRequest(bytes32("expired"));
         request.bounds.submitBy = uint64(block.timestamp + 1);
-        request.bounds.executionWindowSeconds = uint32(uint256(uint64(block.timestamp + 1)) - block.timestamp);
 
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
         OrderV3Types.PendingIntent memory pending = book.pendingIntent(orderId);
         uint256 pythUpdatesBefore = baseMockPyth.updatePriceFeedsCallCount();
         uint256 uniqueParsesBefore = baseMockPyth.parseUniqueCallCount();
-        vm.warp(uint256(request.bounds.submitBy) + 1);
+        vm.warp(uint256(pending.timing.executionDeadline) + 1);
 
         vm.prank(KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, new bytes[](0));
@@ -527,11 +595,10 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(outcome.executor, KEEPER);
     }
 
-    function test_BulkCleanupRemovesExpiredTailWithoutBlockingLiveHead() public {
+    function test_BulkCleanupRemovesExpiredTailsWithoutRemovingUnlistedHead() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory headRequest = _openRequest(bytes32("bulk-live-head"));
         OrderV3Types.OrderRequest memory tailRequest = _openRequest(bytes32("bulk-expired-tail"));
-        tailRequest.bounds.executionWindowSeconds = 1;
         vm.prank(ALICE);
         uint64 headId = router.commitOrder(headRequest);
         vm.prank(BOB);
@@ -541,12 +608,11 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         uint64 secondTailId = router.commitOrder(tailRequest);
         uint256 keeperBefore = _settlementBalance(KEEPER);
 
-        uint64[] memory ids = new uint64[](5);
+        uint64[] memory ids = new uint64[](4);
         ids[0] = tailId;
         ids[1] = secondTailId;
         ids[2] = tailId;
         ids[3] = 999;
-        ids[4] = headId;
         vm.warp(book.orderTiming(tailId).executionDeadline);
         vm.prank(KEEPER);
         (uint256 nextIndex, uint256 cleared) = router.clearInvalidOrders(ids);
@@ -558,7 +624,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         (nextIndex, cleared) = router.clearInvalidOrders(ids);
         assertEq(nextIndex, ids.length);
         assertEq(cleared, 2);
-        assertEq(router.nextExecuteId(), headId, "out-of-order cleanup must preserve the live head");
+        assertEq(router.nextExecuteId(), headId, "targeted cleanup must preserve the unlisted head");
         assertEq(router.pendingOrderCounts(BOB), 0);
         assertEq(router.pendingOrderCounts(ALICE), 1);
         assertEq(_remainingCommittedMargin(tailId), 0);
@@ -570,11 +636,23 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(outcome.executor, KEEPER);
         assertEq(_settlementBalance(KEEPER) - keeperBefore, outcome.bountyAssets + secondOutcome.bountyAssets);
 
-        vm.roll(block.number + 1);
         vm.prank(KEEPER);
-        OrderV3Types.ExecutionResult memory headResult =
-            router.executeOrder(headId, _mockPythUpdateData(EXECUTION_PRICE));
-        assertEq(uint8(headResult.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        OrderV3Types.ExecutionResult memory headResult = router.expireOrder(headId);
+        assertEq(uint8(headResult.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));
+        assertEq(router.nextExecuteId(), 0);
+    }
+
+    function test_ProtocolTreasuryCannotCommitFreshOrder() public {
+        address treasury = engine.protocolTreasury();
+        _fundTrader(treasury, 100_000e6);
+        uint64 nextCommitBefore = router.nextCommitId();
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("treasury-blocked"));
+
+        vm.prank(treasury);
+        vm.expectRevert(abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 12));
+        router.commitOrder(request);
+        assertEq(router.pendingOrderCounts(treasury), 0, "rejected treasury order must not queue");
+        assertEq(router.nextCommitId(), nextCommitBefore, "rejected treasury order must not consume an order id");
     }
 
     function test_BulkCleanupRemovesNonHeadConfigMismatch() public {
@@ -645,7 +723,6 @@ contract OrderRouterAgentV2Test is BasePerpTest {
 
     function test_BulkCleanupKeepsSettledPrefixWhenLaterItemFails() public {
         OrderV3Types.OrderRequest memory request = _openRequest(bytes32("bulk-prefix-first"));
-        request.bounds.executionWindowSeconds = 1;
         vm.prank(ALICE);
         uint64 firstId = router.commitOrder(request);
         request.clientOrderId = bytes32("bulk-prefix-second");
@@ -679,7 +756,6 @@ contract OrderRouterAgentV2Test is BasePerpTest {
 
     function test_BulkCleanupStopsOnPendingItemAndCapsBountyPrice() public {
         OrderV3Types.OrderRequest memory request = _openRequest(bytes32("bulk-pending-cap"));
-        request.bounds.executionWindowSeconds = 1;
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
         vm.warp(uint256(book.orderTiming(orderId).executionDeadline) + 1);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -9,6 +9,7 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IMarginAccount} from "@plether/perps/interfaces/IMarginAccount.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 
@@ -43,6 +44,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     mapping(address => uint256) internal settlementBalances;
 
     mapping(address => uint256) internal positionMarginAssets;
+
+    struct ProtectedTopUp {
+        uint256 pledgedAssets;
+        uint256 releasedAssets;
+    }
+    // Released pledge remains locked until the queue drains, even if a close leaves the account flat.
+    mapping(address => ProtectedTopUp) public protectedTopUps;
+
     mapping(address => uint256) internal committedOrderMarginAssets;
     mapping(address => uint256) internal reservedSettlementAssets;
     /// @dev Mandatory negative-lifetime-VPI floor contained inside `reservedSettlementAssets`; never counted twice.
@@ -60,6 +69,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     mapping(IMarginClearinghouse.BountyKind => mapping(uint64 => IMarginClearinghouse.BountyReservation)) internal
         bountyReservations;
     mapping(address => uint256) public totalBountyReservationsAssets;
+
+    /// @notice Records the protected balances after a custody change.
+    event ProtectedTopUpUpdated(address indexed account, uint256 pledgedAssets, uint256 releasedAssets);
 
     error MarginClearinghouse__InvalidBountyReservation();
     event BountyReservationUpdated(
@@ -505,8 +517,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Returns the account's settlement balance and its typed locked/free margin breakdown.
-    /// @dev `otherLockedMarginAssets` combines liquidation, committed-order, and action-reserve margin. Every amount is in
-    ///      six-decimal settlement token units; unrealized PnL and engine withdrawal guards are not included.
+    /// @dev `otherLockedMarginAssets` combines liquidation reserves, committed-order margin, action reserves, and
+    ///      released protected top-ups. Amounts are in six-decimal settlement token units and describe custody.
     /// @param account Account to inspect
     /// @return buckets Settlement balance, total locked, position locked, other locked, and free settlement amounts
     function getAccountAssetBuckets(
@@ -529,12 +541,21 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         buckets.freeSettlementAssets = buckets.settlementBalanceAssets > buckets.totalLockedAssets
             ? buckets.settlementBalanceAssets - buckets.totalLockedAssets
             : 0;
+        ProtectedTopUp storage topUp = protectedTopUps[account];
+        buckets.protectedPledgeAssets = topUp.pledgedAssets;
+        buckets.protectedReleasedAssets = topUp.releasedAssets;
     }
 
     function pnlPledgeAssets(
         address account
     ) external view returns (uint256) {
         return positionMarginAssets[account];
+    }
+
+    function eligiblePositionMarginAssets(
+        address account
+    ) external view returns (uint256) {
+        return positionMarginAssets[account] - protectedTopUps[account].pledgedAssets;
     }
 
     function liquidationReserveAssets(
@@ -577,6 +598,28 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _lockMargin(account, IMarginClearinghouse.MarginBucket.Position, amountAssets);
     }
 
+    /// @notice Pledges an owner top-up for liquidation while protecting it from the live order queue.
+    function lockPositionTopUp(
+        address account,
+        uint256 amountAssets
+    ) external onlyEngine {
+        _lockMargin(account, IMarginClearinghouse.MarginBucket.Position, amountAssets);
+        address router = ICfdEngineCore(engine).orderRouter();
+        if (router.code.length != 0 && IOrderRouterAccounting(router).pendingOrderCounts(account) != 0) {
+            ProtectedTopUp storage topUp = protectedTopUps[account];
+            topUp.pledgedAssets += amountAssets;
+            emit ProtectedTopUpUpdated(account, topUp.pledgedAssets, topUp.releasedAssets);
+        }
+    }
+
+    /// @notice Makes the protected top-up ordinary pledge or free settlement after queue cleanup.
+    function releaseProtectedTopUp(
+        address account
+    ) external onlyEngine {
+        delete protectedTopUps[account];
+        emit ProtectedTopUpUpdated(account, 0, 0);
+    }
+
     /// @notice Decreases an account's active-position margin bucket by an exact amount.
     /// @dev Callable only by the engine or its reported settlement sidecar. The settlement balance is unchanged, and
     ///      the call reverts rather than clamping when `amountAssets` exceeds the position-margin bucket. This
@@ -600,15 +643,36 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 cashChargeAfterVpi,
         uint256 vpiRelease
     ) external onlyOperator {
-        uint256 reserve = _spendableActionReserveAssets(account);
-        uint256 afterReserve = cashChargeAfterVpi > reserve ? cashChargeAfterVpi - reserve : 0;
-        uint256 free = getFreeBuyingPowerAssets(account) + vpiRelease;
-        uint256 needed = afterReserve > free ? afterReserve - free : 0;
-        uint256 expected = needed < safeRelease ? needed : safeRelease;
-        if (fromReleased != expected || netRelease != safeRelease - expected) {
-            revert MarginClearinghouse__ActionReserveMismatch();
+        {
+            uint256 reserve = _spendableActionReserveAssets(account);
+            uint256 afterReserve = cashChargeAfterVpi > reserve ? cashChargeAfterVpi - reserve : 0;
+            uint256 free = getFreeBuyingPowerAssets(account) + vpiRelease;
+            uint256 needed = afterReserve > free ? afterReserve - free : 0;
+            uint256 expected = needed < safeRelease ? needed : safeRelease;
+            if (fromReleased != expected || netRelease != safeRelease - expected) {
+                revert MarginClearinghouse__ActionReserveMismatch();
+            }
         }
+        uint256 protectedRelease = MarginClearinghouseAccountingLib.protectedCloseRelease(
+            positionMarginAssets[account], protectedTopUps[account].pledgedAssets, safeRelease, fromReleased
+        );
         _unlockMargin(account, IMarginClearinghouse.MarginBucket.Position, safeRelease);
+        if (protectedRelease != 0) {
+            ProtectedTopUp storage topUp = protectedTopUps[account];
+            topUp.releasedAssets += protectedRelease;
+            emit ProtectedTopUpUpdated(account, topUp.pledgedAssets, topUp.releasedAssets);
+        }
+    }
+
+    function _consumeReleasedTopUp(
+        address account,
+        uint256 amountAssets
+    ) private {
+        if (amountAssets != 0) {
+            ProtectedTopUp storage topUp = protectedTopUps[account];
+            topUp.releasedAssets -= amountAssets;
+            emit ProtectedTopUpUpdated(account, topUp.pledgedAssets, topUp.releasedAssets);
+        }
     }
 
     /// @notice Locks free settlement as committed-order margin and records it against a unique order id.
@@ -906,7 +970,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit AssetSeized(account, settlementAsset, amountAssets, recipient);
     }
 
-    /// @notice Collects an action charge from spendable action reserve, free settlement, then committed order margin.
+    /// @notice Collects a reducing action charge from reserve, free settlement, released top-ups, then order margin.
     /// @dev Negative-VPI backing and clearinghouse-attributed execution bounties remain protected in the shared action-reserve
     ///      bucket. The caller supplies the exact planned reserve and committed-margin split so a state mismatch
     ///      reverts. Committed order margin is consumed in clearinghouse FIFO order. Locked PnL pledge and liquidation
@@ -921,7 +985,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address protocolTreasury,
         uint256 protocolFeeAssets
     ) external onlyOperator returns (uint256 collectedAssets, uint256 protocolFeeCreditedAssets) {
-        collectedAssets = _validateActionChargeConsumption(
+        uint256 releasedTopUpConsumed;
+        (collectedAssets, releasedTopUpConsumed) = _validateActionChargeConsumption(
             account, chargeAssets, actionReserveConsumedAssets, actionCommittedMarginConsumedAssets
         );
         if (collectedAssets == 0) {
@@ -934,6 +999,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
                 account, IMarginClearinghouse.MarginBucket.ReservedSettlement, actionReserveConsumedAssets
             );
         }
+        _consumeReleasedTopUp(account, releasedTopUpConsumed);
         if (actionCommittedMarginConsumedAssets > 0) {
             uint256 consumedCommittedMarginAssets =
                 _consumeAccountOrderReservations(account, actionCommittedMarginConsumedAssets, true);
@@ -951,25 +1017,29 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 chargeAssets,
         uint256 actionReserveConsumedAssets,
         uint256 actionCommittedMarginConsumedAssets
-    ) private view returns (uint256 collectedAssets) {
+    ) private view returns (uint256 collectedAssets, uint256 releasedTopUpConsumed) {
         uint256 actionReserveAvailableAssets = _spendableActionReserveAssets(account);
         uint256 freeSettlementAvailableAssets = getFreeBuyingPowerAssets(account);
-        uint256 eligibleAssets =
-            actionReserveAvailableAssets + freeSettlementAvailableAssets + committedOrderMarginAssets[account];
+        uint256 releasedTopUpAvailable = protectedTopUps[account].releasedAssets;
+        uint256 liquidAssets = freeSettlementAvailableAssets + releasedTopUpAvailable;
+        uint256 eligibleAssets = actionReserveAvailableAssets + liquidAssets + committedOrderMarginAssets[account];
         collectedAssets = chargeAssets < eligibleAssets ? chargeAssets : eligibleAssets;
 
         uint256 expectedActionReserveConsumedAssets =
             collectedAssets < actionReserveAvailableAssets ? collectedAssets : actionReserveAvailableAssets;
         uint256 chargeAfterReserveAssets = collectedAssets - expectedActionReserveConsumedAssets;
-        uint256 expectedCommittedMarginConsumedAssets = chargeAfterReserveAssets > freeSettlementAvailableAssets
-            ? chargeAfterReserveAssets - freeSettlementAvailableAssets
-            : 0;
+        uint256 expectedCommittedMarginConsumedAssets =
+            chargeAfterReserveAssets > liquidAssets ? chargeAfterReserveAssets - liquidAssets : 0;
         if (
             actionReserveConsumedAssets != expectedActionReserveConsumedAssets
                 || actionCommittedMarginConsumedAssets != expectedCommittedMarginConsumedAssets
         ) {
             revert MarginClearinghouse__ActionReserveMismatch();
         }
+        uint256 chargeAfterFree = chargeAfterReserveAssets > freeSettlementAvailableAssets
+            ? chargeAfterReserveAssets - freeSettlementAvailableAssets
+            : 0;
+        releasedTopUpConsumed = chargeAfterFree - expectedCommittedMarginConsumedAssets;
     }
 
     function _spendableActionReserveAssets(
@@ -1102,7 +1172,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         }
     }
 
-    /// @notice Collects carry from canonical active position margin first, then free settlement.
+    /// @notice Collects carry from eligible position margin first, then free settlement.
     /// @dev Callable only by the engine or its reported settlement sidecar. Consumption is planned from canonical
     ///      stored buckets. Other locked buckets and trader claims remain protected; the caller retains uncovered
     ///      carry until subsequent collection or terminal recovery/waiver.
@@ -1121,12 +1191,41 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         onlyOperator
         returns (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets)
     {
+        return _consumeSettlementLoss(account, lossAssets, recipient, false);
+    }
+
+    /// @notice Collects funded carry from eligible pledge and free settlement.
+    /// @dev Reducing settlement can use the full pledge and then debit released top-ups after free settlement.
+    function consumePositionCarry(
+        address account,
+        uint256 lossAssets,
+        address recipient,
+        bool includeProtected
+    )
+        external
+        onlyEngine
+        returns (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets)
+    {
+        return _consumeSettlementLoss(account, lossAssets, recipient, includeProtected);
+    }
+
+    function _consumeSettlementLoss(
+        address account,
+        uint256 lossAssets,
+        address recipient,
+        bool includeProtected
+    ) private returns (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets) {
         if (lossAssets == 0) {
             return (0, 0, 0);
         }
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
-            _planCarryLossConsumption(account, lossAssets);
+            MarginClearinghouseAccountingLib.planCarryLossConsumption(
+                _buildAccountAssetBuckets(account),
+                lossAssets,
+                includeProtected ? 0 : protectedTopUps[account].pledgedAssets,
+                includeProtected ? protectedTopUps[account].releasedAssets : 0
+            );
         freeSettlementConsumedAssets = consumption.freeSettlementConsumedAssets;
         marginConsumedAssets = consumption.activeMarginConsumedAssets;
         uncoveredAssets = consumption.uncoveredAssets;
@@ -1138,6 +1237,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
                 account, IMarginClearinghouse.MarginBucket.Position, mutation.positionMarginUnlockedAssets
             );
         }
+        _consumeReleasedTopUp(account, mutation.otherLockedMarginUnlockedAssets);
 
         uint256 totalConsumedAssets = mutation.settlementDebitAssets;
         if (totalConsumedAssets == 0) {
@@ -1293,15 +1393,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             positionMarginAssets[account],
             liquidationReserveBalances[account],
             committedOrderMarginAssets[account],
-            reservedSettlementAssets[account]
+            reservedSettlementAssets[account] + protectedTopUps[account].releasedAssets
         );
-    }
-
-    function _planCarryLossConsumption(
-        address account,
-        uint256 lossAssets
-    ) internal view returns (MarginClearinghouseAccountingLib.SettlementConsumption memory consumption) {
-        return MarginClearinghouseAccountingLib.planCarryLossConsumption(_buildAccountAssetBuckets(account), lossAssets);
     }
 
     function _routeSettlementDebit(
@@ -1709,6 +1802,11 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     ) internal {
         if (bucket == IMarginClearinghouse.MarginBucket.Position) {
             positionMarginAssets[account] = amountAssets;
+            ProtectedTopUp storage topUp = protectedTopUps[account];
+            if (topUp.pledgedAssets > amountAssets) {
+                topUp.pledgedAssets = amountAssets;
+                emit ProtectedTopUpUpdated(account, amountAssets, topUp.releasedAssets);
+            }
         } else if (bucket == IMarginClearinghouse.MarginBucket.CommittedOrder) {
             committedOrderMarginAssets[account] = amountAssets;
         } else if (bucket == IMarginClearinghouse.MarginBucket.ReservedSettlement) {
@@ -1724,7 +1822,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address account
     ) internal view returns (uint256) {
         return positionMarginAssets[account] + liquidationReserveBalances[account] + committedOrderMarginAssets[account]
-            + reservedSettlementAssets[account];
+            + reservedSettlementAssets[account] + protectedTopUps[account].releasedAssets;
     }
 
     /// @notice Moves already-reserved settlement value between two internal clearinghouse accounts.
@@ -1779,7 +1877,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     /// @notice Returns the total locked settlement token margin across all buckets for an account.
     /// @param account Account to inspect
-    /// @return Sum of position, liquidation-reserve, committed-order, and reserved-settlement margin in settlement token units
+    /// @return Total position margin, liquidation reserves, committed-order margin, action reserves, and released top-ups
     function lockedMarginAssets(
         address account
     ) external view returns (uint256) {

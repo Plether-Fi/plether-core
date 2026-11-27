@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import {PythAdapter} from "@plether/spot/oracles/PythAdapter.sol";

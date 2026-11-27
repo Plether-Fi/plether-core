@@ -1,30 +1,44 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 /// @notice Engine host surface called by the timelocked engine admin.
 interface ICfdEngineAdminHost {
 
-    /// @notice Risk parameters, execution fee, frozen close spread, and settlement buffer staged by governance.
+    /// @notice Risk parameters, execution fee, frozen close spread, settlement buffer, and open-slippage floor staged by governance.
     /// @param riskParams VPI, skew, margin, carry, and liquidation-bounty parameters.
     /// @param executionFeeBps Protocol fee charged on executed notional, in basis points.
     /// @param frozenCloseSpreadBps LP-owned spread charged on oracle-frozen voluntary close notional, in basis points.
     /// @param settlementBufferBps Protected headroom per unit of maximum directional liability, in basis points.
+    /// @param minOpenSlippageToleranceBps Minimum open/increase commit price/bound tolerance band around `lastMarkPrice`, in basis points (`0` disables).
     struct EngineRiskConfig {
         CfdTypes.RiskParams riskParams;
         uint256 executionFeeBps;
         uint256 frozenCloseSpreadBps;
         uint256 settlementBufferBps;
+        uint256 minOpenSlippageToleranceBps;
     }
 
-    /// @notice FAD calendar override timestamps and deleverage runway.
-    /// @param fadDayTimestamps Unix timestamps whose normalized UTC day numbers are configured as all-day FAD and
-    ///        oracle-frozen overrides; duplicate normalized days are ignored by the engine.
-    /// @param fadRunwaySeconds Look-ahead duration before an override day during which FAD restrictions apply.
+    /// @notice Scheduled market closure as a half-open interval of Unix timestamps.
+    /// @param startTime First second when frozen-oracle policy applies.
+    /// @param endTime First second after the closure, subject to any other active calendar rules.
+    struct MarketClosure {
+        uint64 startTime;
+        uint64 endTime;
+    }
+
+    /// @notice FAD calendar override timestamps, deleverage runway, and scheduled market closures.
+    /// @param fadDayTimestamps Unix timestamps whose normalized UTC day numbers activate all-day FAD and add freezing
+    ///        only before that day's 17:00 New York boundary. Recurring weekend freezing still applies; duplicate
+    ///        normalized days are ignored by the engine.
+    /// @param fadRunwaySeconds Duration of FAD restrictions before an override day or scheduled closure starts.
+    /// @param marketClosures Scheduled closures ordered by start time with no overlaps. FAD also stays active for
+    ///        15 minutes after each closure ends.
     struct EngineCalendarConfig {
         uint256[] fadDayTimestamps;
         uint256 fadRunwaySeconds;
+        MarketClosure[] marketClosures;
     }
 
     /// @notice Mark freshness limits for frozen and live-market policy.
@@ -43,9 +57,9 @@ interface ICfdEngineAdminHost {
         EngineRiskConfig calldata config
     ) external;
 
-    /// @notice Applies finalized FAD calendar overrides.
-    /// @dev Callable only by the configured admin. Replaces the complete override set after normalizing each input to
-    ///      a Unix day number. The admin owns validation and timelock enforcement.
+    /// @notice Applies the finalized FAD calendar and scheduled closures.
+    /// @dev Callable only by the configured admin. Replaces the day overrides and closure intervals. Each day
+    ///      override is normalized to a Unix day number. The admin owns validation and timelock enforcement.
     /// @param config Calendar configuration to apply
     function applyCalendarConfig(
         EngineCalendarConfig calldata config

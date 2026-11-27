@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -34,9 +34,10 @@ contract TrancheVaultMaintenanceFeeGasDriver is TrancheVault {
 contract JuniorMaintenanceFeeGasSizeTest is BasePerpTest {
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
-    // Measured with entry-pause refunds (solc 0.8.35, via-IR, optimizer runs 200).
-    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_571;
-    uint256 internal constant TRANCHE_VAULT_RUNTIME_TARGET = 24_124;
+    // Includes impaired Senior ownership floor, Junior entry floor, and bounded deposit quotes
+    // (solc 0.8.35, via-IR, optimizer runs 200).
+    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_573;
+    uint256 internal constant TRANCHE_VAULT_RUNTIME_TARGET = 24_550;
     uint256 internal constant DEFAULT_ZERO_INCREMENTAL_GAS_LIMIT = 5000;
     uint256 internal constant ACTIVE_EPOCH_SETTLEMENT_GAS_LIMIT = 1_000_000;
     uint256 internal constant ACTIVE_EPOCH_INCREMENTAL_GAS_LIMIT = 150_000;

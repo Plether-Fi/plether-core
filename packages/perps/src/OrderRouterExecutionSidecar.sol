@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -493,16 +493,16 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         ICfdEngineCore engine_ = ICfdEngineCore(context.host.engine());
         AccountState memory preState = _accountState(engine_, context.order.account);
 
-        // Classification-only release is inside this independently revertible item frame. Unknown failures below
-        // therefore restore the reservation, while successful assessment sees the same free-settlement state as Engine.
-        IMarginClearinghouse(engine_.clearinghouse()).releaseOrderReservationForTerminalCleanup(context.order.orderId);
-
         (address evaluator, bool assessed, bytes memory assessmentData) =
             _callPolicyEvaluator(context, request, address(engine_));
         if (!assessed) {
             return _settleAssessmentFailure(context, request, preState, evaluator, assessmentData);
         }
         OrderV3Types.ExecutionAssessment memory assessment = _decodeAssessment(evaluator, assessmentData);
+
+        // The evaluator projects this release while the live reservation is still readable for its funding check.
+        // The actual release remains inside the rollback frame and precedes Engine apply.
+        IMarginClearinghouse(engine_.clearinghouse()).releaseOrderReservationForTerminalCleanup(context.order.orderId);
 
         (bool engineSucceeded, bytes memory engineData) = _callEngine(context, request, address(engine_));
         if (!engineSucceeded) {
@@ -1080,9 +1080,10 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             return false;
         }
         uint64 commitTime = order.commitTime;
+        uint256 minPublishTime = uint256(commitTime) + oracle.minOrderSettlementDelay();
         if (
-            commitTime < cache.minReusableCommitTime || commitTime >= cache.oldestPublishTime
-                || commitTime >= cache.publishTime
+            commitTime < cache.minReusableCommitTime || cache.oldestPublishTime < minPublishTime
+                || cache.publishTime < minPublishTime
         ) {
             return false;
         }

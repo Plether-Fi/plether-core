@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
@@ -19,7 +19,7 @@ contract BountyBackingHarness is CfdOrderPolicyEvaluator {
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 bounty
     ) external pure returns (OrderV3Types.ExecutionAssessment memory) {
-        return _evaluateClose(snapshot, delta, bounds, bounty, true);
+        return _evaluateClose(snapshot, delta, bounds, bounty, true, false, 0);
     }
 
 }
@@ -319,14 +319,16 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.CloseDelta memory delta = _baseCloseDelta();
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 4;
-        bounds.maxGrossAccountDebitAssets = 27e6 - 1;
+        // _baseCloseDelta has 5e6 claim + 15e6 pledge + 5e6 non-carry action charge + 1e6 bounty = 26e6
+        // (1e6 uncovered execution-time carry is reported on the receipt but excluded from debit bounds).
+        bounds.maxGrossAccountDebitAssets = 26e6 - 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
                 OrderV3Types.ConstraintKind.GrossAccountDebit,
-                27e6,
-                27e6 - 1
+                26e6,
+                26e6 - 1
             )
         );
         evaluator.evaluateClose(snapshot, delta, bounds, 1e6);
@@ -525,6 +527,28 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         evaluator.evaluateOpen(snapshot, _baseOpenDelta(), bounds, BOUNTY);
     }
 
+    function test_OpenRequiresOwnEquityStrictlyAboveInitialMargin() public {
+        CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
+        snapshot.riskParams = _coordinatorRiskParams();
+        CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
+        // On $100 notional, $2 in costs and a $1 reserve leave exactly the $1.50 initial margin.
+        delta.marginDeltaAssets = 4_500_000;
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+                false
+            )
+        );
+        evaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
+
+        delta.marginDeltaAssets += 1;
+        evaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
+    }
+
     function test_OpenPlannerFailureKeepsExistingTypedCategoryAndCode() public {
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         delta.valid = false;
@@ -579,6 +603,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function _baseOpenDelta() private pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         delta.valid = true;
         delta.openState.notionalAssets = 100e6;
+        delta.marginDeltaAssets = 205e6;
         delta.posSide = CfdTypes.Side.SHORT;
         delta.newPosSize = CfdTypes.SIZE_QUANTUM;
         delta.newPosEntryPrice = PRICE;
@@ -692,7 +717,9 @@ contract CfdOrderPolicyEvaluatorTest is Test {
             actionReserveAssets: BOUNTY,
             vpiRebateReserveAssets: 0,
             totalLockedAssets: BOUNTY,
-            freeSettlementAssets: 20_000e6 - BOUNTY
+            freeSettlementAssets: 20_000e6 - BOUNTY,
+            protectedPledgeAssets: 0,
+            protectedReleasedAssets: 0
         });
         vm.mockCall(
             CLEARINGHOUSE, abi.encodeWithSignature("getPnlIsolationBuckets(address)", ACCOUNT), abi.encode(buckets)
@@ -709,6 +736,8 @@ contract CfdOrderPolicyEvaluatorTest is Test {
 
         vm.mockCall(ENGINE, abi.encodeWithSignature("unsettledCarryAssets(address)", ACCOUNT), abi.encode(0));
         vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceAssets()"), abi.encode(0));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("totalPositiveVpiAccruedAssets()"), abi.encode(0));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("totalNegativeVpiAccruedAssets()"), abi.encode(0));
         vm.mockCall(ENGINE, abi.encodeWithSignature("traderClaimBalanceAssets(address)", ACCOUNT), abi.encode(0));
         vm.mockCall(ENGINE, abi.encodeWithSignature("degradedMode()"), abi.encode(false));
         vm.mockCall(ENGINE, abi.encodeWithSignature("CAP_PRICE()"), abi.encode(2e8));

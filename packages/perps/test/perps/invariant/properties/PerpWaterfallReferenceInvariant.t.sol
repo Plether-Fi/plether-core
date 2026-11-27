@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
@@ -14,8 +14,8 @@ import {Test} from "forge-std/Test.sol";
 /// @notice Persistent waterfall reference campaign using real Engine, clearinghouse, pool, and tranche vaults.
 /// @dev Router authorization and the recapitalization source are explicit test boundaries: orders are submitted as
 ///      the configured Router and recap cash is injected at the engine-only claimant-inflow API. This does not test
-///      Router/Pyth admission or a public recapitalization transaction. Both tranches retain their seed owners;
-///      no share issuance/redemption, open-position carry, VPI, deferred claims, or raw-cash shortage is modeled.
+///      Router/Pyth admission or a public recapitalization transaction. The initial Senior includes redeemable shares;
+///      no further share issuance/redemption, open-position carry, VPI, deferred claims, or raw-cash shortage is modeled.
 ///      Trading rounds forward to Monday 10:00 UTC to keep frozen spread outside this waterfall-only model;
 ///      the additional elapsed time still accrues coupon in the independent reference.
 ///      The reference ledger advances only from initial funding and action inputs, never production previews or
@@ -197,12 +197,10 @@ contract PerpWaterfallReferenceHandler is Test {
     }
 
     function _reconcileReference() private {
-        if (expectedUnassigned > expectedCash) {
-            expectedUnassigned = expectedCash;
-        }
+        uint256 claimantCash = expectedCash > expectedUnassigned ? expectedCash - expectedUnassigned : 0;
         WaterfallReferenceMath.Result memory result = WaterfallReferenceMath.reconcile(
             WaterfallReferenceMath.State(expectedSenior, expectedJunior, expectedHwm, expectedCheckpoint),
-            expectedCash - expectedUnassigned,
+            claimantCash,
             800,
             block.timestamp
         );
@@ -253,11 +251,12 @@ contract PerpWaterfallReferenceInvariantTest is BasePerpTest {
     }
 
     function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
-        return 500_000e6;
+        return 499_999e6;
     }
 
     function setUp() public override {
         super.setUp();
+        _assignSeniorCapital(1e6);
         handler = new PerpWaterfallReferenceHandler(
             settlementToken, engine, clearinghouse, pool, address(router), address(juniorVault)
         );

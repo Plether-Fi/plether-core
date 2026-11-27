@@ -94,15 +94,17 @@ Fresh requests require:
 
 - A nonzero account-scoped `clientOrderId`. The prefix `0x504c455448455221` is reserved for protocol-generated orders.
 - A nonzero, lot-aligned size and nonzero target price.
-- `submitBy >= block.timestamp` and `0 < executionWindowSeconds <= OrderRouter.maxExecutionWindowSeconds()`.
+- `submitBy >= block.timestamp` and `executionWindowSeconds == OrderRouter.maxExecutionWindowSeconds()`.
 - The current nonzero configuration hash, a nonempty valid execution-mode mask, and nonzero `maxPostLeverageBps`.
-- For closes, `marginDelta == 0`, the same side as the account's queued-position projection, and a size no larger
-  than that projection. Partial closes also face minimum-notional admission checks.
+- For closes, `marginDelta == 0`, the same side as the live position, and a size no larger than the live size minus
+  earlier same-side queued closes. Partial closes also face minimum-notional admission checks.
 
 Committed orders enter a global first-in, first-out (FIFO) queue and cannot be cancelled. `submitBy` limits when a
 fresh commitment may occur; the execution deadline is the actual commitment time plus `executionWindowSeconds`.
-Use deliberate execution windows. Passing a deadline does not remove the order until a cleanup or execution call
-records its terminal outcome.
+The execution duration is fixed by protocol configuration (default 60 seconds); callers must echo it exactly, and a
+mismatch reverts rather than being normalized. `submitBy` cannot shorten that lifetime. Configuration changes do not
+rewrite stored timing, and exact replays retain their original timing. Passing a deadline does not remove the order
+until a cleanup or execution call records its terminal outcome.
 
 ### Financial limits
 
@@ -112,7 +114,7 @@ maximum only when your account policy intentionally permits that exposure.
 | Bound | Meaning |
 | --- | --- |
 | `submitBy` | Last permitted fresh-commit timestamp |
-| `executionWindowSeconds` | Duration from commitment to execution deadline |
+| `executionWindowSeconds` | Fixed duration from commitment to execution deadline; must equal the Router configuration |
 | `allowedExecutionModes` | Mask: Live `1`, Fad `2`, Frozen `4`; combine permitted bits |
 | `expectedConfigHash` | Exact execution configuration accepted by the account |
 | `maxExecutionBountyAssets` | Maximum order bounty reserved at commitment |
@@ -222,7 +224,7 @@ Call `IPerpsKeeper` on the Router:
 | `settleLpEpoch(pythUpdateData)` | Atomically refresh the mark and settle eligible LP epoch work |
 
 The keeper supplies Pyth payloads rather than an arbitrary execution price. Live and FAD orders use a unique
-historical basket in `(commitTime, min(commitTime + orderSettlementWindow, block.timestamp)]`, with predecessor
+historical basket in `[commitTime + minOrderSettlementDelay, min(commitTime + orderSettlementWindow, block.timestamp)]`, with predecessor
 checks that prevent skipping an earlier eligible tick. The Oracle applies adverse confidence adjustment and price
 caps; the Router enforces the target boundary. Frozen closes use the stored-mark policy and frozen-close spread.
 Quote the applicable oracle fee and simulate the exact call with sufficient gas for settlement and receipt creation.
@@ -249,7 +251,8 @@ predictable amount of progress matters.
 Opening orders may reserve a bounty. Successful self-execution releases it to the account's free settlement;
 external execution credits the keeper's Clearinghouse account. Ordinary and protection-generated closes have zero
 order bounty, including failed-close cleanup. Risk-off cleanup refunds remaining margin and bounty to internal
-settlement and pays no cleaner. Liquidation can forfeit unpaid opening and protection-trigger bounties. Interpret
+settlement and pays no cleaner. Liquidation preserves valid opening-order bounties and can forfeit unpaid
+protection-trigger bounties. Interpret
 actual receipt amounts rather than assuming every terminal outcome paid a keeper.
 
 ## Take-profit and stop-loss protection
@@ -280,7 +283,7 @@ with `closeFinancialLimits(protectionId)`; they are separate from `getPositionPr
 | `cancelPositionProtection(id)` | Owner cancels while `PendingOpen` or `Armed`, refunding the unpaid trigger bounty |
 | `cancelPositionProtectionAndCommitClose(id, request)` | Owner atomically cancels matching `Armed` protection and submits a fresh bounded full close |
 | `triggerPositionProtection(id, pythUpdateData)` | Permissionlessly evaluates an `Armed` protection and queues a close if crossed |
-| `amendLatchedPositionProtectionCloseLimits(id, limits)` | Owner changes financial limits after a failed attempt has become `Latched` |
+| `amendLatchedPositionProtectionCloseLimits(id, limits)` | Owner sets limits for future retries while `Latched` with no pending orders or `Triggered` with only the linked close pending |
 | `retryPositionProtectionClose(id)` | Permissionlessly queues a new attempt for `Latched` protection without re-evaluating the trigger |
 
 An attached parent uses the same complete bounded request as ordinary `commitOrder`, including its nonzero target
@@ -293,13 +296,14 @@ does not cancel its already-queued parent.
 
 Triggering pays the reserved trigger bounty once and queues a zero-bounty close at the global FIFO tail. The
 protocol-generated close permits all execution modes, is intentionally unpinned (`expectedConfigHash == 0`), and
-uses the current maximum execution window. It copies the four retained close limits into each attempt. Other upper
+uses the current configured fixed execution lifetime. It copies the four retained close limits into each attempt. Other upper
 bounds use their type maxima, minimum bounds are zero, and the nonbinding target is `CAP_PRICE` for a LONG close or
 `1` for a SHORT close. Public `commitOrder` cannot use this zero-config exception.
 
 These limits apply per attempt, including commitment charges, not cumulatively across retries. If commitment would
 exceed a limit, triggering reverts and the owner can replace the `Armed` protection. If a queued close fails and the
-protected side and size still match, protection becomes `Latched`; the owner may amend its limits before retrying.
+protected side and size still match, protection becomes `Latched`. An amendment made while a close is pending
+applies to subsequent retries. The pending close executes under the limits copied at commitment.
 Each retry gets a new id, commitment time, execution deadline, and oracle window. It requires no pending Router
 orders and does not re-test the original trigger. Missing or changed positions end protection as `Failed` instead.
 

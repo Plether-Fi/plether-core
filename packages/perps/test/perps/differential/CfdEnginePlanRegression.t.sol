@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockSettlementToken} from "../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../BasePerpTest.sol";
@@ -563,19 +563,19 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.poolAssets = 2_000_000e6;
         snap.poolCashAssets = 2_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
-            settlementBalanceAssets: 3110e6,
-            totalLockedMarginAssets: 2610e6,
+            settlementBalanceAssets: 3105e6,
+            totalLockedMarginAssets: 2605e6,
             activePositionMarginAssets: 2500e6,
-            otherLockedMarginAssets: 110e6,
+            otherLockedMarginAssets: 105e6,
             freeSettlementAssets: 500e6
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
             positionMarginAssets: 2500e6,
             committedOrderMarginAssets: 0,
             reservedSettlementAssets: 0,
-            totalLockedMarginAssets: 2610e6
+            totalLockedMarginAssets: 2605e6
         });
-        snap.liquidationReserveAssets = 110e6;
+        snap.liquidationReserveAssets = 105e6;
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
         snap.executionFeeBps = engine.executionFeeBps();

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
@@ -71,7 +71,7 @@ contract PerpOracleHandler is Test {
     function warpToOracleBoundary(
         uint256 modeFuzz
     ) external {
-        uint256 mode = modeFuzz % 16;
+        uint256 mode = modeFuzz % 26;
         uint256 target;
         if (mode == 0) {
             target = 1_772_832_599; // Spring Friday 21:29:59 UTC: before standard-time FAD
@@ -103,8 +103,28 @@ contract PerpOracleHandler is Test {
             target = 1_793_570_400; // Fall Sunday 22:00:00 UTC: standard-time freeze ends
         } else if (mode == 14) {
             target = 1_793_571_299; // Fall Sunday 22:14:59 UTC: FAD shoulder active
-        } else {
+        } else if (mode == 15) {
             target = 1_793_571_300; // Fall Sunday 22:15:00 UTC: FAD shoulder ends
+        } else if (mode == 16) {
+            target = 1_784_753_999; // Summer overridden Wednesday: before 21:00 UTC reopen
+        } else if (mode == 17) {
+            target = 1_784_754_000; // Summer holiday: exact 17:00 New York reopen
+        } else if (mode == 18) {
+            target = 1_784_754_001; // Summer holiday: after reopen, still FAD
+        } else if (mode == 19) {
+            target = 1_768_427_999; // Winter overridden Wednesday: before 22:00 UTC reopen
+        } else if (mode == 20) {
+            target = 1_768_428_000; // Winter holiday: exact 17:00 New York reopen
+        } else if (mode == 21) {
+            target = 1_768_428_001; // Winter holiday: after reopen, still FAD
+        } else if (mode == 22) {
+            target = 1_784_764_799; // Summer holiday: last UTC second remains live
+        } else if (mode == 23) {
+            target = 1_768_435_199; // Winter holiday: last UTC second remains live
+        } else if (mode == 24) {
+            target = 1_784_764_800; // Following summer override: UTC midnight freezes again
+        } else {
+            target = 1_768_435_200; // Following winter override: UTC midnight freezes again
         }
         vm.warp(target);
     }
@@ -151,6 +171,22 @@ contract PerpOracleHandler is Test {
         ICfdEngineAdminHost.EngineCalendarConfig memory config;
         config.fadDayTimestamps = timestamps;
         config.fadRunwaySeconds = bound(runwayFuzz, 0, 24 hours);
+        engineAdmin.proposeCalendarConfig(config);
+        vm.warp(block.timestamp + 7 days);
+        engineAdmin.finalizeCalendarConfig();
+        vm.stopPrank();
+    }
+
+    function configureHolidayOverrides() external {
+        ICfdEngineAdminHost.EngineCalendarConfig memory config;
+        config.fadDayTimestamps = new uint256[](4);
+        config.fadDayTimestamps[0] = 1_784_678_400; // Wednesday 2026-07-22
+        config.fadDayTimestamps[1] = 1_784_764_800; // Thursday 2026-07-23
+        config.fadDayTimestamps[2] = 1_768_348_800; // Wednesday 2026-01-14
+        config.fadDayTimestamps[3] = 1_768_435_200; // Thursday 2026-01-15
+        config.fadRunwaySeconds = 24 hours;
+
+        vm.startPrank(owner);
         engineAdmin.proposeCalendarConfig(config);
         vm.warp(block.timestamp + 7 days);
         engineAdmin.finalizeCalendarConfig();

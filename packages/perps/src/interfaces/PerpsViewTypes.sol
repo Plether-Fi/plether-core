@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
@@ -22,19 +22,17 @@ library PerpsViewTypes {
     /// @notice Compact custody, reservation, and risk summary for one trader account.
     /// @dev All monetary fields use settlement token's 6 decimals.
     /// @param equityAssets Cached-mark price-risk equity: post-carry pledge plus same-account claim plus exact price PnL.
-    ///        VPI is excluded. Uncovered carry or an underfunded negative-VPI reserve independently makes
-    ///        `liquidatable` true and withdrawal capacity zero. This field is floored at zero and equals raw settlement
-    ///        equity when flat.
-    /// @param withdrawableAssets Same-state withdrawal estimate from the account lens. Uncovered carry or an underfunded
-    ///        negative-VPI reserve makes this zero. When price-risk headroom binds, the live guard requires equity to
-    ///        remain strictly above the requirement, so the exact quoted boundary may need to be reduced by one atomic
-    ///        settlement token unit.
+    ///        This field is floored at zero and equals raw settlement equity when flat.
+    /// @param withdrawableAssets Same-state withdrawal estimate from the account lens. The withdrawal projection
+    ///        covers carry using eligible active pledge and free settlement. A carry shortfall or an underfunded
+    ///        negative-VPI reserve makes this zero. When price-risk headroom binds, the live guard requires equity
+    ///        strictly above the requirement, so the quoted boundary may need to be reduced by one settlement atom.
     /// @param pendingOrderMarginAssets Margin committed to pending open or increase orders.
     /// @param pendingExecutionBountyAssets Clearinghouse-custodied settlement attributed to execution bounties.
     /// @param hasOpenPosition Whether the account currently has a nonzero position.
-    /// @param liquidatable Cached-mark diagnostic that is true for an exact price-risk maintenance breach, carry left
-    ///        uncovered after projected margin-first, then free-settlement collection, or an underfunded negative-VPI reserve; mark
-    ///        freshness is not validated by this view.
+    /// @param liquidatable Cached-mark diagnostic for a maintenance breach, an underfunded negative-VPI reserve,
+    ///        or carry left uncovered after projecting collection from active margin, free settlement, and released
+    ///        top-ups in that order. Execution must validate mark freshness separately.
     struct TraderAccountView {
         uint256 equityAssets;
         uint256 withdrawableAssets;
@@ -53,9 +51,9 @@ library PerpsViewTypes {
     /// @param marginAssets Canonical position-margin bucket backing the position.
     /// @param unrealizedPnlAssets Mark-to-market PnL at the cached engine mark, excluding pending carry and VPI.
     /// @param maintenanceMarginAssets Margin required at the current mark under the active calendar regime.
-    /// @param liquidatable Cached-mark diagnostic that is true for an exact price-risk maintenance breach, carry left
-    ///        uncovered after projected margin-first, then free-settlement collection, or an underfunded negative-VPI
-    ///        reserve; mark freshness is not validated by this view.
+    /// @param liquidatable Cached-mark diagnostic for a maintenance breach, an underfunded negative-VPI reserve,
+    ///        or carry left uncovered after projecting collection from active margin, free settlement, and released
+    ///        top-ups in that order. Execution must validate mark freshness separately.
     struct PositionView {
         bool exists;
         CfdTypes.Side side;

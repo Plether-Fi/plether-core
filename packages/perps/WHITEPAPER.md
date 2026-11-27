@@ -602,8 +602,9 @@ seizure, and an explicit amount above the cap that was absent from pre-close LP
 NAV after the carry checkpoint. Carry
 first consumes margin and free settlement.
 The remaining carry, VPI, execution fees, and frozen spread settle separately
-against fresh price gain and permitted action cash, including committed order
-margin on terminal paths. Liquidation charges use their dedicated reserve. A
+against fresh price gain and permitted action cash. Full closes may use committed
+order margin; liquidation preserves margin for surviving opens and uses its
+dedicated charge reserve. A
 terminally uncollectible action remainder is waived rather than recast as price
 debt. The apply path then installs the residual curve or removes the full-close curve atomically.
 Liquidation separately partitions its dedicated charge reserve among keeper,
@@ -1035,8 +1036,9 @@ and FIFO does not by itself prove fairness [21-22].
 5. The binding, user-uncancellable order becomes the global FIFO head in turn.
 6. For live execution, a keeper supplies Pyth updates and native-token oracle
    fees.
-7. The router resolves the unique historical update in the configured window
-   strictly after commit.
+7. The oracle resolves the first historical update for each feed in the
+   configured settlement window, starting at commit time plus the minimum
+   settlement delay.
 8. Basket components are normalized, confidence is propagated, publish-time
    dispersion is checked, and the side-adverse execution price is capped at
    \(C\).
@@ -1057,10 +1059,9 @@ and FIFO does not by itself prove fairness [21-22].
     receipt preimage for independent reconstruction of what happened.
 
 Pyth's `parsePriceFeedUpdatesUnique` primitive verifies that returned updates are
-the first qualifying feed updates in a specified range [6]. Plether obtains
-"strictly after commit" by setting the lower bound after the commit timestamp,
-not because Pyth globally assigns that semantic. Pyth confidence is an
-uncertainty interval width, not a confidence score [5,23].
+the first qualifying feed updates in a specified range [6]. Plether sets the
+inclusive lower bound to `commitTime + minOrderSettlementDelay`. Pyth
+confidence measures the width of the price uncertainty interval [5,23].
 
 ### 6.2 Basket-specific oracle checks
 
@@ -1242,10 +1243,11 @@ frozen spread are assessed through their separate action-charge path.
 
 ### 7.3 Liquidation
 
-Before final liquidation assessment, the Router authenticates and settles pending
-order records in one rollback frame. Unpaid opening bounties may be forfeited to
-treasury; pending close records are zero and move no value. If the position is
-healthy, that frame reverts and leaves its pending orders intact; valid risk-off
+Before final liquidation assessment, the Router authenticates pending reservations
+in one rollback frame. Valid opening orders retain their queue position, committed
+margin, and execution bounty; stale close records are cleared with zero bounty
+movement. If the position is healthy, that frame reverts and leaves its pending
+orders intact; valid risk-off
 refunds already completed in the outer frame remain effective. Liquidation
 cannot send PnL pledge to treasury as a close-bounty forfeiture.
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -13,9 +13,23 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 ///      position sizes use 18 decimals.
 interface ICfdOrderPolicyEvaluator {
 
+    /// @notice Checks the live planner result and the opening order's own funding at the Router's reference mark.
+    /// @dev Called by the Router, which supplies its configured engine, lens and oracle through its getters.
+    function validateOpenCommit(
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 commitPrice,
+        uint256 executionBountyAssets
+    ) external view;
+
     error CfdOrderPolicyEvaluator__CommittedPolicyChanged(uint64 orderId);
 
     error CfdOrderPolicyEvaluator__ReservationMismatch(uint64 orderId);
+
+    /// @notice Opening order target price does not satisfy the configured minimum tolerance band around the commit mark.
+    /// @param targetPrice Caller-supplied directional target price (8 decimals).
+    /// @param requiredBound Directional target-price boundary required by `minOpenSlippageToleranceBps` (8 decimals).
+    error CfdOrderPolicyEvaluator__SlippageToleranceTooTight(uint256 targetPrice, uint256 requiredBound);
     function assessCommittedOrder(
         address engine,
         uint64 orderId,

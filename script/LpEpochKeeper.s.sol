@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
+import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {ISettlementMonitorLens} from "@plether/perps/interfaces/ISettlementMonitorLens.sol";
 import {SettlementMonitorViewTypes} from "@plether/perps/interfaces/SettlementMonitorViewTypes.sol";
 import "forge-std/Script.sol";
@@ -11,15 +13,21 @@ interface ILpEpochSettlementOracle {
         bytes[] calldata pythUpdateData
     ) external view returns (uint256);
 
+    function getOrderExecutionFee(
+        bytes[] calldata pythUpdateData
+    ) external view returns (uint256);
+
 }
 
-interface ILpEpochSettlementRouter {
+interface ILpEpochSettlementRouter is IPerpsKeeper {
 
     function pletherOracle() external view returns (ILpEpochSettlementOracle);
 
-    function settleLpEpoch(
-        bytes[] calldata pythUpdateData
-    ) external payable;
+    function nextExecuteId() external view returns (uint64);
+
+    function globalTailOrderId() external view returns (uint64);
+
+    function maxPruneOrdersPerCall() external view returns (uint256);
 
 }
 
@@ -42,10 +50,11 @@ interface ILpEpochSettlementMonitor is ISettlementMonitorLens {
 
 /**
  * @title LpEpochKeeper
- * @notice Selects the Lens-reported cached-mark or atomic-refresh route and clears one bounded LP epoch pass.
+ * @notice Provides a bounded order pass followed by Lens-routed settlement in a separate script invocation.
  * @dev Usage: SETTLEMENT_MONITOR_LENS=<addr> PERPS_ORDER_ROUTER=<addr> OBSERVED_EPOCH=<epoch> \
  *             KEEPER_PRIVATE_KEY=<key> [PYTH_UPDATE_DATA=<abi-encoded bytes[]>] \
- *             forge script script/LpEpochKeeper.s.sol --tc LpEpochKeeper --rpc-url $RPC_URL --broadcast
+ *             [ORDER_PYTH_UPDATE_DATA=<abi-encoded bytes[]>] \
+ *             bash scripts/settle-lp-epoch.sh --rpc-url $RPC_URL --broadcast
  *      Poll the lighter SettlementMonitorLens status view. Before broadcasting, select `observedEpoch` and record the
  *      composite as a block-pinned checkpoint; its roughly 6 KB return / 0.8-1.3m representative eth_call gas is not
  *      intended for every polling tick. The script refuses unknown/no-work routing. `CachedMark` calls HousePool
@@ -59,12 +68,58 @@ interface ILpEpochSettlementMonitor is ISettlementMonitorLens {
  */
 contract LpEpochKeeper is Script {
 
+    uint256 internal constant MAX_ORDER_IDS_PER_PASS = 4;
+
     error LpEpochKeeper__InvalidContract(address target);
     error LpEpochKeeper__RouterMismatch(address expected, address actual);
     error LpEpochKeeper__ExecutionPathUnknown(uint256 dependencyMask);
     error LpEpochKeeper__LpEpochSettlementPaused();
     error LpEpochKeeper__NoMaturedWork();
     error LpEpochKeeper__UnsupportedExecutionPath(SettlementMonitorViewTypes.ExecutionPath executionPath);
+
+    /// @notice Makes one best-effort pass; the runner invokes LP settlement independently of this transaction.
+    function processOrders() external {
+        ILpEpochSettlementRouter router = ILpEpochSettlementRouter(vm.envAddress("PERPS_ORDER_ROUTER"));
+        (SettlementMonitorViewTypes.SettlementStatus memory status,) =
+            _prepareSettlement(vm.envAddress("SETTLEMENT_MONITOR_LENS"), address(router), vm.envUint("OBSERVED_EPOCH"));
+
+        uint64 tail = router.globalTailOrderId();
+        if (tail == 0) {
+            return;
+        }
+        uint64 head = router.nextExecuteId();
+        uint256 count = uint256(tail) - head + 1;
+        if (count > MAX_ORDER_IDS_PER_PASS) {
+            count = MAX_ORDER_IDS_PER_PASS;
+        }
+
+        bytes memory encoded = vm.envOr("ORDER_PYTH_UPDATE_DATA", bytes(""));
+        bytes[] memory orderData = encoded.length == 0 ? new bytes[](0) : abi.decode(encoded, (bytes[]));
+        if (!status.oracleFrozen) {
+            if (orderData.length == 0) {
+                _clearInvalidOrders(router, head, count);
+                return;
+            }
+            // Executing an open in a flat Pool can make the atomic settlement route necessary.
+            if (status.requiredExecutionPath == SettlementMonitorViewTypes.ExecutionPath.CachedMark) {
+                bytes memory lpData = vm.envOr("PYTH_UPDATE_DATA", bytes(""));
+                if (lpData.length == 0 || abi.decode(lpData, (bytes[])).length == 0) {
+                    console.log("Current LP oracle data unavailable; checking invalid orders only");
+                    _clearInvalidOrders(router, head, count);
+                    return;
+                }
+            }
+        }
+
+        // Each order may require a separate historical parse. The Router refunds unused funding.
+        uint256 fee = router.pletherOracle().getOrderExecutionFee(orderData) * count;
+        uint64 last = uint64(uint256(head) + count - 1);
+        vm.broadcast(vm.envUint("KEEPER_PRIVATE_KEY"));
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch{value: fee}(last, orderData);
+        console.log("Order pass terminal count:", result.terminalCount);
+        console.log("Order pass next order:", result.nextOrderId);
+        console.log("Order pass stop reason:", uint256(result.stopReason));
+    }
 
     function run() external {
         address monitorAddress = vm.envAddress("SETTLEMENT_MONITOR_LENS");
@@ -106,6 +161,24 @@ contract LpEpochKeeper is Script {
         vm.stopBroadcast();
 
         console.log("Atomic LP epoch settlement succeeded; inspect LpEpochSettled for the bounded-pass result");
+    }
+
+    function _clearInvalidOrders(
+        ILpEpochSettlementRouter router,
+        uint64 head,
+        uint256 count
+    ) internal {
+        uint256 maxPrune = router.maxPruneOrdersPerCall();
+        if (count > maxPrune) {
+            count = maxPrune;
+        }
+        uint64[] memory ids = new uint64[](count);
+        for (uint256 i; i < count; ++i) {
+            ids[i] = uint64(uint256(head) + i);
+        }
+        vm.broadcast(vm.envUint("KEEPER_PRIVATE_KEY"));
+        (, uint256 cleared) = router.clearInvalidOrders(ids);
+        console.log("Order pass invalid orders cleared:", cleared);
     }
 
     function _prepareSettlement(

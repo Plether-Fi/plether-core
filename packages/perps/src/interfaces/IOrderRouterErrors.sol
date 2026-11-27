@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
@@ -37,7 +37,8 @@ interface IOrderRouterErrors {
     /// @notice An order size is not an exact multiple of the canonical 100-token position lot.
     error OrderRouter__InvalidSizeQuantum();
     /// @notice A commit failed a compact economic or planner-derived validation rule.
-    /// @param code Numeric validation code; current code `11` denotes a below-minimum notional or close-size floor.
+    /// @param code Numeric validation code; code `11` denotes a below-minimum notional or close-size floor, and
+    ///             code `12` denotes an order submitted by the protocol treasury account.
     error OrderRouter__CommitValidation(uint8 code);
 
     /// @notice A proposed Plether oracle has invalid code, Pyth, engine, or HousePool wiring.
@@ -104,7 +105,7 @@ interface IOrderRouterErrors {
     error OrderRouter__ZeroTargetPrice();
     /// @notice A fresh V3 request supplied an elapsed submission deadline.
     error OrderRouter__InvalidSubmitBy();
-    /// @notice The execution duration is zero or exceeds the configured maximum.
+    /// @notice A fresh request's execution duration differs from the configured fixed lifetime.
     error OrderRouter__InvalidExecutionWindow();
     /// @notice A fresh V3 request supplied no execution mode or included an undefined mode bit.
     error OrderRouter__InvalidExecutionModeMask();
@@ -161,6 +162,8 @@ interface IOrderRouterErrors {
     /// @notice Commit-time planner preflight identified a predictably invalid open/increase.
     /// @param code Numeric `CfdEnginePlanTypes.OpenRevertCode` returned by the engine lens.
     error OrderRouter__PredictableOpenInvalid(uint8 code);
+    /// @notice The fixed target or financial bounds cannot permit any execution of the requested order.
+    error OrderRouter__ImpossibleExecutionRequest();
     /// @notice A liquidation batch was empty or exceeded the hard 256-account bound.
     error OrderRouter__InvalidLiquidationBatchSize();
 

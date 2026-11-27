@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {NumericDomainLensHarness, NumericDomainMathHarness} from "../../shared/NumericDomainHarness.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
@@ -32,6 +32,23 @@ contract OpenNumericDomainTest is Test {
         snap.riskParams.minBountyAssets = 1e6;
         snap.riskParams.bountyBps = 10;
         snap.riskParams.vpiFactor = 0.0005e18;
+    }
+
+    function _withAccrual(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        int256 accrued
+    ) private pure returns (CfdEnginePlanTypes.RawSnapshot memory) {
+        snap.position.vpiAccrued = accrued;
+        if (accrued > 0) {
+            snap.totalPositiveVpiAccruedAssets = uint256(accrued);
+            // Preserve the original one-million-unit economic depth while probing
+            // the signed lifetime boundary under a funded physical cash snapshot.
+            snap.poolAssets += uint256(accrued);
+            snap.poolCashAssets += uint256(accrued);
+        } else if (accrued < 0) {
+            snap.totalNegativeVpiAccruedAssets = uint256(-(accrued + 1)) + 1;
+        }
+        return snap;
     }
 
     function _order() private pure returns (CfdTypes.Order memory order) {
@@ -335,17 +352,18 @@ contract OpenNumericDomainTest is Test {
 
     function test_LifetimeVpiSignedEqualityAndAdjacentAtoms() public pure {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
-        snap.position.vpiAccrued = type(int256).max - 25_000;
+        snap = _withAccrual(snap, type(int256).max - 25_000);
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, _order(), 1e8);
         assertTrue(delta.valid, "maximum lifetime sum remains representable");
         snap = _snapshot();
-        snap.position.vpiAccrued = type(int256).max - 24_999;
+        snap = _withAccrual(snap, type(int256).max - 24_999);
         _numeric(snap, _order());
         snap = _snapshot();
         snap.shortSide.openInterest = 500 * Q;
-        snap.position.vpiAccrued = type(int256).min + 225_000;
+        snap = _withAccrual(snap, type(int256).min + 225_000);
         _numeric(snap, _order()); // -225,000 VPI would produce the unusable int256.min.
-        snap.position.vpiAccrued += 1;
+        snap = _withAccrual(_snapshot(), type(int256).min + 225_001);
+        snap.shortSide.openInterest = 500 * Q;
         assertEq(
             uint8(CfdEnginePlanLib.planOpen(snap, _order(), 1e8).revertCode),
             10,
@@ -356,9 +374,9 @@ contract OpenNumericDomainTest is Test {
     function test_LifetimeAndSettlementHeadroomAreTyped() public pure {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
         CfdTypes.Order memory order = _order();
-        snap.position.vpiAccrued = type(int256).max;
+        snap = _withAccrual(snap, type(int256).max);
         _numeric(snap, order);
-        snap.position.vpiAccrued = type(int256).min;
+        snap = _withAccrual(_snapshot(), type(int256).min);
         _numeric(snap, order);
         snap = _snapshot();
         snap.shortSide.openInterest = 500 * Q;
@@ -424,7 +442,7 @@ contract OpenNumericDomainTest is Test {
         NumericDomainLensHarness lens = new NumericDomainLensHarness();
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
-        snap.position.vpiAccrued = type(int256).max;
+        snap = _withAccrual(snap, type(int256).max);
         CfdEnginePlanTypes.OpenDelta memory delta;
         delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
         delta.posVpiAccruedDelta = 1;

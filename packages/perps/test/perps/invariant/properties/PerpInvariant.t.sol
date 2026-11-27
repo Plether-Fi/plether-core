@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
@@ -564,7 +564,9 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 claimed = pool.seniorPrincipal() + pool.juniorPrincipal();
         uint256 terminalAssets = pool.totalAssets();
         ICfdEngineTypes.TerminalNavSnapshot memory terminal = engine.terminalNavSnapshot();
-        uint256 terminalLiabilities = terminal.totalTraderClaimsAssets;
+        (uint256 positiveVpi, uint256 negativeVpi) = _positionVpiTotals();
+        terminalAssets += negativeVpi;
+        uint256 terminalLiabilities = terminal.totalTraderClaimsAssets + positiveVpi;
         if (terminal.terminalLpPriceDeltaAssets >= 0) {
             terminalAssets += uint256(terminal.terminalLpPriceDeltaAssets);
         } else {
@@ -894,18 +896,38 @@ contract PerpInvariantTest is BasePerpTest {
             engine.totalTraderClaimBalanceAssets(),
             "Protocol view trader trader claims must match storage"
         );
+        (uint256 positiveVpi, uint256 negativeVpi) = _positionVpiTotals();
+        assertEq(
+            engine.totalPositiveVpiAccruedAssets(), positiveVpi, "Positive VPI aggregate must match live positions"
+        );
+        assertEq(
+            engine.totalNegativeVpiAccruedAssets(), negativeVpi, "Negative VPI aggregate must match live positions"
+        );
     }
 
     function _assertInvariant_WithdrawalReserveIncludesTraderClaimLiabilities() internal view {
         uint256 maxLiability = _maxLiability();
+        (uint256 refundableVpi,) = _positionVpiTotals();
         uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceAssets()
-            + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiability, engine.settlementBufferBps());
+            + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiability, engine.settlementBufferBps())
+            + refundableVpi;
 
         assertEq(
             _withdrawalReservedAssets(),
             expectedReserved,
-            "Withdrawal reserve must include liabilities, trader claims, and settlement headroom"
+            "Withdrawal reserve must include liabilities, trader claims, settlement headroom, and positive VPI"
         );
+    }
+
+    function _positionVpiTotals() internal view returns (uint256 positiveVpi, uint256 negativeVpi) {
+        for (uint256 i; i < 3; ++i) {
+            (,,,,,, int256 accruedVpi) = engine.positions(handler.traders(i));
+            if (accruedVpi > 0) {
+                positiveVpi += uint256(accruedVpi);
+            } else if (accruedVpi < 0) {
+                negativeVpi += uint256(-(accruedVpi + 1)) + 1;
+            }
+        }
     }
 
     function _assertInvariant_PoolLiquidityViewMatchesProtocolAccounting() internal view {
@@ -1585,13 +1607,24 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         handler.openPosition(0, 0, 250, 5000e6);
         handler.openPosition(1, 0, 250, 5000e6);
         handler.queueBadClose(1);
-        handler.openPosition(0, 0, 250, 4950e6);
 
         address actor = handler.actors(0);
-        uint256 free = clearinghouse.getFreeBuyingPowerAssets(actor);
-        assertGt(free, 0);
+        uint256 bounty = (250 * engine.lastMarkPrice() * router.openOrderExecutionBountyBps()) / 10_000;
+        uint256 minBounty = router.minOpenOrderExecutionBountyAssets();
+        if (bounty < minBounty) {
+            bounty = minBounty;
+        }
+        uint256 maxBounty = router.maxOpenOrderExecutionBountyAssets();
+        if (bounty > maxBounty) {
+            bounty = maxBounty;
+        }
+        uint256 freeBeforeCommit = clearinghouse.getFreeBuyingPowerAssets(actor);
+        assertGt(freeBeforeCommit, 4950e6 + bounty);
         vm.prank(actor);
-        clearinghouse.withdraw(actor, free);
+        clearinghouse.withdraw(actor, freeBeforeCommit - 4950e6 - bounty);
+
+        vm.prank(actor);
+        router.commitOrder(CfdTypes.Side.LONG, 250 * CfdTypes.SIZE_QUANTUM, 4950e6, 1e8, false);
         assertEq(clearinghouse.getFreeBuyingPowerAssets(actor), 0);
 
         uint64 nextCommitIdBefore = router.nextCommitId();
@@ -1610,6 +1643,17 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     function test_AdversarialStarvedBatchesSettleFailuresAndBountiesWithoutSuccessfulExecution() public {
         handler.starveLiquidity(pool.totalAssets() - 10e6);
         assertEq(pool.totalAssets(), 10e6);
+        // Bypass only the admission preview so the real execution planner sees the starved pool.
+        vm.mockCall(
+            router.engineLensForCommit(),
+            abi.encodeWithSelector(CfdEngineLens.previewOpenRevertCode.selector),
+            abi.encode(uint8(CfdEnginePlanTypes.OpenRevertCode.OK))
+        );
+        vm.mockCall(
+            router.engineLensForCommit(),
+            abi.encodeWithSelector(CfdEngineLens.previewOpenCommitRevertCode.selector),
+            abi.encode(uint8(CfdEnginePlanTypes.OpenRevertCode.OK))
+        );
         uint256 custodyBefore = settlementToken.balanceOf(address(clearinghouse));
         uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint256[4] memory balancesBefore;
@@ -1617,9 +1661,6 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             balancesBefore[i] = clearinghouse.balanceAssets(handler.actors(i));
         }
         for (uint256 i; i < 33; ++i) {
-            // Stale marks defer predictable-open validation to execution. Each batch refreshes the mark, so age it
-            // again before the next admitted attempt; the pool remains starved throughout all 33 batches.
-            vm.warp(vm.getBlockTimestamp() + router.pletherOracle().getOrderExecutionPolicy(false).maxStaleness + 1);
             handler.processBatch(1, 1e8);
             assertEq(
                 uint8(router.lifecycleBook().terminalOutcome(uint64(i + 1)).reason),

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {LegacyOrderRouterHarness} from "../../utils/LegacyOrderRouterHarness.sol";
 import {RecordedOrderReceipts} from "../../utils/RecordedOrderReceipts.sol";
@@ -160,6 +160,7 @@ contract GasProfileTest is RecordedOrderReceipts {
         uint256 balance;
         uint256 entryCost;
         uint256 liquidationReserve;
+        int256 accruedVpi;
         uint256 sizeDelta;
         uint256 marginDelta;
         bool isClose;
@@ -977,7 +978,7 @@ contract GasProfileTest is RecordedOrderReceipts {
     ) internal {
         address account = expectedOrders[orderId].account;
         TradeAccountingSnapshot storage beforeTrade = tradeAccountingBefore[orderId];
-        (beforeTrade.size, beforeTrade.margin,,,,,) = engine.positions(account);
+        (beforeTrade.size, beforeTrade.margin,,,,, beforeTrade.accruedVpi) = engine.positions(account);
         beforeTrade.balance = clearinghouse.balanceAssets(account);
         beforeTrade.entryCost = engine.positionEntryCostAssetAtoms(account);
         beforeTrade.liquidationReserve = clearinghouse.liquidationReserveAssets(account);
@@ -1001,11 +1002,8 @@ contract GasProfileTest is RecordedOrderReceipts {
         assertEq(economics.executionFeeAssets, notional * 4 / 10_000, "trade pays its exact 4-bps fee");
         assertEq(economics.frozenSpreadAssets, 0, "trade sample uses live execution");
         assertGe(economics.carryAssets, 0);
-        uint256 carry = uint256(economics.carryAssets);
-        // Close receipts include commitment-time carry, while this snapshot is taken after commitment.
-        if (beforeTrade.isClose) {
-            carry -= receipt.commitment.carryCollectedAssets;
-        }
+        // Receipts include commitment-time carry for opens and closes; this snapshot is taken after commitment.
+        uint256 carry = uint256(economics.carryAssets) - receipt.commitment.carryCollectedAssets;
         int256 action = economics.vpiAssets + int256(economics.executionFeeAssets);
         uint256 charge = action > 0 ? uint256(action) : 0;
         uint256 expectedMargin;
@@ -1033,11 +1031,13 @@ contract GasProfileTest is RecordedOrderReceipts {
                 reserve = beforeTrade.liquidationReserve;
             }
         } else {
-            if (reserve < beforeTrade.liquidationReserve) {
-                reserve = beforeTrade.liquidationReserve;
-            }
             expectedMargin = beforeTrade.margin + beforeTrade.marginDelta - carry - charge
-                - (reserve - beforeTrade.liquidationReserve);
+                + beforeTrade.liquidationReserve - reserve;
+            // The order's net rebate covers reserve growth first. Its pledge funds any shortfall.
+            (uint256 vpiReserveAfter, uint256 vpiReserveFromPledge) =
+                _expectedOpenVpiReserve(beforeTrade.accruedVpi, economics.vpiAssets, action);
+            assertEq(clearinghouse.vpiRebateReserveAssets(receipt.account), vpiReserveAfter);
+            expectedMargin -= vpiReserveFromPledge;
         }
         int256 expectedCash =
             int256(beforeTrade.balance) - int256(carry) - action + pnl - int256(expectedClaim + receipt.bountyAssets);
@@ -1057,6 +1057,18 @@ contract GasProfileTest is RecordedOrderReceipts {
         assertEq(
             engine.positionEntryCostAssetAtoms(receipt.account), expectedEntryCost, "trade installs exact entry basis"
         );
+    }
+
+    function _expectedOpenVpiReserve(
+        int256 accruedVpi,
+        int256 vpiDelta,
+        int256 action
+    ) private pure returns (uint256 reserveAfter, uint256 reserveFromPledge) {
+        int256 accruedVpiAfter = accruedVpi + vpiDelta;
+        uint256 reserveBefore = accruedVpi < 0 ? uint256(-accruedVpi) : 0;
+        reserveAfter = accruedVpiAfter < 0 ? uint256(-accruedVpiAfter) : 0;
+        uint256 rebate = action < 0 ? uint256(-action) : 0;
+        reserveFromPledge = reserveAfter > reserveBefore + rebate ? reserveAfter - reserveBefore - rebate : 0;
     }
 
     function _assertExecutedPositionAndReservation(

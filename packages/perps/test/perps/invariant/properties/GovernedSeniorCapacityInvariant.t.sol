@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
@@ -501,7 +501,7 @@ contract GovernedSeniorCapacityHandler is Test {
 
         uint256 checkpoint = pool.lastSeniorCouponCheckpointTime();
         uint256 elapsed = block.timestamp > checkpoint ? block.timestamp - checkpoint : 0;
-        if (elapsed == 0 || seniorPrincipal == 0 || juniorVault.totalSupply() == 0) {
+        if (elapsed == 0 || seniorPrincipal == 0 || juniorVault.totalSupply() == 0 || _seniorSeedIsOnlyHolder()) {
             return (seniorPrincipal, juniorPrincipal, seniorHighWaterMark);
         }
 
@@ -526,10 +526,17 @@ contract GovernedSeniorCapacityHandler is Test {
     }
 
     function _activeSeniorRatioWithinLimit() internal view returns (bool) {
+        if (_seniorSeedIsOnlyHolder() && pool.reservedSeniorDepositAssets() == 0) {
+            return true;
+        }
         uint256 principal = pool.seniorPrincipal();
         uint256 highWaterMark = pool.seniorHighWaterMark();
         uint256 exposure = principal > highWaterMark ? principal : highWaterMark;
         return _withinRatio(exposure, pool.juniorPrincipal());
+    }
+
+    function _seniorSeedIsOnlyHolder() internal view returns (bool) {
+        return seniorVault.totalSupply() == seniorVault.seedShareFloor();
     }
 
     function _withinRatio(

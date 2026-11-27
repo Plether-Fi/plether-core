@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {SourceBoundBountyFixture} from "../../shared/SourceBoundBountyFixture.sol";
 import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
@@ -285,20 +285,47 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         }
     }
 
+    function test_OpenWithoutLiveModeRejectsBeforeReservingFloor() public {
+        OrderV3Types.OrderRequest memory request = _request();
+        request.bounds.allowedExecutionModes = 2;
+        uint64 expectedId = router.nextCommitId();
+        bytes32 beforeState = _bountyStateDigest(expectedId);
+        bytes32 bucketsBefore = keccak256(abi.encode(clearinghouse.getAccountAssetBuckets(BOUNTY_TRADER)));
+        bytes32 reservationsBefore = keccak256(abi.encode(router.getAccountReservations(BOUNTY_TRADER)));
+        bytes32 identityBefore =
+            keccak256(abi.encode(router.lifecycleBook().clientIntent(BOUNTY_TRADER, request.clientOrderId)));
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ImpossibleExecutionRequest.selector);
+        _commit(request);
+
+        assertEq(_bountyStateDigest(expectedId), beforeState, "rejection preserves custody, queue and pending intent");
+        assertEq(keccak256(abi.encode(clearinghouse.getAccountAssetBuckets(BOUNTY_TRADER))), bucketsBefore);
+        assertEq(keccak256(abi.encode(router.getAccountReservations(BOUNTY_TRADER))), reservationsBefore);
+        assertEq(
+            keccak256(abi.encode(router.lifecycleBook().clientIntent(BOUNTY_TRADER, request.clientOrderId))),
+            identityBefore,
+            "rejection must not bind client identity"
+        );
+        assertEq(clearinghouse.totalBountyReservationsAssets(BOUNTY_TRADER), 0);
+        assertEq(router.lifecycleBook().terminalOutcome(expectedId).receiptHash, bytes32(0));
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), FUNDING, "no floor may remain reserved");
+        vm.prank(BOUNTY_TRADER);
+        clearinghouse.withdrawMargin(FUNDING);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), 0);
+    }
+
     function test_AllReachableFailureReasonsReleaseFloorAndReservations() public {
-        for (uint8 reason; reason < 7; ++reason) {
+        for (uint8 reason; reason < 6; ++reason) {
             uint256 snapshot = vm.snapshotState();
             OrderV3Types.OrderRequest memory r = _request();
             if (reason == 0) {
-                r.targetPrice = 2e8;
+                r.targetPrice = 110_000_000;
             }
             if (reason == 1) {
-                r.bounds.maxActionChargeAssets = 0;
+                // A lower-price fill can meet this bound; the actual $1 fill charges $4 and violates it.
+                r.bounds.maxActionChargeAssets = 4e6 - 1;
             }
-            if (reason == 2) {
-                r.bounds.allowedExecutionModes = 2;
-            }
-            if (reason == 5) {
+            if (reason == 4) {
                 IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
                 config.maxPendingOrders += 1;
                 routerAdmin.proposeRouterConfig(config);
@@ -307,18 +334,18 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
             }
             uint64 id = _commit(r);
             OrderV3Types.OrderReceipt memory receipt;
-            if (reason == 3) {
+            if (reason == 2) {
                 receipt = _bountyExpire(id, BOUNTY_KEEPER);
-            } else if (reason == 4) {
+            } else if (reason == 3) {
                 routerAdmin.pause();
                 vm.recordLogs();
                 router.clearRiskOffOrder(id);
                 receipt = _bountyReceipt(id);
             } else {
-                if (reason == 5) {
+                if (reason == 4) {
                     routerAdmin.finalizeRouterConfig();
                 }
-                if (reason == 6) {
+                if (reason == 5) {
                     vm.mockCallRevert(
                         address(engine),
                         abi.encodeWithSelector(engine.processOrderTyped.selector),
@@ -334,14 +361,12 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
                 : reason == 1
                     ? OrderV3Types.TerminalReason.ConstraintViolation
                     : reason == 2
-                        ? OrderV3Types.TerminalReason.ExecutionModeDisallowed
+                        ? OrderV3Types.TerminalReason.Expired
                         : reason == 3
-                            ? OrderV3Types.TerminalReason.Expired
+                            ? OrderV3Types.TerminalReason.RiskOff
                             : reason == 4
-                                ? OrderV3Types.TerminalReason.RiskOff
-                                : reason == 5
-                                    ? OrderV3Types.TerminalReason.ConfigMismatch
-                                    : OrderV3Types.TerminalReason.PlannerRejected;
+                                ? OrderV3Types.TerminalReason.ConfigMismatch
+                                : OrderV3Types.TerminalReason.PlannerRejected;
             assertEq(uint8(receipt.reason), uint8(expected));
             vm.clearMockedCalls();
             assertEq(router.accountHeadOrderId(BOUNTY_TRADER), 0);
@@ -419,13 +444,72 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         uint64 id = _commit(_request());
         uint256 beforeBalance = clearinghouse.balanceAssets(BOUNTY_TRADER);
         uint256 beforeSurplus = engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        vm.prank(BOUNTY_TRADER);
+        engine.settleTraderClaim(BOUNTY_TRADER);
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), beforeBalance);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), beforeSurplus);
+        assertEq(engine.traderClaimBalanceAssets(BOUNTY_TRADER), 996_400_000);
+        _expectFloor(id, beforeSurplus + 1, true);
+
+        _bountyExpire(id, BOUNTY_KEEPER);
+        assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 0);
+        beforeBalance = clearinghouse.balanceAssets(BOUNTY_TRADER);
+        beforeSurplus = engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER);
         vm.prank(BOUNTY_TRADER);
         engine.settleTraderClaim(BOUNTY_TRADER);
         assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), beforeBalance + 996_400_000);
         assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), beforeSurplus + 996_400_000);
         assertEq(engine.unsettledCarryAssets(BOUNTY_TRADER), 0);
+        id = _commit(_request());
         assertEq(router.accountHeadOrderId(BOUNTY_TRADER), id);
-        _expectFloor(id, beforeSurplus + 996_400_000 + 1, true);
+        _expectFloor(id, engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER) + 1, true);
+    }
+
+    function test_OpenPositionWithPendingCloseOrIncreaseBlocksFreeSettlementWithdrawal() public {
+        uint64 openId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, false, BOUNTY_SIZE, 250e6);
+        _bountyExecute(openId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        assertGt(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0, "healthy open position can withdraw");
+
+        // Pending partial close must block free-settlement withdrawal on both APIs and report 0 withdrawable.
+        uint64 partialCloseId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
+        assertEq(router.accountHeadOrderId(BOUNTY_TRADER), partialCloseId);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
+
+        vm.prank(BOUNTY_TRADER);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdraw(BOUNTY_TRADER, 1e6);
+
+        vm.prank(BOUNTY_TRADER);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdrawMargin(1e6);
+
+        // Once the partial close executes and clears the queue, withdrawal resumes.
+        _bountyExecute(partialCloseId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        assertEq(router.accountHeadOrderId(BOUNTY_TRADER), 0);
+        assertGt(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
+        vm.prank(BOUNTY_TRADER);
+        clearinghouse.withdrawMargin(1e6);
+
+        // Pending increase on an open position also blocks withdrawal until settled/expired.
+        uint64 increaseId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, false, BOUNTY_SIZE / 2, 125e6);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
+        vm.prank(BOUNTY_TRADER);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdrawMargin(1e6);
+        _bountyExpire(increaseId, BOUNTY_KEEPER);
+
+        // Pending full close blocks withdrawal (prevents draining free settlement before positive VPI settlement).
+        uint64 fullCloseId = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
+        assertEq(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
+        vm.prank(BOUNTY_TRADER);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
+        clearinghouse.withdraw(BOUNTY_TRADER, 1e6);
+
+        _bountyExecute(fullCloseId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        assertGt(engineAccountLens.getWithdrawableAssets(BOUNTY_TRADER), 0);
+        vm.prank(BOUNTY_TRADER);
+        clearinghouse.withdrawMargin(1e6);
     }
 
 }

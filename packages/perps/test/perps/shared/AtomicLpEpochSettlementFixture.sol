@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -99,11 +99,14 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
     }
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
-    // Measured after the token-neutral API rename (solc 0.8.35, via-IR, optimizer runs 200).
-    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_571;
-    uint256 internal constant REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT = 1200;
-    // Production runtime with treasury scheduling, the planning reader, and distinct paid-claim routing.
-    uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 23_524;
+    // Measured with the impaired Senior ownership floor (solc 0.8.35, via-IR, optimizer runs 200).
+    uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_573;
+    // v2 includes the pure reconciliation planner and pending-claimant caps.
+    uint256 internal constant REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT = 3600;
+    // Measured production runtime with signed VPI accounting, scheduled closures, and protected top-ups.
+    uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 24_576;
+    // Snapshot construction lives in the immutable planning reader. Keep at least 4 KiB of headroom.
+    uint256 internal constant CFD_ENGINE_SETTLEMENT_SIDECAR_RUNTIME_TARGET = 20_480;
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);

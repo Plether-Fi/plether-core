@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -167,7 +167,7 @@ abstract contract LiquidationBatchTestFixture is BasePerpTest {
     ) internal returns (uint64 orderId) {
         orderId = router.nextCommitId();
         vm.prank(account);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, marginAssets, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, marginAssets, CAP_PRICE, false);
     }
 
     function _positionSize(

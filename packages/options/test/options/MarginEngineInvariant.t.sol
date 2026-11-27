@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockOptionsSplitter, MockStakedTokenOptions} from "../utils/OptionsMocks.sol";
 import {OptionsTestSetup} from "../utils/OptionsTestSetup.sol";

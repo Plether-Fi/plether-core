@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
@@ -619,7 +619,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertLe(pool.seniorPrincipal(), pool.juniorPrincipal(), "the final 50% Senior-share covenant must hold");
     }
 
-    function test_ImpairedSeniorFrozenExitScalesHwmByFundedPrincipal() public {
+    function test_ImpairedSeniorFrozenExitScalesHwmAndHealsDeficitFirst() public {
         (uint256 seniorShares,) = _fundPair(ALICE, 100_000e6, BOB, 100_000e6);
 
         vm.prank(address(pool));
@@ -637,16 +637,26 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         uint256 principalBefore = pool.seniorPrincipal();
         uint256 hwmBefore = pool.seniorHighWaterMark();
         uint256 supplyBefore = seniorVault.totalSupply();
+        uint256 grossAssets = seniorVault.convertToAssets(seniorShares / 2);
 
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
-        uint256 expectedHwm = hwmBefore - (hwmBefore * result.seniorFundedAssets) / principalBefore;
-        uint256 noFeeAssets = (principalBefore * result.seniorFundedShares) / supplyBefore;
+        uint256 assetRemovedHwm = (hwmBefore * grossAssets) / principalBefore;
+        uint256 shareRemovedHwm = (hwmBefore * result.seniorFundedShares) / supplyBefore;
+        uint256 expectedHwm = hwmBefore - (assetRemovedHwm < shareRemovedHwm ? assetRemovedHwm : shareRemovedHwm);
+        uint256 exitFee = grossAssets - result.seniorFundedAssets;
+        uint256 deficitAfterGross = expectedHwm - (principalBefore - grossAssets);
+        uint256 expectedRestore = exitFee < deficitAfterGross ? exitFee : deficitAfterGross;
 
         assertGt(result.seniorFundedAssets, 0);
         assertEq(result.seniorFundedShares, seniorShares / 2);
-        assertLt(result.seniorFundedAssets, noFeeAssets, "the frozen exit fee must stay in Senior principal");
-        assertEq(pool.seniorPrincipal(), principalBefore - result.seniorFundedAssets);
-        assertEq(pool.seniorHighWaterMark(), expectedHwm, "HWM must scale by the actual principal removed");
+        assertGt(exitFee, 0, "frozen Senior exit must charge a nonzero fee");
+        assertEq(
+            pool.seniorPrincipal(),
+            principalBefore - grossAssets + expectedRestore,
+            "Senior exit fee must heal remaining Senior impairment up to HWM first"
+        );
+        assertEq(pool.juniorPrincipal(), exitFee - expectedRestore, "only overflow above Senior HWM may credit Junior");
+        assertEq(pool.seniorHighWaterMark(), expectedHwm, "HWM must scale conservatively by gross principal removed");
     }
 
     function test_PartialFundingAccumulatesAcrossClaims() public {
@@ -714,6 +724,63 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertEq(juniorVault.balanceOf(address(juniorVault)), 0);
         assertEq(juniorVault.balanceOf(CAROL), 1);
         assertEq(juniorVault.balanceOf(ALICE), ownerBalanceBefore - nextShares);
+    }
+
+    function test_ZeroSeniorHeadAfterFundingDoesNotDelayJuniorExitAcrossFrozenBoundary() public {
+        (uint256 seniorShares, uint256 juniorShares) = _fundPair(ALICE, 100_000e6, BOB, 300_000e6);
+        vm.prank(ALICE);
+        seniorVault.transfer(CAROL, 1);
+
+        // Friday 2024-03-08 closes at 22:00 UTC, before the US daylight-saving transition.
+        uint256 freezeStart = SATURDAY_FROZEN - 1 days;
+        uint256 requestCutoff = seniorVault.LP_REQUEST_CUTOFF_DURATION();
+        vm.warp(freezeStart - 2 hours - requestCutoff - 1);
+        _refreshMark();
+        uint256 seniorRequestId = _requestRedeem(seniorVault, ALICE, seniorShares - 1, ALICE, ALICE);
+        assertEq(pool.lpEpochStart(seniorRequestId), freezeStart - 2 hours);
+
+        vm.warp(freezeStart - 1 hours - requestCutoff - 1);
+        _refreshMark();
+        uint256 dustRequestId = _requestRedeem(seniorVault, CAROL, 1, CAROL, CAROL);
+        uint256 juniorRequestId = _requestRedeem(juniorVault, BOB, juniorShares, BOB, BOB);
+        uint256 depositId = _requestDeposit(juniorVault, OPERATOR, 1e6);
+        assertGt(dustRequestId, seniorRequestId, "dust must be a separate head after the payable Senior request");
+        assertEq(pool.lpEpochStart(dustRequestId), freezeStart - 1 hours);
+        assertEq(dustRequestId, juniorRequestId);
+        assertEq(depositId, juniorRequestId, "the victim's exit and entrant's deposit must mature together");
+
+        vm.warp(freezeStart - 1);
+        _refreshMark();
+        assertFalse(engine.isOracleFrozen(), "the last live settlement precedes the fee boundary by one second");
+        assertEq(seniorVault.estimateRedeemAssets(1), 0, "the queued Senior share is worthless before the burn");
+        uint256 liveVictimQuote = juniorVault.estimateRedeemAssets(juniorShares);
+        assertGt(liveVictimQuote, 0);
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+
+        assertEq(result.juniorDepositAssets, 1e6, "the same live call must still activate the queued entry");
+        assertEq(result.seniorFundedShares, seniorShares - 1);
+        assertEq(result.seniorProcessedEpochs, 2, "pay the Senior head and refund its worthless successor");
+        assertFalse(result.seniorBacklog);
+        assertEq(seniorVault.estimateRedeemAssets(1), 0, "the refunded share remains worthless after the burn");
+        assertEq(_pendingRedeem(seniorVault, dustRequestId, CAROL), 0);
+        assertEq(_refundableRedeem(seniorVault, dustRequestId, CAROL), 1);
+        assertEq(result.juniorFundedShares, juniorShares, "dust must not defer the eligible Junior exit");
+        assertEq(result.juniorFundedAssets, liveVictimQuote, "the exit must retain its live settlement price");
+        assertFalse(result.juniorBacklog);
+        assertEq(_claimableRedeem(juniorVault, juniorRequestId, BOB), juniorShares);
+        assertEq(_claimableDeposit(juniorVault, depositId, OPERATOR), 1e6);
+
+        vm.warp(freezeStart);
+        assertTrue(engine.isOracleFrozen(), "the next second must enter the scheduled frozen regime");
+        assertEq(pool.juniorFrozenLpFeeBps(), 75);
+        uint256 balanceBefore = settlementToken.balanceOf(BOB);
+        assertEq(_claimRedeem(juniorVault, juniorRequestId, BOB, juniorShares), liveVictimQuote);
+        assertEq(settlementToken.balanceOf(BOB) - balanceBefore, liveVictimQuote, "claiming after freeze adds no fee");
+
+        vm.prank(CAROL);
+        assertEq(_async(seniorVault).claimRedeemRefund(dustRequestId, CAROL, CAROL), 1);
+        assertEq(seniorVault.balanceOf(CAROL), 1, "the worthless request must return its shares without burning them");
     }
 
     function test_SeniorWorkCapStopsJuniorAndDepositFallthrough() public {

@@ -19,6 +19,7 @@ docs/
 # Dotenv file
 .env
 .env.arbitrum-sepolia-perps
+.env.arbitrum-sepolia-perps-aa-kernel
 
 .deps
 .states

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Common emergency-pause selector shape exposed by perps administrative components.
 /// @dev This is a logical role interface rather than a guarantee that one contract controls every perps component.

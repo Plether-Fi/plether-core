@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Narrow Router surface used by its immutable liquidation-batch delegate sidecar.
 interface IOrderRouterLiquidationBatchHost {

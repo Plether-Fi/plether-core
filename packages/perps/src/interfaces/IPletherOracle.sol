@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
@@ -80,6 +80,7 @@ interface IPletherOracle {
     /// @param orderExecutionStalenessLimit Maximum live order-execution and mark-refresh component age, in seconds.
     /// @param liquidationStalenessLimit Maximum live liquidation component age, in seconds.
     /// @param basketMaxConfidenceRatioBps Maximum accepted aggregate basket confidence-to-price ratio, in basis points.
+    /// @param minOrderSettlementDelay Minimum time after commit before a historical component can qualify, in seconds.
     /// @param orderSettlementWindow Post-commit window for a unique historical execution tick, in seconds.
     /// @param maxComponentPublishTimeDivergence Maximum component-time divergence for a historical basket, in seconds.
     /// @param adverseConfidenceMultiplierBps Basis-point multiplier applied to aggregate confidence for adverse pricing.
@@ -87,13 +88,14 @@ interface IPletherOracle {
         uint256 orderExecutionStalenessLimit;
         uint256 liquidationStalenessLimit;
         uint256 basketMaxConfidenceRatioBps;
+        uint256 minOrderSettlementDelay;
         uint256 orderSettlementWindow;
         uint256 maxComponentPublishTimeDivergence;
         uint256 adverseConfidenceMultiplierBps;
     }
 
     /// @notice Inputs that identify and price one delayed order.
-    /// @param commitTime Order commit time; live execution requires a unique tick strictly after this timestamp.
+    /// @param commitTime Order commit time used to calculate the live historical publish-time window.
     /// @param targetPrice Router-enforced slippage target in 8-decimal units; the oracle does not inspect this field.
     /// @param side Position side used to choose the adverse confidence-shift direction.
     /// @param isClose Whether the order reduces a position; also waives the confidence shift during frozen policy.
@@ -116,7 +118,8 @@ interface IPletherOracle {
     /// @param price Neutral, pre-cap basket price in 8-decimal units.
     /// @param confidence Aggregate basket confidence in 8-decimal price units.
     /// @param publishTime Newest component publish time for the cached basket and Engine mark.
-    /// @param oldestPublishTime Oldest component publish time; a later order can reuse only if this follows its commit.
+    /// @param oldestPublishTime Oldest component publish time, used to check the next order's settlement delay.
+    /// @param componentPublishTimes Parsed publish times in configured feed order, used to check stored-feed coverage.
     struct BatchOrderPriceCache {
         bool hasHistoricalBasket;
         uint64 minReusableCommitTime;
@@ -124,6 +127,7 @@ interface IPletherOracle {
         uint256 confidence;
         uint64 publishTime;
         uint64 oldestPublishTime;
+        uint256[] componentPublishTimes;
     }
 
     /// @notice Thrown when the caller is not the engine's configured order router.
@@ -169,7 +173,7 @@ interface IPletherOracle {
     /// @param publishTime Basket publish time.
     /// @param lastMarkTime Engine cached-mark publish time.
     error PletherOracle__PriceOutOfOrder(uint64 publishTime, uint64 lastMarkTime);
-    /// @notice A signed live component predates the previously accepted price for that feed.
+    /// @notice A signed live component predates the feed's accepted timestamp or the initial Engine mark floor.
     error PletherOracle__FeedTimeOutOfOrder(bytes32 feedId, uint256 publishTime, uint256 acceptedPublishTime);
     /// @notice A replay disagrees with the Engine mark at the same oracle timestamp.
     error PletherOracle__EqualTimeMarkMismatch(uint64 publishTime, uint256 basketPrice, uint256 enginePrice);
@@ -183,6 +187,8 @@ interface IPletherOracle {
     /// @param storedPublishTime Current stored component timestamp.
     /// @param requiredPublishTime Minimum timestamp required by this resolution.
     error PletherOracle__StoredFeedBehind(bytes32 feedId, uint256 storedPublishTime, uint256 requiredPublishTime);
+    /// @notice A reused cache has the wrong number of component times or inconsistent oldest and newest times.
+    error PletherOracle__InvalidBatchCacheTimes();
     /// @notice Thrown when a component is future-dated, too old, or required historical data is unavailable.
     /// @param mode Action policy under which validation failed.
     /// @param feedId Failing Pyth feed id, or zero when no individual historical feed is available.
@@ -257,10 +263,11 @@ interface IPletherOracle {
 
     /// @notice Applies order-execution update data and returns a validated execution price.
     /// @dev Outside frozen-oracle policy, resolves a unique historical basket in
-    ///      `(commitTime, min(commitTime + orderSettlementWindow, block.timestamp)]`. Frozen policy instead replays the
-    ///      Engine mark at zero fee under the frozen age limit. Historical resolution also
-    ///      updates storage from the same payload and verifies coverage before returning. `price` is shifted against
-    ///      the requested side by aggregate confidence, except for a frozen voluntary close; `markPrice` stays neutral.
+    ///      `[commitTime + minOrderSettlementDelay, min(commitTime + orderSettlementWindow, block.timestamp)]`.
+    ///      Frozen policy instead replays the Engine mark at zero fee under the frozen age limit. Historical resolution
+    ///      also updates storage from the same payload and verifies coverage before returning. The raw price is shifted
+    ///      against the requested side by aggregate confidence and then capped. Frozen voluntary closes skip the shift.
+    ///      `markPrice` is the neutral capped price.
     ///      This function reports but does not enforce close-only policy and ignores `request.targetPrice`. Successful
     ///      historical calls do not refund overpayment; supply exactly `getOrderExecutionFee`. Frozen calls refund
     ///      overpayment. If Pyth reports no qualifying update in the supplied payload and the request permits it,
@@ -278,8 +285,8 @@ interface IPletherOracle {
     ) external payable returns (bool ok, PriceSnapshot memory snapshot);
 
     /// @notice Batch variant that can reuse a historical tick already proven unique for later commits.
-    /// @dev Reuse is available only outside frozen policy when the cached publish time is after the new commit, within
-    ///      its settlement window, no later than the current time, and covered by `minReusableCommitTime`. Reuse pays no
+    /// @dev Outside frozen policy, reuse requires all component publish times to fit the new order's settlement range
+    ///      and the new commit to be covered by `minReusableCommitTime`. Reuse pays no
     ///      Pyth fee after checking stored-feed coverage; it does not authenticate cache prices or refund supplied ETH.
     ///      Otherwise, fee handling and price construction
     ///      match `updateOrderExecutionPrice`. Only a successful new parse and synchronization extends `nextCache`; a frozen
@@ -420,9 +427,9 @@ interface IPletherOracle {
     ) external view returns (uint256 executionFunding);
 
     /// @notice Returns whether the market calendar allows frozen-oracle policy.
-    /// @dev The recurring window follows Pyth FX hours from Friday 17:00 New York time through Sunday 16:59:59 New York
-    ///      time, including US daylight-saving transitions. An engine override freezes its entire UTC day; the FAD
-    ///      runway does not extend this window.
+    /// @dev Delegates to the engine's canonical calendar. The recurring window follows Pyth FX hours from Friday
+    ///      17:00 New York time through Sunday 16:59:59 New York time, including US daylight-saving transitions.
+    ///      Day overrides and scheduled closure intervals can add freezing. FAD shoulders do not freeze pricing.
     /// @return Whether frozen-oracle policy is active at the current timestamp.
     function isOracleFrozen() external view returns (bool);
 
@@ -441,6 +448,10 @@ interface IPletherOracle {
     /// @notice Returns the max accepted aggregate basket confidence ratio in basis points.
     /// @return Maximum basket confidence-to-price ratio in basis points.
     function basketMaxConfidenceRatioBps() external view returns (uint256);
+
+    /// @notice Returns the minimum post-commit delay for historical order execution.
+    /// @return Minimum difference in seconds between the commit time and each historical component's publish time.
+    function minOrderSettlementDelay() external view returns (uint256);
 
     /// @notice Returns the post-commit settlement window for historical order execution.
     /// @return Historical execution window in seconds.

@@ -36,7 +36,7 @@ def artifact(creation=b"\x60\x00", runtime=b"\x00", source=SOURCE_PATH, name="Ex
         "abi": [{"type": "constructor", "inputs": [{"name": "owner", "type": "address"}]}],
         "bytecode": {"object": "0x" + creation.hex()},
         "deployedBytecode": {"object": "0x" + runtime.hex()},
-        "metadata": {"compiler": {"version": "0.8.35+commit.47b9dedd"}, "settings": {
+        "metadata": {"compiler": {"version": "0.8.39+commit.ce47f2c8"}, "settings": {
             "viaIR": True, "optimizer": {"enabled": True, "runs": 200}, "evmVersion": "prague",
             "compilationTarget": {source: name},
         }, "sources": {source: {"keccak256": synthetic_keccak(content)}}},
@@ -88,6 +88,20 @@ class SettlementConfigurationTest(unittest.TestCase):
         inventory = release.consumer_inventory(self.root, self.manifest)
         self.assertEqual(inventory[identifier], "packages/perps/src/CfdEnginePlanningReader.sol")
         self.assertTrue((self.root / inventory[identifier]).is_file())
+
+    def test_export_includes_release_engine_and_admission_validator(self):
+        engine_entry = self.manifest["contracts"]["cfdEngine"]
+        engine_id = release.artifact_identifier("cfdEngine", engine_entry)
+        self.assertEqual(engine_id, "DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseEngine")
+        validator_entry = self.manifest["contracts"]["cfdOrderAdmissionValidator"]
+        validator_id = release.artifact_identifier("cfdOrderAdmissionValidator", validator_entry)
+        self.assertEqual(validator_id, "CfdOrderAdmissionValidator.sol:CfdOrderAdmissionValidator")
+        inventory = release.consumer_inventory(self.root, self.manifest)
+        self.assertEqual(inventory[engine_id], "script/DeployPerpsArbitrumSepolia.s.sol")
+        self.assertEqual(inventory[validator_id], "packages/perps/src/CfdOrderAdmissionValidator.sol")
+        self.assertTrue((self.root / inventory[validator_id]).is_file())
+        self.assertEqual(self.manifest["economics"]["minOpenSlippageToleranceBps"], 25)
+        self.assertEqual(self.manifest["economics"]["juniorMaintenanceFeeAprBps"], 0)
 
     def test_mock_cannot_advertise_signed_deposits_bridge_funding_or_gdn_eligibility(self):
         for section, key, value in (
@@ -385,7 +399,7 @@ class ExportWorkflowTest(unittest.TestCase):
                 elif corruption == "abi":
                     value["abi"] = []
                 else:
-                    value["metadata"]["compiler"]["version"] = "0.8.35+commit.ffffffff"
+                    value["metadata"]["compiler"]["version"] = "0.8.39+commit.ffffffff"
                 self.build_artifacts[IDENTIFIER] = value
                 with self.assertRaises(ValueError):
                     self.export()

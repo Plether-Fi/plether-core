@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @title OracleFreshnessPolicyLib
 /// @notice Selects close-only and mark-age rules for each perps action and calendar regime.

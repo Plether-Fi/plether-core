@@ -142,7 +142,7 @@ or filename does not give them invariant depth; only `invariant_*` functions use
 
 ## Running a campaign
 
-Run from the repository root with Foundry and Solc 0.8.35 installed. `--offline` requires the compiler to be cached.
+Run from the repository root with Foundry and Solc 0.8.39 installed. `--offline` requires the compiler to be cached.
 Use the `--root` argument so Forge reads the package's profiles rather than the repository integration profile.
 
 ```bash

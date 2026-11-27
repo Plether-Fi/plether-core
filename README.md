@@ -3,7 +3,7 @@
 [![CI](https://github.com/Plether-Fi/plether-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Plether-Fi/plether-core/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/Plether-Fi/plether-core/branch/master/graph/badge.svg)](https://codecov.io/gh/Plether-Fi/plether-core)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Solidity](https://img.shields.io/badge/Solidity-0.8.35-363636?logo=solidity)](https://docs.soliditylang.org/)
+[![Solidity](https://img.shields.io/badge/Solidity-0.8.39-363636?logo=solidity)](https://docs.soliditylang.org/)
 
 Plether is a Solidity monorepo for on-chain products that provide bounded, dollar-directional exposure. Spot, options,
 perpetuals, and the Sepolia perps paymaster are peer Foundry packages under `packages/`; product-neutral contracts and
@@ -57,7 +57,7 @@ unchanged by the repository layout; verification tooling and downstream source i
 
 ## Getting Started
 
-CI uses Foundry v1.5.1 and Solidity 0.8.35. Clone submodules before building:
+CI uses Foundry v1.5.1 and Solidity 0.8.39. Clone submodules before building:
 
 ```bash
 git submodule update --init --recursive

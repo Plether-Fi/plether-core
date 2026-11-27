@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
@@ -14,9 +14,16 @@ interface IOrderLifecycleBook {
         OrderV3Types.ConstraintKind constraint, uint256 actual, uint256 limit
     );
 
-    /// @notice Records the Router's close-admission or open-bounty commitment for a pending order.
+    /// @notice Records close effects or reconciles open custody across both reservation hooks.
+    function recordCommitment(
+        uint64 orderId,
+        CfdEnginePlanTypes.CloseCommitment calldata effects,
+        bool isClose
+    ) external;
+
+    /// @notice Records the Router's close-admission commitment for a pending order.
     /// @param orderId Pending order whose commitment is recorded.
-    /// @param effects Carry and bounty effects returned by the Engine or open-order reservation path.
+    /// @param effects Carry and bounty effects returned by the Engine.
     function recordCommitment(
         uint64 orderId,
         CfdEnginePlanTypes.CloseCommitment calldata effects
@@ -103,6 +110,11 @@ interface IOrderLifecycleBook {
 
     function CONFIG_SCHEMA_HASH() external view returns (bytes32);
 
+    /// @notice Whether a pending public close qualified at submission only under the full-exit exemption.
+    function closeRequiresFullExit(
+        uint64 orderId
+    ) external view returns (bool);
+
     /// @notice Hashes every mutable execution-critical integration and finalized admin version.
     function currentExecutionConfigHash() external view returns (bytes32 configHash);
 
@@ -158,6 +170,12 @@ interface IOrderLifecycleBook {
     function orderTiming(
         uint64 orderId
     ) external view returns (OrderV3Types.OrderTiming memory);
+
+    /// @notice Pending opening lots by side through their deadlines, excluding risk-off invalidated orders.
+    function unexpiredOpenLots() external view returns (uint256 longLots, uint256 shortLots);
+
+    /// @notice Queued closing lots by side through their deadlines.
+    function unexpiredCloseLots() external view returns (uint256 longLots, uint256 shortLots);
 
     function pendingPolicy(
         uint64 orderId

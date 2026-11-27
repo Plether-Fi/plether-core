@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
@@ -272,7 +272,53 @@ contract RecapitalizationIdempotenceTest is HousePoolTestBase {
         assertEq(pool.seniorPrincipal(), 1000e6);
         assertEq(pool.juniorPrincipal(), 0, "owner recap cannot become Junior revenue");
         assertEq(pool.unassignedAssets(), 5800e6);
-        assertEq(pool.pendingRecapitalizationAssets(), 0);
+        assertEq(pool.pendingRecapitalizationAssets(), 0, "preserved unassigned deficit must not leave zombie recap");
+        assertEq(pool.getMaxSeniorWithdraw(), 1000e6, "Senior liquidity must not stay frozen after claims clear");
+    }
+
+    function test_ClaimSettlementBeforeFirstReconcileDoesNotDivertFreshRecapToJunior() public {
+        _wipePool();
+        // Pool holds 4000e6 cash against 5000e6 trader claims (1000e6 claim deficit), Senior HWM = 1000e6.
+        settlementToken.mint(address(pool), 4000e6);
+        pool.accountExcess();
+        _setTotalTraderClaim(5000e6);
+
+        // Owner recapitalizes 5000e6 -> 1000e6 cures claim deficit, 1000e6 restores Senior, 3000e6 -> unassigned.
+        _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 5000e6);
+        assertEq(pool.totalAssets(), 9000e6);
+
+        // Claimant settles before the first reconcile runs; net distributable remains 4000e6.
+        vm.prank(address(engine));
+        pool.payOutTraderClaim(address(0xCA11), 5000e6);
+        _setTotalTraderClaim(0);
+
+        (uint256 previewSenior, uint256 previewJunior,,) = pool.getPendingTrancheState();
+        assertEq(previewSenior, 1000e6, "preview must restore Senior to HWM");
+        assertEq(previewJunior, 0, "preview must not divert fresh recapitalization to Junior");
+
+        _reconcile();
+        assertEq(pool.seniorPrincipal(), 1000e6, "recapitalization must restore Senior to HWM");
+        assertEq(pool.juniorPrincipal(), 0, "claim settlement must not divert fresh recapitalization to Junior");
+        assertEq(pool.unassignedAssets(), 3000e6, "remaining recapitalization beyond Senior HWM stays unassigned");
+        assertEq(pool.pendingRecapitalizationAssets(), 0, "settled fresh recapitalization must clear");
+    }
+
+    function test_ClaimSettlementBeforeFirstReconcileWithStaleBookedPrincipalsPreservesRecap() public {
+        // Stale booked principals: seniorPrincipal = 1000e6, juniorPrincipal = 1000e6, cash = 2000e6.
+        // Unreconciled trading loss created 3000e6 of trader claims (wiping both tranches + 1000e6 claim deficit).
+        _setTotalTraderClaim(3000e6);
+
+        // Owner recapitalizes 3000e6 -> 1000e6 cures deficit, 1000e6 restores Senior, 1000e6 -> unassigned, 0 -> Junior.
+        _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 3000e6);
+        vm.prank(address(engine));
+        pool.payOutTraderClaim(address(0xCA11), 3000e6);
+        _setTotalTraderClaim(0);
+
+        _reconcile();
+        assertEq(pool.seniorPrincipal(), 1000e6, "recapitalization must restore Senior HWM");
+        assertEq(pool.juniorPrincipal(), 0, "stale Junior principal must absorb the loss, not keep owner recap");
+        assertEq(pool.unassignedAssets(), 1000e6, "excess owner recapitalization stays unassigned");
+        assertEq(pool.pendingRecapitalizationAssets(), 0, "fresh recapitalization must clear cleanly");
     }
 
     function test_TemporaryMarkedLossCannotEraseFreshRecapAfterOrdinaryPayout() public {

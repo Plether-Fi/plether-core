@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MockInvariantHousePool} from "../mocks/MockInvariantHousePool.sol";
@@ -185,7 +185,9 @@ contract PerpClaimModelHandler is Test {
             uint256 payout = amounts.pnl - amounts.fee;
             if (liquidPool) {
                 immediateCloses++;
-                expectedPoolAfter -= amounts.pnl;
+                // With zero tranche principal the pool cannot top up the protocol fee;
+                // the withheld fee remains pool cash, so only the net payout leaves.
+                expectedPoolAfter -= payout;
                 expectedSettlementAfter += payout;
             } else {
                 deferredCloses++;

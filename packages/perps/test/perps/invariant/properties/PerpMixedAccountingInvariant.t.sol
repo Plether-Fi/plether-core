@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {MixedLpTestHarness} from "../support/MixedLpTestHarness.sol";
@@ -25,11 +25,12 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
     }
 
     function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
-        return 500_000e6;
+        return 499_999e6;
     }
 
     function setUp() public override {
         super.setUp();
+        _assignSeniorCapital(1e6);
         handler = new MixedLpTestHarness(
             settlementToken,
             baseMockPyth,
@@ -191,7 +192,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         assertGt(handler.slippageFailures(), 0);
         assertGt(handler.riskOffOrders(), 0);
         assertGt(handler.completedBatches(), 0);
-        assertGt(handler.pendingMarginConsumed(), 0);
+        assertEq(handler.liquidationPendingMarginConsumed(), 0, "liquidation preserves queued open margin");
         assertGt(handler.unpaidFailureTransitions(), 0);
         assertGt(handler.closesBehindPendingOrders(), 0);
         assertGt(handler.closeOpenCloseHistories(), 0);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -134,6 +134,8 @@ library OrderV3Types {
     ///      `minPostSettlementBalanceAssets` refers to total internal settlement custody, including locked value.
     ///      Full closes skip the post-position equity and leverage checks; fresh public requests still require a
     ///      nonzero `maxPostLeverageBps`. Execution modes use bits 1 (Live), 2 (Fad), and 4 (Frozen).
+    ///      Fresh requests must set `executionWindowSeconds` to the Router's configured `maxExecutionWindowSeconds`;
+    ///      mismatches revert rather than being normalized. `submitBy` limits submission independently.
     struct ExecutionBounds {
         uint64 submitBy;
         uint32 executionWindowSeconds;
@@ -207,6 +209,7 @@ library OrderV3Types {
         uint256 postTraderClaimAssets;
         uint256 postPositionSize;
         uint256 postPositionMarginAssets;
+        /// @notice For opens, equity and leverage are measured with the collateral eligible at execution.
         int256 postPositionEquityAssets;
         uint256 postLeverageBps;
         CloseEconomics close;
@@ -245,6 +248,7 @@ library OrderV3Types {
         uint256 postTraderClaimBalanceAssets;
         uint256 postPositionSize;
         uint256 postPositionMarginAssets;
+        /// @notice For opens, the equity and leverage used to check the committed order bounds.
         int256 postPositionEquityAssets;
         uint256 postLeverageBps;
         CloseEconomics close;

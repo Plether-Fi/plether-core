@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {RecordedOrderReceipts} from "../../../utils/RecordedOrderReceipts.sol";
@@ -59,6 +59,13 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 liquidationReserve;
         uint256 wallet;
         int256 vpi;
+    }
+
+    struct TraderModelTotals {
+        uint256 cash;
+        uint256 wallet;
+        uint256 arrears;
+        uint256 margin;
     }
 
     struct Lp {
@@ -268,9 +275,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         latestAuthoredTick = HistoricalTick({
             componentPrice: 1e8, publishTime: vm.getBlockTimestamp(), previousPublishTime: 0, available: true
         });
-        // These fixtures start from permanent seeds only. Neither seed liquidity nor flat-account deposits
-        // checkpoint the Engine, so the independently authored carry clock starts at its zero storage default.
-        carry = new CarryReferenceLedger(expectedPoolCash, 0, 500);
+        // The fixtures recapitalize before assigning redeemable Senior shares, checkpointing the idle carry clock.
+        carry = new CarryReferenceLedger(expectedPoolCash, vm.getBlockTimestamp(), 500);
         orders = new PendingOrderReferenceLedger();
         vm.deal(address(this), 100_000 ether);
         vm.deal(KEEPER, 100_000 ether);
@@ -358,7 +364,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         if (lots < existing) {
             // Intentional successful partials fund their selected price envelope using actual collateral actions.
-            // The separate deferred-claim history directly exercises zero-pledge claim-backed partial admission.
+            // The separate deferred-claim history directly exercises partial admission with a retained claim.
             _ensurePledge(i, existing * (frozen ? CAP : 5e6));
         }
         if (_free(i) < 10e6) {
@@ -394,7 +400,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 i = actorSeed % 4;
         uint256 amount = bound(amountSeed, 1, 100e6);
         _deposit(i, amount);
-        if (traders[i].lots != 0) {
+        // This ledger models ordinary pledge. Protected top-ups have dedicated queue tests.
+        if (traders[i].lots != 0 && orders.count(i) == 0) {
             if (amount > _free(i)) {
                 bytes32 afterDeposit = _economicFingerprint(i);
                 vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
@@ -825,18 +832,26 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 juniorCapital,
         uint256 hwm
     ) internal view returns (uint256) {
-        uint256[2] memory liabilities;
-        for (uint256 i; i < 4; ++i) {
-            liabilities[i % 2] += i % 2 == 0 ? traders[i].basis : traders[i].lots * CAP - traders[i].basis;
-        }
-        uint256 liability = liabilities[0] > liabilities[1] ? liabilities[0] : liabilities[1];
-        uint256 reserve = liability + expectedClaims + (liability * 25 + 9999) / 10_000;
+        uint256 reserve = _bufferedLiability(_sideLiabilities()) + expectedClaims + _positiveVpiAccrued();
         uint256 free = _depth() > reserve ? _depth() - reserve : 0;
         // Fixture governance protects the greater of principal/HWM at a 9999-bps Senior exposure ceiling.
         uint256 seniorExposure = seniorCapital > hwm ? seniorCapital : hwm;
         uint256 requiredJunior = (seniorExposure + 9998) / 9999;
         uint256 ratioBudget = juniorCapital > requiredJunior ? juniorCapital - requiredJunior : 0;
         return free < ratioBudget ? free : ratioBudget;
+    }
+
+    function _sideLiabilities() internal view returns (uint256[2] memory liabilities) {
+        for (uint256 i; i < 4; ++i) {
+            liabilities[i % 2] += i % 2 == 0 ? traders[i].basis : traders[i].lots * CAP - traders[i].basis;
+        }
+    }
+
+    function _bufferedLiability(
+        uint256[2] memory liabilities
+    ) internal pure returns (uint256) {
+        uint256 liability = liabilities[0] > liabilities[1] ? liabilities[0] : liabilities[1];
+        return liability + (liability * 25 + 9999) / 10_000;
     }
 
     function _refreshRedeemEntitlements(
@@ -1110,6 +1125,13 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (traders[i].claim == 0) {
             return;
         }
+        if (orders.count(i) != 0) {
+            vm.prank(actorAt(i));
+            vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+            engine.settleTraderClaim(actorAt(i));
+            assertModel();
+            return;
+        }
         _collect(i);
         uint256 amount = traders[i].claim;
         assertGe(expectedPoolCash, expectedClaims, "modeled aggregate claim liquidity");
@@ -1162,17 +1184,16 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             return;
         }
         _refresh(80_000_002);
-        int256 action = _vpi(0, 100, false) + int256(100 * currentPrice * 4 / 10_000);
-        uint256 contribution = (action > 0 ? uint256(action) : 0) + 100 * currentPrice / 1000;
+        uint256 contribution = 150e6;
         if (_free(0) < contribution + 1e6) {
             _deposit(0, contribution + 100e6);
         }
         _trade(0, 100, contribution, false);
-        assertEq(traders[0].margin, 0, "claim alone backs the reopened position");
+        assertGt(traders[0].margin, 0, "the reopened position funds its own pledge");
         assertEq(traders[0].basis, 100 * currentPrice);
         uint256 claimBefore = traders[0].claim;
         _trade(0, 50, 0, true);
-        assertEq(traders[0].margin, 0, "claim alone backs the live partial remainder");
+        assertGt(traders[0].claim, 0, "the live partial remainder retains its claim");
         assertEq(traders[0].basis, 50 * currentPrice);
         assertGt(claimBefore, 50 * currentPrice / 100, "claim-backed equity exceeds maintenance");
         assertEq(traders[0].claim, claimBefore, "claims are health collateral, never action-fee cash");
@@ -1248,7 +1269,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             _trade(i, 100, 300e6, false);
         }
         if (_liquidateAt(i, i % 2 == 0 ? 140_000_002 : 60_000_002)) {
-            _withdraw(i, traders[i].cash);
+            _withdraw(i, _free(i));
             _rejectExcessWithdrawal(i);
         }
         assertModel();
@@ -1260,7 +1281,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     /// 6: maintenance-only price loss leaves a surviving old claim and unused liquidation reserve;
     /// 7/8/9: free pool cash is respectively one atom below, equal to, or one atom above the fresh payout;
     /// 10: a small new gain replaces negative-VPI backing, which then pays otherwise uncovered carry;
-    /// 11: terminal carry consumes protected pending-order margin before releasing its unused remainder.
+    /// 11: terminal carry is waived while pending opening-order margin stays reserved.
     /// Environmental cash is restored only after the tested transition, except the explicitly funded immediate
     /// payout/claim-credit branches. No deposit pays the intended unpaid carry before liquidation.
     function exerciseLiquidationHistory(
@@ -1299,8 +1320,12 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         if (scenario == 6) {
             int256 action = _vpi(i, 100, false) + int256(100 * currentPrice * 4 / 10_000);
-            uint256 contribution = (action > 0 ? uint256(action) : 0) + 100 * currentPrice / 1000;
+            uint256 contribution = (action > 0 ? uint256(action) : 0) + 100 * currentPrice / 1000
+                + (100 * currentPrice * 150 / 10_000) + 1;
             _trade(i, 100, contribution, false);
+            // The independent opening margin exceeds normal maintenance; FAD raises the live threshold.
+            vm.warp(1_709_934_000); // Friday 2024-03-08 21:40 UTC, before the frozen window.
+            assertTrue(_isFadReference(vm.getBlockTimestamp()));
             uint256 desiredLoss = traders[i].claim - 50e6;
             uint256 adverseMove = desiredLoss / 100;
             uint256 adversePrice = i % 2 == 0 ? currentPrice + adverseMove : currentPrice - adverseMove;
@@ -1318,11 +1343,20 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (scenario == 10) {
             assertLt(traders[i].vpi, 0, "opposing open produces a backed lifetime rebate");
         }
+        _withdraw(i, _free(i));
         if (scenario == 11) {
+            uint256 nextBounty = 17 * currentPrice / 10_000;
+            if (nextBounty > 200_000) {
+                nextBounty = 200_000;
+            }
+            if (nextBounty < 10_000) {
+                nextBounty = 10_000;
+            }
+            _deposit(i, 1020e6 + nextBounty);
             assertGt(_commitTrade(i, 17, 1020e6, false), 0, "live pending margin predates accrued carry");
             assertEq(orders.margin(i), 1020e6);
+            assertEq(_free(i), 0);
         }
-        _withdraw(i, _free(i));
         restoredCash = expectedPoolCash;
         _setLiquidationPoolCash(0);
         vm.warp(_nextLiveTime(vm.getBlockTimestamp() + (scenario == 4 ? 10 * 365 days : 365 days)));
@@ -1379,9 +1413,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
                 assertGt(lastLiquidation.carryWaived, 0, "remaining carry is waived without consuming claims");
             }
             if (scenario == 11) {
-                assertGt(lastLiquidation.committedConsumed, 0, "terminal carry consumes protected pending margin");
-                assertLt(lastLiquidation.committedConsumed, 1020e6, "unused margin returns to free settlement");
-                assertEq(orders.count(i), 0, "liquidation authenticates and clears the account queue");
+                assertEq(lastLiquidation.committedConsumed, 0, "terminal carry does not consume pending margin");
+                assertEq(orders.count(i), 1, "liquidation retains the opening order");
             }
         }
         if (restoredCash != 0) {
@@ -1571,6 +1604,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         t.margin = 0;
         t.vpi = 0;
         t.liquidationReserve = 0;
+        carry.changePositiveVpi(_positiveVpiAccrued());
         carry.changeDepth(_depth(), vm.getBlockTimestamp());
         _apply(i);
         lastLiquidation = values;
@@ -1653,7 +1687,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 i,
         uint256 target
     ) internal {
-        if (traders[i].lots == 0) {
+        if (traders[i].lots == 0 || orders.count(i) != 0) {
             return;
         }
         // A real one-atom deposit assesses old carry before deciding the fresh collateral contribution.
@@ -1718,7 +1752,17 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     function _netDepth(
         uint256 grossAssets
     ) internal view returns (uint256) {
-        return grossAssets > expectedClaims ? grossAssets - expectedClaims : 0;
+        uint256 afterClaims = grossAssets > expectedClaims ? grossAssets - expectedClaims : 0;
+        uint256 positiveVpi = _positiveVpiAccrued();
+        return afterClaims > positiveVpi ? afterClaims - positiveVpi : 0;
+    }
+
+    function _positiveVpiAccrued() internal view returns (uint256 positiveVpi) {
+        for (uint256 i; i < 4; ++i) {
+            if (traders[i].vpi > 0) {
+                positiveVpi += uint256(traders[i].vpi);
+            }
+        }
     }
 
     function _apply(
@@ -1917,11 +1961,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (orders.count(i) == 5 || traders[i].lots == 0) {
             return;
         }
-        uint256 projected = orders.queuedLots(i, traders[i].lots, riskOffCutoff);
-        if (projected == 0) {
+        uint256 closeableLots = _closeableLots(i);
+        if (closeableLots == 0) {
             return;
         }
-        uint256 lots = full ? projected : bound(lotsSeed, 1, projected);
+        uint256 lots = full ? closeableLots : bound(lotsSeed, 1, closeableLots);
         if (lots < traders[i].lots) {
             _ensurePledge(i, traders[i].lots * 60e6);
         }
@@ -2061,8 +2105,20 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             ++rejectedCloseOnlyCommits;
             return 0;
         }
-        uint256 queuedLots = orders.queuedLots(i, traders[i].lots, riskOffCutoff);
-        bool belowMinimum = lots * currentPrice < router.minOpenNotionalAssets() && (!isClose || lots < queuedLots);
+        if (isClose) {
+            uint256 closeableLots = _closeableLots(i);
+            if (lots > closeableLots) {
+                bytes4 selector = closeableLots == 0
+                    ? IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector
+                    : IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector;
+                _rejectCommit(i, request, abi.encodeWithSelector(selector));
+                ++rejectedCloseCommitments;
+                ++rejectedQueuedCloseSize;
+                return 0;
+            }
+        }
+        bool belowMinimum = lots * currentPrice < router.minOpenNotionalAssets()
+            && (!isClose || lots < orders.queuedLots(i, traders[i].lots, riskOffCutoff));
         if (belowMinimum) {
             vm.prank(actorAt(i));
             vm.expectRevert(
@@ -2084,9 +2140,6 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             if (rejection.length != 0) {
                 _rejectCommit(i, request, rejection);
                 ++rejectedCloseCommitments;
-                if (lots > traders[i].lots) {
-                    ++rejectedQueuedCloseSize;
-                }
                 return 0;
             }
         }
@@ -2151,17 +2204,19 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(router.lifecycleBook().clientIntent(actorAt(i), request.clientOrderId).orderId, 0);
     }
 
+    function _closeableLots(
+        uint256 i
+    ) internal view returns (uint256) {
+        uint256 liveLots = traders[i].lots;
+        uint256 pendingCloseLots = orders.pendingCloseLots(i);
+        return liveLots > pendingCloseLots ? liveLots - pendingCloseLots : 0;
+    }
+
     function _closeCommitFailure(
         uint256 i,
         uint256 lots
     ) internal view returns (bytes memory) {
         Trader memory t = traders[i];
-        if (t.lots == 0) {
-            return abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__NoOpenPosition.selector);
-        }
-        if (lots > t.lots) {
-            return abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__CloseSizeExceedsPosition.selector);
-        }
         CarryReferenceLedger.Collection memory c = carry.previewCheckpoint(actorAt(i), vm.getBlockTimestamp());
         uint256 pledge = t.margin - c.fromMargin;
         if (lots == t.lots) {
@@ -2365,7 +2420,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (o.request.isClose) {
             return _projectClose(i, lots, c).revertCode;
         }
-        return _projectOpen(i, lots, o.request.marginDelta, c).revertCode;
+        uint8 code = _projectOpen(i, lots, o.request.marginDelta, c).revertCode;
+        if (code == 0 && o.remainingMargin < o.request.marginDelta) {
+            return 5;
+        }
+        return code;
     }
 
     function _modelExecutedOrder(
@@ -2764,9 +2823,10 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint64[] memory ids = orders.accountIds(i);
         for (uint256 j; j < ids.length; ++j) {
             PendingOrderReferenceLedger.Order memory o = orders.order(ids[j]);
-            if (o.request.isClose) {
-                ++unpaidCloseLiquidations;
+            if (!o.request.isClose) {
+                continue;
             }
+            ++unpaidCloseLiquidations;
             assertEq(orders.takeBounty(o.id), o.bountyAssets);
             uint256 amount = o.bountyFree;
             forfeitedOrderBounties[ids[j]] = amount;
@@ -2794,6 +2854,9 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint64[] memory ids = orders.accountIds(i);
         for (uint256 j; j < ids.length; ++j) {
             PendingOrderReferenceLedger.Order memory o = orders.order(ids[j]);
+            if (!o.request.isClose) {
+                continue;
+            }
             assertEq(forfeitedOrderBounties[o.id], o.bountyFree);
             _releasePendingMargin(o.id);
             _finishPendingOrder(
@@ -2913,9 +2976,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (x.oldVpiReserve > x.nextVpiReserve) {
             x.available += x.oldVpiReserve - x.nextVpiReserve;
         }
-        if (x.cost < 0) {
-            x.available += uint256(-x.cost);
-        }
+        uint256 rebateCredit = x.cost < 0 ? uint256(-x.cost) : 0;
+        x.available += rebateCredit;
         if (contribution > x.available || (x.cost > 0 && uint256(x.cost) > t.margin + contribution)) {
             v.revertCode = 5;
             return v;
@@ -2923,7 +2985,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         v.margin = t.margin + contribution - (x.cost > 0 ? uint256(x.cost) : 0);
         x.available -= contribution;
         x.extraVpi = x.nextVpiReserve > x.oldVpiReserve ? x.nextVpiReserve - x.oldVpiReserve : 0;
-        x.vpiFromPledge = x.extraVpi > x.available ? x.extraVpi - x.available : 0;
+        uint256 availableRebate = rebateCredit < x.available ? rebateCredit : x.available;
+        x.vpiFromPledge = x.extraVpi > availableRebate ? x.extraVpi - availableRebate : 0;
         x.newPledge = v.margin > t.margin ? v.margin - t.margin : 0;
         if (x.vpiFromPledge > x.newPledge) {
             v.revertCode = 10;
@@ -2934,14 +2997,16 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (v.reserve < 1e6) {
             v.reserve = 1e6;
         }
-        if (v.reserve < t.liquidationReserve) {
-            v.reserve = t.liquidationReserve;
+        if (v.reserve > t.liquidationReserve) {
+            uint256 reserveIncrease = v.reserve - t.liquidationReserve;
+            if (reserveIncrease > x.newPledge - x.vpiFromPledge) {
+                v.revertCode = 9;
+                return v;
+            }
+            v.margin -= reserveIncrease;
+        } else {
+            v.margin += t.liquidationReserve - v.reserve;
         }
-        if (v.reserve - t.liquidationReserve > x.newPledge - x.vpiFromPledge) {
-            v.revertCode = 9;
-            return v;
-        }
-        v.margin -= v.reserve - t.liquidationReserve;
         x.pnl = int256(t.basis) - int256(t.lots * currentPrice);
         if (i % 2 != 0) {
             x.pnl = -x.pnl;
@@ -2981,8 +3046,12 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         input.lifetimeVpi = t.vpi;
         input.closeLots = lots;
         input.price = currentPrice;
-        if (lots <= t.lots) {
+        if (lots != 0 && lots <= t.lots) {
             input.vpiDelta = _vpiAtDepth(i, lots, true, depth);
+            uint256 closedBasis = t.basis * lots / t.lots;
+            uint256[2] memory liabilities = _sideLiabilities();
+            liabilities[i % 2] -= input.isLong ? closedBasis : lots * CAP - closedBasis;
+            input.poolLiabilityReserve = _bufferedLiability(liabilities);
         }
         input.frozen = frozen;
         input.unpaidCarry = c.unpaid;
@@ -3021,6 +3090,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         t.lots += lots;
         t.basis += lots * currentPrice;
         t.vpi += v.vpi;
+        carry.changePositiveVpi(_positiveVpiAccrued());
         sideLots[i % 2] += lots;
         _countVpi(v.vpi);
     }
@@ -3050,6 +3120,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         t.cash = v.remainingCash;
         t.claim = v.remainingClaim;
         t.vpi = v.remainingVpi;
+        carry.changePositiveVpi(_positiveVpiAccrued());
         t.liquidationReserve = v.remainingLiquidationReserve;
         expectedPoolCash = v.poolCashAfter;
         expectedAccounted = v.poolAccountedAfter;
@@ -3087,6 +3158,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         int256 nav = int256(_depth()) - int256(expectedClaims);
         for (uint256 i; i < 4; ++i) {
             Trader storage t = traders[i];
+            nav -= t.vpi;
             int256 pnl = int256(t.basis) - int256(t.lots * currentPrice);
             if (i % 2 != 0) {
                 pnl = -pnl;
@@ -3193,9 +3265,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(bounty.freeFundedAssets, o.bountyFree);
         assertEq(bounty.freeFundedAssets, bounty.amountAssets);
         assertEq(uint8(bounty.state), uint8(IMarginClearinghouse.BountyReservationState.Active));
-        if (o.request.isClose) {
-            assertEq(intent.commitment.carryCollectedAssets, committedCarry[id]);
-        }
+        assertEq(intent.commitment.carryCollectedAssets, committedCarry[id]);
     }
 
     function _assertTerminalOrder(
@@ -3309,6 +3379,10 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     function exerciseUnpaidCarryVpiOffsetClose() external {
         assertEq(orders.liveCount(), 0);
         assertEq(traders[0].lots, 50, "existing public claim-backed half position");
+        // Pay accrued carry from the funded pledge before committing the claim-backed close.
+        vm.warp(_nextLiveTime(vm.getBlockTimestamp() + 5200 weeks));
+        _refresh(currentPrice);
+        _deposit(0, 1000e6);
         assertEq(traders[0].margin, 0);
         assertGt(traders[0].claim, 0);
         assertGt(traders[0].vpi, 0);
@@ -3338,20 +3412,29 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             assertEq(traders[i].lots, 0);
         }
         _refresh(80_000_002);
-        _trade(0, 100, 300e6, false);
-        _trade(1, 500, 30_000e6, false);
-        uint64 closeId = _commitTrade(0, 100, 0, true);
-        uint64 first = _commitTrade(0, 17, 2e6, false);
-        uint64 second = _commitTrade(0, 17, 10e6, false);
-        assertEq(orders.head(), closeId);
+        _trade(0, 600, 1800e6, false);
+        _trade(1, 1100, 30_000e6, false);
         _withdraw(0, _free(0));
+        uint256 nextBounty = 17 * currentPrice / 10_000;
+        if (nextBounty > 200_000) {
+            nextBounty = 200_000;
+        }
+        if (nextBounty < 10_000) {
+            nextBounty = 10_000;
+        }
+        _deposit(0, 75e6 + 2 * nextBounty);
+        uint64 closeId = _commitTrade(0, 600, 0, true);
+        uint64 first = _commitTrade(0, 17, 25e6, false);
+        uint64 second = _commitTrade(0, 17, 50e6, false);
+        assertEq(orders.head(), closeId);
+        assertEq(_free(0), 0);
         _refresh(140_000_002);
         uint256 keeperBefore = expectedKeeper;
         executeHead(false);
         assertEq(traders[0].lots, 0);
         assertEq(orders.order(first).remainingMargin, 0, "oldest committed margin fully consumed");
         assertGt(orders.order(second).remainingMargin, 0, "newer committed margin retains unspent cash");
-        assertLt(orders.order(second).remainingMargin, 10e6, "next reservation partly consumed");
+        assertLt(orders.order(second).remainingMargin, 50e6, "next reservation partly consumed");
         assertEq(uint8(orders.order(first).marginStatus), uint8(PendingOrderReferenceLedger.MarginStatus.Consumed));
         assertEq(orders.order(first).remainingBounty, 136_000);
         assertEq(orders.order(second).remainingBounty, 136_000);
@@ -3388,7 +3471,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertGt(traders[i].lots, 0);
         _deposit(i, 1);
         _withdraw(i, _free(i));
-        uint64 first = _commitTrade(i, traders[i].lots, 0, true);
+        uint256 firstLots = traders[i].lots / 2;
+        uint64 first = _commitTrade(i, firstLots, 0, true);
         assertGt(first, 0);
         assertEq(orders.order(first).bountyAssets, 0);
         uint256 nextBounty = 17 * currentPrice / 10_000;
@@ -3402,7 +3486,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint64 later = _commitTrade(i, 17, 1020e6, false);
         assertGt(later, first);
         assertEq(_free(i), 0);
-        uint64 last = _commitTrade(i, 17, 0, true);
+        uint64 last = _commitTrade(i, traders[i].lots - firstLots, 0, true);
         assertGt(last, later, "unpaid later close requires no pledge reservation restriction");
         ++closeOpenCloseHistories;
         vm.warp(vm.getBlockTimestamp() + 61);
@@ -3459,55 +3543,26 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         assertEq(carry.poolDepth(), _depth(), "independent gross assets match complete pool ledger");
         assertEq(carry.totalClaims(), expectedClaims, "independent carry claims match complete claim ledger");
-        assertEq(carry.economicDepth(), _netDepth(_depth()), "independent economic depth excludes claims");
+        assertEq(carry.totalPositiveVpi(), _positiveVpiAccrued(), "independent accrued positive VPI ledger");
+        assertEq(carry.economicDepth(), _netDepth(_depth()), "independent economic depth excludes claims and VPI");
         uint256 custody = expectedTreasury + expectedKeeper;
         uint256 arrears;
         uint256 wallets;
+        uint256 positiveVpi;
+        uint256 negativeVpi;
         uint256[2] memory expectedSideMargin;
         for (uint256 i; i < 4; ++i) {
-            Trader storage t = traders[i];
-            address account = actorAt(i);
-            (uint256 size, uint256 margin,, uint256 maxProfit,,, int256 vpi) = engine.positions(account);
-            assertEq(size, t.lots * 1e20, "mixed exact lots");
-            assertEq(margin, t.margin, "mixed independent pledge");
-            assertEq(engine.positionEntryCostAssetAtoms(account), t.basis, "mixed exact entry basis");
-            assertEq(maxProfit, i % 2 == 0 ? t.basis : t.lots * CAP - t.basis, "mixed endpoint liability");
-            assertEq(vpi, t.vpi, "mixed lifetime VPI");
-            assertEq(clearinghouse.balanceAssets(account), t.cash, "mixed account cash");
-            assertEq(engine.traderClaimBalanceAssets(account), t.claim, "mixed independently generated claim");
-            assertEq(clearinghouse.liquidationReserveAssets(account), t.liquidationReserve, "mixed liquidation reserve");
-            assertEq(
-                clearinghouse.vpiRebateReserveAssets(account), t.vpi < 0 ? uint256(-t.vpi) : 0, "mixed VPI backing"
-            );
-            assertEq(settlementToken.balanceOf(account), t.wallet, "mixed trader external custody");
-            CarryReferenceLedger.Account memory carryAccount = carry.accountState(account);
-            assertEq(engine.unsettledCarryAssets(account), carryAccount.arrears, "mixed carry arrears");
-            assertEq(
-                carryAccount.totalNewCarry,
-                carryAccount.totalCollected + carryAccount.totalWaived + carryAccount.arrears,
-                "per-account lifetime carry conservation"
-            );
-            arrears += carryAccount.arrears;
-            assertEq(carryAccount.pledge, t.margin, "reference ledger pledge integration");
-            assertEq(carryAccount.free, _free(i), "reference ledger free integration");
-            (uint256 maxProfitExposure, uint256 index, uint64 timestamp) = engine.positionCarryState(account);
-            if (t.lots != 0) {
-                assertEq(maxProfitExposure, carryAccount.maxProfit, "mixed position maximum-profit carry exposure");
-                assertEq(index, carryAccount.lastIndex, "mixed position checkpoint index");
-                assertEq(timestamp, carryAccount.lastTime, "mixed position checkpoint timestamp");
-            } else {
-                assertEq(maxProfitExposure, 0, "flat generation maximum-profit exposure cleared");
-                assertEq(index, 0, "flat generation carry index cleared");
-                assertEq(timestamp, 0, "flat generation carry timestamp cleared");
+            TraderModelTotals memory totals = _assertTraderModel(i);
+            custody += totals.cash;
+            wallets += totals.wallet;
+            arrears += totals.arrears;
+            expectedSideMargin[i % 2] += totals.margin;
+            int256 accruedVpi = traders[i].vpi;
+            if (accruedVpi > 0) {
+                positiveVpi += uint256(accruedVpi);
+            } else if (accruedVpi < 0) {
+                negativeVpi += uint256(-accruedVpi);
             }
-            assertEq(
-                carryAccount.protectedFunds,
-                t.liquidationReserve + (t.vpi < 0 ? uint256(-t.vpi) : 0) + orders.margin(i) + orders.bounty(i),
-                "independent complete protected funds"
-            );
-            custody += t.cash;
-            wallets += t.wallet;
-            expectedSideMargin[i % 2] += t.margin;
         }
         assertEq(
             carry.totalNewCarry(),
@@ -3519,6 +3574,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), expectedTreasury, "mixed fee ownership");
         assertEq(clearinghouse.balanceAssets(KEEPER), expectedKeeper, "mixed exact-once keeper credits");
         assertEq(engine.totalTraderClaimBalanceAssets(), expectedClaims, "mixed aggregate claims");
+        assertEq(engine.totalPositiveVpiAccruedAssets(), positiveVpi, "mixed accrued positive VPI liability");
+        assertEq(engine.totalNegativeVpiAccruedAssets(), negativeVpi, "mixed accrued negative VPI receivable");
         assertEq(settlementToken.balanceOf(address(pool)), expectedPoolCash, "mixed modeled physical pool cash");
         assertEq(pool.accountedAssets(), expectedAccounted, "mixed canonical pool backing");
         assertEq(pool.seniorPrincipal(), expectedSenior, "mixed independent Senior waterfall");
@@ -3545,6 +3602,65 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             assertEq(oi, sideLots[side] * 1e20);
             assertEq(maxProfit, carry.sideState(side).maxProfitExposure, "mixed side maximum-profit exposure");
         }
+    }
+
+    function _assertTraderModel(
+        uint256 i
+    ) internal view returns (TraderModelTotals memory totals) {
+        Trader storage t = traders[i];
+        address account = actorAt(i);
+        _assertTraderPosition(i, account);
+        assertEq(clearinghouse.balanceAssets(account), t.cash, "mixed account cash");
+        assertEq(engine.traderClaimBalanceAssets(account), t.claim, "mixed independently generated claim");
+        assertEq(clearinghouse.liquidationReserveAssets(account), t.liquidationReserve, "mixed liquidation reserve");
+        assertEq(clearinghouse.vpiRebateReserveAssets(account), t.vpi < 0 ? uint256(-t.vpi) : 0, "mixed VPI backing");
+        assertEq(settlementToken.balanceOf(account), t.wallet, "mixed trader external custody");
+        totals = TraderModelTotals(t.cash, t.wallet, _assertTraderCarry(i, account), t.margin);
+    }
+
+    function _assertTraderPosition(
+        uint256 i,
+        address account
+    ) internal view {
+        Trader storage t = traders[i];
+        (uint256 size, uint256 margin,, uint256 maxProfit,,, int256 vpi) = engine.positions(account);
+        assertEq(size, t.lots * 1e20, "mixed exact lots");
+        assertEq(margin, t.margin, "mixed independent pledge");
+        assertEq(engine.positionEntryCostAssetAtoms(account), t.basis, "mixed exact entry basis");
+        assertEq(maxProfit, i % 2 == 0 ? t.basis : t.lots * CAP - t.basis, "mixed endpoint liability");
+        assertEq(vpi, t.vpi, "mixed lifetime VPI");
+    }
+
+    function _assertTraderCarry(
+        uint256 i,
+        address account
+    ) internal view returns (uint256 arrears) {
+        Trader storage t = traders[i];
+        CarryReferenceLedger.Account memory carryAccount = carry.accountState(account);
+        assertEq(engine.unsettledCarryAssets(account), carryAccount.arrears, "mixed carry arrears");
+        assertEq(
+            carryAccount.totalNewCarry,
+            carryAccount.totalCollected + carryAccount.totalWaived + carryAccount.arrears,
+            "per-account lifetime carry conservation"
+        );
+        assertEq(carryAccount.pledge, t.margin, "reference ledger pledge integration");
+        assertEq(carryAccount.free, _free(i), "reference ledger free integration");
+        (uint256 maxProfitExposure, uint256 index, uint64 timestamp) = engine.positionCarryState(account);
+        if (t.lots != 0) {
+            assertEq(maxProfitExposure, carryAccount.maxProfit, "mixed position maximum-profit carry exposure");
+            assertEq(index, carryAccount.lastIndex, "mixed position checkpoint index");
+            assertEq(timestamp, carryAccount.lastTime, "mixed position checkpoint timestamp");
+        } else {
+            assertEq(maxProfitExposure, 0, "flat generation maximum-profit exposure cleared");
+            assertEq(index, 0, "flat generation carry index cleared");
+            assertEq(timestamp, 0, "flat generation carry timestamp cleared");
+        }
+        assertEq(
+            carryAccount.protectedFunds,
+            t.liquidationReserve + (t.vpi < 0 ? uint256(-t.vpi) : 0) + orders.margin(i) + orders.bounty(i),
+            "independent complete protected funds"
+        );
+        arrears = carryAccount.arrears;
     }
 
     function _assertRedeemPosition(

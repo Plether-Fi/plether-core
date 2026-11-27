@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BootstrapPerpsArbitrumSepolia} from "../../script/BootstrapPerpsArbitrumSepolia.s.sol";
 import {DeployPerpsArbitrumSepolia, MockUSDG} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
@@ -75,6 +75,29 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
             address(deployed.engine.planningReader()), abi.encodeWithSignature("ENGINE()"), abi.encode(address(0xBAD))
         );
         vm.expectRevert(bytes("Engine planning reader binding mismatch"));
+        verifier.run();
+        vm.clearMockedCalls();
+
+        vm.mockCall(
+            address(deployed.engineLens),
+            abi.encodeWithSignature("orderAdmissionValidator()"),
+            abi.encode(address(0xBAD))
+        );
+        vm.expectRevert(bytes("Order admission validator has no code"));
+        verifier.run();
+        vm.clearMockedCalls();
+        vm.mockCall(
+            address(deployed.engineLens.orderAdmissionValidator()),
+            abi.encodeWithSignature("engine()"),
+            abi.encode(address(0xBAD))
+        );
+        vm.expectRevert(bytes("Order admission validator binding mismatch"));
+        verifier.run();
+        vm.clearMockedCalls();
+        vm.mockCall(
+            address(deployed.engine), abi.encodeWithSignature("minOpenSlippageToleranceBps()"), abi.encode(uint256(0))
+        );
+        vm.expectRevert(bytes("Minimum open slippage tolerance mismatch"));
         verifier.run();
         vm.clearMockedCalls();
 

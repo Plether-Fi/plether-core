@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockAToken, MockERC20, MockPool} from "./utils/MockAave.sol";
 import {MockYieldAdapter} from "./utils/MockYieldAdapter.sol";

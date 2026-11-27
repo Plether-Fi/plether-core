@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
@@ -516,7 +516,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 900e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 900e6, CAP_PRICE, false);
 
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);

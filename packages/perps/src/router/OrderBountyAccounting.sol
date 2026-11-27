@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 
 /// @title OrderBountyAccounting
-/// @notice Transfers queued bounty reservations during account liquidation.
+/// @notice Transfers close-order and protection bounty reservations during account liquidation.
 abstract contract OrderBountyAccounting is OrderRouterBase {
 
-    /// @notice Forfeits live order and unpaid protection-trigger bounty reservations before liquidation.
-    /// @dev Does not release margin or unlink orders; post-liquidation queue cleanup performs those steps.
+    /// @notice Forfeits close-order and unpaid protection-trigger bounty reservations before liquidation.
+    /// @dev Opening orders keep their bounty funding and queue records for execution after liquidation.
+    ///      Does not release margin or unlink orders; post-liquidation close cleanup performs those steps.
     ///      A downstream engine revert rolls back every cleared record.
     /// @param account Liquidated account whose bounties are forfeited.
     function _forfeitReservedOrderBountiesOnLiquidation(
@@ -19,7 +20,9 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
         for (
             uint64 cursor = accountHeadOrderId[account]; cursor != 0; cursor = orderRecords[cursor].nextAccountOrderId) {
             lifecycleBook.validateBountyFunding(cursor);
-            ++orderCount;
+            if (orderRecords[cursor].core.isClose) {
+                ++orderCount;
+            }
         }
         orderIds = new uint64[](orderCount);
         orderBountiesAssets = new uint256[](orderCount);
@@ -31,6 +34,9 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
             orderId != 0;
             orderId = orderRecords[orderId].nextAccountOrderId
         ) {
+            if (!orderRecords[orderId].core.isClose) {
+                continue;
+            }
             uint256 executionBountyAssets =
                 clearinghouse.takeBountyReservation(account, IMarginClearinghouse.BountyKind.Order, orderId);
             orderIds[index] = orderId;

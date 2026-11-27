@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BootstrapPerpsArbitrumSepolia} from "../../script/BootstrapPerpsArbitrumSepolia.s.sol";
 import {DeployPerpsArbitrumSepolia, MockUSDG} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
@@ -24,6 +24,7 @@ import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiqu
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {Test} from "forge-std/Test.sol";
@@ -292,6 +293,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(engine.executionFeeBps(), 4, "execution fee");
         assertEq(engine.frozenCloseSpreadBps(), 50, "frozen close spread");
         assertEq(engine.settlementBufferBps(), 25, "settlement buffer");
+        assertEq(engine.minOpenSlippageToleranceBps(), 0, "generic minimum open slippage tolerance");
         assertEq(engine.fadRunwaySeconds(), 1 hours, "fad runway");
         assertEq(address(engine.terminalNavBook()), address(terminalNavBook), "terminal NAV book");
         assertEq(terminalNavBook.SIZE_QUANTUM(), 1e20, "position size quantum");
@@ -552,7 +554,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertGt(address(redemptionMathSidecar).code.length, 0, "redemption math sidecar code");
         assertEq(
             redemptionMathSidecar.implementationId(),
-            keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
+            keccak256("Plether.HousePoolRedemptionMathSidecar.v2"),
             "redemption math sidecar ID"
         );
         assertFalse(pool.lpEpochSettlementPaused(), "LP epoch settlement starts paused");
@@ -819,9 +821,13 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
 
         bootstrapScript.verifyInitialReleaseConfig(deployed.housePool, deployed.router);
+        assertEq(deployed.engine.minOpenSlippageToleranceBps(), 25);
+        assertEq(deployed.engineAdmin.riskConfigActivationTime(), 0);
+        assertEq(deployed.engineAdmin.TIMELOCK_DELAY(), 72 hours);
         assertEq(deployed.housePool.maxSeniorExposureAssets(), 40_000_000e6);
         assertEq(deployed.housePool.maxSeniorShareBps(), 8000);
         assertEq(deployed.router.minOpenNotionalAssets(), 1000e6);
+        assertEq(deployed.router.pletherOracle().minOrderSettlementDelay(), 1);
         assertEq(deployed.router.pletherOracle().adverseConfidenceMultiplierBps(), 2500);
         assertEq(deployed.housePool.poolConfigActivationTime(), 0);
         OrderRouterAdmin routerAdmin = OrderRouterAdmin(deployed.router.admin());
@@ -830,6 +836,17 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(routerAdmin.TIMELOCK_DELAY(), 72 hours);
 
         address owner = vm.addr(0xA11CE);
+        ICfdEngineAdminHost.EngineRiskConfig memory nextEngineConfig = _activeEngineRiskConfig(deployed.engine);
+        nextEngineConfig.minOpenSlippageToleranceBps = 50;
+        vm.prank(owner);
+        deployed.engineAdmin.proposeRiskConfig(nextEngineConfig);
+        assertEq(deployed.engineAdmin.riskConfigActivationTime(), block.timestamp + 72 hours);
+        assertEq(deployed.engine.minOpenSlippageToleranceBps(), 25, "proposal changed live Engine config");
+        vm.expectRevert(bytes("Outstanding Engine risk proposal"));
+        bootstrapScript.verifyInitialReleaseConfig(deployed.housePool, deployed.router);
+        vm.prank(owner);
+        deployed.engineAdmin.cancelRiskConfig();
+
         IHousePool.PoolConfig memory nextPoolConfig = IHousePool.PoolConfig({
             seniorRateBps: deployed.housePool.seniorRateBps(),
             markStalenessLimit: deployed.housePool.markStalenessLimit(),
@@ -857,6 +874,27 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         bootstrapScript.verifyInitialReleaseConfig(deployed.housePool, deployed.router);
     }
 
+    function _activeEngineRiskConfig(
+        CfdEngine engine
+    ) internal view returns (ICfdEngineAdminHost.EngineRiskConfig memory config) {
+        (
+            config.riskParams.vpiFactor,
+            config.riskParams.maxSkewRatio,
+            config.riskParams.maintMarginBps,
+            config.riskParams.initMarginBps,
+            config.riskParams.fadMarginBps,
+            config.riskParams.baseCarryBps,
+            config.riskParams.minBountyAssets,
+            config.riskParams.bountyBps,
+            config.riskParams.keeperShareBps,
+            config.riskParams.protocolShareBps
+        ) = engine.riskParams();
+        config.executionFeeBps = engine.executionFeeBps();
+        config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
+        config.settlementBufferBps = engine.settlementBufferBps();
+        config.minOpenSlippageToleranceBps = engine.minOpenSlippageToleranceBps();
+    }
+
     function _activeRouterConfig(
         OrderRouter router
     ) internal view returns (IOrderRouterAdminHost.RouterConfig memory config) {
@@ -864,6 +902,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
         config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.minOrderSettlementDelay = router.pletherOracle().minOrderSettlementDelay();
         config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();

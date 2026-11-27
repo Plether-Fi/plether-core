@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {SettlementOracle} from "@plether/options/oracles/SettlementOracle.sol";
 import {AggregatorV3Interface} from "@plether/shared/interfaces/AggregatorV3Interface.sol";

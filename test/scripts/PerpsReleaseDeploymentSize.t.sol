@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {DeployPerpsArbitrumSepolia} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -83,7 +83,7 @@ contract PerpsReleaseDeploymentSizeTest is Test {
         );
         _measure(
             "cfdEngine",
-            "CfdEngine.sol:CfdEngine",
+            string.concat(DEPLOY_SCRIPT, "ArbitrumSepoliaReleaseEngine"),
             address(d.engine),
             deployment.engineArguments(address(d.settlementToken), address(d.clearinghouse))
         );
@@ -173,6 +173,13 @@ contract PerpsReleaseDeploymentSizeTest is Test {
             "CfdEngineOpenQuoter.sol:CfdEngineOpenQuoter",
             vm.computeCreateAddress(address(d.engineLens), 1),
             ""
+        );
+        // The lens creates its immutable admission validator with its second CREATE.
+        _measure(
+            "cfdOrderAdmissionValidator",
+            "CfdOrderAdmissionValidator.sol:CfdOrderAdmissionValidator",
+            vm.computeCreateAddress(address(d.engineLens), 2),
+            abi.encode(address(d.engine))
         );
         _measure(
             "cfdOrderPolicyEvaluator",

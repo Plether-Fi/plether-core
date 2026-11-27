@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice HousePool LP reservation surface used by the configured senior tranche vault.
 /// @dev Settlement is coordinated separately through the Router-facing `IHousePool` entrypoints.

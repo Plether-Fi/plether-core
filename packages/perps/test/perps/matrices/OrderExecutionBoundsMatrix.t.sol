@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -124,45 +124,75 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                         assertTrue(vm.revertToState(startingState));
                         continue;
                     }
-                    uint256 actual = _amount(twin, kind);
-                    for (uint8 adjacent; adjacent < 3; adjacent++) {
-                        // A zero maximum has no tighter representable limit.
-                        if (adjacent == 1 && actual == 0 && !_minimum(kind)) {
-                            continue;
-                        }
-                        uint256 limit = adjacent == 0
-                            ? actual
-                            : adjacent == 1
-                                ? (_minimum(kind) ? actual + 1 : actual - 1)
-                                : (_minimum(kind) ? actual - 1 : actual + 1);
-                        OrderV3Types.OrderRequest memory request = _request(row);
-                        _setLimit(request, kind, limit);
-                        if (kind == 1 && adjacent == 1) {
-                            State memory before_ = _state();
-                            vm.expectRevert(
-                                abi.encodeWithSelector(
-                                    IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound.selector,
-                                    actual,
-                                    limit
-                                )
-                            );
-                            vm.prank(ACCOUNT);
-                            router.commitOrder(request);
-                            _assertCommitRollback(before_);
-                        } else {
-                            OrderV3Types.OrderReceipt memory receipt =
-                                _execute(row, request, adjacent == 1, kind, actual);
-                            if (adjacent != 1) {
-                                _assertGolden(row, receipt);
-                            }
-                        }
-                        assertTrue(vm.revertToState(startingState));
-                    }
+                    _probeBound(row, twin, kind, startingState);
                 }
                 vm.deleteStateSnapshot(startingState);
                 assertTrue(vm.revertToState(scenario));
                 vm.deleteStateSnapshot(scenario);
             }
+        }
+    }
+
+    function _probeBound(
+        Row memory row,
+        OrderV3Types.OrderReceipt memory twin,
+        uint8 kind,
+        uint256 startingState
+    ) private {
+        uint256 actual = _amount(twin, kind);
+        if (row.action == 1 && kind == 8) {
+            // The increase's equity floor is checked against its own funded pledge as well as
+            // the combined position. The standalone amount is the tighter boundary.
+            actual = MARGIN - FEE - NOTIONAL / 1000;
+        }
+        for (uint8 adjacent; adjacent < 3; adjacent++) {
+            // A zero maximum has no tighter representable limit.
+            if (adjacent == 1 && actual == 0 && !_minimum(kind)) {
+                continue;
+            }
+            uint256 limit = adjacent == 0
+                ? actual
+                : adjacent == 1
+                    ? (_minimum(kind) ? actual + 1 : actual - 1)
+                    : (_minimum(kind) ? actual - 1 : actual + 1);
+            OrderV3Types.OrderRequest memory request = _request(row);
+            _setLimit(request, kind, limit);
+            if (kind == 6 && adjacent == 1 && row.action < 2) {
+                State memory before_ = _state();
+                vm.expectRevert(IOrderRouterErrors.OrderRouter__ImpossibleExecutionRequest.selector);
+                vm.prank(ACCOUNT);
+                router.commitOrder(request);
+                _assertCommitRollback(before_);
+            } else if (kind == 1 && adjacent == 1) {
+                State memory before_ = _state();
+                vm.expectRevert(
+                    abi.encodeWithSelector(
+                        IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound.selector, actual, limit
+                    )
+                );
+                vm.prank(ACCOUNT);
+                router.commitOrder(request);
+                _assertCommitRollback(before_);
+            } else if (row.action < 2 && kind >= 8 && adjacent == 1) {
+                State memory before_ = _state();
+                vm.expectRevert(
+                    abi.encodeWithSelector(
+                        ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
+                        OrderV3Types.ConstraintKind(kind),
+                        actual,
+                        limit
+                    )
+                );
+                vm.prank(ACCOUNT);
+                router.commitOrder(request);
+                _assertCommitRollback(before_);
+            } else {
+                OrderV3Types.OrderReceipt memory receipt = _execute(row, request, adjacent == 1, kind, actual);
+                if (adjacent != 1) {
+                    _assertGolden(row, receipt);
+                }
+            }
+            assertTrue(vm.revertToState(startingState));
         }
     }
 
@@ -244,10 +274,10 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
     ) private view returns (OrderV3Types.OrderRequest memory request) {
         request.clientOrderId = bytes32(uint256(router.nextCommitId()) + 0xB000);
         request.side = row.side;
-        request.targetPrice = MARK;
+        request.isClose = row.action >= 2;
+        request.targetPrice = (row.side == CfdTypes.Side.LONG) != request.isClose ? 1 : CAP_PRICE;
         request.sizeDelta = row.action == 3 ? 2 * SIZE : SIZE;
         request.marginDelta = row.action < 2 ? MARGIN : 0;
-        request.isClose = row.action >= 2;
         request.bounds = OrderV3Types.ExecutionBounds({
             submitBy: uint64(vm.getBlockTimestamp() + 1 hours),
             executionWindowSeconds: 3600,
@@ -421,8 +451,9 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
     }
 
     /// @dev Offline rational potential vectors: C(S)=S²/(100D), D starts at 1,002,000 settlement token.
-    /// Seed: 80,000-settlement token skew costs 63.872255; at D=1,002,063.872255, moving to 88,000 costs
-    /// 13.412318 and moving to 72,000 rebates 12.134955. These are constants, not evaluator outputs.
+    /// Seed: 80,000-settlement token skew costs 63.872255. Its cash arrives with an equal deferred reserve, so
+    /// D remains 1,002,000; moving to 88,000 costs 13.413174 and moving to 72,000 rebates 12.135729.
+    /// These are independent integer-curve constants, not evaluator outputs.
     struct VpiGolden {
         int256 vpi;
         uint256 charge;
@@ -455,8 +486,8 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         Row memory row = Row(0, 0, healing ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG, self);
         _prepare(row);
         VpiGolden memory golden;
-        golden.vpi = healing ? int256(-12_134_955) : int256(13_412_318);
-        golden.charge = healing ? 0 : 16_612_318;
+        golden.vpi = healing ? int256(-12_135_729) : int256(13_413_174);
+        golden.charge = healing ? 0 : 16_613_174;
         golden.gross = golden.charge + 200_000;
         golden.settlement = uint256(int256(FUNDING - FEE) - golden.vpi) - (self ? 0 : 200_000);
         _vpiLimit(row, golden, 3);
@@ -620,7 +651,9 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                 router.commitOrder(tooSmall);
                 _assertCommitRollback(beforeCommit);
             }
-            uint256 actual = kind == 5 ? FEE : commitmentCarry + delayedCarry + FEE;
+            // Execution-time accrued carry (`delayedCarry`) is excluded from debit/charge bounds so carry
+            // checkpointing cannot toggle fills, while commitment carry remains bounded and receipts report both.
+            uint256 actual = kind == 5 ? FEE : commitmentCarry + FEE;
             for (uint8 adjacent; adjacent < 3; adjacent++) {
                 OrderV3Types.OrderRequest memory request = _request(row);
                 _setLimit(request, kind, adjacent == 0 ? actual : adjacent == 1 ? actual - 1 : actual + 1);

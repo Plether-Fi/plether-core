@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
@@ -82,8 +82,9 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
             preview.commitmentCarryAssets = preview.commitment.carryCollectedAssets;
             delta = planner.planClose(snapshot, _requestOrder(account, request), executionPrice);
         }
-        preview.assessment = _evaluateClose(snapshot, delta, request.bounds, 0, executor == account);
-        _includeCommitment(preview.assessment, preview.commitment, request.bounds, 0);
+        preview.assessment = _evaluateClose(
+            snapshot, delta, request.bounds, 0, executor == account, false, preview.commitmentCarryAssets
+        );
     }
 
     function _resolveClientId(
@@ -158,8 +159,8 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         preview.commitment = CloseCommitmentLib.project(snapshot, order.sizeDelta);
         preview.commitmentCarryAssets = preview.commitment.carryCollectedAssets;
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snapshot, order, executionPrice);
-        preview.assessment = _evaluateClose(snapshot, delta, bounds, 0, executor == order.account);
-        _includeCommitment(preview.assessment, preview.commitment, bounds, 0);
+        preview.assessment =
+            _evaluateClose(snapshot, delta, bounds, 0, executor == order.account, false, preview.commitmentCarryAssets);
     }
 
     /// @dev The router checks side and partial-close dust before reserving even a zero bounty. Its queued-position

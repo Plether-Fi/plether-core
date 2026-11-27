@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Independent liquidation arithmetic for the mixed campaign's fixed risk configuration.
 /// @dev Inputs are the action ledger after direct margin-first/free-second carry collection. No production
@@ -97,8 +97,8 @@ library LiquidationReferenceMath {
         due -= v.actionReserveConsumed;
         v.freeConsumed = _min(due, x.free + v.vpiReleased);
         due -= v.freeConsumed;
-        v.committedConsumed = _min(due, x.committedMargin);
-        v.carryWaived = due - v.committedConsumed;
+        // Liquidation leaves opening-order margin committed; terminal carry beyond free cash is waived.
+        v.carryWaived = due;
         v.carryCash = x.unpaidCarry - v.carryWithheld - v.carryWaived;
         v.fresh = v.gain - v.vpiWithheld - v.carryWithheld;
         v.allClaimsAfter = x.allClaims - v.claimConsumed;

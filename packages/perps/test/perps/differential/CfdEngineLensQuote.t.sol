@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEngineOpenQuoter} from "@plether/perps/CfdEngineOpenQuoter.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
@@ -74,6 +74,81 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         _open(account, CfdTypes.Side.LONG, quote.maxSizeDelta, 5000e6, 1e8);
     }
 
+    function test_OpenPreviewAndQuote_ReportEquityEligibleForOrderBounds() public {
+        address account = address(0xBEEF);
+        uint256 margin = 5000e6;
+        uint256 topUp = 1000e6;
+        _fundTrader(account, 25_000e6);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, margin, 1e8);
+
+        vm.startPrank(account);
+        uint64 orderId = router.commitOrder(CfdTypes.Side.LONG, 10_000e18, margin, 1e8, false);
+        engine.addMargin(account, topUp);
+        vm.stopPrank();
+        (uint256 protectedPledge,) = clearinghouse.protectedTopUps(account);
+        assertEq(protectedPledge, topUp);
+
+        (ICfdEngineTypes.OpenPreview memory preview, int256 eligibleEquity) =
+            engineLens.previewOpenWithEligibleEquity(account, CfdTypes.Side.LONG, 10_000e18, margin, 1e8);
+        assertTrue(preview.valid);
+        assertEq(preview.postEquityAssets, int256(preview.postMarginAssets));
+        assertEq(eligibleEquity, preview.postEquityAssets - int256(topUp));
+        assertEq(
+            eligibleEquity,
+            policyEvaluator.assessCommittedOrder(address(engine), orderId, account, 1e8).postPositionEquityAssets
+        );
+
+        ICfdEngineLens.MaxOpenQuote memory quote = _quote(account, CfdTypes.Side.LONG, margin, 1e8);
+        assertGt(quote.maxSizeDelta, 0);
+        assertEq(quote.postEligibleEquityAssets, quote.preview.postEquityAssets - int256(topUp));
+    }
+
+    function test_QuoteMaxOpen_LegacyReturnShapeRemainsDecodable() public {
+        address account = address(0xBEEF);
+        uint256 margin = 5000e6;
+        _fundTrader(account, margin);
+        ICfdEngineLens.MaxOpenQuote memory quote = _quote(account, CfdTypes.Side.LONG, margin, 1e8);
+        assertGt(quote.maxSizeDelta, 0);
+        assertEq(quote.postEligibleEquityAssets, quote.preview.postEquityAssets);
+
+        (bool success, bytes memory data) = address(engineLens)
+            .staticcall(abi.encodeCall(ICfdEngineLens.quoteMaxOpen, (account, CfdTypes.Side.LONG, margin, 1e8)));
+        assertTrue(success);
+        (
+            uint256 maxSizeDelta,
+            ICfdEngineTypes.OpenPreview memory preview,
+            CfdEnginePlanTypes.OpenRevertCode limitingReason
+        ) = abi.decode(data, (uint256, ICfdEngineTypes.OpenPreview, CfdEnginePlanTypes.OpenRevertCode));
+        assertEq(maxSizeDelta, quote.maxSizeDelta);
+        assertEq(keccak256(abi.encode(preview)), keccak256(abi.encode(quote.preview)));
+        assertEq(uint8(limitingReason), uint8(quote.limitingReason));
+    }
+
+    function test_QuoteMaxOpen_IncreaseReclassifiesExcessLiquidationReserve() public {
+        address account = address(0xBEEF);
+        CfdTypes.Side side = CfdTypes.Side.SHORT;
+        _fundTrader(account, 20_000e6);
+        _open(account, side, 100_000e18, 11_490e6, 1e8);
+        assertEq(clearinghouse.liquidationReserveAssets(account), 100e6);
+        assertEq(clearinghouse.pnlPledgeAssets(account), 11_350e6);
+        uint256 balanceBefore = clearinghouse.balanceAssets(account);
+        uint256 lockedBefore = clearinghouse.lockedMarginAssets(account);
+
+        // At $0.90, the released reserve is needed to meet initial margin without adding collateral.
+        ICfdEngineLens.MaxOpenQuote memory quote = _quote(account, side, 0, 0.9e8);
+        assertEq(quote.maxSizeDelta, 600e18);
+        assertEq(quote.preview.postMarginAssets, 11_359_460_000);
+        assertEq(clearinghouse.liquidationReserveAssets(account), 100e6);
+
+        _open(account, side, quote.maxSizeDelta, 0, 0.9e8);
+        assertEq(clearinghouse.liquidationReserveAssets(account), 90_540_000);
+        assertEq(clearinghouse.pnlPledgeAssets(account), quote.preview.postMarginAssets);
+        assertEq(clearinghouse.lockedMarginAssets(account), lockedBefore);
+        assertEq(
+            clearinghouse.balanceAssets(account), balanceBefore - _engineExecutionFeeAssets(quote.maxSizeDelta, 0.9e8)
+        );
+    }
+
     function test_QuoteMaxOpen_ReturnsZeroForZeroPrice() public {
         address account = address(0xCAFE);
         _fundTrader(account, 10_000e6);
@@ -143,6 +218,42 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         ICfdEngineLens.MaxOpenQuote memory capped = _quote(account, CfdTypes.Side.SHORT, 10_000e6, CAP_PRICE);
         ICfdEngineLens.MaxOpenQuote memory above = _quote(account, CfdTypes.Side.SHORT, 10_000e6, CAP_PRICE + 1e8);
         assertEq(keccak256(abi.encode(capped)), keccak256(abi.encode(above)));
+    }
+
+    function test_QuoteMaxOpen_NetsRebateAgainstFeeAtSettlementBuffer() public {
+        uint256 price = 1e6;
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        snap.account = address(0x123);
+        snap.capPrice = price;
+        snap.longSide.openInterest = 100 * CfdTypes.SIZE_QUANTUM;
+        snap.longSide.maxProfitAssets = 100e6;
+        snap.poolCashAssets = 100_250_000;
+        snap.poolAssets = snap.poolCashAssets;
+        snap.settlementBufferBps = 25;
+        snap.executionFeeBps = 4;
+        snap.riskParams = _riskParams();
+        snap.riskParams.initMarginBps = 1000;
+        snap.riskParams.minBountyAssets = 1000;
+        snap.riskParams.vpiFactor = 0.0002e18;
+        snap.accountBuckets = MarginClearinghouseAccountingLib.buildIsolatedAccountAssetBuckets(10e6, 0, 0, 0, 0);
+        CfdTypes.Order memory order;
+        order.account = snap.account;
+        order.side = CfdTypes.Side.SHORT;
+        order.marginDelta = 2e6;
+        // At the cap a short adds no payout liability. The strict 10% initial-margin ceiling bounds it to 19 lots.
+        uint256 expectedSize = 19 * CfdTypes.SIZE_QUANTUM;
+        order.sizeDelta = expectedSize;
+        ICfdEnginePlanner planner = engine.planner();
+        CfdEnginePlanTypes.OpenDelta memory expected = planner.planOpen(snap, order, price);
+        assertTrue(expected.valid);
+        assertEq(expected.requiredEffectiveAssetsAfterAssets, snap.poolCashAssets);
+        assertLt(expected.posVpiAccruedDelta, 0);
+        assertGt(expected.tradeCostAssets, 0, "fee absorbs the opening rebate before any cash leaves the pool");
+
+        CfdEngineOpenQuoter quoter = new CfdEngineOpenQuoter();
+        (uint256 actualSize, CfdEnginePlanTypes.OpenDelta memory actual,) = quoter.quote(planner, snap, order, price);
+        assertEq(actualSize, expectedSize, "quote must retain the valid size at the settlement buffer");
+        assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(expected)));
     }
 
     function test_QuoteMaxOpen_ExistingRebateReserveCanBeReleased() public {

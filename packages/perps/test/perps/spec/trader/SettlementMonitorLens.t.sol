@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
@@ -557,7 +557,16 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertFalse(early.oracle.readSucceeded);
         assertFalse(early.oracle.policyValid);
         assertFalse(early.oracle.publishTimeMeetsEpochFloor);
+        assertEq(early.oracle.failureSelector, IPletherOracle.PletherOracle__PoolEpochComponentTooOld.selector);
+        assertEq(early.oracle.dependencyFailureMask, 0);
+        assertEq(early.status.dependencyFailureMask, 0);
+        assertEq(uint8(early.health.state), uint8(SettlementMonitorViewTypes.HealthState.Healthy));
         assertTrue(
+            _hasOperationalBlocker(
+                early.status.operationalBlockerMask, SettlementMonitorViewTypes.OperationalBlocker.RequiredOracleInvalid
+            )
+        );
+        assertFalse(
             _hasOperationalBlocker(
                 early.status.operationalBlockerMask,
                 SettlementMonitorViewTypes.OperationalBlocker.RequiredDependencyUnknown
@@ -2690,8 +2699,11 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         address rebootLp = address(0xB007);
         uint256 oldSeniorSupply = seniorVault.totalSupply();
         pool.assignUnassignedAssets(true, rebootLp);
-        uint256 rebootShares = seniorVault.balanceOf(rebootLp);
-        assertEq(rebootShares, seniorBootstrapAssets * (oldSeniorSupply + 1000));
+        assertEq(seniorVault.balanceOf(rebootLp), 0, "wiped Senior assignment must not dilute existing shares");
+        uint256 rebootShares = seniorBootstrapAssets * (oldSeniorSupply + 1000);
+        vm.prank(address(pool));
+        seniorVault.bootstrapMint(rebootShares, rebootLp);
+        assertEq(seniorVault.balanceOf(rebootLp), rebootShares);
         assertEq(pool.seniorPrincipal(), seniorBootstrapAssets);
         assertEq(pool.seniorHighWaterMark(), seniorBootstrapAssets);
 
@@ -2903,6 +2915,39 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
             monitorLens.getSettlementObservation(observedEpoch);
         assertEq(later.observableConfigDigest, configBefore);
         assertTrue(later.observationDigest != first.observationDigest);
+    }
+
+    function test_PoolEpochComponentTooOldIsRecognizedPolicyRejectionAcrossHourBoundary() public {
+        uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 25_000e6);
+        _openMonitorPosition();
+        uint256 epochStart = pool.lpEpochStart(observedEpoch);
+        vm.warp(epochStart - 10);
+        _setCurrentBasket(100_000_000, 50_000, block.timestamp);
+        vm.warp(epochStart + 5);
+
+        SettlementMonitorViewTypes.OracleStatus memory oracleStatus = monitorLens.getPoolReconcileOracleStatus();
+        assertFalse(oracleStatus.readSucceeded);
+        assertFalse(oracleStatus.policyValid);
+        assertEq(oracleStatus.failureSelector, IPletherOracle.PletherOracle__PoolEpochComponentTooOld.selector);
+        assertEq(oracleStatus.dependencyFailureMask, 0, "epoch-boundary revert is a policy rejection, not a fault");
+
+        SettlementMonitorViewTypes.SettlementObservation memory observation =
+            monitorLens.getSettlementObservation(observedEpoch);
+        assertFalse(observation.observationComplete, "pre-boundary oracle still blocks atomic readiness");
+        assertEq(observation.status.dependencyFailureMask, 0);
+        assertEq(uint8(observation.health.state), uint8(SettlementMonitorViewTypes.HealthState.Healthy));
+        assertTrue(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask,
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredOracleInvalid
+            )
+        );
+        assertFalse(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask,
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredDependencyUnknown
+            )
+        );
     }
 
 }

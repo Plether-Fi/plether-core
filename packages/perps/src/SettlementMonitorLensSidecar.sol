@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -357,20 +357,27 @@ contract SettlementMonitorLensSidecar {
             }
             return recognized;
         }
-        bytes4 outOfOrder = IPletherOracle.PletherOracle__PriceOutOfOrder.selector;
-        bytes4 invalidSelector = IPletherOracle.PletherOracle__InvalidPrice.selector;
+        if (returnSize == 68) {
+            bytes4 outOfOrder = IPletherOracle.PletherOracle__PriceOutOfOrder.selector;
+            bytes4 invalidSelector = IPletherOracle.PletherOracle__InvalidPrice.selector;
+            bytes4 poolEpochTooOld = IPletherOracle.PletherOracle__PoolEpochComponentTooOld.selector;
+            assembly ("memory-safe") {
+                recognized := or(
+                    or(
+                        and(eq(selector, outOfOrder), and(iszero(shr(64, failureArg0)), iszero(shr(64, failureArg1)))),
+                        and(eq(selector, invalidSelector), eq(failureArg1, signextend(7, failureArg1)))
+                    ),
+                    and(eq(selector, poolEpochTooOld), lt(failureArg0, failureArg1))
+                )
+            }
+            return recognized;
+        }
         bytes4 invalidInverse = IPletherOracle.PletherOracle__InvalidInverseConfidence.selector;
         bytes4 mismatch = IPletherOracle.PletherOracle__EqualTimeMarkMismatch.selector;
         bytes4 zero = IPletherOracle.PletherOracle__ZeroBasketPrice.selector;
         bytes4 missing = IPletherOracle.PletherOracle__NoAcceptedBasket.selector;
         assembly ("memory-safe") {
             switch returnSize
-            case 68 {
-                recognized := or(
-                    and(eq(selector, outOfOrder), and(iszero(shr(64, failureArg0)), iszero(shr(64, failureArg1)))),
-                    and(eq(selector, invalidSelector), eq(failureArg1, signextend(7, failureArg1)))
-                )
-            }
             case 100 {
                 recognized := or(
                     and(eq(selector, mismatch), iszero(shr(64, failureArg0))),

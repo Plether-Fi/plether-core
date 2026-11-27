@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -34,16 +34,20 @@ library CloseCommitmentLib {
         effects.carryCollectedAssets = CfdEnginePlanLib.projectCloseCommitCarry(snap);
         effects.carryOutstandingAssets = snap.unsettledCarryAssets;
         if (size != snap.position.size) {
-            if (snap.unsettledCarryAssets != 0) {
+            // Check that the reducing fill can collect the remaining carry without spending protected pledge at commit.
+            if (snap.unsettledCarryAssets > snap.protectedPositionMarginAssets + snap.protectedReleasedMarginAssets) {
                 revert ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded(snap.unsettledCarryAssets);
             }
+            uint256 carryFromPledge = snap.unsettledCarryAssets < snap.protectedPositionMarginAssets
+                ? snap.unsettledCarryAssets
+                : snap.protectedPositionMarginAssets;
             uint256 bps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
             if (PositionRiskAccountingLib.buildExactPriceRiskState(
                     snap.position,
                     snap.positionEntryCostAssetAtoms,
                     snap.lastMarkPrice,
                     snap.capPrice,
-                    snap.position.margin + snap.traderClaimBalanceForAccount,
+                    snap.position.margin - carryFromPledge + snap.traderClaimBalanceForAccount,
                     bps
                 )
                 .liquidatable) {

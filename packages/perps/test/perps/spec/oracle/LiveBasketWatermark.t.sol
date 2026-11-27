@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {PletherOracleEngineMock, PletherOracleVaultMock} from "./PletherOracleMocks.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
@@ -62,6 +62,23 @@ contract LiveBasketWatermarkTest is Test {
         pyth.setPrice(A, 50_000_000, -8, 1000);
         pyth.setPrice(B, 50_000_000, -8, 1000);
         assertEq(oracle.getLatestPrice(), 100_000_000);
+    }
+
+    function test_FirstLiveBasketRequiresEveryFeedAtOrAfterEngineMark() public {
+        engine.setLastMark(100_000_000, 993);
+
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__FeedTimeOutOfOrder.selector, B, 992, 993));
+        oracle.updatePrice{value: FEE}(
+            address(this), _twoTicks(100_000_000, 994, 990, 100_000_000, 992, 990), IPletherOracle.PriceMode.MarkRefresh
+        );
+        assertFalse(oracle.hasAcceptedBasket());
+
+        IPletherOracle.PriceSnapshot memory snapshot = oracle.updatePrice{value: FEE}(
+            address(this), _twoTicks(100_000_000, 994, 990, 100_000_000, 993, 992), IPletherOracle.PriceMode.MarkRefresh
+        );
+        assertEq(snapshot.publishTime, 994);
+        assertTrue(oracle.hasAcceptedBasket());
+        assertEq(oracle.getAcceptedFeedPublishTimes()[1], 993);
     }
 
     function test_RejectsMissingAndRegressedComponents() public {

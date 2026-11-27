@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract MarketCalendarHarness {
+
+    function marketStatus(
+        uint256 timestamp,
+        bool todayOverride,
+        bool tomorrowOverride,
+        uint256 fadRunwaySeconds
+    ) external pure returns (bool fadWindow, bool oracleFrozen) {
+        return MarketCalendarLib.marketStatus(timestamp, todayOverride, tomorrowOverride, fadRunwaySeconds);
+    }
 
     function isFadWindow(
         uint256 timestamp,
@@ -91,6 +100,72 @@ contract MarketCalendarLibTest is Test {
         assertTrue(calendar.isFadWindow(wednesdayNoon, true, false, 0));
         assertFalse(calendar.isOracleFrozen(wednesdayNoon, false));
         assertFalse(calendar.isFadWindow(wednesdayNoon, false, false, 0));
+    }
+
+    function test_OverrideFrozen_EndsAtNewYorkReopenEveryWeekday() public view {
+        _assertOverrideWeek(1_784_505_600, 21 hours); // Monday 2026-07-20, daylight time
+        _assertOverrideWeek(1_768_176_000, 22 hours); // Monday 2026-01-12, standard time
+    }
+
+    function test_OverrideFrozen_ConsecutiveDaysThawBeforeUtcMidnight() public view {
+        uint256[2] memory days_ = [uint256(1_784_678_400), uint256(1_768_348_800)];
+        uint256[2] memory boundaries = [uint256(21 hours), uint256(22 hours)];
+        for (uint256 season; season < days_.length; ++season) {
+            uint256 dayStart = days_[season];
+            (bool fad, bool frozen) = calendar.marketStatus(dayStart + boundaries[season], true, true, 24 hours);
+            assertTrue(fad, "The override keeps FAD active after reopening");
+            assertFalse(frozen, "Tomorrow's override must not extend today's closure");
+            (fad, frozen) = calendar.marketStatus(dayStart + 1 days - 1, true, true, 24 hours);
+            assertTrue(fad);
+            assertFalse(frozen, "The tail remains live through the last UTC second");
+            (fad, frozen) = calendar.marketStatus(dayStart + 1 days, true, false, 24 hours);
+            assertTrue(fad);
+            assertTrue(frozen, "The next overridden UTC day starts a new closure");
+            (fad, frozen) = calendar.marketStatus(dayStart + 1 days + boundaries[season], true, false, 24 hours);
+            assertTrue(fad);
+            assertFalse(frozen, "The next override also ends at its reopening boundary");
+            (fad, frozen) = calendar.marketStatus(dayStart + 2 days, false, false, 24 hours);
+            assertFalse(fad, "All-day FAD ends when the last overridden UTC day ends");
+            assertFalse(frozen);
+        }
+    }
+
+    function test_OverrideFrozen_DstSundayReopensAtAdjustedBoundary() public view {
+        uint256[2] memory sundays = [uint256(1_772_928_000), uint256(1_793_491_200)];
+        uint256[2] memory boundaries = [uint256(21 hours), uint256(22 hours)];
+        for (uint256 season; season < sundays.length; ++season) {
+            uint256 reopen = sundays[season] + boundaries[season];
+            assertTrue(calendar.isOracleFrozen(reopen - 1, true));
+            assertFalse(calendar.isOracleFrozen(reopen, true));
+            assertFalse(calendar.isOracleFrozen(reopen + 1, true));
+            assertTrue(calendar.isFadWindow(reopen + 1 hours, true, false, 0));
+        }
+    }
+
+    function test_FadRunway_NeverFreezesThePreOverrideTail() public view {
+        uint256 tail = 1_784_678_400 - 1; // Tuesday 2026-07-21 23:59:59 UTC
+        (bool fad, bool frozen) = calendar.marketStatus(tail, false, true, 1 hours);
+        assertTrue(fad, "The next day's override activates only FAD during its runway");
+        assertFalse(frozen, "The runway must keep ordinary oracle freshness checks");
+    }
+
+    function _assertOverrideWeek(
+        uint256 monday,
+        uint256 marketBoundary
+    ) internal view {
+        for (uint256 weekday; weekday < 7; ++weekday) {
+            uint256 dayStart = monday + weekday * 1 days;
+            uint256 reopen = dayStart + marketBoundary;
+            bool recurringWeekendClosure = weekday == 4 || weekday == 5;
+            assertTrue(calendar.isOracleFrozen(dayStart, true), "Every override starts frozen at UTC midnight");
+            assertTrue(calendar.isOracleFrozen(reopen - 1, true), "The override stays frozen before reopening");
+            assertEq(calendar.isOracleFrozen(reopen, true), recurringWeekendClosure, "Reopening is inclusive");
+            assertEq(calendar.isOracleFrozen(reopen + 1, true), recurringWeekendClosure);
+            assertEq(calendar.isOracleFrozen(dayStart + 1 days - 1, true), recurringWeekendClosure);
+            assertTrue(calendar.isFadWindow(dayStart, true, false, 0));
+            assertTrue(calendar.isFadWindow(reopen, true, false, 0), "FAD survives the oracle reopening");
+            assertTrue(calendar.isFadWindow(dayStart + 1 days - 1, true, false, 0));
+        }
     }
 
     function test_NewYorkDst_TransitionInstantsAreInclusiveAndExclusive() public view {

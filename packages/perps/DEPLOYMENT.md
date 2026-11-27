@@ -22,6 +22,12 @@ Immutable and one-time bindings prevent a Router-only replacement or an in-place
 There is no live-state migration tool. Cutover needs a separate plan for existing positions, queued orders,
 protections, balances, claims, and LP obligations.
 
+Deferred VPI ownership requires a fresh matched Engine, Pool, lens and dependent deployment set. Its positive and
+negative accrued-VPI totals start at zero with no positions; there is no owner backfill setter or in-place correction
+for populated immutable contracts. Export the new guarded `vpiAccountingSnapshot()` and expanded accounting tuples
+from the candidate build. The terminal price book's eight-word snapshot remains price-only. Preserve historical ABI
+and release files for their original deployments.
+
 Manual shutdown uses the existing `OrderRouterAdmin` and `HousePool` entry pauses, left in place while obligations
 are settled. Do not use the LP epoch settlement hold as a permanent stop because it also blocks redemption funding.
 The source adds no automatic wipeout latch or irreversible restart restriction.
@@ -60,9 +66,9 @@ transaction evidence unset and must not be marked deployed or active.
 | Environment template | `.env.arbitrum-sepolia-perps.example` |
 | Full-stack manifest template | `deployments/arbitrum-sepolia-perps.template.json` |
 | Consumer ABI and build-evidence export | `scripts/export-perps-release.py` |
-| One bounded LP settlement pass | `script/LpEpochKeeper.s.sol` |
+| Order pass followed by one bounded LP settlement pass | `scripts/settle-lp-epoch.sh` |
 
-The full-stack manifest includes 29 contracts, including constructor-created children. Save the exact source commit,
+The full-stack manifest includes 31 contracts, including constructor-created children. Save the exact source commit,
 compiler settings, deployment block, transaction receipts, addresses, runtime hashes, creation inputs, and active
 execution-config hash. The standalone verifier checks the deployment graph and release state; it does not replace
 comparison of every deployed bytecode artifact with the release build.
@@ -71,14 +77,16 @@ comparison of every deployed bytecode artifact with the release build.
 
 The deploy script performs creation and one-time wiring in this order:
 
-1. Deploy MockUSDG, MarginClearinghouse, CfdEngine, and the empty Engine-bound TerminalNavBookV2. Wire the Book before
+1. Deploy MockUSDG, MarginClearinghouse, the release CfdEngine, and the empty Engine-bound TerminalNavBookV2. Wire the Book before
    any exposure. Deploy and wire the Engine planner, settlement sidecar, and admin.
+   The Engine constructor creates its immutable planning reader, which owns read-only snapshot construction; the
+   settlement sidecar resolves that reader lazily and retains the authorized snapshot facade.
 2. Deploy HousePoolRedemptionMathSidecar, then the release HousePool. The Pool constructor also creates
    CfdEngineProtocolLens. Deploy Senior with a zero maintenance fee and zero recipient, register it, snapshot
    `Engine.protocolTreasury()`, then deploy Junior with a zero fee and that recipient. Register Junior and wire the
    Engine to the Pool.
 3. Deploy the account lens, Engine lens, release Oracle, policy evaluator, CfdClosePreview, and execution sidecar.
-   CfdEngineLens internally creates CfdEngineOpenQuoter; the execution sidecar creates OrderRecoverySidecar.
+   CfdEngineLens internally creates CfdEngineOpenQuoter and CfdOrderAdmissionValidator; the execution sidecar creates OrderRecoverySidecar.
 4. Deploy the lifecycle Book, liquidation/keeper sidecar, and Router in the strict nonce sequence below. The Router
    constructor creates RouterAdmin and PositionProtectionBook. Complete Engine/Router/Clearinghouse wiring.
 5. Deploy PerpsPublicLens and SettlementMonitorLens. The monitor creates its own monitor-only sidecar.
@@ -98,10 +106,10 @@ Do not insert a nonce-consuming transaction into this sequence. The Router valid
 checks the actual Router address against the prediction. If the sequence breaks, recompute the prediction and deploy
 new dependencies; their immutable bindings cannot be repaired.
 
-The release wrappers initialize HousePool's `$40M/80%` Senior limits, the Oracle's `2,500`-bps adverse multiplier,
-and the Router's `$1,000` opening minimum. The deploy script checks the Oracle multiplier before creating the Router.
-These wrappers add no post-deployment configuration surface. Later economic configuration changes use the applicable
-72-hour governance paths.
+The release wrappers initialize the Engine's `25`-bps minimum open slippage tolerance band, HousePool's `$40M/80%`
+Senior limits, the Oracle's `2,500`-bps adverse multiplier, and the Router's `$1,000` opening minimum. The release
+oracle inherits the one-second minimum settlement delay. Later configuration changes use the applicable 72-hour
+governance paths.
 
 Record and verify children as well as top-level deployments:
 
@@ -109,6 +117,7 @@ Record and verify children as well as top-level deployments:
 | --- | --- |
 | Engine protocol lens | `HousePool.ENGINE_PROTOCOL_LENS()`; verify Engine binding |
 | Engine open quoter | Recover from the Engine-lens creation trace; its internal immutable has no public getter |
+| Order admission validator | `CfdEngineLens.orderAdmissionValidator()`; verify Engine binding |
 | Recovery sidecar | `OrderRouterExecutionSidecar.recoverySidecar()` |
 | RouterAdmin | `OrderRouter.admin()` |
 | Position-protection Book | `OrderRouter.positionProtectionBook()`; verify Router and Engine |
@@ -122,7 +131,9 @@ CfdClosePreview is a separate stateless contract, not the policy evaluator or a 
 
 HousePool deliberately has no getter for its immutable redemption-math sidecar. Preserve its constructor input and
 creation evidence. Bootstrap's supplied-sidecar check proves code and
-`implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v1")`, not the Pool's hidden binding.
+`implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v2")`, not the Pool's hidden binding.
+The v2 sidecar also supplies the pure reconciliation planner and pending-claimant caps. Deploy it with the matching
+HousePool revision; the Pool rejects a v1 redemption-only implementation.
 
 ## Initial release parameters
 
@@ -158,9 +169,11 @@ six decimals; basis points use `10,000 = 100%`.
 | `protocolShareBps` | `0` (protocol liquidation fee disabled; remaining 50% goes to LPs) |
 | `executionFeeBps` | `4` |
 | `settlementBufferBps` | `25` (0.25% of maximum directional liability) |
+| `minOpenSlippageToleranceBps` | `25` (0.25% symmetric commit-time open/increase tolerance band; release-Engine constructor initialization) |
 | `positionSizeQuantum` | `1e20` raw units (100 synthetic tokens) |
 | `fadRunwaySeconds` | `1 hours` |
 | `basketMaxConfidenceRatioBps` | `10` |
+| `minOrderSettlementDelay` | `1` second |
 | `adverseConfidenceMultiplierBps` | `2_500` (release-oracle constructor initialization) |
 | `minOpenNotionalAssets` | `1_000e6` (release-Router constructor initialization) |
 | `maxPendingOrders` | `5` |
@@ -176,6 +189,10 @@ Read [Accounting specification](ACCOUNTING_SPEC.md) for fee, reserve, margin, an
 
 - The settlement buffer reserves additional withdrawal capacity and gates new risk. Raw degraded mode still uses
   `E < L`, with `E = max(Pool assets - trader claims, 0)` and `L` the larger directional liability.
+- Buffered admission and LP withdrawal cash also protect gross positive accrued VPI. LP NAV subtracts that deferred
+  amount and adds reserve-backed negative accrued VPI; the negative receivable is never cash headroom. Qualify both
+  signs and matching consumer tuples before activation. When both stored tranche principals are zero, pool-funded
+  protocol-fee top-ups are forgone for that action and do not become fee debt.
 - Junior maintenance fees mint Junior shares. The zero-rate treasury recipient is a deployment-time snapshot;
   changing the Engine treasury does not rotate it automatically.
 - The frozen close spread applies to voluntary reductions during `oracleFrozen`. Pricing and live/frozen Pyth fee
@@ -183,8 +200,16 @@ Read [Accounting specification](ACCOUNTING_SPEC.md) for fee, reserve, margin, an
 
 The script pins Pyth to `0x0B73614636C855Bf23F342F307FB981A3e47f42B` and configures EUR/USD and GBP/USD directly,
 plus inverted USD/JPY, USD/CAD, USD/SEK, and USD/CHF feeds. Feed IDs, quantities, and base prices are in the deploy
-script. Calendar classification follows 17:00 New York FX close/open, including daylight saving; integrations must
-use the same rule and the Engine's configured overrides.
+script. The Engine calendar combines the 17:00 New York FX weekend schedule, day overrides, and scheduled closures.
+Integrations should use the Engine's canonical calendar status.
+
+For a scheduled provider closure, verify the configured basket feeds' hours and submit the exact UTC start and end
+through `CfdEngineAdmin.proposeCalendarConfig`. The proposal replaces the complete day override and closure lists.
+Supply the other entries that should remain active and remove any day overrides that were approximating the same
+closure. Finalize after the 72-hour timelock and before the closure's FAD runway. Confirm the active intervals
+using `marketClosureCount()` and `marketClosures(index)`. Install a fresh mark before the closure starts.
+Use the release ABI when encoding calendar proposals or decoding their events, since the configuration tuple
+includes the closure array.
 
 ## Preflight and deploy
 
@@ -548,15 +573,22 @@ and every basket component to meet the current epoch boundary. Frozen replay use
 repair a mark older than the frozen freshness limit. See [Oracle synchronization](ORACLE_SYNCHRONIZATION.md).
 
 For the keeper script, set `SETTLEMENT_MONITOR_LENS`, `PERPS_ORDER_ROUTER`, `OBSERVED_EPOCH`, and
-`KEEPER_PRIVATE_KEY`. For the atomic route, also set `PYTH_UPDATE_DATA` as an ABI-encoded `bytes[]`; an empty array is
-usable only when accepted-basket or frozen replay policy permits it. Then run:
+`KEEPER_PRIVATE_KEY`. Set `ORDER_PYTH_UPDATE_DATA` to an ABI-encoded `bytes[]` with historical price updates for
+the queued orders. Set `PYTH_UPDATE_DATA` separately with a current basket for atomic settlement. Supply it even
+when the Pool is flat if the order pass may open a position. The atomic route can use an empty array only when
+accepted-basket or frozen replay policy permits it. Then run:
 
 ```bash
-forge script script/LpEpochKeeper.s.sol --tc LpEpochKeeper \
-  --rpc-url "$ARB_SEPOLIA_RPC_URL" --broadcast
+bash scripts/settle-lp-epoch.sh --rpc-url "$ARB_SEPOLIA_RPC_URL" --broadcast
 ```
 
-The script checks monitor/Router binding and the hold before decoding payloads or quoting fees. Do not use
+The runner attempts at most one order transaction over four consecutive IDs starting at the FIFO head. Without
+historical data in live mode, it uses oracle-free cleanup for expired or invalid orders. Frozen execution can use
+the cached mark. When live settlement initially uses the cached route and no current basket is supplied, the order
+pass is limited to cleanup so it cannot open the first position. The runner re-reads the settlement route after the
+order pass and attempts settlement even if the pass fails or leaves orders pending.
+
+Both phases check monitor/Router binding and the hold before decoding payloads or quoting fees. Do not use
 `--skip-simulation`. Confirm `LpEpochSettled`, re-read remaining work, and repeat as needed. Each tranche phase is
-bounded to 16 nonempty epochs per call; every atomic pass revalidates its oracle input. A no-progress or
-oracle-rejected call rolls back the transaction's state changes.
+bounded to 16 nonempty epochs per call. Every atomic pass revalidates its oracle input. A no-progress or
+oracle-rejected LP call rolls back that transaction's state changes.

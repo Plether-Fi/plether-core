@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Public trader-facing margin account surface stripped of internal reservation and bucket plumbing.
 /// @dev Monetary values use the settlement token's native units, expected to be 6-decimal settlement token.

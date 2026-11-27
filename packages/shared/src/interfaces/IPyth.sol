@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @title Pyth Price Structs
 library PythStructs {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
 import {ClaimEngineViewTypes} from "@plether/perps/interfaces/ClaimEngineViewTypes.sol";
 
@@ -71,6 +72,212 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
             clearinghouseBefore + traderClaim,
             "Claim should credit the clearinghouse balance"
         );
+    }
+
+    function test_SettleTraderClaim_FlatPendingOpenCannotLoseClaimCollateral() public {
+        address account = address(0xD3021);
+        uint256 claimAssets = 1000e6;
+        _fundTrader(account, 5000e6);
+        _seedAuthenticatedTraderClaim(account, claimAssets);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        // Standalone open funding requires own margin at commit, while the claim stays locked until execution.
+        vm.prank(account);
+        uint64 orderId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
+        bytes[] memory updateData = _mockPythUpdateData();
+        uint256 poolBefore = pool.totalAssets();
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
+        uint256 freeBefore = _freeSettlementAssets(account);
+        uint256 bountyBefore = clearinghouse.totalBountyReservationsAssets(account);
+
+        vm.prank(account);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        engine.settleTraderClaim(account);
+
+        assertEq(engine.traderClaimBalanceAssets(account), claimAssets);
+        assertEq(engine.totalTraderClaimBalanceAssets(), claimAssets);
+        assertEq(pool.totalAssets(), poolBefore, "Blocked settlement must not pay pool cash");
+        assertEq(clearinghouse.balanceAssets(account), settlementBefore);
+        assertEq(_freeSettlementAssets(account), freeBefore, "Claim must not become withdrawable");
+        assertEq(clearinghouse.getOrderReservation(orderId).remainingAmountAssets, 2000e6);
+        assertEq(clearinghouse.totalBountyReservationsAssets(account), bountyBefore);
+        assertEq(router.pendingOrderCounts(account), 1);
+
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Executed));
+        (uint256 size,,,,,,) = engine.positions(account);
+        assertEq(size, 100_000e18, "The claim-backed open must still execute");
+    }
+
+    function test_SettleTraderClaim_ZeroMarginOrdersBlockUntilFlatQueueClears() public {
+        address account = address(0xD3022);
+        uint256 claimAssets = 5000e6;
+        _fundTrader(account, 5000e6);
+        _seedAuthenticatedTraderClaim(account, claimAssets);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        // Stale-mark admission still requires standalone funding; multiple queued opens keep blocking until drained.
+        vm.warp(block.timestamp + router.pletherOracle().orderExecutionStalenessLimit() + 1);
+        vm.startPrank(account);
+        uint64 firstOrderId = router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 200e6, 2e8, false);
+        uint64 secondOrderId = router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 200e6, 2e8, false);
+        vm.stopPrank();
+        assertEq(router.getAccountReservations(account).committedMarginAssets, 400e6);
+
+        vm.prank(account);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        engine.settleTraderClaim(account);
+
+        bytes[] memory updateData = _mockPythUpdateData();
+        OrderV3Types.ExecutionResult memory firstResult = router.executeOrder(firstOrderId, updateData);
+        assertEq(uint8(firstResult.terminalReason), uint8(OrderV3Types.TerminalReason.Slippage));
+        assertEq(router.pendingOrderCounts(account), 1);
+        (uint256 size,,,,,,) = engine.positions(account);
+        assertEq(size, 0);
+
+        vm.prank(account);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        engine.settleTraderClaim(account);
+
+        OrderV3Types.ExecutionResult memory secondResult = router.executeOrder(secondOrderId, updateData);
+        assertEq(uint8(secondResult.terminalReason), uint8(OrderV3Types.TerminalReason.Slippage));
+        assertEq(router.pendingOrderCounts(account), 0);
+        uint256 freeBefore = _freeSettlementAssets(account);
+
+        vm.prank(account);
+        engine.settleTraderClaim(account);
+        assertEq(engine.traderClaimBalanceAssets(account), 0);
+        assertEq(_freeSettlementAssets(account), freeBefore + claimAssets);
+    }
+
+    function test_SettleTraderClaim_OtherAccountPendingOrderDoesNotBlock() public {
+        address claimant = address(0xD3023);
+        address trader = address(0xD3024);
+        uint256 claimAssets = 1000e6;
+        _seedAuthenticatedTraderClaim(claimant, claimAssets);
+        _fundTrader(trader, 5000e6);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        vm.prank(trader);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
+
+        vm.prank(claimant);
+        engine.settleTraderClaim(claimant);
+
+        assertEq(engine.traderClaimBalanceAssets(claimant), 0);
+        assertEq(_freeSettlementAssets(claimant), claimAssets);
+        assertEq(router.pendingOrderCounts(trader), 1);
+    }
+
+    function test_SettleTraderClaim_LivePendingIncreaseWaitsThenPaysPledge() public {
+        address account = address(0xD3025);
+        uint256 claimAssets = 2000e6;
+        _fundTrader(account, 5000e6);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
+        _seedAuthenticatedTraderClaim(account, claimAssets);
+
+        vm.prank(account);
+        uint64 orderId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
+        uint256 pledgeBefore = clearinghouse.pnlPledgeAssets(account);
+        uint256 freeBefore = _freeSettlementAssets(account);
+
+        vm.prank(account);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        engine.settleTraderClaim(account);
+
+        assertEq(engine.traderClaimBalanceAssets(account), claimAssets);
+        assertEq(clearinghouse.pnlPledgeAssets(account), pledgeBefore);
+        assertEq(_freeSettlementAssets(account), freeBefore, "Live claim payment must stay locked");
+        assertEq(router.pendingOrderCounts(account), 1);
+
+        bytes[] memory updateData = _mockPythUpdateData();
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Executed));
+        (uint256 size,,,,,,) = engine.positions(account);
+        assertEq(size, 200_000e18, "The unpaid claim must remain usable by the pending increase");
+
+        uint256 pledgeAfterOpen = clearinghouse.pnlPledgeAssets(account);
+        vm.prank(account);
+        engine.settleTraderClaim(account);
+        assertEq(engine.traderClaimBalanceAssets(account), 0);
+        assertEq(clearinghouse.pnlPledgeAssets(account), pledgeAfterOpen + claimAssets);
+    }
+
+    function test_SettleTraderClaim_UnderwaterIncreaseReliesOnLockedClaimCollateral() public {
+        address account = address(0xD30255);
+        uint256 claimAssets = 2000e6;
+        _fundTrader(account, 6000e6);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
+        _seedAuthenticatedTraderClaim(account, claimAssets);
+
+        // Move price adversely (+1.5% on LONG = 1,500 USDG unrealized loss) so the existing position's own equity
+        // (~360 USDG) plus the standalone increase's equity (~1,858 USDG) falls short of combined IMR (~3,045 USDG)
+        // unless the locked 2,000 USDG trader claim stays in place.
+        uint256 adversePrice = 101_500_000;
+        vm.warp(block.timestamp + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(adversePrice, uint64(block.timestamp));
+
+        vm.prank(account);
+        uint64 orderId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, adversePrice, false);
+        assertEq(router.pendingOrderCounts(account), 1);
+
+        // Settling the claim while the increase is queued must stay blocked.
+        vm.prank(account);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        engine.settleTraderClaim(account);
+        assertEq(engine.traderClaimBalanceAssets(account), claimAssets);
+
+        // With the claim still locked, combined post-open equity clears IMR and the increase executes.
+        bytes[] memory updateData = _mockPythUpdateData(adversePrice);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Executed));
+        (uint256 size,,,,,,) = engine.positions(account);
+        assertEq(size, 200_000e18, "underwater increase must execute using locked claim collateral");
+
+        // Once the queue drains, settling the claim converts it into active position pledge.
+        uint256 pledgeBeforeSettle = clearinghouse.pnlPledgeAssets(account);
+        vm.prank(account);
+        engine.settleTraderClaim(account);
+        assertEq(engine.traderClaimBalanceAssets(account), 0);
+        assertEq(clearinghouse.pnlPledgeAssets(account), pledgeBeforeSettle + claimAssets);
+    }
+
+    function test_SettleTraderClaim_LiveCloseThenReopenCannotReleaseClaimCollateral() public {
+        address account = address(0xD3026);
+        uint256 claimAssets = 2000e6;
+        _fundTrader(account, 6000e6);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
+        _seedAuthenticatedTraderClaim(account, claimAssets);
+
+        vm.startPrank(account);
+        uint64 closeId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
+        uint64 reopenId = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
+        vm.stopPrank();
+        assertEq(router.pendingOrderCounts(account), 2);
+
+        vm.prank(account);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        engine.settleTraderClaim(account);
+        assertEq(engine.traderClaimBalanceAssets(account), claimAssets);
+
+        bytes[] memory updateData = _mockPythUpdateData();
+        OrderV3Types.ExecutionResult memory closeResult = router.executeOrder(closeId, updateData);
+        assertEq(uint8(closeResult.terminalReason), uint8(OrderV3Types.TerminalReason.Executed));
+        (uint256 size,,,,,,) = engine.positions(account);
+        assertEq(size, 0);
+        assertEq(router.pendingOrderCounts(account), 1);
+
+        vm.prank(account);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
+        engine.settleTraderClaim(account);
+
+        OrderV3Types.ExecutionResult memory reopenResult = router.executeOrder(reopenId, updateData);
+        assertEq(uint8(reopenResult.terminalReason), uint8(OrderV3Types.TerminalReason.Executed));
+        (size,,,,,,) = engine.positions(account);
+        assertEq(size, 100_000e18);
     }
 
     function test_SettleTraderClaim_NoOpenPositionCheckpointsCarryBeforePoolPayout() public {

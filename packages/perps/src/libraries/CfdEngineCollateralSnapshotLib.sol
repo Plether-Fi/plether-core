@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -17,12 +17,13 @@ library CfdEngineCollateralSnapshotLib {
         bool closeCommit
     ) internal view {
         IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(account);
+        snapshot.protectedPositionMarginAssets = buckets.protectedPledgeAssets;
+        snapshot.protectedReleasedMarginAssets = buckets.protectedReleasedAssets;
         snapshot.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
             settlementBalanceAssets: buckets.settlementBalanceAssets,
             totalLockedMarginAssets: buckets.totalLockedAssets,
             activePositionMarginAssets: buckets.pnlPledgeAssets,
-            otherLockedMarginAssets: buckets.liquidationReserveAssets + buckets.orderMarginAssets
-                + buckets.actionReserveAssets,
+            otherLockedMarginAssets: buckets.totalLockedAssets - buckets.pnlPledgeAssets,
             freeSettlementAssets: buckets.freeSettlementAssets
         });
         snapshot.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({

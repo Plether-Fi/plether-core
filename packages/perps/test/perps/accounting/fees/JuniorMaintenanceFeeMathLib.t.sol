@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {JuniorMaintenanceFeeMathLib} from "@plether/perps/libraries/JuniorMaintenanceFeeMathLib.sol";
@@ -37,7 +37,8 @@ contract JuniorMaintenanceFeeMathHarness {
         uint256 aprBps,
         uint256 chargeableHours
     ) external pure returns (uint256) {
-        return JuniorMaintenanceFeeMathLib.pendingFeeShares(rawSupply, aprBps, chargeableHours);
+        return
+            JuniorMaintenanceFeeMathLib.pendingFeeShares(rawSupply, aprBps, chargeableHours, type(uint256).max - 1000);
     }
 
 }
@@ -48,6 +49,7 @@ contract JuniorMaintenanceFeeMathLibTest is Test {
     uint256 internal constant BPS = 10_000;
     uint256 internal constant HOURS_PER_YEAR = 8760;
     uint256 internal constant MAX_APR_BPS = 10_000;
+    uint256 internal constant MAX_SUPPLY = type(uint256).max - 1000;
 
     JuniorMaintenanceFeeMathHarness internal harness;
 
@@ -99,20 +101,56 @@ contract JuniorMaintenanceFeeMathLibTest is Test {
         harness.pendingFeeShares(1, MAX_APR_BPS, HOURS_PER_YEAR + 1);
     }
 
-    function test_MaxUintSupplyQuoteAtTenPercentDoesNotOverflow() public view {
-        uint256 feeShares = harness.pendingFeeShares(type(uint256).max, 1000, HOURS_PER_YEAR);
+    function test_SupplyAtOrAboveCeilingHasNoFeeHeadroom() public view {
+        assertEq(harness.pendingFeeShares(MAX_SUPPLY, MAX_APR_BPS, HOURS_PER_YEAR), 0);
+        assertEq(harness.pendingFeeShares(type(uint256).max, MAX_APR_BPS, HOURS_PER_YEAR), 0);
+    }
 
-        assertGt(feeShares, 0);
-        assertLt(feeShares, type(uint256).max / 9);
+    function test_FeeCapsBeforeTheNominalQuoteOverflows() public view {
+        uint256 rawSupply = (MAX_SUPPLY / 4) * 3;
+
+        assertEq(harness.pendingFeeShares(rawSupply, MAX_APR_BPS, HOURS_PER_YEAR), MAX_SUPPLY - rawSupply);
+    }
+
+    function test_OneHourFeeReservesVirtualShareHeadroom() public view {
+        assertEq(harness.pendingFeeShares(MAX_SUPPLY - 100, 1000, 1), 100);
+        assertEq(harness.pendingFeeShares(MAX_SUPPLY - 1, 1000, 1), 1);
+    }
+
+    function test_CapThresholdPreservesExactRounding() public view {
+        // Independent arbitrary-precision vectors at 100% APR for 8,760 hours.
+        uint256 threshold =
+            42_595_097_599_228_796_961_190_291_830_538_776_464_904_405_152_670_032_048_832_659_830_978_366_294_865;
+
+        assertEq(threshold - 1 + harness.pendingFeeShares(threshold - 1, MAX_APR_BPS, HOURS_PER_YEAR), MAX_SUPPLY - 6);
+        assertEq(threshold + harness.pendingFeeShares(threshold, MAX_APR_BPS, HOURS_PER_YEAR), MAX_SUPPLY - 3);
+        assertEq(threshold + 1 + harness.pendingFeeShares(threshold + 1, MAX_APR_BPS, HOURS_PER_YEAR), MAX_SUPPLY);
     }
 
     function test_MaxReachableSupplyCanAddTheFullYearFeeWithoutOverflow() public view {
         uint256 retainedRay = harness.retentionRay(MAX_APR_BPS, HOURS_PER_YEAR);
-        uint256 safeRawSupply = Math.mulDiv(type(uint256).max, retainedRay, RAY, Math.Rounding.Floor);
+        uint256 safeRawSupply = Math.mulDiv(MAX_SUPPLY, retainedRay, RAY, Math.Rounding.Floor);
         uint256 feeShares = harness.pendingFeeShares(safeRawSupply, MAX_APR_BPS, HOURS_PER_YEAR);
 
-        assertLe(feeShares, type(uint256).max - safeRawSupply);
+        assertLe(feeShares, MAX_SUPPLY - safeRawSupply);
         assertGe(safeRawSupply + feeShares, safeRawSupply);
+    }
+
+    function testFuzz_FeeFitsSupplyHeadroom(
+        uint256 supplySeed,
+        uint256 aprSeed,
+        uint256 hoursSeed
+    ) public view {
+        uint256 rawSupply = bound(supplySeed, 0, MAX_SUPPLY);
+        uint256 aprBps = bound(aprSeed, 0, MAX_APR_BPS);
+        uint256 chargeableHours = bound(hoursSeed, 0, HOURS_PER_YEAR);
+        uint256 feeShares = harness.pendingFeeShares(rawSupply, aprBps, chargeableHours);
+
+        assertLe(feeShares, MAX_SUPPLY - rawSupply);
+        assertLe(rawSupply + feeShares + 1000, type(uint256).max);
+        if (rawSupply == 0 || aprBps == 0 || chargeableHours == 0) {
+            assertEq(feeShares, 0);
+        }
     }
 
     function testFuzz_HourlyRateIsTheSpecifiedFloor(

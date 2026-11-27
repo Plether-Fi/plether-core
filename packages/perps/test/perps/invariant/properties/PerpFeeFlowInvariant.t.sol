@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpInvariantTest} from "../BasePerpInvariantTest.sol";
 import {PerpFeeHandler} from "../handlers/PerpFeeHandler.sol";
@@ -87,9 +87,9 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         handler.closePosition(0, 1e8); // A skipped precondition is observable, not a successful close.
         handler.openPosition(0, 2000e6);
         handler.openPosition(1, 10_000e6);
-        handler.closePosition(0, 0.98e8); // Fee withheld from a gain and funded by pool cash.
+        handler.closePosition(0, 0.98e8); // Fee withheld from a gain; zero-principal pool cannot top it up.
         handler.closePosition(1, 1.02e8); // Fee collected from trader cash on a losing close.
-        assertEq(handler.ghostAccruedFeesAssets(), 80e6);
+        assertEq(handler.ghostAccruedFeesAssets(), 60_400_000);
         _assertAllInvariants();
 
         handler.withdrawTreasuryFees();
@@ -103,19 +103,26 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         assertEq(handler.successfulWithdrawals(), 2);
         assertEq(handler.expectedRejections(), 1);
         assertEq(handler.skippedActions(), 1);
-        assertEq(handler.ghostAccruedFeesAssets(), 120e6);
-        assertEq(handler.ghostWithdrawnFeesAssets(), 120e6);
+        assertEq(handler.ghostAccruedFeesAssets(), 100_400_000);
+        assertEq(handler.ghostWithdrawnFeesAssets(), 100_400_000);
         _assertAllInvariants();
     }
 
     function test_FeeRoundingUsesWholeSettlementAtoms() public {
         handler.openPosition(0, 2000e6);
         handler.openPosition(1, 2000e6);
-        handler.closePosition(0, 98_000_004);
-        assertEq(handler.ghostAccruedFeesAssets(), 59_600_000);
+        handler.closePosition(0, 100_000_004);
+        assertEq(handler.ghostAccruedFeesAssets(), 60_000_000);
         _assertAllInvariants();
-        handler.closePosition(1, 98_000_005);
-        assertEq(handler.ghostAccruedFeesAssets(), 79_200_001);
+        handler.closePosition(1, 100_000_005);
+        assertEq(handler.ghostAccruedFeesAssets(), 80_000_001);
+        _assertAllInvariants();
+    }
+
+    function test_ProfitableCloseCreditsOnlyFeeNotWithheld() public {
+        handler.openPosition(0, 2000e6);
+        handler.closePosition(0, 99_999_999); // A 500-atom gain withholds only part of the assessed fee.
+        assertEq(handler.ghostAccruedFeesAssets(), 39_999_499);
         _assertAllInvariants();
     }
 

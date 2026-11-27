@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -27,7 +27,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     uint256 internal constant MIN_ENGINE_GAS_CAP = 5_000_000;
     /// @notice Upper bound for expired or configuration-invalid heads pruned in one execution call.
     uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL_LIMIT = 256;
-    /// @notice Upper bound for the permitted execution window at commit time.
+    /// @notice Upper bound for the configured fixed execution lifetime.
     uint256 internal constant MAX_EXECUTION_WINDOW_SECONDS_LIMIT = 1 hours;
 
     /// @notice Router host controlled by this admin.
@@ -53,7 +53,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     error OrderRouterAdmin__TimelockNotReady();
     /// @notice Finalization was requested without an active proposal.
     error OrderRouterAdmin__NoProposal();
-    /// @notice The proposed maximum order age is zero or exceeds the one-hour limit.
+    /// @notice The proposed fixed execution lifetime is zero or exceeds the one-hour limit.
     error OrderRouterAdmin__InvalidMaxExecutionWindowSeconds();
     /// @notice A staleness, settlement-window, or component-divergence limit is inconsistent or zero.
     error OrderRouterAdmin__InvalidStalenessLimit();
@@ -333,8 +333,8 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         _validateGasConfig(config.minEngineGas, config.maxPruneOrdersPerCall);
     }
 
-    /// @notice Validates a nonzero maximum order age no greater than one hour.
-    /// @param maxExecutionWindowSeconds Candidate maximum age in seconds.
+    /// @notice Validates a nonzero fixed execution lifetime no greater than one hour.
+    /// @param maxExecutionWindowSeconds Candidate fixed lifetime in seconds.
     function _validateOrderAge(
         uint256 maxExecutionWindowSeconds
     ) private pure {
@@ -350,7 +350,8 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     ) private pure {
         if (
             config.orderExecutionStalenessLimit == 0 || config.liquidationStalenessLimit == 0
-                || config.orderSettlementWindow == 0 || config.orderSettlementWindow > config.maxExecutionWindowSeconds
+                || config.minOrderSettlementDelay == 0 || config.minOrderSettlementDelay > config.orderSettlementWindow
+                || config.orderSettlementWindow > config.maxExecutionWindowSeconds
                 || config.maxComponentPublishTimeDivergence == 0
                 || config.maxComponentPublishTimeDivergence > config.orderSettlementWindow
         ) {

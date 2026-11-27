@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -121,6 +121,7 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         pool.recordClaimantInflow(
             3000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
+        // Spend part of the pending revenue on a pool payout so residual unbacked pending revenue is discarded.
         vm.prank(address(engine));
         pool.payOut(address(0xDEAD), 1000e6);
         assertEq(pool.unassignedAssets(), 0);
@@ -147,6 +148,28 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         vm.expectRevert(IHousePool.HousePool__PendingBootstrap.selector);
         pool.activateTrading();
         assertFalse(pool.isTradingActive());
+    }
+
+    function test_ActivateTradingDiscardsSpentPendingRevenueWithSeedOwners() public {
+        _seedBothTranches();
+        settlementToken.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        settlementToken.mint(address(pool), 3000e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            3000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        vm.prank(address(engine));
+        pool.payOut(address(0xDEAD), 1000e6);
+
+        pool.activateTrading();
+        assertTrue(pool.isTradingActive(), "spent revenue must not leave an unsupported bootstrap reservation");
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.pendingTradingRevenueAssets(), 0, "spent revenue must be written off");
+        assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), 2000e6, "only retained cash may restore LPs");
     }
 
     function test_ActivateTradingAcceptsPendingRevenueWithSeedOwners() public {
@@ -204,6 +227,8 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         settlementToken.mint(address(this), seniorSeed);
         settlementToken.approve(address(pool), seniorSeed);
         pool.initializeSeedPosition(true, seniorSeed, address(this));
+        uint256 redeemableSenior = 1e6;
+        _assignSeniorCapital(redeemableSenior);
 
         vm.warp(block.timestamp + 30 days);
         uint256 juniorSeedTime = block.timestamp;
@@ -211,7 +236,7 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         settlementToken.approve(address(pool), juniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
 
-        uint256 seniorBeforeJuniorSeed = seniorSeed + juniorCapacityBacking;
+        uint256 seniorBeforeJuniorSeed = seniorSeed + redeemableSenior + juniorCapacityBacking;
         assertEq(
             pool.seniorPrincipal(), seniorBeforeJuniorSeed, "Junior seed should not pay pre-existing senior coupon time"
         );

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
@@ -675,6 +675,11 @@ contract PerpAccountingHandler is Test {
         try engine.settleTraderClaim(account) {
             _observeTraderClaim(account);
         } catch (bytes memory err) {
+            if (_revertSelector(err) == ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector) {
+                if (engine.traderClaimBalanceAssets(account) == 0 || router.pendingOrderCounts(account) == 0) {
+                    revert UnexpectedActionRevert(RejectionDomain.Claim, err);
+                }
+            }
             _recordCaughtRevert(RejectionDomain.Claim, err);
         }
     }
@@ -822,7 +827,8 @@ contract PerpAccountingHandler is Test {
         if (domain == RejectionDomain.Claim) {
             return err.length == 4
                 && (selector == ICfdEngineTypes.CfdEngine__NoTraderClaim.selector
-                    || selector == ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
+                    || selector == ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector
+                    || selector == ICfdEngineTypes.CfdEngine__PendingOrdersExist.selector);
         }
         if (domain == RejectionDomain.Withdrawal) {
             return err.length == 4
@@ -1326,17 +1332,12 @@ contract PerpAccountingHandler is Test {
     ) internal {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             if (ghostOrderOwner[orderId] == account && ghostOrderState[orderId] == GHOST_ORDER_PENDING) {
-                _finalizeGhostOrder(orderId, GHOST_ORDER_LIQUIDATED);
+                if (_orderRecord(orderId).status != IOrderRouterAccounting.OrderStatus.Pending) {
+                    _finalizeGhostOrder(orderId, GHOST_ORDER_LIQUIDATED);
+                }
             }
         }
-
-        uint256 committedAfter = _trackedCommittedMargin(account);
-        if (committedBefore > committedAfter) {
-            uint256 observedReduction = committedBefore - committedAfter;
-            if (observedReduction > 0 && committedAfter > 0) {
-                _consumeCommittedMarginFromAccount(account, observedReduction);
-            }
-        }
+        assertEq(_trackedCommittedMargin(account), committedBefore, "Liquidation preserves queued opening margin");
     }
 
     function _snapshotTrackedCommittedMargin() internal view returns (uint256[4] memory committedMarginByActor) {
@@ -1430,8 +1431,8 @@ contract PerpAccountingHandler is Test {
         return actor;
     }
 
-    /// @notice Historical cleanup remains checked after an account deposits, trades and liquidates again.
-    /// @dev New-generation orders are deliberately excluded; old orders can never become live again.
+    /// @notice Historical stale-close cleanup remains checked after an account trades and liquidates again.
+    /// @dev Valid opening orders may span generations, so only stale closes count as cleanup exposure.
     function liquidatedGenerationExposure(
         address account
     ) external view returns (uint256 pendingOrders, uint256 liveReserves, uint256 reservedAssets) {
@@ -1446,6 +1447,9 @@ contract PerpAccountingHandler is Test {
                 break;
             }
             OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
+            if (!record.core.isClose) {
+                continue;
+            }
             if (record.status == IOrderRouterAccounting.OrderStatus.Pending) {
                 pendingOrders++;
             }

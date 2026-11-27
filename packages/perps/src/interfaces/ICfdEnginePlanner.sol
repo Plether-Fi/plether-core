@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -21,9 +21,11 @@ interface ICfdEnginePlanner {
 
     /// @notice Classifies the recurring and governance-override market-calendar regimes.
     /// @dev The recurring schedule follows the 17:00 New York FX boundary and its US daylight-saving transitions.
+    ///      Overrides keep FAD active all day and add freezing only before that day's boundary. Recurring weekend
+    ///      freezing still applies; tomorrow's override and the runway affect FAD only.
     /// @param timestamp Unix timestamp to classify
-    /// @param todayOverride Whether the current UTC day is an all-day FAD and frozen-oracle override
-    /// @param tomorrowOverride Whether the following UTC day is an all-day override
+    /// @param todayOverride Whether the current UTC day is configured as a FAD calendar override
+    /// @param tomorrowOverride Whether the following UTC day is configured as a FAD calendar override
     /// @param fadRunwaySeconds FAD look-ahead interval before an overridden following day
     /// @return fadWindow Whether FAD controls are active
     /// @return oracleFrozen Whether frozen-oracle policy is active

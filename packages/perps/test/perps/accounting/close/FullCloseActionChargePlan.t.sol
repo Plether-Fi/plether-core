@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
@@ -155,6 +155,7 @@ contract FullCloseActionChargePlanTest is Test {
     function test_FullClose_VpiClawbackAndReleasedBackingAreNotDoubleCounted() public view {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(20e6, 2e6, 0, 0, 7e6);
         snap.position.vpiAccrued = -5e6;
+        snap.totalNegativeVpiAccruedAssets = 5e6;
         snap.vpiRebateReserveAssets = 5e6;
         snap.protectedExecutionBountyAssets = 2e6;
         CfdEnginePlanTypes.CloseDelta memory flat = _plan(snap, PRICE, SIZE);
@@ -176,6 +177,7 @@ contract FullCloseActionChargePlanTest is Test {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(100e6, 10e6, 0, 0, 0);
         snap.riskParams.vpiFactor = 0.1e18;
         snap.position.vpiAccrued = 100e6;
+        snap.totalPositiveVpiAccruedAssets = 100e6;
         CfdEnginePlanTypes.CloseDelta memory reducing = _plan(snap, PRICE, SIZE);
         assertTrue(reducing.valid);
         assertLt(reducing.closeState.vpiDeltaAssets, 0);
@@ -193,6 +195,54 @@ contract FullCloseActionChargePlanTest is Test {
         assertGt(increasing.actionChargeAssessedAssets, FEE);
         assertEq(increasing.actionChargeCollectedAssets, increasing.actionChargeAssessedAssets);
         assertEq(increasing.actionChargeWaivedAssets, 0);
+    }
+
+    function test_FullClose_RebateFundsFullProtocolFee() public view {
+        CfdEnginePlanTypes.CloseDelta memory d = _plan(_rebateFeeSnapshot(), PRICE, SIZE);
+
+        assertTrue(d.valid);
+        assertEq(d.closeState.vpiDeltaAssets, -20e6);
+        assertEq(d.closeState.executionFeeAssets, FEE);
+        assertEq(d.actionChargeCollectedAssets, 0);
+        assertEq(d.actionRebatePaidAssets, 10e6);
+        assertEq(d.actionProtocolFeeCreditedAssets, 0);
+        assertEq(d.protocolFeeTopUpAssets, FEE);
+    }
+
+    function test_FullClose_RebateFundedProtocolFeeRespectsPoolReserves() public view {
+        CfdEnginePlanTypes.RawSnapshot memory snap = _rebateFeeSnapshot();
+        uint256 freeCashAfterRebate = 3e6;
+        snap.poolAdditionalReservedAssets = snap.poolCashAssets - 10e6 - freeCashAfterRebate;
+
+        CfdEnginePlanTypes.CloseDelta memory d = _plan(snap, PRICE, SIZE);
+
+        assertTrue(d.valid);
+        assertEq(d.actionRebatePaidAssets, 10e6);
+        assertEq(d.actionProtocolFeeCreditedAssets, 0);
+        assertEq(d.protocolFeeTopUpAssets, freeCashAfterRebate);
+    }
+
+    function test_FullClose_RebateDoesNotSubsidizeUncollectibleFee() public view {
+        CfdEnginePlanTypes.RawSnapshot memory snap = _rebateFeeSnapshot();
+        snap.oracleFrozen = true;
+        snap.frozenCloseSpreadBps = 50;
+
+        CfdEnginePlanTypes.CloseDelta memory d = _plan(snap, PRICE, SIZE);
+
+        assertTrue(d.valid);
+        assertEq(d.actionChargeAssessedAssets, 40e6);
+        assertEq(d.actionChargeWaivedAssets, 39e6);
+        assertEq(d.actionProtocolFeeCreditedAssets, 1e6);
+        assertEq(d.protocolFeeTopUpAssets, 0);
+    }
+
+    function _rebateFeeSnapshot() private pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
+        snap = _snapshot(0, 0, 1e6, 0, 0);
+        snap.poolAssets = 25_100e6;
+        snap.poolCashAssets = snap.poolAssets;
+        snap.riskParams.vpiFactor = 0.01e18;
+        snap.position.vpiAccrued = 100e6;
+        snap.totalPositiveVpiAccruedAssets = 100e6;
     }
 
     function testFuzz_FullClose_CashPlacementDoesNotChangeRecovery(

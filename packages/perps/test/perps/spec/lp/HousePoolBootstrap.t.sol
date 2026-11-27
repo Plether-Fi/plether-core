@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 import {HousePoolAsyncTestBase} from "../../shared/HousePoolTestBase.sol";
 
 contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
+
+    using stdStorage for StdStorage;
 
     address alice = address(0x111);
     address bob = address(0x222);
@@ -102,6 +105,48 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertGt(mintedShares, 0);
         assertEq(juniorVault.totalSupply(), supplyBefore + mintedShares);
         assertEq(pool.unassignedAssets(), 0);
+    }
+
+    function test_AssignUnassignedAssets_RevertsWhenVaultQuotesZeroShares() public {
+        uint256 assets = 1000e6;
+        _mintAndAccountPoolExcess(assets);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        vm.mockCall(address(juniorVault), abi.encodeCall(TrancheVault.quoteBootstrapDeposit, (assets)), abi.encode(0));
+        vm.expectRevert(IHousePool.HousePool__BootstrapSharesZero.selector);
+        pool.assignUnassignedAssets(false, alice);
+
+        assertEq(pool.unassignedAssets(), assets);
+        assertEq(juniorVault.balanceOf(alice), 0);
+    }
+
+    function test_AssignUnassignedAssets_JuniorWaitsForSeniorRecovery() public {
+        settlementToken.mint(address(this), 45_000e6);
+        settlementToken.approve(address(pool), 40_000e6);
+        pool.initializeSeedPosition(false, 10_000e6, address(this));
+        pool.initializeSeedPosition(true, 30_000e6, address(this));
+        settlementToken.approve(address(engine), 5000e6);
+        engine.recapitalizePool(5000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), 5000e6);
+
+        // The loss has not been reconciled when the owner attempts the assignment.
+        settlementToken.burn(address(pool), 15_000e6);
+        vm.expectRevert(IHousePool.HousePool__SeniorImpaired.selector);
+        pool.assignUnassignedAssets(false, alice);
+        assertEq(pool.unassignedAssets(), 5000e6);
+        assertEq(juniorVault.balanceOf(alice), 0);
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 25_000e6);
+        settlementToken.mint(address(pool), 15_000e6);
+        pool.assignUnassignedAssets(false, alice);
+        assertEq(pool.seniorPrincipal(), 30_000e6);
+        assertEq(pool.unassignedAssets(), 0);
+        assertGt(juniorVault.balanceOf(alice), 0);
     }
 
     function test_InitializeSeedPosition_MintsPermanentSeedShares() public {
@@ -606,7 +651,7 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(pool.seniorPrincipal(), 100_000e6);
     }
 
-    function test_AssignUnassignedAssets_ReconcilesBeforeBootstrappingAndAvoidsPhantomAssets() public {
+    function test_AssignUnassignedAssets_WaitsForFullBackingAfterAdverseMark() public {
         settlementToken.mint(address(pool), 100_000e6);
         pool.accountExcess();
         vm.prank(address(juniorVault));
@@ -619,9 +664,19 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         _ensureLaterOracleTime();
         vm.prank(address(router));
         engine.updateMarkPrice(1.2e8, uint64(vm.getBlockTimestamp()));
+
+        vm.expectRevert(IHousePool.HousePool__UnassignedAssetsUnderbacked.selector);
         pool.assignUnassignedAssets(false, alice);
-        assertLt(pool.juniorPrincipal(), 100_000e6);
+        assertEq(pool.unassignedAssets(), 100_000e6);
+        assertEq(juniorVault.balanceOf(alice), 0);
+
+        _ensureLaterOracleTime();
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(vm.getBlockTimestamp()));
+        pool.assignUnassignedAssets(false, alice);
+        assertEq(pool.juniorPrincipal(), pool.totalAssets());
         assertEq(pool.unassignedAssets(), 0);
+        assertGt(juniorVault.balanceOf(alice), 0);
     }
 
     function test_RecordImplicitTradingRevenue_RestoresSeededSeniorBeforeJuniorWhenBothAreZero() public {
@@ -654,6 +709,39 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(pool.seniorPrincipal(), 30_000e6, "Implicit retained revenue should restore seeded senior first");
         assertEq(pool.juniorPrincipal(), 5000e6, "Residual implicit retained revenue should attach to seeded junior");
         assertEq(pool.unassignedAssets(), 0, "Seeded implicit retained revenue should avoid quarantine");
+    }
+
+    function test_AssignUnassignedAssets_WipedSeniorCreditsExistingHoldersWithoutDilution() public {
+        settlementToken.mint(address(this), 20_000e6);
+        settlementToken.approve(address(pool), 20_000e6);
+        pool.initializeSeedPosition(false, 10_000e6, address(this));
+        pool.initializeSeedPosition(true, 10_000e6, address(this));
+        uint256 seniorSupplyBefore = seniorVault.totalSupply();
+        assertGt(seniorSupplyBefore, 0);
+
+        // Wipe both tranches to zero principal while preserving Senior's HWM and share supply.
+        uint256 totalBefore = pool.totalAssets();
+        vm.prank(address(engine));
+        pool.payOut(bob, totalBefore);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 0);
+        assertEq(pool.seniorHighWaterMark(), 10_000e6);
+
+        // Fund unassignedAssets and Junior backing so Senior capacity check passes while Senior principal is 0.
+        uint256 assignmentAssets = 2000e6;
+        settlementToken.mint(address(pool), 10_000e6 + assignmentAssets);
+        pool.accountExcess();
+        stdstore.target(address(pool)).sig("juniorPrincipal()").checked_write(uint256(10_000e6));
+        stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(assignmentAssets);
+
+        pool.assignUnassignedAssets(true, alice);
+
+        assertEq(pool.seniorPrincipal(), assignmentAssets, "Wiped senior assignment must credit senior principal");
+        assertEq(pool.seniorHighWaterMark(), 10_000e6, "Wiped senior assignment must preserve higher existing HWM");
+        assertEq(pool.unassignedAssets(), 0, "Assignment must clear unassignedAssets");
+        assertEq(seniorVault.balanceOf(alice), 0, "Wiped senior assignment must not mint dilutive shares");
+        assertEq(seniorVault.totalSupply(), seniorSupplyBefore, "Senior share supply must remain unchanged");
     }
 
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
@@ -150,7 +150,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8, false);
 
         _forcePnlPledgeForMarginDrain(aliceAccount, 1e6);
 
@@ -186,7 +186,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8, false);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
         _forcePnlPledgeForMarginDrain(aliceAccount, 1e6);
@@ -217,7 +217,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8, false);
 
         _forcePnlPledgeForMarginDrain(aliceAccount, 1e6);
 
@@ -255,7 +255,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 200e6, 1e8, false);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
         _forcePnlPledgeForMarginDrain(aliceAccount, 1e6);

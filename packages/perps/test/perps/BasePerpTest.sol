@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {MockSettlementToken} from "../utils/MockSettlementToken.sol";
@@ -352,6 +352,16 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         uint256 amount
     ) internal {
         _fundTrancheAsync(seniorVault, lp, amount);
+    }
+
+    /// @dev Adds redeemable Senior shares at the current checkpoint without advancing an LP epoch.
+    function _assignSeniorCapital(
+        uint256 amount
+    ) internal {
+        settlementToken.mint(address(this), amount);
+        settlementToken.approve(address(engine), amount);
+        engine.recapitalizePool(amount);
+        pool.assignUnassignedAssets(true, address(this));
     }
 
     function _fundTrancheAsync(
@@ -809,6 +819,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.executionFeeBps = engine.executionFeeBps();
         config.settlementBufferBps = engine.settlementBufferBps();
+        config.minOpenSlippageToleranceBps = engine.minOpenSlippageToleranceBps();
     }
 
     function _engineCalendarConfig() internal view returns (ICfdEngineAdminHost.EngineCalendarConfig memory config) {
@@ -828,6 +839,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.settlementBufferBps = engine.settlementBufferBps();
+        config.minOpenSlippageToleranceBps = engine.minOpenSlippageToleranceBps();
         engineAdmin.proposeRiskConfig(config);
         vm.warp(block.timestamp + 72 hours + 1);
         engineAdmin.finalizeRiskConfig();
@@ -854,6 +866,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
         config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
+        config.minOrderSettlementDelay = router.pletherOracle().minOrderSettlementDelay();
         config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
+import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
+import {ICfdEngineProtocolLens} from "@plether/perps/interfaces/ICfdEngineProtocolLens.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
@@ -105,6 +107,45 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
 
         assertEq(pool.juniorPrincipal(), 0, "Junior wiped out");
         assertLt(pool.seniorPrincipal(), 500_000 * 1e6, "Senior absorbs remaining loss");
+    }
+
+    function test_Reconcile_PreservesUnassignedReserveAcrossTemporaryDeficit() public {
+        uint256 reserve = 5000e6;
+        _queueRecapitalization(reserve);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), reserve);
+
+        uint256 cashBefore = settlementToken.balanceOf(address(pool));
+        ICfdEngineProtocolLens lens = pool.ENGINE_PROTOCOL_LENS();
+        uint256 markStalenessLimit = pool.markStalenessLimit();
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
+            lens.getHousePoolInputSnapshot(markStalenessLimit);
+        // The mark leaves only 3,000 USDG of equity against the 5,000 USDG reserve.
+        snapshot.terminalLpPriceDeltaAssets = -4000e6;
+        vm.mockCall(
+            address(lens),
+            abi.encodeCall(ICfdEngineProtocolLens.getHousePoolInputSnapshot, (markStalenessLimit)),
+            abi.encode(snapshot)
+        );
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), 0);
+        assertEq(pool.juniorPrincipal(), 0);
+        assertEq(pool.unassignedAssets(), reserve, "Temporary loss must preserve the full reserve target");
+
+        vm.clearMockedCalls();
+        (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, SEEDED_SENIOR);
+        assertEq(pendingJunior, SEEDED_JUNIOR, "Reserve recovery must stay out of Junior NAV");
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), SEEDED_SENIOR);
+        assertEq(pool.juniorPrincipal(), SEEDED_JUNIOR);
+        assertEq(pool.unassignedAssets(), reserve);
+        assertEq(settlementToken.balanceOf(address(pool)), cashBefore, "Repricing must leave pool cash unchanged");
     }
 
     // ==========================================
@@ -419,6 +460,88 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         );
     }
 
+    function test_AssignUnassignedAssets_RestoresWipedJuniorWithoutMintingShares() public {
+        _fundJunior(bob, 20_000e6);
+        uint256 unassigned = pool.juniorPrincipal();
+        uint256 supplyBefore = juniorVault.totalSupply();
+        uint256 holderSharesBefore = juniorVault.balanceOf(bob);
+
+        // Fixture: Junior has outstanding shares and all its backing is in the unassigned bucket.
+        stdstore.target(address(pool)).sig("juniorPrincipal()").checked_write(uint256(0));
+        stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(unassigned);
+        assertGt(holderSharesBefore, 0);
+        assertEq(juniorVault.totalAssets(), 0);
+        assertFalse(pool.canAcceptTrancheDeposits(false));
+
+        vm.expectEmit(true, true, false, true, address(pool));
+        emit IHousePool.UnassignedAssetsAssigned(false, alice, unassigned, 0);
+        pool.assignUnassignedAssets(false, alice);
+
+        assertEq(pool.unassignedAssets(), 0);
+        assertEq(pool.juniorPrincipal(), unassigned);
+        assertEq(juniorVault.totalAssets(), unassigned);
+        assertEq(juniorVault.totalSupply(), supplyBefore);
+        assertEq(juniorVault.balanceOf(bob), holderSharesBefore);
+        assertEq(juniorVault.balanceOf(alice), 0);
+        assertTrue(pool.canAcceptTrancheDeposits(false));
+    }
+
+    function test_AssignUnassignedAssets_PreservesJuniorRecoveryAfterMarkReversal() public {
+        _fundSenior(alice, 500_000e6);
+        _fundJunior(bob, 50_000e6);
+        _fundTrader(carol, 50_000e6);
+        uint256 openingMark = 1e8;
+        _open(carol, CfdTypes.Side.LONG, 100_000e18, 10_000e6, openingMark);
+
+        uint256 holderShares = juniorVault.balanceOf(bob);
+        uint256 supplyBefore = juniorVault.totalSupply();
+        uint256 sharesToRedeem = holderShares / 2;
+        uint256 claimBeforeWipe = juniorVault.convertToAssets(sharesToRedeem);
+        assertGt(claimBeforeWipe, 0);
+
+        // Align post-coupon Junior principal to a multiple of Carol's 1,000 lots so the oracle mark wipes Junior
+        // without impairing Senior (which would rightly block Junior assignment).
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        uint256 oneSecondCoupon = (pool.seniorPrincipal() * 800 * 1) / (10_000 * uint256(365 days));
+        uint256 juniorAfterCoupon = pool.juniorPrincipal() - oneSecondCoupon;
+        uint256 alignmentPad = (1000 - (juniorAfterCoupon % 1000)) % 1000;
+        if (alignmentPad > 0) {
+            _mintAndAccountPoolExcess(alignmentPad);
+            vm.prank(address(juniorVault));
+            pool.reconcile();
+            juniorAfterCoupon = pool.juniorPrincipal() - oneSecondCoupon;
+        }
+        uint256 wipeMark = openingMark - juniorAfterCoupon / 1000;
+
+        // Supply quarantined cash as a fixture. Oracle marks drive the Junior NAV changes.
+        uint256 unassigned = 1000e6;
+        _mintAndAccountPoolExcess(unassigned);
+        stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(unassigned);
+
+        router.updateMarkPrice(_mockPythUpdateData(wipeMark));
+        assertEq(juniorVault.totalAssets(), 0);
+        assertEq(pool.seniorPrincipal(), pool.seniorHighWaterMark());
+        assertEq(juniorVault.balanceOf(bob), holderShares);
+
+        pool.assignUnassignedAssets(false, alice);
+        assertEq(pool.juniorPrincipal(), unassigned);
+        assertEq(pool.unassignedAssets(), 0);
+        assertEq(juniorVault.totalSupply(), supplyBefore);
+        assertEq(juniorVault.balanceOf(alice), 0);
+
+        _finishAsyncCooldown(juniorVault, bob);
+        uint256 requestId = _requestAsyncRedeem(juniorVault, bob, sharesToRedeem);
+        vm.warp(pool.lpEpochStart(requestId));
+        router.settleLpEpoch(_mockPythUpdateData(openingMark));
+
+        uint256 balanceBefore = settlementToken.balanceOf(bob);
+        (uint256 sharesClaimed, uint256 assetsClaimed) = _claimAsyncRedeem(juniorVault, requestId, bob);
+        assertEq(sharesClaimed, sharesToRedeem);
+        assertGe(assetsClaimed, claimBeforeWipe);
+        assertEq(settlementToken.balanceOf(bob) - balanceBefore, assetsClaimed);
+    }
+
     function test_AssignUnassignedAssets_ResetsSeniorHwmWhenSeniorIsEmptyButJuniorStillExists() public {
         uint256 juniorAssets = 20_000e6;
         uint256 strandedAssets = 30_000e6;
@@ -432,18 +555,43 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         stdstore.target(address(pool)).sig("accountedAssets()").checked_write(juniorAssets + strandedAssets);
         stdstore.target(address(pool)).sig("unassignedAssets()").checked_write(strandedAssets);
 
+        uint256 seniorSupplyBefore = seniorVault.totalSupply();
         pool.assignUnassignedAssets(true, alice);
 
         assertEq(
-            pool.seniorPrincipal(),
-            strandedAssets,
-            "Bootstrap should seed fresh senior principal from unassigned assets"
+            pool.seniorPrincipal(), strandedAssets, "Assignment should restore senior principal from unassigned assets"
         );
         assertEq(
-            pool.seniorHighWaterMark(), strandedAssets, "Fresh senior bootstrap must replace the stale HWM baseline"
+            pool.seniorHighWaterMark(),
+            legacySeniorHwm,
+            "Existing senior share owners must preserve their higher HWM baseline"
         );
+        assertEq(seniorVault.balanceOf(alice), 0, "Existing senior owners must not be diluted by zero-NAV mint");
+        assertEq(seniorVault.totalSupply(), seniorSupplyBefore, "Senior share supply should remain unchanged");
         assertEq(pool.juniorPrincipal(), juniorAssets, "Junior principal should remain untouched");
         assertEq(pool.unassignedAssets(), 0, "Assignment should consume the unassigned bucket");
+    }
+
+    function test_AssignUnassignedAssets_RequiresBackingAfterPendingClaimsSettle() public {
+        uint256 reserve = 5000e6;
+        _queueRecapitalization(reserve);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), reserve);
+
+        uint256 pendingRecap = 3000e6;
+        _queueRecapitalization(pendingRecap);
+        // Terminal equity is 6,000 USDG: 1,000 USDG restores Senior, 5,000 USDG backs the unassigned reserve,
+        // and 2,000 USDG of pending recapitalization remains deferred behind trader claims.
+        _setTotalTraderClaim(4000e6);
+        (uint256 pendingSenior,,,) = pool.getPendingTrancheState();
+        assertEq(pendingSenior, SEEDED_SENIOR);
+
+        vm.expectRevert(IHousePool.HousePool__UnassignedAssetsUnderbacked.selector);
+        pool.assignUnassignedAssets(false, carol);
+        assertEq(pool.unassignedAssets(), reserve);
+        assertEq(pool.pendingRecapitalizationAssets(), pendingRecap);
+        assertEq(juniorVault.balanceOf(carol), 0);
     }
 
     function test_RecordClaimantRevenue_RestoresCanonicalAssetsAfterRawShortfall() public {
@@ -564,6 +712,14 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
 
         assertEq(pool.seniorPrincipal(), 0);
         assertEq(pool.seniorHighWaterMark(), hwmBeforeWipeout, "HWM preserves senior recovery rights after wipeout");
+    }
+
+    function _queueRecapitalization(
+        uint256 amount
+    ) internal {
+        settlementToken.mint(address(this), amount);
+        settlementToken.approve(address(engine), amount);
+        engine.recapitalizePool(amount);
     }
 
 }

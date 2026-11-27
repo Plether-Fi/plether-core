@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 
@@ -87,8 +87,9 @@ interface ICfdEngine is ICfdEngineTypes {
     ) external;
 
     /// @notice Credits a reserved execution bounty into the beneficiary's clearinghouse account.
-    /// @dev Callable only by the router. Collects available margin and free settlement toward carry before crediting a live
-    ///      position, retaining arrears. The incoming bounty remains untouched until a later checkpoint. A strictly newer mark is capped and cached; zero is a no-op.
+    /// @dev Callable only by the router. A same-account credit releases the reserve without collecting carry.
+    ///      A credit to another account can cache a newer mark and collects carry from the beneficiary's live position
+    ///      and free settlement before crediting the bounty, retaining any arrears. Zero is a no-op.
     /// @param sourceAccount Account whose reserved settlement bounty funds the credit
     /// @param beneficiary Account receiving the clearinghouse settlement credit
     /// @param amountAssets Reserved settlement token amount to reclassify
@@ -191,7 +192,7 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @return Maximum supported oracle price
     function CAP_PRICE() external view returns (uint256);
 
-    /// @notice Returns whether recurring FAD, an override day, or the configured pre-override runway is active.
+    /// @notice Returns whether the engine calendar enables FAD, including configured days and closure intervals.
     /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after
     ///      Sunday's 17:00 New York FX open. This window surrounds the narrower frozen-oracle interval.
     /// @return Whether FAD maintenance and risk-increase restrictions are active
@@ -201,9 +202,10 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @return Frozen-market mark age limit in seconds
     function fadMaxStaleness() external view returns (uint256);
 
-    /// @notice Returns whether the recurring frozen interval or a configured all-day override is active.
+    /// @notice Returns whether the engine calendar enables frozen-oracle policy.
     /// @dev The recurring interval follows Pyth FX hours from Friday 17:00 New York time through Sunday 16:59:59 New
-    ///      York time, including US daylight-saving transitions.
+    ///      York time, including US daylight-saving transitions. UTC-day overrides add freezing only before that
+    ///      day's 17:00 New York boundary. Scheduled closures freeze from their start until their end (exclusive).
     /// @return Whether frozen-oracle policy is active
     function isOracleFrozen() external view returns (bool);
 
@@ -252,7 +254,7 @@ interface ICfdEngine is ICfdEngineTypes {
 
     /// @notice Whether a given day number is an admin-configured FAD override
     /// @param dayNumber Unix day number to inspect
-    /// @return Whether the entire day is configured as FAD and oracle-frozen
+    /// @return Whether the day is configured as all-day FAD with freezing before its 17:00 New York boundary
     function fadDayOverrides(
         uint256 dayNumber
     ) external view returns (bool);

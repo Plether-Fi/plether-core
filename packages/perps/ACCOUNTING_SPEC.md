@@ -19,7 +19,7 @@ Use it together with:
 ## Reading the accounting model
 
 The protocol keeps cash availability, risk solvency, and terminal LP equity as separate questions. LP entry and exit
-pricing, however, deliberately share one exact terminal-NAV view.
+pricing share the same exact marked price-PnL adjustment and deferred VPI ownership view.
 
 The key rules are:
 
@@ -37,6 +37,8 @@ The key rules are:
 7. A valid risk-reducing transition must not revert just to preserve either pre-close solvency or settlement-buffer
    headroom; the protocol contains raw insolvency with `degradedMode` instead.
 8. Frozen-close spread value belongs to LPs and must never be credited to protocol treasury.
+9. Outstanding positive lifetime VPI defers LP ownership of refundable charges. Outstanding negative lifetime VPI is
+   a reserve-backed receivable; it affects share ownership but cannot fund withdrawals before collection.
 
 ## Canonical Quantities
 
@@ -48,7 +50,7 @@ decimals, position sizes use 18 decimals, and rates in basis points use a denomi
 | PnL | Trader profit or loss from the change in the capped basket price. |
 | PnL pledge | Settlement cash allocated to the live position and reachable for price losses. |
 | Trader claim | An unpaid price payout owed by the pool; it is a liability, not cash in the trader's clearinghouse account. |
-| NAV | Net asset value attributed to LP shares after the terminal price adjustment and tranche waterfall. |
+| NAV | Net asset value attributed to LP shares after the terminal price adjustment, signed accrued VPI correction, and tranche waterfall. |
 | VPI | Virtual price impact: a signed skew-based action charge or rebate, accounted separately from price PnL. |
 | FAD | The scheduled close-only regime with elevated maintenance margin around oracle closures. FAD alone does not mean the oracle is frozen. |
 
@@ -63,8 +65,9 @@ Use these terms consistently:
 - `accountedAssets`: canonical protocol-owned USDG recognized by pool accounting
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: conservative economic pool backing
-- `economicDepth = max(physicalAssets - totalTraderClaimBalanceAssets, 0)`: depth for skew capacity and VPI.
-  Do not also subtract open-position liabilities, the settlement buffer, or LP principal.
+- `economicDepth = max(physicalAssets - totalTraderClaimBalanceAssets - totalPositiveVpiAccruedAssets, 0)`: cash depth
+  for skew capacity and VPI. Do not add negative-VPI receivables or subtract open-position price liabilities, the
+  settlement buffer, or LP principal again.
 - `protocolTreasuryBalance = clearinghouse.balanceAssets(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
 - `netPhysicalAssets = physicalAssets`: the retained snapshot field reports canonical pool backing. Treasury
   settlement is held in the clearinghouse, outside pool custody, so subtracting it here would understate backing.
@@ -88,6 +91,31 @@ Operational rules:
 - `priceLossWrittenOffAssets`: diagnostic trader price loss above the account's collectible cap; it is not a liability
   or receivable. Unpaid price payouts become trader claims; negative aggregate terminal equity is reported
   separately as `terminalDeficit`.
+
+### Deferred VPI ownership
+
+The Engine owns two unsigned aggregates over live positions:
+
+```text
+Rplus = totalPositiveVpiAccruedAssets = sum(max(position.vpiAccrued, 0))
+Rminus = totalNegativeVpiAccruedAssets = sum(max(-position.vpiAccrued, 0))
+```
+
+Canonical position writes replace the old contribution with the actual new contribution; deletion removes it.
+This includes increases, sign crossings, proportional partial closes, full closes and liquidations. The guarded
+`vpiAccountingSnapshot()` exposes both totals to stable accounting reads. The terminal price book and its
+`TerminalNavSnapshot` remain price-only.
+
+Positive accrued VPI is treated as deferred LP ownership until the related exposure closes. Negative accrued VPI
+has mandatory dedicated clearinghouse backing and is a collectible receivable, not pool cash. Excess reserve
+funding does not increase this receivable. These are existing signed VPI settlement rules, not a separate maker
+reward: the lifetime clamp prevents a closed position portion from finishing with net negative VPI.
+
+This policy conservatively defers recognition; it does not forecast the exact VPI from every possible future close.
+An opening signed VPI adjustment changes physical cash and signed accrued VPI equally, so its VPI-only NAV effect is
+zero. A close removing accrued `a` and assessing signed VPI `c` recognizes finalized lifetime expense `a + c`, subject
+to actual settlement and waiver. Liquidation releases positive accrued VPI as finalized income and recovers negative
+accrued VPI before removing its receivable.
 
 ### Settlement-buffer terms
 
@@ -157,24 +185,27 @@ For a valid close plan, `frozenSpreadAssets == frozenSpreadPaidAssets + frozenSp
 
 ### Symmetric exact marked NAV
 
-The aggregate signed book output is the sole mark-to-close adjustment used to price both LP deposits and LP
-redemptions, before allocating pending claimant inflows and excluding ownerless assets from tranche ownership:
+Both LP deposits and redemptions use the exact signed book output together with the separate deferred VPI correction,
+before allocating pending claimant inflows and excluding ownerless assets from tranche ownership:
 
 ```text
 signedTerminalEquity = physicalAssets
                      - totalTraderClaimBalanceAssets
                      + terminalLpPriceDeltaAssets
+                     - totalPositiveVpiAccruedAssets
+                     + totalNegativeVpiAccruedAssets
 
 distributable = max(signedTerminalEquity, 0)
 terminalDeficit = max(-signedTerminalEquity, 0)
 ```
 
 This is symmetric: an entrant receives the same discount for inherited marked liabilities that an exiting LP bears,
-and receives credit only for collectible marked receivables. It does not make those receivables cash. Redemption
-funding still uses the stricter physical withdrawal reserve described below.
+and receives credit only for collectible marked and backed VPI receivables. It does not make those receivables cash.
+The positive and negative VPI amounts enter before the single final equity floor; neither changes terminal price
+collectible cap `K`. Redemption funding still uses the stricter physical withdrawal reserve described below.
 
 For example, suppose the pool holds 1,000 USDG, owes 100 USDG of trader claims, has maximum open-position liability
-of 600 USDG, and has a collectible terminal price delta of +80 USDG. At a 25-bps buffer rate:
+of 600 USDG, has a collectible terminal price delta of +80 USDG, and has no outstanding VPI accrual. At a 25-bps buffer rate:
 
 | Question | Calculation | Result |
 | --- | --- | --- |
@@ -238,12 +269,12 @@ This view determines whether the protocol may accept more risk. Compute the foll
 
 - derive post-op `E = max(P - C, 0)`,
 - derive post-op `L = max(longMaxProfit, shortMaxProfit)`,
-- derive `B = ceil(L * settlementBufferBps / 10_000)`.
+- derive `B = ceil(L * settlementBufferBps / 10_000)` and post-op `Rplus`.
 
 Rule:
 
-- a risk-increasing open or increase is allowed only if post-op `E >= L + B`; implementation uses the equivalent
-  subtraction form after first proving `E >= L`.
+- a risk-increasing open or increase is allowed only if post-op `E >= L + B + Rplus`. Raw insolvency and degraded
+  mode still compare `E` against `L`; a refundable VPI charge cannot finance new price exposure.
 
 Notes:
 
@@ -259,12 +290,12 @@ Notes:
 This view determines how much cash the next synchronized settlement may commit to matured LP redemptions:
 
 ```text
-baseWithdrawalReservedAssets = C + L + B
+baseWithdrawalReservedAssets = C + L + B + Rplus
 freeAssets = max(P - withdrawalReservedAssets, 0)
 ```
 
 HousePool adds pending claimant assets and `unassignedAssets` to the base reserve before calculating free cash.
-The Engine supplies `B` as `supplementalReservedAssets`.
+The Engine supplies `B` as `supplementalReservedAssets` and the VPI totals as separate snapshot fields.
 
 Rule:
 
@@ -274,7 +305,7 @@ Rule:
 Notes:
 
 - this view is intentionally stricter than solvency,
-- it ignores uncollected carry and marked price-loss receivables as a cash source for withdrawal,
+- it ignores uncollected carry, marked price-loss receivables and backed negative VPI as cash sources for withdrawal,
 - dormant Senior NAV is not reserved merely because it exists; only eligible matured Senior demand has priority over
   Junior demand,
 - deposit assets finalized later in the same synchronized transaction are not a funding source for withdrawals,
@@ -288,6 +319,7 @@ This view determines tranche equity for share pricing and revenue distribution:
 
 - start from the same physical assets, trader-claim liabilities, claimant buckets, recapitalizations, and revenue state,
 - apply the exact signed `terminalLpPriceDeltaAssets` once,
+- subtract `Rplus` and add the backed `Rminus` once before flooring equity,
 - route the resulting distributable equity through the same Senior/Junior waterfall for both redemption and deposit
   pricing,
 - ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, Junior requests
@@ -313,8 +345,9 @@ Rules:
 - uncollateralized trader losses beyond an account's collectible cap are not booked as LP receivables,
 - marked receivables cannot fund same-transaction LP withdrawals,
 - value with no valid claimant path must sit in explicit `unassignedAssets`,
-- during `oracleFrozen`, synchronized redemption funding may apply the fixed tranche-local exit surcharge, while
-  deposit activation is deferred until the live symmetric-NAV entry gate passes,
+- during `oracleFrozen`, synchronized redemption funding may apply the fixed exit surcharge (retained in Junior for
+  Junior redemptions, and routed from Senior to Junior — or `unassignedAssets` when Junior share supply is zero — for
+  Senior redemptions), while deposit activation is deferred until the live symmetric-NAV entry gate passes,
 - direct cached-mark settlement is restricted to zero-open-position state or `oracleFrozen`; a separately refreshed
   live cached mark cannot bypass the atomic Router path. A frozen cached mark must still pass its configured age limit,
 - during `oracleFrozen`, bootstrap admin flows (`initializeSeedPosition`, `assignUnassignedAssets`) are blocked rather than inheriting LP frozen-fee pricing.
@@ -323,8 +356,30 @@ Required consequences:
 
 - `unassignedAssets > 0` blocks new tranche-deposit requests and deposit activation; initial trading activation also
   rejects stored or projected unassigned assets and residual pending claimant assets,
+- `unassignedAssets` retains its full target during a shortfall. Recovered terminal equity refills the reserve before
+  ordinary waterfall gains reach tranches, and governance can assign the reserve only when fully backed,
 - a wiped tranche cannot be silently revived by an ordinary asynchronous deposit,
 - seeded ownership continuity is preferred over governance re-assignment.
+
+Ordinary Junior entry has a fixed minimum price of `0.000001 USDG` per whole nine-decimal share. Let `A` be projected
+deposit-pricing assets in six-decimal units and `S` the fee-inclusive pricing supply. Including the existing virtual
+offsets, entry requires `(A + 1) * 1e9 >= S + 1000`; equality is allowed. The implementation compares
+`A >= floor((S + 999) / 1e9)` after bounding supply, so the floor check cannot overflow. Empty initial seeding remains
+available. This is an entry gate: it does not write down principal, reprice existing shares, or restrict redemption
+pricing. Ordinary discounted entry above the floor remains available.
+
+Deposit quotes also reserve the virtual-share offset: with `C = uint256.max - 1000`, a cumulative phase quote must
+fit `C - S`. The quote checks headroom before a potentially unrepresentable `mulDiv` result and computes retained
+assets before adding them to pricing assets. All epochs retain the same frozen phase price and cumulative basis;
+headroom is measured against that frozen `S`, not the live supply after earlier epochs mint.
+
+A positive-NAV Junior epoch below the floor, or an epoch whose quote exceeds supply headroom, returns zero shares.
+The existing settlement path rejects the whole epoch, leaves its assets in refundable escrow, and continues other
+eligible settlement work, including Senior funding. Actual zero NAV with surviving shares keeps its existing
+deferral and cancellation rules. Junior request admission closes below the floor or at the pricing-safe supply ceiling;
+accepted requests are still repriced and may be rejected at activation. Explicit owner bootstrap retains its
+existing ability to restore backing below the ordinary-entry floor. Bootstrap quotes share the numeric and supply
+headroom checks, and every Junior mint checks remaining headroom after maintenance-fee checkpointing.
 
 ### Senior/Junior waterfall and coupon
 
@@ -360,8 +415,9 @@ couponDue  = floor(seniorPrincipal * seniorRateBps * dt / (10_000 * 365 days))
 couponPaid = min(couponDue, juniorPrincipal)
 ```
 
-The coupon requires nonzero Junior share supply. Payment first fills any Senior impairment; only the remainder
-raises both Senior principal and its high-water mark. It changes no pool cash and creates no unpaid-coupon liability
+The coupon requires nonzero Junior share supply and pauses while only the permanent Senior seed shares remain.
+The coupon clock continues to checkpoint during that pause. Payment first fills any Senior impairment. Any remainder
+raises both Senior principal and its high-water mark. Payment changes no pool cash and creates no unpaid-coupon liability
 when Junior cannot cover the full amount. Paid coupon becomes Senior principal for subsequent accrual intervals.
 The default `seniorRateBps` is 800 (8% nominal annual rate); it is not a guaranteed return.
 
@@ -383,7 +439,8 @@ factor:
 ```text
 hourlyFeeRay = floor(r * 1e27 / (10_000 * 8_760))
 retentionRay = rayPowUp(1e27 - hourlyFeeRay, chargeableHours)
-feeShares    = floor(rawSupply * (1e27 - retentionRay) / retentionRay)
+nominalFeeShares = floor(rawSupply * (1e27 - retentionRay) / retentionRay)
+feeShares = min(nominalFeeShares, max((uint256.max - 1000) - rawSupply, 0))
 effectiveSupply = rawSupply + pendingFeeShares
 ```
 
@@ -391,6 +448,11 @@ Retention rounds up and fee shares round down, so the protocol does not exceed t
 charges at most `8_760` hours; if more time elapsed, older hours are explicitly forgiven and the boundary advances to
 the latest completed Unix hour. The nominal APR is therefore not an exact annual dilution percentage: at `1_000 bps`,
 hourly retention produces approximately `9.516%` dilution over a flat year.
+
+Pending quotes and checkpoint mints use the same supply cap, reserving the 1,000 virtual shares added by pricing.
+The cap is checked before evaluating a potentially overflowing nominal fee. A successful checkpoint consumes the
+elapsed hours even when the cap reduces the mint to zero; excess fee shares are forgiven and cannot reappear after
+a later burn. `forgivenHours` continues to report only hours beyond the one-year catch-up window.
 
 Integer rounding can make split checkpoints differ from a single checkpoint by a small number of share atoms.
 The [maintenance-fee math tests](test/perps/accounting/fees/JuniorMaintenanceFeeMathLib.t.sol) specify and check that
@@ -455,6 +517,8 @@ Rules:
   terminal wipe, Senior impairment, rejected epochs, and a Pool entry pause also permit refunds,
 - funded junior redemptions of net assets `w` must additionally preserve
   `(X + R) * 10_000 <= Q * (X + R + J - w)` using active protected exposure plus pending commitments,
+- the Junior withdrawal ratio is waived when only the permanent Senior seed shares remain and `R = 0`. If a
+  Senior deposit is reserved, Junior still backs the combined Senior balance that activation would create,
 - funded Senior redemptions and Junior deposits improve capacity and may cure an overage,
 - governance reductions are prospective for active claims and accepted reservations: neither is burned, repriced, or
   forced out, while new Senior capacity remains zero until the state returns within both limits.
@@ -534,6 +598,8 @@ Key fields:
 - `terminalLpPriceDeltaAssets`: exact signed collectible price-PnL adjustment used by both entry and exit pricing
 - `terminalNavBookVersion`: monotonic version captured with the exact delta
 - `traderClaimBalanceAssets`
+- `totalPositiveVpiAccruedAssets`: deferred VPI liability also protected by the physical withdrawal reserve
+- `totalNegativeVpiAccruedAssets`: backed VPI receivable included only in ownership pricing
 - `hasOpenPositions`
 - `markFreshnessRequired`
 - `maxMarkStaleness`
@@ -542,7 +608,7 @@ Rule:
 
 - downstream LP accounting must not re-derive the terminal delta from rounded position tuples or side aggregates,
 - the Engine snapshot authenticates mark, claims, position status, maximum directional liability, and book version in
-  one call,
+  one call; the separate guarded VPI snapshot is read in the same stable static-call flow,
 - no ordinary deposit request mints active shares in the submission transaction; shares are priced and minted at
   epoch activation.
 
@@ -589,12 +655,33 @@ Accounting rules:
 - `withdraw` and `redeem` only release already-funded escrow and do not reprice or reassess a fee,
 - the fee does not become protocol revenue,
 - the fee does not increase `protocolTreasuryBalanceAssets`,
-- the fee remains inside the same tranche and therefore benefits incumbent LPs of that tranche only.
+- Junior frozen exit fees remain inside `juniorPrincipal` and therefore benefit incumbent Junior LPs; Senior frozen exit
+  fees are debited from `seniorPrincipal` as part of the gross exited share value and routed through the waterfall:
+  first restoring any remaining Senior impairment up to `seniorHighWaterMark`, with all overflow credited to
+  `juniorPrincipal` (or `unassignedAssets` when Junior share supply is zero). Healthy Senior exits therefore send 100%
+  of their frozen fee to Junior without inflating remaining Senior share price or trapping fee value on the permanent
+  Senior seed floor, while impaired Senior exits never pay Junior ahead of underwater remaining Senior LPs.
 
-Senior withdrawal protection follows the actual net principal debit: for pre-withdrawal principal `P`, high-water
-mark `H`, and funded assets `A`, settlement sets `P' = P - A` and `H' = H - floor(H * A / P)`.
-This preserves healthy Senior principal/HWM equality and retains impaired protection proportionally, including
-protection for retained fees. Rounding favors the remaining protected claim; zero funding leaves both values unchanged.
+Senior withdrawal protection follows the gross principal debit, with a share-ownership floor for impaired partial
+withdrawals. For pre-withdrawal principal `P`, high-water mark `H`, and gross exited Senior principal `G` (of which net
+funded assets `A` are escrowed to `seniorVault` and `G - A` is routed to Junior), settlement sets `P' = P - G`. If
+Senior is impaired (`H > P`) and positive principal remains (`0 < G < P`), it sets:
+
+`H' = H - min(floor(H * G / P), floor(H * x / S))`
+
+Here `x` is the aggregate Senior shares actually funded during the settlement phase, and `S` is that phase's
+post-reconcile, pre-burn real Senior share supply, without the ERC-4626 virtual share offset. All matured epochs
+funded in one phase use the same supply snapshot. A later settlement pass takes a fresh snapshot.
+
+Otherwise, positive funding uses `H' = H - floor(H * G / P)`. This preserves healthy Senior principal/HWM equality
+without inflating remaining Senior share price or HWM. Zero funding leaves both values unchanged, including a wiped-out
+Senior's HWM; removing the entire principal clears the HWM even if shares remain outstanding.
+
+The impaired partial-withdrawal floor prevents virtual-offset pricing and asset rounding from removing more HWM
+than the funded shares' fraction of real ownership. The gross-principal result remains unchanged whenever it already
+meets that floor. This is a conservative, one-sided bound: when asset rounding removes a smaller fraction of principal
+than of shares, remaining HWM may exceed share-proportional protection. It does not guarantee exact proportionality or
+that differences between asset-based and share-based protection are below one USDG atom.
 
 Async allocation dust is resolved only after every controller's entitlement is accounted for:
 
@@ -648,6 +735,8 @@ Keep these categories separate:
 - `recordClaimantInflow(amount, Recapitalization, CashArrived)`: recapitalization intended to restore waterfall claimants
 - `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the pool in this flow
 - `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the pool and only needing ownership routing
+- `recordClaimantInflow(amount, BalanceOnly, CashArrived)`: recognize incoming deferred VPI cash or collection of an
+  already-counted negative-VPI receivable without adding a pending revenue intent
 - `accountExcess()`: owner-governed admission of unsolicited raw pool cash into canonical assets
 
 Governance funds recapitalization through `CfdEngine.recapitalizePool(amountAssets)`. The engine owner approves
@@ -670,14 +759,30 @@ Rules:
 - claimant continuity should prefer seeded ownership paths when available,
 - only value with no safe claimant path belongs in `unassignedAssets`.
 
+Pending trading revenue is capped at canonical physical assets plus collectible terminal receivables, above the
+existing unassigned reserve and the full pending recapitalization intent. Revenue above that backing is written off
+during reconciliation, so trader payouts cannot leave an unbacked gross receipt reserved as future LP income.
+Outstanding trader claims and terminal payables can defer settlement of backed revenue without writing it off.
+Settleable claimant buckets are capped at terminal
+distributable equity above the existing unassigned reserve. Live reconciliation and pending-accounting previews use
+the same caps and residual reservations.
+
 `unassignedAssets` should be exceptional telemetry, not a normal operating bucket.
+
+Positive opening VPI and mandatory negative-VPI clawback are balance-only flows. A gain-withheld clawback likewise
+replaces the existing receivable without adding retained-revenue intent. Releasing a positive accrual makes retained
+value visible through corrected NAV; it needs no second revenue record. Other realized price, fee and carry revenue
+keeps its existing routing. When both stored tranche principals are zero, pool-funded protocol-fee top-ups are
+forgone for that action to protect claimant continuity before reconciliation. Direct fees collected from the trader
+remain eligible; skipped top-ups create no fee debt and are not recovered by later reconciliation.
 
 ## Economic Depth For Carry And Risk Pricing
 
 The opening skew cap and open/close VPI use `economicDepth`, not gross physical assets. Paying a flat account's
 existing claim reduces assets and liabilities equally and therefore does not change this depth when no other state
 changes. Physical custody, payout affordability, solvency snapshots, Router depth/receipt fields, and hypothetical
-preview inputs remain gross; each risk-pricing consumer subtracts claims once.
+preview inputs remain gross; each risk-pricing consumer subtracts claims and `Rplus` once.
+`Rminus` never increases the denominator because its backing remains in clearinghouse custody until collection.
 
 Carry is independent of economic depth. The heading is retained for existing links. Neither actual nor hypothetical
 pool depth, claim changes, recapitalization, LP activity, or passive balance shocks change the annual carry rate or
@@ -730,18 +835,21 @@ Rules:
 - carry accrues continuously by wall-clock time,
 - carry does not pause when the oracle is stale or frozen,
 - both sides pay when they have nonzero maximum-profit exposure, regardless of margin or pool depth,
-- guard, open/modify, withdrawal, close, and liquidation paths allocate pending carry to canonical active position
-  margin first, then free settlement. Collection protects all other locked buckets and same-account trader claims,
+- ordinary collection uses eligible active pledge first, then free settlement. Close and liquidation execution
+  project and collect from the full active pledge, then free settlement, then released top-ups. These sources
+  leave other locked buckets and same-account trader claims intact,
 - projected price-risk health uses the remaining margin plus same-account claim and exact price PnL. Fully collected
   carry is not an independent delinquency, but its margin debit can cause a maintenance breach,
-- any uncovered carry remainder means both margin and free settlement are exhausted; it blocks withdrawal and
-  independently makes the account liquidatable. A trader claim cannot pay that remainder,
-- claim payments and keeper bounty credits first collect all available margin and free settlement toward carry,
+- carry left uncovered by the withdrawal projection blocks withdrawal. Carry left uncovered by the liquidation
+  projection independently makes the account liquidatable. A trader claim cannot pay that remainder,
+- claim payments and cross-account bounty credits first collect carry from eligible active pledge and free settlement,
   retaining any unpaid remainder. Then the full credit is applied: paid claims become pledge for live positions,
   bounties become free settlement. No second collection pass or waiver occurs; a later checkpoint can collect that
   credit even at the same timestamp, without reassessing elapsed carry,
 - stored `unsettledCarryAssets` may therefore coexist with new backing immediately after a credit. Health checks project
   collection from current buckets; stored arrears alone do not prove carry delinquency,
+- final order cleanup promotes protected pledge to eligible pledge and frees released top-ups. This changes
+  custody eligibility independently of the position's maximum-profit exposure and carry accrual,
 - claim service still requires pool cash to cover all outstanding trader claims after carry collection. Collected carry
   may enable that payout; insufficient cash or any later failure reverts the entire collection and credit,
 - the global carry index advances before position-exposure or annual-rate changes. Engine-owned collateral,
@@ -759,10 +867,19 @@ Rules:
 - only still-unpaid carry enters the subsequent action settlement, using eligible action sources or withheld new gains.
   Full closes also collect from released surplus as specified below; partial-close rejection and liquidation waiver
   rules remain unchanged,
-- realized carry is booked as LP trading revenue once. Receipts and financial bounds include the direct collection once,
-  in addition to the residual action settlement; carried-forward arrears are not counted as newly accrued carry,
+- realized carry is booked as LP trading revenue once. Open and close receipts and financial bounds include the direct
+  collection once, in addition to the residual action settlement; carried-forward arrears are not counted as newly
+  accrued carry,
 - margin-consuming collection updates the terminal curve atomically with collateral and pool changes; the
   maximum-profit carry basis stays unchanged. Terminal-NAV reads are blocked during intermediate accounting, and a revert restores the entire change.
+
+Opening commitments measure settlement custody before bounty and committed-margin reservations and after both.
+The reservations only reclassify custody; any decrease is carry actually collected by their checkpoints. The Book
+retains that collection, outstanding carry, and final settlement/free-settlement snapshots after both reservations.
+Commitment checks include collected carry in the gross-debit and action-charge limits; execution includes the same
+recorded collection once alongside its remaining charges. A rejected commitment rolls back collection and reservations.
+If commitment succeeds but execution exceeds the combined limit, the trade fails and the earlier carry payment remains.
+Receipt custody snapshots still describe execution; charge totals also include the recorded commitment collection.
 
 `CarryRealized` reports collection and retained arrears whenever nonzero carry is due, including zero collection when
 no backing remains.
@@ -794,11 +911,12 @@ collectible cap continue to describe custody before collection. Price-risk equit
 margin and free settlement, respectively; same-account claims contribute to price equity without funding carry.
 
 For every checkpoint sequence, `starting arrears + newly accrued carry = margin collected + free settlement collected
-+ ending arrears`. At a terminal action, reconcile any remaining arrears separately against terminal recovery and waiver.
++ released top-ups collected + ending arrears`. At a terminal action, reconcile any remaining arrears separately
+against terminal recovery and waiver.
 An ordinary close commitment collects applicable carry without reserving a bounty from free settlement or position pledge.
-Zero free settlement alone does not prevent commitment. Partial commitments still require no unpaid carry and strict
-post-carry maintenance/FAD health; full commitments retain their separate rules. The zero bounty does not bypass
-carry or admission checks.
+Zero free settlement alone does not prevent commitment. For a partial commitment, the projected reducing settlement
+must cover any remaining carry and leave strict post-carry maintenance/FAD health. Full commitments retain their
+separate admission rules.
 
 ## Trader Claim Liabilities
 
@@ -811,6 +929,8 @@ The protocol supports fail-soft terminal settlement.
   owner must execute through that account),
 - settlement is all-or-nothing for the account claim once aggregate trader claim liabilities are fully cash-covered,
 - settlement is credited into `MarginClearinghouse`,
+- a beneficiary cannot settle a claim while any of its orders remain pending; this keeps claim collateral available
+  through queued closes and opens, including orders that reserve no margin,
 - if the beneficiary still has a live position, paid claim value is credited directly to `pnlPledgeAssets` and the
   account's terminal curve is resynchronized; it must not become withdrawable free settlement while its value was
   already included in the marked collectible cap.
@@ -842,8 +962,8 @@ actionReserveAssets >= protectedExecutionBountyAssets + vpiRebateReserveAssets
 ```
 
 The second relation is a protected floor: generic action-charge collection may consume only action reserve above it.
-An open/increase that raises the VPI target must fully fund the increase from eligible settlement or newly supplied
-pledge, otherwise planning fails before exposure grows.
+An open/increase that raises the VPI target uses its own available net rebate first. Its newly supplied pledge must
+cover the rest of the increase before funding any additional liquidation reserve. Other free settlement stays available.
 
 After an open/increase, the target liquidation reserve is:
 
@@ -980,9 +1100,10 @@ trigger rewards, and liquidation rewards remain paid incentives. A zero reward d
 or guarantee that every partial reduction passes its health and financial limits.
 
 Ordinary close commitment validates the position, queued exposure, direction, size quantum, minimum partial size,
-carry and financial bounds. It collects carry from pledge first, then free settlement, protecting other reservations. A partial
-commitment requires fully collected carry and strict maintenance/FAD health. Full-close commitment may retain unpaid
-carry under its own admission rules. Collected commitment carry is included exactly once in gross account debit,
+carry, and financial bounds. It collects carry from eligible active pledge first, then free settlement. Partial
+commitment requires that reducing settlement can cover any remaining carry and preserve strict maintenance/FAD
+health. Full-close commitment may retain unpaid carry under its own admission rules. Collected commitment carry is
+included exactly once in gross account debit,
 assessed/collected action charges, and carry totals for the user's financial bounds. The Book records custody before
 and after commitment and any carry still outstanding.
 
@@ -1074,21 +1195,24 @@ When a close realizes a loss:
    or protocol debt; a partial close still requires a healthy residual position,
 4. handle still-unpaid carry, VPI, fees, and spreads through their separate settlement paths; those distinct
    charges retain their explicit partial-close collection policy,
-5. on a full close, release the unused post-carry, post-price-loss pledge and liquidation reserve into free settlement
-   before collecting action charges; waive only the shortfall after all eligible funds are exhausted,
+5. on a full close, release the remaining liquidation reserve and the post-carry, post-price-loss pledge for
+   settlement. Encumber any unused protected portion as released top-ups while orders remain pending. Waive only the
+   shortfall after all eligible funds are exhausted,
 6. atomically replace or remove the account's terminal curve, including the residual position's updated collectible
    cap, before the transition completes.
 
 Required properties:
 
 - full closes withhold new price gains and settle dedicated VPI backing first, then collect generic action charges
-  from spendable action reserve, free settlement (including released liquidation reserve and unused VPI backing), safely released pledge, and finally
-  committed-order margin in FIFO order. Protected execution bounties and existing trader claims cannot pay action
-  charges. A waiver at the engine settlement boundary implies no eligible cash remains; later router bounty credits
-  and protected-reservation refunds are separate transitions,
+  from spendable action reserve, free settlement (including released liquidation reserve and unused VPI backing),
+  safely released pledge from the current close, previously released top-ups, and finally committed-order margin in
+  FIFO order. A waiver at the engine settlement boundary implies no eligible cash remains,
 - partial closes retain the current health- and terminal-cap-safe pledge funding policy, but cannot use released
-  liquidation reserve or committed-order margin for action charges and still reject a shortfall. Liquidation's
-  separate charge and bounty allocation is unchanged,
+  liquidation reserve or committed-order margin for action charges. Previously released top-ups can fund the charge
+  before a remaining shortfall causes the partial close to reject. Liquidation's separate charge and bounty allocation
+  is unchanged,
+- when a partial close nets a price loss against a same-account claim, the final residual must also retain at least
+  its positive pre-close equity-to-notional ratio at the execution price, measured after carry and rounded up,
 - price-loss write-off never creates a receivable; a partial close still requires a healthy residual position and
   full collection of its required action charges,
 - a price payout, after any action charge withheld from the gain, is paid in full only when unreserved pool cash
@@ -1104,9 +1228,10 @@ Required properties:
   including a newly deferred price payout. It may be partially paid; the unfunded portion is explicitly waived and
   never becomes a trader claim or PnL pledge,
 - anticipated carry, VPI, fees, spreads, and other action economics stay outside terminal `K`; the book is synchronized
-  only to actually installed PnL pledge and same-account claim state after settlement. The VPI reserve therefore does
-  not inflate marked LP receivables or symmetric LP NAV,
-- a user must not shield otherwise reachable settlement by parking it in queued committed margin right before terminal settlement,
+  only to actually installed PnL pledge and same-account claim state after settlement. Deferred VPI enters full LP NAV
+  through the separate `Rplus`/`Rminus` correction; arbitrary reserve overfunding never increases either price `K` or
+  VPI receivables,
+- a user must not shield full-close action charges by parking otherwise reachable settlement in queued committed margin,
 - carry-adjusted close loss must be planned once and consumed live from that same canonical loss amount,
 - price-gain-withheld or cash-collected frozen spread becomes LP revenue and never treasury margin; same-account claim
   netting remains exclusive to exact price loss,
@@ -1133,13 +1258,15 @@ snapshot. Only collected cash is added to pool assets. Margin collection alone d
 settlement and may fund the dedicated VPI reserve; they do not directly become price-risk pledge.
 
 Admission then checks the resulting pledge plus same-account claim, after the VPI-reserve funding and
-liquidation-reserve carve-out. It also checks the pool's post-trade settlement buffer. An order above the configured
+liquidation-reserve carve-out. It also checks the pool's post-trade settlement buffer and positive-VPI cash backing.
+An order above the configured
 skew cap is allowed only when it strictly reduces the existing imbalance without making its own side heavier.
 
 An open must match the position projected through earlier queued orders. A full queued close can project the account
-flat and permit an opposite-side open, but execution rechecks actual state if that earlier close fails. Similarly, a
-queued close must match the live position's side at execution. Unsupported numeric inputs are rejected explicitly
-rather than admitted as orders that can only fail with arithmetic errors.
+flat and permit an opposite-side open. Execution rechecks actual state if that earlier close fails. A new close is
+limited to the live size minus earlier same-side queued closes, and pending opens and increases contribute no size to
+that limit. A queued close must match the live position's side at execution. Admission rejects unsupported numeric
+inputs explicitly.
 
 Preview and execution use the same planner for carry, exact entry basis, rebate credit, reserve funding, collateral
 health, and solvency. [Order timing](CANONICAL_ENTRYPOINTS.md#order-timing) describes admission versus execution rules.
@@ -1195,9 +1322,10 @@ Liquidation must:
 6. re-evaluate degraded-mode containment.
 
 Risk-off refunds and their existing early health check occur first. A separate inner rollback frame then authenticates
-pending reservations, forfeits unpaid opening bounties where applicable, settles zero close records, invokes the
-Engine liquidation health/settlement path, and finalizes account-local queue cleanup. If the account is healthy,
-roll back this entire inner frame: its pending orders remain and no liquidation bounty is earned. Previously completed
+pending reservations, forfeits unpaid protection-trigger bounties, invokes the Engine liquidation health/settlement
+path, and terminalizes stale closes. Valid opening orders retain their queue position, committed margin, and execution
+bounty. A healthy-account result rolls back this entire inner frame: its pending orders remain and no liquidation
+bounty is earned. Previously completed
 outer risk-off refunds persist. Without such outer work, the single-call
 solvent revert and batch skipped-solvent behavior are preserved. Only the exact direct Engine solvent failure receives
 that classification; unrelated errors do not become healthy outcomes. Other accounts retain their relative FIFO order.
@@ -1216,9 +1344,9 @@ Liquidation-charge rule:
 
 Required property:
 
-- liquidation eligibility first projects carry from active position margin and then free settlement, and uses the
-  reduced pledge for exact price-risk equity. Carry left uncovered by both sources independently makes the account
-  liquidatable; same-account claims remain exclusive to price-loss netting,
+- liquidation eligibility projects carry from active position margin, then free settlement, then released top-ups,
+  and uses the reduced pledge for exact price-risk equity. Carry left uncovered by those sources independently
+  makes the account liquidatable. Same-account claims contribute to price-risk equity and can settle price loss,
 - liquidation charge caps and residual planning use their typed physically eligible sources rather than folding carry
   into the price channel,
 - negative accrued VPI does not reduce pledge-plus-claim price-risk equity. Its gross target must instead remain fully backed by the
@@ -1228,6 +1356,8 @@ Required property:
 - the keeper/protocol charge is capped by its dedicated reserve and other explicitly eligible charge funds; it must
   never raid PnL pledge needed by price settlement,
 - an uncollectible terminal action charge is waived rather than reclassified as protocol debt or price loss,
+- the terminal action charge can use released top-ups after spendable action reserve and ordinary free settlement,
+  and does not consume committed margin reserved for surviving opening orders; any remaining shortfall is waived,
 - liquidation does not assess `frozenCloseSpreadBps`, including while `oracleFrozen`,
 - preview and live liquidation should share the same liquidation-accounting kernel.
 
@@ -1251,10 +1381,10 @@ Close and liquidation settlement latch it when their post-operation solvency che
 E < L
 ```
 
-This is the raw solvency boundary. The settlement buffer is deliberately excluded: a close or liquidation may leave
-`L <= E < L + B` without entering degraded mode. The owner may clear an existing latch once `E >= L`; restoring the
-full buffer is not a clear condition. Subsequent opens and increases still fail their separate `E >= L + B`
-admission check.
+This is the raw solvency boundary. The settlement buffer and deferred positive VPI are deliberately excluded: a close
+or liquidation may leave `L <= E < L + B + Rplus` without entering degraded mode. The owner may clear an existing
+latch once `E >= L`; restoring the buffer and VPI cash headroom is not a clear condition. Subsequent opens and
+increases still fail their separate `E >= L + B + Rplus` admission check.
 
 Allowed while degraded:
 
@@ -1349,11 +1479,13 @@ The main accounting invariants are:
 9. Reservations cannot be withdrawn or reused; negative lifetime VPI remains backed by its dedicated reserve.
 10. Collected carry is pool revenue once; uncollected carry is not an LP receivable.
 11. Price-loss write-offs, action-charge waivers, deferred price claims, and terminal deficit remain separate quantities.
-12. Successful opens/increases meet `E >= L + B`. Closes and liquidations may consume the buffer and complete into
+12. Successful opens/increases meet `E >= L + B + Rplus`. Closes and liquidations may consume the buffer and complete into
     degraded mode; they do not revert solely to preserve pre-close pool solvency.
 13. Frozen-close spread and frozen LP exit fees stay with LPs; they never become protocol treasury margin.
 14. Ordinary and protection close attempts authenticate zero bounty records without reserving or paying a close bounty.
 15. LP request ids use the same five-minute cutoff for both tranches and both directions; maturity does not fix a price.
+16. Gross positive and negative VPI totals equal live position contributions. LP prices apply both signs, while cash
+    reserves and economic depth protect gross positive VPI without spending the negative receivable.
 
 ### Implementation references
 

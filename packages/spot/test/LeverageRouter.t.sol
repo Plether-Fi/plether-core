@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockCurvePool} from "./mocks/MockCurvePool.sol";
 import {MockMorpho} from "./mocks/MockMorpho.sol";

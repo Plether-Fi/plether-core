@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderRecoverySidecar} from "@plether/perps/OrderRecoverySidecar.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
@@ -18,9 +20,6 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
-import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
-import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
-import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "@plether/perps/libraries/OrderValidationLib.sol";
 
 /// @notice Router getters and isolated item entrypoints used by delegated keeper logic.
@@ -28,13 +27,17 @@ interface IOrderLiquidationBatchHost {
 
     function engine() external view returns (ICfdEngineCore);
 
+    function engineLensForCommit() external view returns (ICfdEngineLens);
+
     function pletherOracle() external view returns (IPletherOracle);
 
     function positionProtectionBook() external view returns (IPositionProtectionBook);
 
     function lifecycleBook() external view returns (IOrderLifecycleBook);
 
-    function engineLensForCommit() external view returns (ICfdEngineLens);
+    function policyEvaluator() external view returns (ICfdOrderPolicyEvaluator);
+
+    function executionSidecar() external view returns (address);
 
     function nextCommitId() external view returns (uint64);
 
@@ -90,6 +93,12 @@ interface IOrderDelegatedLogicRefundAdmin {
 
 }
 
+interface IOrderExecutionSidecarRecovery {
+
+    function recoverySidecar() external view returns (address);
+
+}
+
 /// @title OrderLiquidationBatchLogic
 /// @notice Stateless order commit, protection, oracle-policy, mark-refresh, LP-settlement, and liquidation logic.
 /// @dev This code deliberately reads router state only through external getters and mutates it only through the
@@ -98,11 +107,11 @@ interface IOrderDelegatedLogicRefundAdmin {
 ///      Router's EIP-170 runtime and EIP-3860 creation input.
 abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
-    /// @notice Minimal projected position used by delegated close-commit validation.
+    /// @notice Minimal projected position used by delegated order admission.
     struct QueuedPositionView {
-        bool exists;
         CfdTypes.Side side;
         uint256 size;
+        uint256 closeableSize;
     }
 
     /// @notice Dedicated rejection ABI for direct or foreign-context liquidation-batch calls.
@@ -235,8 +244,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         if (request.isClose) {
             _validateCloseAdmission(host, account, request.side, request.sizeDelta);
         } else {
-            executionBountyAssets =
-                _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
+            uint256 commitPrice;
+            (executionBountyAssets, commitPrice) = _validatedOpenBounty(host, account, request);
+            if (host.engine().minOpenSlippageToleranceBps() != 0) {
+                _delegateOpenToleranceBand(host, account, request, commitPrice, executionBountyAssets);
+            }
         }
         if (executionBountyAssets > request.bounds.maxExecutionBountyAssets) {
             revert IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound(
@@ -273,6 +285,9 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         OrderV3Types.OrderRequest calldata request,
         bool enforceProtectionLock
     ) private view {
+        if (account == host.engine().protocolTreasury()) {
+            revert OrderRouter__CommitValidation(12);
+        }
         if (request.clientOrderId == bytes32(0)) {
             revert OrderRouter__ZeroClientOrderId();
         }
@@ -284,7 +299,9 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         if (uint256(bounds.submitBy) < block.timestamp) {
             revert OrderRouter__InvalidSubmitBy();
         }
-        if (bounds.executionWindowSeconds == 0 || bounds.executionWindowSeconds > host.maxExecutionWindowSeconds()) {
+        // Keep every fresh intent binding for the configured lifetime. A shorter trader-selected window would
+        // allow expiry to refund an adverse order before an independent executor can fill it.
+        if (bounds.executionWindowSeconds != host.maxExecutionWindowSeconds()) {
             revert OrderRouter__InvalidExecutionWindow();
         }
         uint8 executionModes = bounds.allowedExecutionModes;
@@ -299,7 +316,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert OrderRouter__ZeroPostLeverageBound();
         }
 
-        OrderValidationLib.validateBaseCommit(request.sizeDelta, request.marginDelta, request.isClose);
+        host.engineLensForCommit().orderAdmissionValidator().validateRequest(request);
         uint64 head = host.accountHeadOrderId(account);
         if (head != 0 && host.lifecycleBook().pendingPolicy(head).minPostSettlementBalanceAssets != 0) {
             revert OrderRouter__SettlementFloorOrderPending(head);
@@ -348,14 +365,12 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint256 sizeDelta
     ) private view {
         ICfdEngineCore engine = host.engine();
-        QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
-        OrderValidationLib.validateCloseCommit(
-            queuedPosition.exists, queuedPosition.size, queuedPosition.side, side, sizeDelta
-        );
+        QueuedPositionView memory queuedPosition = _queuedPosition(host, account);
+        // A positive closeable size means the projected position has never gone flat, so its side is still live.
+        OrderValidationLib.validateCloseCommit(queuedPosition.closeableSize, queuedPosition.side, side, sizeDelta);
 
         uint256 commitPrice = _commitReferencePrice(engine);
-        // Admission already checked lot alignment; the projected size is bounded by the Engine's uint112 lots
-        // and the Router's bounded pending-order count, while commitPrice is capped.
+        // A below-minimum close must still flatten the projected position if earlier increases fill.
         if (
             sizeDelta < queuedPosition.size
                 && (sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice < host.minOpenNotionalAssets()
@@ -366,92 +381,63 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
     function _queuedPosition(
         IOrderLiquidationBatchHost host,
-        ICfdEngineCore engine,
         address account
     ) private view returns (QueuedPositionView memory queuedPosition) {
-        (uint256 positionSize,,,, CfdTypes.Side side,,) = engine.positions(account);
-        if (positionSize != 0) {
-            queuedPosition.exists = true;
-            queuedPosition.side = side;
-            queuedPosition.size = positionSize;
-        }
-
-        uint64 riskOffCutoff = IOrderRouterEmergencyAdmin(host.admin()).riskOffOrderCutoff();
-        for (uint64 orderId = host.accountHeadOrderId(account); orderId != 0;) {
-            (IOrderRouterAccounting.PendingOrderView memory pending, uint64 nextOrderId) =
-                host.getPendingOrderView(orderId);
-            if (riskOffCutoff == 0 || orderId > riskOffCutoff || pending.isClose) {
-                if (pending.isClose) {
-                    if (queuedPosition.exists && pending.side == queuedPosition.side) {
-                        queuedPosition.size =
-                            queuedPosition.size > pending.sizeDelta ? queuedPosition.size - pending.sizeDelta : 0;
-                        if (queuedPosition.size == 0) {
-                            queuedPosition.exists = false;
-                        }
-                    }
-                } else if (!queuedPosition.exists) {
-                    queuedPosition.exists = true;
-                    queuedPosition.side = pending.side;
-                    queuedPosition.size = pending.sizeDelta;
-                } else if (pending.side == queuedPosition.side) {
-                    queuedPosition.size += pending.sizeDelta;
-                }
-            }
-            orderId = nextOrderId;
-        }
+        (, queuedPosition.side, queuedPosition.size, queuedPosition.closeableSize) =
+            host.engineLensForCommit().orderAdmissionValidator().queuedPosition(account);
     }
 
     function _validatedOpenBounty(
         IOrderLiquidationBatchHost host,
         address account,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta
-    ) private view returns (uint256 executionBountyAssets) {
+        OrderV3Types.OrderRequest calldata request
+    ) private view returns (uint256 executionBountyAssets, uint256 commitPrice) {
         ICfdEngineCore engine = host.engine();
-        uint256 commitPrice = _commitReferencePrice(engine);
-        uint256 lots = sizeDelta / CfdTypes.SIZE_QUANTUM;
-        if (lots > type(uint112).max || marginDelta > uint256(type(int256).max)) {
-            revert OrderRouter__PredictableOpenInvalid(uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
-        }
-        // Quantum was checked at admission. uint112 lots times the uint32-capped mark fits uint144 exactly.
-        uint256 notionalAssets = lots * commitPrice;
-        if (notionalAssets < host.minOpenNotionalAssets()) {
-            revert OrderRouter__CommitValidation(11);
-        }
-
-        // Project the live position through earlier account orders before checking the requested side.
-        QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
-        uint8 opposingCode = uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING);
-        if (queuedPosition.exists && queuedPosition.side != side) {
-            revert OrderRouter__PredictableOpenInvalid(opposingCode);
-        }
-
-        uint64 commitMarkTime = engine.lastMarkTime();
-        uint8 revertCode =
-            host.engineLensForCommit().previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice);
-        if (revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED)) {
-            revert OrderRouter__PredictableOpenInvalid(revertCode);
-        }
-        // A queued close can remove an opposing live position before this open reaches the FIFO head.
-        if (commitMarkTime != 0 && revertCode != opposingCode) {
-            IPletherOracle.PolicySnapshot memory policy = host.pletherOracle().getOrderExecutionPolicy(false);
-            if (!OracleFreshnessPolicyLib.isStale(commitMarkTime, policy.maxStaleness, block.timestamp)) {
-                CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory =
-                    CfdEnginePlanLib.getOpenFailurePolicyCategory(CfdEnginePlanTypes.OpenRevertCode(revertCode));
-                if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
-                    revert OrderRouter__PredictableOpenInvalid(revertCode);
-                }
+        commitPrice = _commitReferencePrice(engine);
+        {
+            // Quantum and numeric domain were checked before this uint112-lot/uint32-price product.
+            uint256 notionalAssets = (request.sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice;
+            if (notionalAssets < host.minOpenNotionalAssets()) {
+                revert OrderRouter__CommitValidation(11);
+            }
+            executionBountyAssets = (notionalAssets * host.openOrderExecutionBountyBps()) / 10_000;
+            uint256 minimumBountyAssets = host.minOpenOrderExecutionBountyAssets();
+            if (executionBountyAssets < minimumBountyAssets) {
+                executionBountyAssets = minimumBountyAssets;
+            }
+            uint256 maximumBountyAssets = host.maxOpenOrderExecutionBountyAssets();
+            if (executionBountyAssets > maximumBountyAssets) {
+                executionBountyAssets = maximumBountyAssets;
             }
         }
-
-        executionBountyAssets = (notionalAssets * host.openOrderExecutionBountyBps()) / 10_000;
-        uint256 minimumBountyAssets = host.minOpenOrderExecutionBountyAssets();
-        if (executionBountyAssets < minimumBountyAssets) {
-            executionBountyAssets = minimumBountyAssets;
+        if (executionBountyAssets > request.bounds.maxGrossAccountDebitAssets) {
+            revert OrderRouter__ExecutionBountyAboveGrossDebit(
+                executionBountyAssets, request.bounds.maxGrossAccountDebitAssets
+            );
         }
-        uint256 maximumBountyAssets = host.maxOpenOrderExecutionBountyAssets();
-        return executionBountyAssets > maximumBountyAssets ? maximumBountyAssets : executionBountyAssets;
+
+        host.engineLensForCommit().orderAdmissionValidator().validateOpen(account, request, executionBountyAssets);
+        host.policyEvaluator().validateOpenCommit(account, request, commitPrice, executionBountyAssets);
+    }
+
+    function _delegateOpenToleranceBand(
+        IOrderLiquidationBatchHost host,
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 commitPrice,
+        uint256 executionBountyAssets
+    ) private {
+        address recovery = IOrderExecutionSidecarRecovery(host.executionSidecar()).recoverySidecar();
+        (bool success, bytes memory result) = recovery.delegatecall(
+            abi.encodeCall(
+                OrderRecoverySidecar.validateOpenToleranceBand, (account, request, commitPrice, executionBountyAssets)
+            )
+        );
+        if (!success) {
+            assembly ("memory-safe") {
+                revert(add(result, 32), mload(result))
+            }
+        }
     }
 
     function _commitReferencePrice(
@@ -504,6 +490,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                     orderExecutionStalenessLimit: config.orderExecutionStalenessLimit,
                     liquidationStalenessLimit: config.liquidationStalenessLimit,
                     basketMaxConfidenceRatioBps: config.basketMaxConfidenceRatioBps,
+                    minOrderSettlementDelay: config.minOrderSettlementDelay,
                     orderSettlementWindow: config.orderSettlementWindow,
                     maxComponentPublishTimeDivergence: config.maxComponentPublishTimeDivergence,
                     adverseConfidenceMultiplierBps: config.adverseConfidenceMultiplierBps
@@ -531,13 +518,27 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     function _oraclePolicy(
         IPletherOracle oracle
     ) private view returns (IPletherOracle.OracleConfig memory policy) {
+        function() external view returns (uint256)[7] memory getters = [
+            oracle.orderExecutionStalenessLimit,
+            oracle.liquidationStalenessLimit,
+            oracle.basketMaxConfidenceRatioBps,
+            oracle.minOrderSettlementDelay,
+            oracle.orderSettlementWindow,
+            oracle.maxComponentPublishTimeDivergence,
+            oracle.adverseConfidenceMultiplierBps
+        ];
+        uint256[7] memory values;
+        for (uint256 i; i < getters.length; ++i) {
+            values[i] = getters[i]();
+        }
         policy = IPletherOracle.OracleConfig({
-            orderExecutionStalenessLimit: oracle.orderExecutionStalenessLimit(),
-            liquidationStalenessLimit: oracle.liquidationStalenessLimit(),
-            basketMaxConfidenceRatioBps: oracle.basketMaxConfidenceRatioBps(),
-            orderSettlementWindow: oracle.orderSettlementWindow(),
-            maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
-            adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
+            orderExecutionStalenessLimit: values[0],
+            liquidationStalenessLimit: values[1],
+            basketMaxConfidenceRatioBps: values[2],
+            minOrderSettlementDelay: values[3],
+            orderSettlementWindow: values[4],
+            maxComponentPublishTimeDivergence: values[5],
+            adverseConfidenceMultiplierBps: values[6]
         });
     }
 

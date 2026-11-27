@@ -57,19 +57,22 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 ### Order timing
 
 Every ordinary request supplies two clocks in [`OrderV3Types.ExecutionBounds`](src/OrderV3Types.sol): a deadline to
-submit, then an execution duration measured from commitment.
+submit, then the protocol's fixed execution duration measured from commitment.
 
 | Field | Meaning | Boundary |
 | --- | --- | --- |
 | `uint64 submitBy` | Latest chain timestamp for fresh commitment | Equality is allowed. |
-| `uint32 executionWindowSeconds` | Duration after successful commitment | Positive and at most `maxExecutionWindowSeconds` (default 60 seconds; governance maximum one hour). |
+| `uint32 executionWindowSeconds` | Fixed duration after successful commitment | Must equal `maxExecutionWindowSeconds` (default 60 seconds; governance maximum one hour). A mismatch reverts. |
 | `commitTimestamp` | Timestamp of successful commitment | Recorded by the lifecycle Book. |
 | `executionDeadline` | `commitTimestamp + executionWindowSeconds` | Expiry is strictly after this timestamp; equality remains eligible. |
 
-A request with `submitBy = 12:02:00` and a 60-second duration committed at `12:01:30` expires after `12:02:30`.
-The submission cutoff no longer controls a committed order. FIFO, oracle, MEV, gas and financial checks still apply.
-Extending execution duration does not extend the Oracle's separate post-commit `orderSettlementWindow`; the signed
-historical price must qualify in that window even if execution happens later. Frozen execution follows the
+With the configured lifetime at 60 seconds, a request with `submitBy = 12:02:00` committed at `12:01:30` expires after
+`12:02:30`. The submission cutoff no longer controls a committed order. The configuration name
+`maxExecutionWindowSeconds` is retained, but callers must echo its exact value; the Router does not normalize signed
+bounds. Configuration changes do not rewrite stored timing. FIFO, oracle, MEV, gas and financial checks still apply.
+The execution lifetime is separate from the Oracle's post-commit `orderSettlementWindow`; the signed historical
+price must qualify in that window even if execution happens later. The live execution duration should cover
+`minOrderSettlementDelay` so a qualifying tick can arrive before the deadline. Frozen execution follows the
 [stored-mark policy](ORACLE_SYNCHRONIZATION.md#frozen-operation).
 
 Expiry makes an order eligible for cleanup; it does not automatically release reservations. `expireOrder` and
@@ -142,10 +145,11 @@ successful cleanup transaction does not by itself establish that the position cl
 - Once a trigger is recorded, neither the owner nor a keeper may replace or cancel it. `Triggered` means one live close
   attempt; `Latched` means the irreversible trigger remains active with no live attempt and may be retried
   permissionlessly.
-- The owner may amend the close ceilings of a `Latched` protection with
-  `PositionProtectionBook.amendLatchedPositionProtectionCloseLimits(uint64,CloseFinancialLimits)` when the account has
-  no pending Router order. This changes the limits used for a future retry; it does not replace or cancel the latched
-  trigger. `PositionProtectionCloseLimitsUpdated` records each creation, replacement, or amendment of these limits.
+- The owner may set close ceilings for future retries with
+  `PositionProtectionBook.amendLatchedPositionProtectionCloseLimits(uint64,CloseFinancialLimits)`. The account must
+  have no pending Router orders while `Latched`, or only the protection's linked close while `Triggered`. A queued
+  close executes under the limits copied at commitment. `PositionProtectionCloseLimitsUpdated` records each creation,
+  replacement, or amendment of the stored ceilings.
 - Only Router-authenticated TP/SL-triggered close attempts use `expectedConfigHash == bytes32(0)` as an internal
   unpinned marker. Protected parent opens and ordinary `OrderRouter.commitOrder(...)` requests require the current
   nonzero configuration hash.
@@ -157,8 +161,10 @@ successful cleanup transaction does not by itself establish that the position cl
 - Protection reads: `PositionProtectionBook.activePositionProtectionId(address)` and
   `PositionProtectionBook.getPositionProtection(uint64)`. Read the retained close ceilings with
   `PositionProtectionBook.closeFinancialLimits(uint64)`.
-- Open-ticket planning: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.quoteMaxOpen(...)`; these exclude Router
-  admission, bounty-reservation, and oracle-validation checks.
+- Open-ticket planning uses `CfdEngineLens.previewOpenWithEligibleEquity(...)` or
+  `CfdEngineLens.quoteMaxOpen(...)`. Use `postEligibleEquityAssets` for open-order equity and leverage bounds.
+  `previewOpen(...).postEquityAssets` and `quoteMaxOpen(...).preview.postEquityAssets` describe position health with
+  the full active pledge. Simulate Router admission, bounty reservation, and oracle validation separately.
 - Pre-commit close review: `CfdClosePreview.previewClose(...)`, which projects commitment carry and the new order's
   zero-bounty commitment before assessing execution. See the current [close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy). Continue to
   simulate the actual Router commitment for queue, deadline, configuration, and other admission checks.
@@ -188,8 +194,11 @@ beneficiary checks, allowance cleanup and fixture limitations are in [Bridge fun
 - Senior and Junior entry is asynchronous through the configured `TrancheVault`: request assets with
   `requestDeposit(assets, controller, owner)`, inspect pending/claimable state, and use ERC-4626 `deposit` or `mint`
   only to claim an activated request.
-- LP exits are asynchronous. A holder calls `requestRedeem(shares, controller, owner)`; funded requests are exposed by
-  `pendingRedeemRequest` / `claimableRedeemRequest` and claimed through ERC-4626 `redeem` or `withdraw`.
+- LP exits are asynchronous. Submit `requestRedeem(shares, controller, owner)` and read `pendingRedeemRequest` or
+  `claimableRedeemRequest`. If the controller differs from the share owner, the controller or its approved operator
+  must submit the request with the share owner's authorization. The standard `maxRedeem`, `maxWithdraw`, `redeem`,
+  and `withdraw` methods look past up to 16 finished requests with no funded claim left. Claim skipped refunds by
+  request ID to recover the shares and advance the stored queue.
 - An activated, unclaimed deposit can route shares directly into redemption through
   `requestRedeemFromClaimableDeposit(depositRequestId,shares,controller)`. Read
   `maxRequestRedeemFromClaimableDeposit(depositRequestId,controller)` first. The controller or its approved operator

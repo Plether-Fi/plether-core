@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -40,6 +40,10 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
 
     uint256 internal constant BPS = 10_000;
     uint256 internal constant VIRTUAL_SHARES = 1000;
+    uint256 internal constant MAX_SHARE_SUPPLY = type(uint256).max - VIRTUAL_SHARES;
+    /// @dev One asset atom (0.000001 USDG) per whole nine-decimal Junior share.
+    uint256 internal constant JUNIOR_FLOOR_SHARE_UNITS = 1e9;
+    uint256 internal constant MAX_REDEEM_HEAD_SKIPS = 16;
 
     uint256 public constant DEPOSIT_COOLDOWN = 1 hours;
     uint256 public constant LP_REQUEST_CUTOFF_DURATION = 5 minutes;
@@ -181,6 +185,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     error TrancheVault__RedeemRefundUnavailable();
     error TrancheVault__EscrowInvariant();
     error TrancheVault__InvalidFee();
+    error TrancheVault__ShareSupplyLimitExceeded();
     error TrancheVault__MaintenanceFeeSeniorUnsupported();
     error TrancheVault__MaintenanceFeeVaultPairNotReady();
     error TrancheVault__NotPoolOwner();
@@ -241,17 +246,25 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     );
 
     modifier onlyPool() {
-        if (msg.sender != address(POOL)) {
-            revert TrancheVault__NotPool();
-        }
+        _checkPool();
         _;
     }
 
     modifier onlyPoolOwner() {
+        _checkPoolOwner();
+        _;
+    }
+
+    function _checkPool() internal view {
+        if (msg.sender != address(POOL)) {
+            revert TrancheVault__NotPool();
+        }
+    }
+
+    function _checkPoolOwner() internal view {
         if (msg.sender != IHousePoolMaintenanceFeeAdminView(address(POOL)).owner()) {
             revert TrancheVault__NotPoolOwner();
         }
-        _;
     }
 
     constructor(
@@ -325,6 +338,9 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (!IS_SENIOR && amount != 0 && (from == address(0) || to == address(0)) && maintenanceFeeAprBps != 0) {
             _checkpointMaintenanceFee();
         }
+        if (!IS_SENIOR && from == address(0) && amount > MAX_SHARE_SUPPLY - totalSupply()) {
+            revert TrancheVault__ShareSupplyLimitExceeded();
+        }
         if (from == seedReceiver && from != address(0) && balanceOf(from) - amount < seedShareFloor) {
             revert TrancheVault__SeedFloorBreached();
         }
@@ -343,7 +359,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     // Junior maintenance fee
     // ---------------------------------------------------------------------
 
-    /// @notice Shares that would be minted if the Junior maintenance fee were checkpointed now.
+    /// @notice Mintable Junior maintenance-fee shares, reserving the virtual-share offset used in pricing.
     function pendingMaintenanceFeeShares() public view returns (uint256) {
         uint256 rawSupply = totalSupply();
         if (IS_SENIOR || maintenanceFeeAprBps == 0 || rawSupply == 0) {
@@ -353,7 +369,9 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (chargeableHours == 0) {
             return 0;
         }
-        return JuniorMaintenanceFeeMathLib.pendingFeeShares(rawSupply, maintenanceFeeAprBps, chargeableHours);
+        return JuniorMaintenanceFeeMathLib.pendingFeeShares(
+            rawSupply, maintenanceFeeAprBps, chargeableHours, MAX_SHARE_SUPPLY
+        );
     }
 
     /// @notice Issued supply plus currently accrued, not-yet-minted Junior maintenance-fee shares.
@@ -440,8 +458,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         }
         uint256 previousBoundary = maintenanceFeeCheckpointBoundary;
         uint256 currentBoundary = _completedMaintenanceFeeBoundary(block.timestamp);
-        uint256 feeShares =
-            JuniorMaintenanceFeeMathLib.pendingFeeShares(rawSupply, maintenanceFeeAprBps, chargeableHours);
+        uint256 feeShares = pendingMaintenanceFeeShares();
+        // Consume these hours even when the supply cap forgives some or all of their fee shares.
         maintenanceFeeCheckpointBoundary = currentBoundary;
         if (feeShares != 0) {
             super._update(address(0), maintenanceFeeRecipient, feeShares);
@@ -617,6 +635,9 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (controller == address(0) || owner == address(0)) {
             revert TrancheVault__ZeroAddress();
         }
+        if (controller != owner) {
+            _requireControllerAuth(controller);
+        }
         if (shares == 0) {
             revert TrancheVault__WithdrawalTooSmall();
         }
@@ -778,30 +799,39 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         uint256 requestId,
         address controller
     ) public view returns (uint256) {
-        RedeemEpoch storage epoch = redeemEpochs[requestId];
-        RedeemPosition storage position = redeemRequests[controller][requestId];
-        if (position.shares == 0 || epoch.shares == 0) {
-            return 0;
-        }
-        uint256 entitled = Math.mulDiv(position.shares, epoch.fundedShares, epoch.shares, Math.Rounding.Floor);
-        return entitled > position.claimedShares ? entitled - position.claimedShares : 0;
+        (uint256 shares,) = _claimableRedeemAmounts(requestId, controller);
+        return shares;
     }
 
     function claimableRedeemAssets(
         uint256 requestId,
         address controller
     ) public view returns (uint256) {
-        RedeemEpoch storage epoch = redeemEpochs[requestId];
+        (, uint256 assets) = _claimableRedeemAmounts(requestId, controller);
+        return assets;
+    }
+
+    function _claimableRedeemAmounts(
+        uint256 requestId,
+        address controller
+    ) internal view returns (uint256 shares, uint256 assets) {
         RedeemPosition storage position = redeemRequests[controller][requestId];
-        if (position.shares == 0 || epoch.shares == 0) {
-            return 0;
+        (uint256 entitledShares, uint256 entitledAssets) = _fundedRedeemEntitlement(redeemEpochs[requestId], position);
+        shares = Math.saturatingSub(entitledShares, position.claimedShares);
+        assets = Math.saturatingSub(entitledAssets, position.claimedAssets);
+    }
+
+    function _fundedRedeemEntitlement(
+        RedeemEpoch storage epoch,
+        RedeemPosition storage position
+    ) internal view returns (uint256 shares, uint256 assets) {
+        if (epoch.shares == 0) {
+            return (0, 0);
         }
-        uint256 entitledShares = Math.mulDiv(position.shares, epoch.fundedShares, epoch.shares, Math.Rounding.Floor);
-        if (entitledShares == 0) {
-            return 0;
+        shares = Math.mulDiv(position.shares, epoch.fundedShares, epoch.shares, Math.Rounding.Floor);
+        if (shares != 0) {
+            assets = Math.mulDiv(position.shares, epoch.fundedAssets, epoch.shares, Math.Rounding.Floor);
         }
-        uint256 entitled = Math.mulDiv(position.shares, epoch.fundedAssets, epoch.shares, Math.Rounding.Floor);
-        return entitled > position.claimedAssets ? entitled - position.claimedAssets : 0;
     }
 
     function refundableRedeemRequest(
@@ -1006,7 +1036,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         address receiver,
         address controller
     ) public override returns (uint256 shares) {
-        return _claimWithdraw(controllerRedeemHead[controller], assets, receiver, controller);
+        (uint256 requestId,,) = _redeemClaimHead(controller);
+        return _claimWithdraw(requestId, assets, receiver, controller);
     }
 
     function redeem(
@@ -1014,7 +1045,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         address receiver,
         address controller
     ) public override returns (uint256 assets) {
-        return _claimRedeem(controllerRedeemHead[controller], shares, receiver, controller);
+        (uint256 requestId,,) = _redeemClaimHead(controller);
+        return _claimRedeem(requestId, shares, receiver, controller);
     }
 
     function claimRedeem(
@@ -1161,8 +1193,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (receiver == address(0)) {
             revert TrancheVault__ZeroAddress();
         }
-        uint256 remainingShares = claimableRedeemRequest(requestId, controller);
-        uint256 remainingAssets = claimableRedeemAssets(requestId, controller);
+        (uint256 remainingShares, uint256 remainingAssets) = _claimableRedeemAmounts(requestId, controller);
         if (shares == 0 || shares > remainingShares) {
             revert ERC4626ExceededMaxRedeem(controller, shares, remainingShares);
         }
@@ -1182,8 +1213,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (receiver == address(0)) {
             revert TrancheVault__ZeroAddress();
         }
-        uint256 remainingShares = claimableRedeemRequest(requestId, controller);
-        uint256 remainingAssets = claimableRedeemAssets(requestId, controller);
+        (uint256 remainingShares, uint256 remainingAssets) = _claimableRedeemAmounts(requestId, controller);
         if (assets == 0 || assets > remainingAssets) {
             revert ERC4626ExceededMaxWithdraw(controller, assets, remainingAssets);
         }
@@ -1242,10 +1272,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
             return;
         }
 
-        uint256 entitledShares = Math.mulDiv(position.shares, epoch.fundedShares, epoch.shares, Math.Rounding.Floor);
-        uint256 entitledAssets = entitledShares == 0
-            ? 0
-            : Math.mulDiv(position.shares, epoch.fundedAssets, epoch.shares, Math.Rounding.Floor);
+        (uint256 entitledShares, uint256 entitledAssets) = _fundedRedeemEntitlement(epoch, position);
         if (position.claimedShares != entitledShares || position.claimedAssets != entitledAssets) {
             return;
         }
@@ -1305,15 +1332,38 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     function maxWithdraw(
         address controller
     ) public view override returns (uint256) {
-        uint256 requestId = controllerRedeemHead[controller];
-        return requestId == 0 ? 0 : claimableRedeemAssets(requestId, controller);
+        (,, uint256 assets) = _redeemClaimHead(controller);
+        return assets;
     }
 
     function maxRedeem(
         address controller
     ) public view override returns (uint256) {
-        uint256 requestId = controllerRedeemHead[controller];
-        return requestId == 0 ? 0 : claimableRedeemRequest(requestId, controller);
+        (, uint256 shares,) = _redeemClaimHead(controller);
+        return shares;
+    }
+
+    /// @dev Skip only terminal entries whose funded claim is exhausted. Refunds remain claimable by request ID.
+    function _redeemClaimHead(
+        address controller
+    ) internal view returns (uint256 requestId, uint256 shares, uint256 assets) {
+        requestId = controllerRedeemHead[controller];
+        uint256 skipped;
+        while (requestId != 0) {
+            (shares, assets) = _claimableRedeemAmounts(requestId, controller);
+            if (shares != 0 || assets != 0 || skipped == MAX_REDEEM_HEAD_SKIPS) {
+                break;
+            }
+            RedeemEpoch storage epoch = redeemEpochs[requestId];
+            if (!epoch.refundEnabled && epoch.fundedShares != epoch.shares) {
+                break;
+            }
+            requestId = redeemRequests[controller][requestId].nextRequestId;
+            unchecked {
+                // The loop checks the skip limit before incrementing.
+                ++skipped;
+            }
+        }
     }
 
     function maxRequestDeposit(
@@ -1328,7 +1378,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (IS_SENIOR) {
             return _seniorDepositCapacity();
         }
-        return type(uint256).max;
+        return _juniorEntryAvailable(_depositPricingAssets(), accruedTotalSupply()) ? type(uint256).max : 0;
     }
 
     function maxRequestRedeem(
@@ -1398,21 +1448,71 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     function quoteBootstrapDeposit(
         uint256 assets
     ) external view returns (uint256) {
-        return _convertToSharesUsingAssets(assets, _depositPricingAssets(), Math.Rounding.Floor);
+        // Explicit owner bootstrap may restore backing below the ordinary-entry floor.
+        return _quoteDepositShares(assets, _depositPricingAssets(), accruedTotalSupply(), 0);
     }
 
+    /// @notice Quotes a cumulative deposit, returning zero when its price or share supply is unsafe.
     function quoteDepositFromState(
         uint256 assets,
         uint256 pricingAssets,
         uint256 pricingSupply,
         uint256 feeBps
-    ) public pure returns (uint256 shares) {
+    ) public view returns (uint256 shares) {
         if (feeBps > BPS) {
             revert TrancheVault__InvalidFee();
         }
-        uint256 netAssets = feeBps == 0 ? assets : Math.mulDiv(assets, BPS - feeBps, BPS, Math.Rounding.Floor);
-        uint256 denominator = pricingAssets + assets + 1 - netAssets;
-        shares = Math.mulDiv(netAssets, pricingSupply + VIRTUAL_SHARES, denominator, Math.Rounding.Floor);
+        if (!IS_SENIOR && !_juniorEntryAvailable(pricingAssets, pricingSupply)) {
+            return 0;
+        }
+        return _quoteDepositShares(assets, pricingAssets, pricingSupply, feeBps);
+    }
+
+    function _juniorEntryAvailable(
+        uint256 pricingAssets,
+        uint256 pricingSupply
+    ) private pure returns (bool) {
+        unchecked {
+            // (pricingAssets + 1) * 1e9 >= pricingSupply + 1000, without a product or assets + 1.
+            // Short-circuiting the supply bound makes the virtual offset safe.
+            return pricingSupply < MAX_SHARE_SUPPLY
+                && pricingAssets >= (pricingSupply + VIRTUAL_SHARES - 1) / JUNIOR_FLOOR_SHARE_UNITS;
+        }
+    }
+
+    /// @dev Fee is validated by the public quote, or fixed to zero by owner bootstrap.
+    function _quoteDepositShares(
+        uint256 assets,
+        uint256 pricingAssets,
+        uint256 pricingSupply,
+        uint256 feeBps
+    ) private pure returns (uint256 shares) {
+        if (pricingSupply > MAX_SHARE_SUPPLY) {
+            return 0;
+        }
+        unchecked {
+            // The supply bound makes the virtual offset, headroom subtraction and headroom + 1 safe.
+            uint256 netAssets = feeBps == 0 ? assets : Math.mulDiv(assets, BPS - feeBps, BPS, Math.Rounding.Floor);
+            uint256 retainedAssets = assets - netAssets; // netAssets <= assets for a validated fee.
+            if (pricingAssets >= type(uint256).max - retainedAssets) {
+                return 0;
+            }
+            uint256 denominator = pricingAssets + retainedAssets + 1; // Fits by the retained-assets guard.
+            uint256 adjustedSupply = pricingSupply + VIRTUAL_SHARES;
+            uint256 headroom = MAX_SHARE_SUPPLY - pricingSupply;
+            // If shares can exceed net assets, bound the input before mulDiv's quotient could overflow.
+            // denominator < adjustedSupply proves this inverse quote fits in headroom + 1.
+            if (
+                adjustedSupply > denominator
+                    && netAssets >= Math.mulDiv(headroom + 1, denominator, adjustedSupply, Math.Rounding.Ceil)
+            ) {
+                return 0;
+            }
+            shares = Math.mulDiv(netAssets, adjustedSupply, denominator, Math.Rounding.Floor);
+            if (shares > headroom) {
+                return 0;
+            }
+        }
     }
 
     // ---------------------------------------------------------------------

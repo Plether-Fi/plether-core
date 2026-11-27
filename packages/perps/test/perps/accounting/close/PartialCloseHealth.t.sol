@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
+import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {Test} from "forge-std/Test.sol";
 
 /// @notice Synthetic pure-plan fixtures isolate atomic health and fee-source boundaries.
@@ -71,6 +72,53 @@ contract PartialCloseHealthTest is Test {
         assertEq(immediate.safeMarginReleaseAssets, deferred.safeMarginReleaseAssets);
         assertEq(immediate.posMarginAfter, deferred.posMarginAfter + deferred.pricePayoutAssets);
         assertEq(immediate.actionChargeWithheldAssets, deferred.actionChargeWithheldAssets);
+    }
+
+    function testFuzz_ClaimFundedLossPreservesEquityRatioAfterCharges(
+        bool isShort,
+        bool exhaustClaim
+    ) public pure {
+        CfdTypes.Side side = isShort ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
+        uint256 price = isShort ? 80_000_000 : 120_000_000;
+        uint256 claim = exhaustClaim ? 15e6 : 40e6;
+        CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(3, 300e6, side, 50e6 + 1, claim);
+        snap.executionFeeBps = 4;
+        snap.riskParams.maintMarginBps = 10;
+        CfdEnginePlanTypes.CloseDelta memory delta = _plan(snap, 1, price);
+        assertTrue(delta.valid);
+        assertEq(delta.pricePnlClaimConsumedAssets, exhaustClaim ? claim : 20e6);
+        assertGt(delta.actionChargeFromReleasedMarginAssets, 0, "fees are funded from the permitted release");
+
+        uint256 preEquity = 50e6 + 1 + claim - 60e6;
+        uint256 postEquity = delta.posMarginAfter + delta.existingTraderClaimRemainingAssets - 40e6;
+        assertGe(postEquity * 3, preEquity * 2, "claim netting preserves equity per lot");
+        assertLt((postEquity - 1) * 3, preEquity * 2, "fractional equity atoms round up");
+
+        CfdTypes.Position memory remaining = snap.position;
+        remaining.size = 2 * CfdTypes.SIZE_QUANTUM;
+        uint256 shift = price * 10 / 10_000 * 2500 / 10_000;
+        uint256 liquidationPrice = isShort ? price - shift : price + shift;
+        assertFalse(
+            PositionRiskAccountingLib.buildExactPriceRiskState(
+                remaining,
+                delta.posEntryCostAfterAssetAtoms,
+                liquidationPrice,
+                CAP_PRICE,
+                delta.posMarginAfter + delta.existingTraderClaimRemainingAssets,
+                snap.riskParams.maintMarginBps
+            )
+            .liquidatable,
+            "the original buffer survives the adverse confidence shift"
+        );
+    }
+
+    function test_ClaimFundedLossAtZeroPricePreservesEquityPerLot() public pure {
+        CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(3, 60e6, CfdTypes.Side.SHORT, 45e6 + 1, 20e6);
+        CfdEnginePlanTypes.CloseDelta memory delta = _plan(snap, 1, 0);
+        assertTrue(delta.valid, "zero notional must not divide by zero");
+        uint256 postEquity = delta.posMarginAfter + delta.existingTraderClaimRemainingAssets - 40e6;
+        assertEq(postEquity, 3_333_334);
+        assertEq(delta.existingTraderClaimRemainingAssets, 0);
     }
 
     function _snapshot(

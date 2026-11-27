@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
@@ -205,8 +205,185 @@ contract FrozenLpFeePolicyTest is BasePerpTest {
         assertEq(pool.frozenLpFeeBps(true), 40, "Updated governed senior frozen fee should become active");
         assertEq(redeemedAssets, maturedEstimate, "Matured governed exit estimate should match settlement");
         assertLt(redeemedAssets, noFeeAssets, "Updated governed fee should reduce the frozen exit payout");
-        assertGt(seniorPriceAfter, seniorPriceBefore, "Retained exit fee should benefit remaining Senior shares");
-        assertEq(juniorPriceAfter, juniorPriceBefore, "Senior frozen exit fee must remain tranche-local");
+        assertApproxEqAbs(
+            seniorPriceAfter,
+            seniorPriceBefore,
+            1e10,
+            "Routed Senior exit fee must not jump remaining Senior share price"
+        );
+        assertGt(juniorPriceAfter, juniorPriceBefore, "Senior frozen exit fee must accrue to incumbent Junior LPs");
+    }
+
+    function test_LastJuniorLpCanExitAfterSeniorFrozenExitFeeRoutesToJunior() public {
+        address seniorLp = address(0xA11CE);
+        _setSeniorCapacity(4_000_000e6, 8000);
+        _fundSenior(seniorLp, 2_000_000e6);
+        _enterFrozenWindow();
+
+        {
+            uint256 seniorShares = seniorVault.balanceOf(seniorLp);
+            _prepareFrozenEpoch(_requestRedeem(seniorVault, seniorLp, seniorShares));
+            uint256 seniorAssetsBefore = seniorVault.totalAssets();
+            uint256 juniorAssetsBefore = juniorVault.totalAssets();
+            uint256 seniorGrossAssets = seniorVault.convertToAssets(seniorShares);
+            IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+            uint256 expectedExitFee = seniorGrossAssets - result.seniorFundedAssets;
+            assertEq(result.seniorFundedShares, seniorShares);
+            assertLt(result.seniorFundedAssets, seniorGrossAssets, "the last Senior exit pays the frozen fee");
+            assertEq(seniorVault.totalSupply(), seniorVault.seedShareFloor());
+            assertEq(
+                pool.seniorPrincipal(),
+                seniorAssetsBefore - seniorGrossAssets,
+                "Senior seed principal must not trap the Senior frozen exit fee"
+            );
+            assertEq(pool.seniorHighWaterMark(), pool.seniorPrincipal(), "Senior HWM scales with gross debit");
+            assertEq(
+                pool.juniorPrincipal(),
+                juniorAssetsBefore + expectedExitFee,
+                "Senior frozen exit fee must route to Junior principal"
+            );
+        }
+        uint256 seniorSeedAssets = pool.seniorPrincipal();
+
+        vm.warp(SATURDAY_FROZEN + 2 days);
+        assertFalse(engine.isOracleFrozen(), "Junior exits after the oracle reopens");
+        address juniorLp = address(this);
+        uint256 juniorShares = juniorVault.maxRequestRedeem(juniorLp);
+        uint256 juniorRequestId = _requestRedeem(juniorVault, juniorLp, juniorShares);
+        vm.warp(pool.lpEpochStart(juniorRequestId));
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        uint256 juniorAssets = juniorVault.estimateRedeemAssets(juniorShares);
+        IHousePool.LpEpochSettlementResult memory juniorResult = _settleLpEpochForTest();
+
+        assertEq(juniorResult.juniorFundedShares, juniorShares, "the last Junior LP exits in full");
+        assertEq(juniorVault.totalSupply(), juniorVault.seedShareFloor());
+        assertEq(pool.seniorPrincipal(), seniorSeedAssets, "the seed receives no further coupon");
+        vm.prank(juniorLp);
+        assertEq(juniorVault.claimRedeem(juniorRequestId, juniorShares, juniorLp, juniorLp), juniorAssets);
+    }
+
+    function test_SeniorFrozenExitFee_SameEpochJuniorExitDoesNotCaptureFee() public {
+        address seniorLp = address(0x5E11);
+        address exitingJunior = address(0xB0B1);
+        address stayingJunior = address(0xB0B2);
+        _fundSenior(seniorLp, 400_000e6);
+        _fundJunior(exitingJunior, 300_000e6);
+        _fundJunior(stayingJunior, 300_000e6);
+        _enterFrozenWindow();
+
+        uint256 seniorShares = seniorVault.balanceOf(seniorLp);
+        uint256 exitingJuniorShares = juniorVault.balanceOf(exitingJunior);
+        uint256 seniorReqId = _requestRedeem(seniorVault, seniorLp, seniorShares);
+        uint256 juniorReqId = _requestRedeem(juniorVault, exitingJunior, exitingJuniorShares);
+        assertEq(seniorReqId, juniorReqId, "requests in the same hour share one epoch");
+        _prepareFrozenEpoch(seniorReqId);
+
+        uint256 seniorGross = seniorVault.convertToAssets(seniorShares);
+        uint256 expectedJuniorPayout = juniorVault.estimateRedeemAssets(exitingJuniorShares);
+        uint256 juniorPrincipalBefore = juniorVault.totalAssets();
+        uint256 accountedBefore = pool.accountedAssets();
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+        uint256 seniorExitFee = seniorGross - result.seniorFundedAssets;
+
+        assertGt(seniorExitFee, 0, "Senior exit must pay a nonzero frozen fee");
+        assertEq(
+            result.juniorFundedAssets,
+            expectedJuniorPayout,
+            "same-epoch Junior exit must price from pre-fee Junior principal"
+        );
+        assertEq(
+            pool.juniorPrincipal(),
+            juniorPrincipalBefore + seniorExitFee - result.juniorFundedAssets,
+            "staying Junior must receive both the routed Senior fee and retained Junior fee"
+        );
+        assertEq(
+            pool.seniorPrincipal() + pool.juniorPrincipal(),
+            accountedBefore - result.seniorFundedAssets - result.juniorFundedAssets,
+            "tranche principals must conserve accounted pool assets"
+        );
+        assertEq(pool.accountedAssets(), pool.seniorPrincipal() + pool.juniorPrincipal());
+    }
+
+    function test_SeniorFrozenExitFee_ImpairedSeniorHealsDeficitBeforeJunior() public {
+        address exitingSenior = address(0x5E12);
+        address stayingSenior = address(0x5E13);
+        _fundSenior(exitingSenior, 500_000e6);
+        _fundSenior(stayingSenior, 500_000e6);
+        _fundJunior(address(0xB0B3), 500_000e6);
+
+        // Impair Senior by wiping Junior and burning half of Senior principal.
+        uint256 loss = pool.juniorPrincipal() + pool.seniorPrincipal() / 2;
+        vm.prank(address(engine));
+        pool.payOut(address(0xD00D), loss);
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+        assertEq(pool.juniorPrincipal(), 0, "Junior must be wiped before Senior impairment");
+        assertLt(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "Senior must be impaired");
+
+        _enterFrozenWindow();
+        uint256 shares = seniorVault.balanceOf(exitingSenior);
+        uint256 reqId = _requestRedeem(seniorVault, exitingSenior, shares);
+        _prepareFrozenEpoch(reqId);
+
+        uint256 seniorPrincipalBefore = pool.seniorPrincipal();
+        uint256 seniorHwmBefore = pool.seniorHighWaterMark();
+        uint256 seniorSupplyBefore = seniorVault.totalSupply();
+        uint256 seniorGross = seniorVault.convertToAssets(shares);
+        uint256 accountedBefore = pool.accountedAssets();
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+        uint256 seniorExitFee = seniorGross - result.seniorFundedAssets;
+
+        assertGt(seniorExitFee, 0);
+        // Remaining Senior deficit far exceeds the 25 bps fee, so 100% heals remaining Senior up to HWM first.
+        assertEq(pool.seniorPrincipal(), seniorPrincipalBefore - result.seniorFundedAssets);
+        assertLt(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "Senior remains impaired below HWM");
+        assertEq(pool.juniorPrincipal(), 0, "Junior must not receive Senior exit fees while Senior is below HWM");
+        assertEq(pool.accountedAssets(), accountedBefore - result.seniorFundedAssets);
+        assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), pool.accountedAssets());
+        assertGe(
+            pool.seniorHighWaterMark(),
+            seniorHwmBefore - (seniorHwmBefore * shares) / seniorSupplyBefore,
+            "impaired remaining Senior HWM ownership must be preserved"
+        );
+    }
+
+    function test_SeniorFrozenExitFee_ImpairedFullExternalExitHealsSeedAndRoutesOverflowToJunior() public {
+        address exitingSenior = address(0x5E14);
+        _fundSenior(exitingSenior, 500_000e6);
+        _fundJunior(address(0xB0B4), 500_000e6);
+
+        uint256 loss = pool.juniorPrincipal() + pool.seniorPrincipal() / 2;
+        vm.prank(address(engine));
+        pool.payOut(address(0xD00E), loss);
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+        assertEq(pool.juniorPrincipal(), 0);
+        assertLt(pool.seniorPrincipal(), pool.seniorHighWaterMark());
+
+        _enterFrozenWindow();
+        uint256 shares = seniorVault.balanceOf(exitingSenior);
+        uint256 reqId = _requestRedeem(seniorVault, exitingSenior, shares);
+        _prepareFrozenEpoch(reqId);
+
+        uint256 seniorPrincipalBefore = pool.seniorPrincipal();
+        uint256 seniorGross = seniorVault.convertToAssets(shares);
+        uint256 accountedBefore = pool.accountedAssets();
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+        uint256 seniorExitFee = seniorGross - result.seniorFundedAssets;
+        uint256 seedAfterGross = seniorPrincipalBefore - seniorGross;
+        uint256 seedRestore = pool.seniorHighWaterMark() - seedAfterGross;
+
+        assertEq(seniorVault.totalSupply(), seniorVault.seedShareFloor(), "only Senior seed remains");
+        assertGt(seedRestore, 0, "seed impairment is healed back to its HWM");
+        assertLt(seedRestore, seniorExitFee, "overflow above seed HWM must flow to Junior");
+        assertEq(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "Senior seed caps exactly at its HWM");
+        assertEq(pool.juniorPrincipal(), seniorExitFee - seedRestore, "overflow fee routes to Junior");
+        assertEq(pool.accountedAssets(), accountedBefore - result.seniorFundedAssets);
+        assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), pool.accountedAssets());
     }
 
     function test_FrozenWithdrawFee_RemainsJuniorLocal() public {

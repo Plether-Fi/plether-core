@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Two-tranche settlement token pool that acts as counterparty to CFD traders.
 ///         Senior tranche earns a junior-funded target coupon; junior absorbs first-loss and excess profit.
@@ -12,7 +12,10 @@ interface IHousePool {
         /// @notice Trading, carry, or spread revenue owned by tranche claimants.
         Revenue,
         /// @notice Owner-funded value routed as claimant equity restoration without minting LP shares.
-        Recapitalization
+        Recapitalization,
+        /// @notice Cash recognition whose ownership is already represented by a lifetime-VPI NAV adjustment.
+        ///         Never queues a second pending revenue or recapitalization entitlement.
+        BalanceOnly
     }
 
     /// @notice Whether claimant inflow accounting should recognize newly arrived cash.
@@ -163,6 +166,8 @@ interface IHousePool {
     error HousePool__PendingBootstrap();
     /// @notice Explicit bootstrap assignment was requested when no unassigned assets remain.
     error HousePool__NoUnassignedAssets();
+    /// @notice Terminal equity cannot cover existing tranche principal and the full unassigned reserve.
+    error HousePool__UnassignedAssetsUnderbacked();
     /// @notice Bootstrap or seed pricing produced zero shares, or a seed amount was zero.
     error HousePool__BootstrapSharesZero();
     /// @notice The selected tranche's permanent seed position was already initialized.
@@ -226,17 +231,17 @@ interface IHousePool {
 
     /// @notice Emitted when claimant-owned revenue or recapitalization is routed into pool accounting.
     /// @param caller Authorized engine or settlement sidecar that recorded the inflow.
-    /// @param kind Revenue or recapitalization ownership bucket.
+    /// @param kind Revenue, recapitalization, or balance-only cash recognition.
     /// @param cashMode Whether canonical accounted assets increased or cash was already retained.
     /// @param amountAssets Routed claimant value in settlement token.
     event ClaimantInflowAccounted(
         address indexed caller, ClaimantInflowKind kind, ClaimantInflowCashMode cashMode, uint256 amountAssets
     );
-    /// @notice Emitted when all quarantined ownerless assets are assigned to a tranche and matching shares are minted.
+    /// @notice Emitted when all quarantined ownerless assets are assigned to a tranche.
     /// @param toSenior True when assets were assigned to senior, false for junior.
-    /// @param receiver Account receiving bootstrap vault shares.
+    /// @param receiver Account specified to receive any bootstrap vault shares.
     /// @param amountAssets Principal assigned to the tranche, in settlement token.
-    /// @param sharesMinted Vault shares minted to `receiver`.
+    /// @param sharesMinted Vault shares minted to `receiver`, or zero for a credit to existing Junior holders.
     event UnassignedAssetsAssigned(
         bool indexed toSenior, address indexed receiver, uint256 amountAssets, uint256 sharesMinted
     );
@@ -266,6 +271,8 @@ interface IHousePool {
     function totalAssets() external view returns (uint256);
 
     /// @notice Cash above all current engine and pool reserves, safe to query during engine settlement.
+    /// @dev Returns zero while both stored tranche principals are zero; diagnostic free-cash views retain their
+    ///      physical reserve calculation regardless of this protocol-fee eligibility rule.
     /// @return Unreserved settlement token available for a protocol-fee top-up.
     function getSettlementFreeAssets() external view returns (uint256);
 
@@ -319,7 +326,8 @@ interface IHousePool {
     ///      `CashArrived` increments canonical accounted assets but does not transfer tokens, so the caller must have
     ///      already delivered the matching settlement token. `AlreadyRetained` only routes ownership for value already held by
     ///      the pool. Revenue is quarantined when no tranche principal exists; recapitalization is always queued for
-    ///      explicit waterfall reconciliation.
+    ///      explicit waterfall reconciliation. `BalanceOnly` recognizes cash without adding pending claimant value:
+    ///      its ownership is already represented by the lifetime-VPI adjustment in canonical LP NAV.
     /// @param amount settlement token amount to route through claimant accounting (6 decimals)
     /// @param kind Economic source bucket for the claimant inflow
     /// @param cashMode Whether to recognize newly arrived cash or only route value already in canonical pool assets
@@ -374,8 +382,8 @@ interface IHousePool {
     /// @return Protected senior entitlement in settlement token restored before revenue flows to junior
     function seniorHighWaterMark() external view returns (uint256);
 
-    /// @notice Accounted LP assets currently quarantined pending explicit bootstrap / assignment (6 decimals)
-    /// @return Ownerless canonical assets reserved from ordinary LP withdrawals and deposits
+    /// @notice Reserve for ownerless LP equity awaiting explicit assignment (6 decimals)
+    /// @return Full reserve target, including any shortfall in current backing
     function unassignedAssets() external view returns (uint256);
 
     /// @notice Unsettled recapitalization reserved from discretionary pool payouts.
@@ -412,13 +420,16 @@ interface IHousePool {
         uint256 expectedPublishTime
     ) external returns (LpEpochSettlementResult memory result);
 
-    /// @notice Explicitly bootstraps quarantined LP assets into a tranche and mints matching shares.
+    /// @notice Explicitly assigns quarantined LP assets to a tranche.
     /// @dev Owner only, outside oracle-frozen mode and with any required mark satisfying active freshness policy.
-    ///      Reconciles, assigns the entire unassigned balance, and asks the selected configured vault to mint shares.
+    ///      Reconciles first and assigns the entire unassigned balance if fully backed. If Junior has zero principal
+    ///      and outstanding shares, credits Junior principal without minting. Otherwise the selected vault mints
+    ///      matching shares.
     ///      No settlement token moves and the tranche seed-lifecycle flag is not initialized by this action. Senior assignment is
     ///      bounded by the active capacity limits, which are neutral before the first governed configuration.
+    ///      Junior assignment requires Senior principal to be at least its high-water mark after reconciliation.
     /// @param toSenior True to assign assets to senior, false to junior
-    /// @param receiver Account receiving bootstrap tranche shares
+    /// @param receiver Nonzero account receiving any bootstrap tranche shares
     function assignUnassignedAssets(
         bool toSenior,
         address receiver
@@ -544,7 +555,7 @@ interface IHousePool {
     function isTradingActive() external view returns (bool);
 
     /// @notice Returns whether the engine reports frozen-oracle mode.
-    /// @dev This can be active during the recurring frozen interval or on an admin-configured all-day override.
+    /// @dev Uses the engine's canonical calendar, including weekends, day overrides and scheduled closures.
     /// @return Whether frozen-oracle policy is active
     function isOracleFrozen() external view returns (bool);
 

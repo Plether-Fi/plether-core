@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
@@ -45,8 +45,8 @@ contract NumericDomainLensHarness is CfdEngineLens {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.OpenDelta memory delta,
         ICfdEnginePlanner planner
-    ) external pure returns (ICfdEngineTypes.OpenPreview memory) {
-        return _openPreviewFromPlan(snap, delta, 0, planner);
+    ) external pure returns (ICfdEngineTypes.OpenPreview memory preview) {
+        (preview,) = _openPreviewFromPlan(snap, delta, 0, planner);
     }
 
 }

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
+import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
+import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
@@ -44,6 +47,120 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
             revert RecoveryUnauthorized();
         }
         _;
+    }
+
+    function validateOpenToleranceBand(
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 commitPrice,
+        uint256 executionBountyAssets
+    ) external view delegated {
+        IOrderRouterExecutionHost host = IOrderRouterExecutionHost(address(this));
+        ICfdEngineCore engine = ICfdEngineCore(host.engine());
+        uint256 toleranceBps = engine.minOpenSlippageToleranceBps();
+        if (toleranceBps == 0) {
+            return;
+        }
+        uint256 capPrice = engine.CAP_PRICE();
+        // `commitPrice <= CAP_PRICE <= type(uint32).max` and `toleranceBps <= 500`, so neither product can overflow.
+        uint256 lowPrice = (commitPrice * (10_000 - toleranceBps)) / 10_000;
+        if (lowPrice == 0) {
+            lowPrice = 1;
+        }
+        uint256 highPrice = (commitPrice * (10_000 + toleranceBps) + 9999) / 10_000;
+        if (highPrice > capPrice) {
+            highPrice = capPrice;
+        }
+
+        if (request.side == CfdTypes.Side.LONG) {
+            if (request.targetPrice > lowPrice) {
+                revert ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__SlippageToleranceTooTight(
+                    request.targetPrice, lowPrice
+                );
+            }
+        } else if (request.targetPrice < highPrice) {
+            revert ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__SlippageToleranceTooTight(
+                request.targetPrice, highPrice
+            );
+        }
+
+        ICfdOrderPolicyEvaluator evaluator = ICfdOrderPolicyEvaluator(host.policyEvaluator());
+        (uint256 liveSize,,,, CfdTypes.Side liveSide,,) = engine.positions(account);
+        if (liveSize != 0 && liveSide != request.side) {
+            _validateQueuedFlipToleranceBand(
+                evaluator, engine, account, request, executionBountyAssets, lowPrice, highPrice
+            );
+            return;
+        }
+        _assessOpenToleranceBand(evaluator, engine, account, request, executionBountyAssets, lowPrice, highPrice);
+    }
+
+    function _validateQueuedFlipToleranceBand(
+        ICfdOrderPolicyEvaluator evaluator,
+        ICfdEngineCore engine,
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 executionBountyAssets,
+        uint256 lowPrice,
+        uint256 highPrice
+    ) private view {
+        uint256 feeBps = ICfdEngineRiskParamsView(address(engine)).executionFeeBps();
+        uint256 lots = request.sizeDelta / CfdTypes.SIZE_QUANTUM;
+        uint256 edgePrice = lowPrice;
+        for (uint256 i; i < 2; ++i) {
+            evaluator.validateOpenCommit(account, request, edgePrice, executionBountyAssets);
+            uint256 edgeNotional = lots * edgePrice;
+            if (edgeNotional > request.bounds.maxExecutionNotionalAssets) {
+                revert ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation(
+                    OrderV3Types.ConstraintKind.ExecutionNotional,
+                    edgeNotional,
+                    request.bounds.maxExecutionNotionalAssets
+                );
+            }
+            uint256 edgeFee = (edgeNotional * feeBps) / 10_000;
+            if (edgeFee > request.bounds.maxExplicitFeesAssets) {
+                revert ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation(
+                    OrderV3Types.ConstraintKind.ExplicitFees, edgeFee, request.bounds.maxExplicitFeesAssets
+                );
+            }
+            if (highPrice == lowPrice) {
+                break;
+            }
+            edgePrice = highPrice;
+        }
+    }
+
+    function _assessOpenToleranceBand(
+        ICfdOrderPolicyEvaluator evaluator,
+        ICfdEngineCore engine,
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 executionBountyAssets,
+        uint256 lowPrice,
+        uint256 highPrice
+    ) private view {
+        uint256 poolDepthAssets = IHousePool(engine.pool()).totalAssets();
+        CfdTypes.Order memory order = CfdTypes.Order({
+            account: account,
+            sizeDelta: request.sizeDelta,
+            marginDelta: request.marginDelta,
+            targetPrice: request.targetPrice,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 0,
+            side: request.side,
+            isClose: false
+        });
+        uint256 price = lowPrice;
+        for (uint256 i; i < 2; ++i) {
+            evaluator.assessOrder(
+                address(engine), order, address(0), price, poolDepthAssets, request.bounds, executionBountyAssets
+            );
+            if (highPrice == lowPrice) {
+                break;
+            }
+            price = highPrice;
+        }
     }
 
     function expireOrder(

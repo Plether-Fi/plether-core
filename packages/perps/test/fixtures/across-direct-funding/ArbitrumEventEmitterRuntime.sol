@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @dev Exact deployed Across Arbitrum emitter runtime, not a reimplementation. See emitter-provenance.json.
 library ArbitrumEventEmitterRuntime {

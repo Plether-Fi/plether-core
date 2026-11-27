@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdEnginePlanningReader} from "@plether/perps/CfdEnginePlanningReader.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {CfdEngineSettlementTypes} from "@plether/perps/interfaces/CfdEngineSettlementTypes.sol";
+import {ICfdEngineAccountActionView} from "@plether/perps/interfaces/ICfdEngineAccountActionView.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineSettlementHost} from "@plether/perps/interfaces/ICfdEngineSettlementHost.sol";
@@ -13,97 +15,9 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
-import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderSettlementFloorLib} from "@plether/perps/libraries/OrderSettlementFloorLib.sol";
-
-/// @dev Engine read surface used by account-action methods externalized from the bytecode-constrained host.
-interface ICfdEngineAccountActionView {
-
-    function planningReader() external view returns (address);
-
-    function positions(
-        address account
-    )
-        external
-        view
-        returns (
-            uint256 size,
-            uint256 margin,
-            uint256 entryPrice,
-            uint256 maxProfitAssets,
-            CfdTypes.Side side,
-            uint64 lastUpdateTime,
-            int256 vpiAccrued
-        );
-
-    function positionEntryCostAssetAtoms(
-        address account
-    ) external view returns (uint256);
-
-    function positionCarryState(
-        address account
-    ) external view returns (uint256 maxProfitAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
-
-    function sides(
-        uint256 index
-    ) external view returns (uint256 maxProfitAssets, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
-
-    function currentCarryIndex() external view returns (uint256);
-
-    function planner() external view returns (address);
-
-    function orderRouter() external view returns (address);
-
-    function lastMarkPrice() external view returns (uint256);
-
-    function lastMarkTime() external view returns (uint64);
-
-    function CAP_PRICE() external view returns (uint256);
-
-    function traderClaimBalanceAssets(
-        address account
-    ) external view returns (uint256);
-
-    function unsettledCarryAssets(
-        address account
-    ) external view returns (uint256);
-
-    function totalTraderClaimBalanceAssets() external view returns (uint256);
-
-    function degradedMode() external view returns (bool);
-
-    function isFadWindow() external view returns (bool);
-
-    function isOracleFrozen() external view returns (bool);
-
-    function engineMarkStalenessLimit() external view returns (uint256);
-
-    function fadMaxStaleness() external view returns (uint256);
-
-    function executionFeeBps() external view returns (uint256);
-
-    function frozenCloseSpreadBps() external view returns (uint256);
-
-    function settlementBufferBps() external view returns (uint256);
-
-    function riskParams()
-        external
-        view
-        returns (
-            uint256 vpiFactor,
-            uint256 maxSkewRatio,
-            uint256 maintMarginBps,
-            uint256 initMarginBps,
-            uint256 fadMarginBps,
-            uint256 baseCarryBps,
-            uint256 minBountyAssets,
-            uint256 bountyBps,
-            uint256 keeperShareBps,
-            uint256 protocolShareBps
-        );
-
-}
+import {VpiAccrualAccountingLib} from "@plether/perps/libraries/VpiAccrualAccountingLib.sol";
 
 /// @title CfdEngineSettlementSidecar
 /// @notice Externalized settlement executor for `CfdEngine` open, close, and liquidation flows.
@@ -144,85 +58,18 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         address account,
         uint256 poolDepthAssets
     ) public view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        if (msg.sender != ENGINE && msg.sender != ICfdEngineAccountActionView(ENGINE).planningReader()) {
+        // Resolve lazily so sidecar deployment does not depend on calling the host.
+        address reader = ICfdEngineAccountActionView(ENGINE).planningReader();
+        if (msg.sender != ENGINE && msg.sender != reader) {
             revert CfdEngineSettlementSidecar__Unauthorized();
         }
-        return _buildRawSnapshot(account, poolDepthAssets, false);
-    }
-
-    /// @dev Commitment needs only its position side and funding/health state. Execution still reads the full snapshot.
-    function _buildRawSnapshot(
-        address account,
-        uint256 poolDepthAssets,
-        bool closeCommit
-    ) private view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        ICfdEngineSettlementHost host = ICfdEngineSettlementHost(ENGINE);
-        ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
-        (
-            snap.position.size,
-            snap.position.margin,
-            snap.position.entryPrice,
-            snap.position.maxProfitAssets,
-            snap.position.side,
-            snap.position.lastUpdateTime,
-            snap.position.vpiAccrued
-        ) = engine.positions(account);
-        snap.positionEntryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
-        (, snap.positionLastCarryIndex, snap.position.lastCarryTimestamp) = engine.positionCarryState(account);
-        snap.carryIndex = engine.currentCarryIndex();
-        snap.account = account;
-        snap.currentTimestamp = block.timestamp;
-        snap.lastMarkPrice = engine.lastMarkPrice();
-        snap.lastMarkTime = engine.lastMarkTime();
-        snap.riskParams = _loadRiskParams(engine);
-
-        // Cash and reserve observations support settlement and admission; flat carry does not depend on depth.
-        IHousePool pool = IHousePool(host.pool());
-        snap.poolCashAssets = pool.totalAssets();
-        snap.poolAdditionalReservedAssets =
-            pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
-        snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
-        snap.totalTraderClaimBalanceAssets = engine.totalTraderClaimBalanceAssets();
-        // Exact enum dispatch selects the exposed side; this is not a target token-balance equality.
-        // slither-disable-next-line incorrect-equality
-        if (!closeCommit || snap.position.side == CfdTypes.Side.LONG) {
-            snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG);
-        }
-        // The other exact enum value selects the SHORT aggregate snapshot.
-        // slither-disable-next-line incorrect-equality
-        if (!closeCommit || snap.position.side == CfdTypes.Side.SHORT) {
-            snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT);
-        }
-        snap.poolAssets = closeCommit ? snap.poolCashAssets : poolDepthAssets;
-
-        IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
-        CfdEngineCollateralSnapshotLib.load(snap, clearinghouse, account, closeCommit);
-
-        snap.unsettledCarryAssets = engine.unsettledCarryAssets(account);
-        snap.traderClaimBalanceForAccount = engine.traderClaimBalanceAssets(account);
-        snap.capPrice = engine.CAP_PRICE();
-        snap.isFadWindow = engine.isFadWindow();
-        if (!closeCommit) {
-            snap.degradedMode = engine.degradedMode();
-            snap.executionFeeBps = engine.executionFeeBps();
-            snap.settlementBufferBps = engine.settlementBufferBps();
-            snap.oracleFrozen = engine.isOracleFrozen();
-            snap.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
-        }
+        return CfdEnginePlanningReader(reader).buildRawSnapshot(account, poolDepthAssets, false);
     }
 
     function _loadRiskParams(
         ICfdEngineAccountActionView engine
     ) private view returns (CfdTypes.RiskParams memory params) {
         params = ICfdEngineRiskParamsView(address(engine)).riskParams();
-    }
-
-    function _sideSnapshot(
-        ICfdEngineAccountActionView engine,
-        CfdTypes.Side side
-    ) private view returns (CfdEnginePlanTypes.SideSnapshot memory snap) {
-        uint256 index = uint256(side);
-        (snap.maxProfitAssets, snap.openInterest, snap.entryNotional, snap.totalMargin) = engine.sides(index);
     }
 
     /// @inheritdoc ICfdEngineSettlementSidecar
@@ -247,6 +94,9 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         }
         if (engine.degradedMode()) {
             revert ICfdEngineTypes.CfdEngine__DegradedMode();
+        }
+        if (OrderSettlementFloorLib.pendingHeadOrderId(engine.orderRouter(), account) != 0) {
+            revert ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition();
         }
 
         (bool priceFresh, uint256 price) = _liveMark(engine, host);
@@ -312,7 +162,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     ) external onlyEngine returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, 0, true);
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            CfdEnginePlanningReader(engine.planningReader()).buildRawSnapshot(account, 0, true);
         effects = ICfdEnginePlanner(engine.planner()).planCloseCommit(snap, sizeDelta);
         host.settlementRealizeCarry(account);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
@@ -347,9 +198,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function _negativeVpiReserveTarget(
         int256 vpiAccruedAssets
     ) private pure returns (uint256 targetAssets) {
-        if (vpiAccruedAssets < 0) {
-            targetAssets = uint256(-(vpiAccruedAssets + 1)) + 1;
-        }
+        (, targetAssets) = VpiAccrualAccountingLib.contribution(vpiAccruedAssets);
     }
 
     function _liveMark(
@@ -427,14 +276,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         );
         if (delta.tradeCostAssets > 0) {
             uint256 poolCashInflowAssets = uint256(delta.tradeCostAssets) - protocolFeeCreditedAssets;
-            if (poolCashInflowAssets > 0) {
-                IHousePool(host.pool())
-                    .recordClaimantInflow(
-                        poolCashInflowAssets,
-                        IHousePool.ClaimantInflowKind.Revenue,
-                        IHousePool.ClaimantInflowCashMode.CashArrived
-                    );
-            }
+            uint256 deferredVpiAssets = delta.posVpiAccruedDelta > 0 ? uint256(delta.posVpiAccruedDelta) : 0;
+            _recordCashInflow(host, poolCashInflowAssets, deferredVpiAssets);
         }
 
         if (delta.vpiRebateReserveAfterAssets > delta.vpiRebateReserveBeforeAssets) {
@@ -455,6 +298,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             clearinghouse.reclassifyPnlPledgeToLiquidationReserve(
                 delta.account, delta.liquidationReserveAfterAssets - delta.liquidationReserveBeforeAssets
             );
+        } else if (delta.liquidationReserveBeforeAssets > delta.liquidationReserveAfterAssets) {
+            uint256 excessReserveAssets = delta.liquidationReserveBeforeAssets - delta.liquidationReserveAfterAssets;
+            clearinghouse.releaseLiquidationReserve(delta.account, excessReserveAssets);
+            clearinghouse.lockPositionMargin(delta.account, excessReserveAssets);
         }
 
         netMarginChange;
@@ -469,8 +316,13 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             int256(delta.sideOiIncrease),
             delta.sideEntryNotionalDelta
         );
-        _settleProtocolFeeTopUp(host, delta.executionFeeAssets, protocolFeeCreditedAssets);
         _writeOpenPosition(host, delta, currentPosition);
+        _settleProtocolFeeTopUp(
+            host,
+            delta.executionFeeAssets > protocolFeeCreditedAssets
+                ? delta.executionFeeAssets - protocolFeeCreditedAssets
+                : 0
+        );
         _assertRequiredEffectiveAssets(host, delta.requiredEffectiveAssetsAfterAssets);
     }
 
@@ -575,19 +427,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         );
         uint256 protocolFeeCreditedAssets = _settleCloseActionCharge(host, clearinghouse, delta);
 
-        uint256 cashArrivedRevenueAssets =
-            delta.pricePnlPledgeConsumedAssets + delta.actionChargeCollectedAssets - protocolFeeCreditedAssets;
-        if (cashArrivedRevenueAssets > 0) {
-            IHousePool(host.pool())
-                .recordClaimantInflow(
-                    cashArrivedRevenueAssets,
-                    IHousePool.ClaimantInflowKind.Revenue,
-                    IHousePool.ClaimantInflowCashMode.CashArrived
-                );
-        }
-
-        uint256 feeWithheldAssets = delta.executionFeeAssets - protocolFeeCreditedAssets;
-        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldAssets - feeWithheldAssets);
+        _recordCloseInflows(host, delta, protocolFeeCreditedAssets);
 
         if (delta.pricePayoutAssets > 0) {
             host.settlementRecordTraderClaim(delta.account, delta.pricePayoutAssets, !delta.deletePosition);
@@ -596,10 +436,6 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             IHousePool(host.pool()).payOut(address(clearinghouse), delta.actionRebatePaidAssets);
             clearinghouse.settleAssets(delta.account, int256(delta.actionRebatePaidAssets));
         }
-
-        _settleProtocolFeeTopUp(
-            host, protocolFeeCreditedAssets + delta.protocolFeeTopUpAssets, protocolFeeCreditedAssets
-        );
 
         uint256 marginAfter = clearinghouse.pnlPledgeAssets(delta.account);
         if (marginAfter != delta.posMarginAfter) {
@@ -626,6 +462,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (!delta.deletePosition && delta.liquidationReserveReleaseAssets > 0) {
             clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseAssets);
         }
+        _settleProtocolFeeTopUp(host, delta.protocolFeeTopUpAssets);
 
         if (delta.closeState.frozenSpreadAssets > 0) {
             uint256 frozenSpreadPaidAssets = _recoveredFrozenSpreadAssets(delta);
@@ -737,6 +574,57 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             );
     }
 
+    /// @dev Deferred VPI cash and collection of an existing VPI receivable are balance changes, not earned intents.
+    function _recordCashInflow(
+        ICfdEngineSettlementHost host,
+        uint256 totalCashAssets,
+        uint256 balanceOnlyAssets
+    ) private {
+        IHousePool pool = IHousePool(host.pool());
+        if (balanceOnlyAssets > 0) {
+            pool.recordClaimantInflow(
+                balanceOnlyAssets,
+                IHousePool.ClaimantInflowKind.BalanceOnly,
+                IHousePool.ClaimantInflowCashMode.CashArrived
+            );
+        }
+        uint256 revenueAssets = totalCashAssets - balanceOnlyAssets;
+        if (revenueAssets > 0) {
+            pool.recordClaimantInflow(
+                revenueAssets, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+            );
+        }
+    }
+
+    function _recordCloseInflows(
+        ICfdEngineSettlementHost host,
+        CfdEnginePlanTypes.CloseDelta calldata delta,
+        uint256 protocolFeeCreditedAssets
+    ) private {
+        // Canonical proportional removal has the prior accrual's sign and cannot exceed its magnitude.
+        uint256 clawbackAssets = _negativeVpiReserveTarget(delta.posVpiAccruedReduction);
+        _recordCashInflow(
+            host,
+            delta.pricePnlPledgeConsumedAssets + delta.actionChargeCollectedAssets - protocolFeeCreditedAssets,
+            delta.vpiRebateReserveConsumedAssets
+        );
+        uint256 withheldClawbackAssets = clawbackAssets - delta.vpiRebateReserveConsumedAssets;
+        uint256 feeWithheldAssets = delta.executionFeeAssets - protocolFeeCreditedAssets;
+        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldAssets - feeWithheldAssets - withheldClawbackAssets);
+    }
+
+    function _recordLiquidationInflows(
+        ICfdEngineSettlementHost host,
+        CfdEnginePlanTypes.LiquidationDelta calldata delta,
+        uint256 seizedAssets
+    ) private {
+        (,,,,,, int256 accruedVpiAssets) = ICfdEngineAccountActionView(address(host)).positions(delta.account);
+        uint256 withheldClawbackAssets =
+            _negativeVpiReserveTarget(accruedVpiAssets) - delta.vpiRebateReserveConsumedAssets;
+        _recordCashInflow(host, seizedAssets + delta.actionChargeCollectedAssets, delta.vpiRebateReserveConsumedAssets);
+        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldAssets - withheldClawbackAssets);
+    }
+
     /// @notice Applies the live liquidation settlement plan produced by the planner.
     /// @dev Callable only by `ENGINE`. The host must supply a liquidatable delta
     ///      consistent with live state; this function neither checks `delta.liquidatable` nor recomputes the plan. It
@@ -781,8 +669,9 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (vpiReserveReleaseAssets > 0) {
             clearinghouse.releaseVpiRebateReserve(delta.account, vpiReserveReleaseAssets);
         }
+        // The unpaid remainder is waived without collecting committed margin from surviving opening orders.
         uint256 genericActionChargeToCollectAssets =
-            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
+            delta.actionChargeCollectedAssets - delta.vpiRebateReserveConsumedAssets;
         if (genericActionChargeToCollectAssets > 0) {
             (uint256 collectedAssets, uint256 protocolCreditedAssets) = clearinghouse.consumeActionCharge(
                 delta.account,
@@ -807,16 +696,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (seizedAssets != delta.settlementSeizedAssets) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
-        uint256 cashArrivedRevenueAssets = seizedAssets + delta.actionChargeCollectedAssets;
-        if (cashArrivedRevenueAssets > 0) {
-            IHousePool(host.pool())
-                .recordClaimantInflow(
-                    cashArrivedRevenueAssets,
-                    IHousePool.ClaimantInflowKind.Revenue,
-                    IHousePool.ClaimantInflowCashMode.CashArrived
-                );
-        }
-        _recordRetainedCloseRevenue(host, delta.actionChargeWithheldAssets);
+        _recordLiquidationInflows(host, delta, seizedAssets);
 
         if (delta.freshTraderPayoutAssets > 0) {
             host.settlementRecordTraderClaim(delta.account, delta.freshTraderPayoutAssets, false);
@@ -874,24 +754,18 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @dev The top-up is capped by both the requested shortfall and current free pool cash, then paid to the clearinghouse
     ///      and credited to the host's protocol-treasury account.
     /// @param host Bound engine settlement host.
-    /// @param amountAssets Total protocol-fee amount intended to be credited.
-    /// @param clearinghouseCreditedAssets Portion already credited from clearinghouse cash collection.
+    /// @param requestedPoolFundingAssets Outstanding protocol-fee amount requested from pool cash.
     function _settleProtocolFeeTopUp(
         ICfdEngineSettlementHost host,
-        uint256 amountAssets,
-        uint256 clearinghouseCreditedAssets
+        uint256 requestedPoolFundingAssets
     ) private {
-        if (clearinghouseCreditedAssets > amountAssets) {
-            clearinghouseCreditedAssets = amountAssets;
-        }
-        uint256 poolFundedAssets = amountAssets - clearinghouseCreditedAssets;
-        if (poolFundedAssets == 0) {
+        if (requestedPoolFundingAssets == 0) {
             return;
         }
 
         IHousePool pool = IHousePool(host.pool());
         uint256 freeCashAssets = pool.getSettlementFreeAssets();
-        uint256 topUpAssets = poolFundedAssets < freeCashAssets ? poolFundedAssets : freeCashAssets;
+        uint256 topUpAssets = requestedPoolFundingAssets < freeCashAssets ? requestedPoolFundingAssets : freeCashAssets;
         if (topUpAssets == 0) {
             return;
         }

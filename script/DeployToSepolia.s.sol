@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {DeployToTest} from "./DeployToTest.s.sol";
 import {IMorpho, MarketParams} from "@plether/shared/interfaces/IMorpho.sol";

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
@@ -67,10 +68,12 @@ contract BootstrapPerpsArbitrumSepolia is Script {
     address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
     uint256 internal constant RELEASE_SENIOR_SEED_ASSETS = 1e6;
     uint256 internal constant RELEASE_JUNIOR_SEED_ASSETS = 1e6;
+    uint256 internal constant RELEASE_MIN_OPEN_SLIPPAGE_TOLERANCE_BPS = 25;
     uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_ASSETS = 40_000_000e6;
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
     uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_ASSETS = 1000e6;
     uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
+    uint256 internal constant RELEASE_MIN_ORDER_SETTLEMENT_DELAY = 1;
     uint256 internal constant RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS = 10;
     uint256 internal constant RELEASE_MAX_PENDING_ORDERS = 5;
     uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 0;
@@ -170,6 +173,10 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Maximum senior exposure (settlement-token units):", housePool.maxSeniorExposureAssets());
         console.log("Maximum senior share (bps):", housePool.maxSeniorShareBps());
         console.log("Minimum opening notional (settlement-token units):", router.minOpenNotionalAssets());
+        console.log(
+            "Minimum open slippage tolerance (bps):",
+            CfdEngine(address(housePool.ENGINE())).minOpenSlippageToleranceBps()
+        );
         console.log("Adverse confidence multiplier (bps):", router.pletherOracle().adverseConfidenceMultiplierBps());
         console.log("LP epoch duration:", housePool.LP_EPOCH_DURATION());
         console.log("Maximum LP epochs per settlement phase:", housePool.MAX_LP_EPOCHS_PER_PHASE());
@@ -185,7 +192,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(redemptionMathSidecar.code.length > 0, "HousePool redemption math sidecar has no code");
         require(
             IHousePoolRedemptionMathSidecar(redemptionMathSidecar).implementationId()
-                == keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
+                == keccak256("Plether.HousePoolRedemptionMathSidecar.v2"),
             "HousePool redemption math sidecar ID mismatch"
         );
     }
@@ -273,6 +280,12 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         OrderRouter router,
         OrderRouterAdmin routerAdmin
     ) internal view {
+        CfdEngine engine = CfdEngine(address(housePool.ENGINE()));
+        require(
+            engine.minOpenSlippageToleranceBps() == RELEASE_MIN_OPEN_SLIPPAGE_TOLERANCE_BPS,
+            "Unexpected minimum open slippage tolerance"
+        );
+        require(CfdEngineAdmin(engine.admin()).riskConfigActivationTime() == 0, "Outstanding Engine risk proposal");
         require(
             housePool.maxSeniorExposureAssets() == RELEASE_MAX_SENIOR_EXPOSURE_ASSETS,
             "Unexpected maximum senior exposure"
@@ -287,6 +300,10 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(
             router.pletherOracle().basketMaxConfidenceRatioBps() == RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS,
             "Basket confidence changed"
+        );
+        require(
+            router.pletherOracle().minOrderSettlementDelay() == RELEASE_MIN_ORDER_SETTLEMENT_DELAY,
+            "Unexpected minimum order settlement delay"
         );
         require(router.maxPendingOrders() == RELEASE_MAX_PENDING_ORDERS, "Pending-order limit changed");
         require(routerAdmin.routerConfigActivationTime() == 0, "Outstanding Router config proposal");

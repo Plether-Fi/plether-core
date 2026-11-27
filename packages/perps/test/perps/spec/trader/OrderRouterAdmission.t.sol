@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 
@@ -98,20 +98,38 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         router.commitOrder(CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 5000e6, 1e8, false);
     }
 
-    function test_CommitOrder_DoesNotUseStaleCachedMarkForPredictableOpenPrefilter() public {
-        _startRecordingLogs();
-        address eve = address(0xE112);
-        address eveAccount = eve;
-        _fundTrader(eve, 1000e6);
+    function test_CommitOrder_RejectsOpenAboveSkewLimitWithStaleMark() public {
+        CfdTypes.RiskParams memory risk = _riskParams();
+        risk.maxSkewRatio = 0.005e18;
+        _setRiskParams(risk);
+        vm.warp(4 days); // Monday, outside the close-only window.
+        assertGt(vm.getBlockTimestamp() - engine.lastMarkTime(), router.pletherOracle().orderExecutionStalenessLimit());
 
+        uint8 skewTooHigh = uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH);
+        assertEq(engineLens.previewOpenRevertCode(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8), skewTooHigh);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector, skewTooHigh)
+        );
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
+        assertEq(router.pendingOrderCounts(alice), 0, "Rejected open must stay out of the queue");
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 2000e18, 1000e6, 1e8, false);
+        assertEq(router.pendingOrderCounts(alice), 1, "Backed open within the skew limit should still queue");
+    }
+
+    function test_CommitOrder_RejectsUnderfundedOpenEvenWithStaleCachedMark() public {
         vm.warp(block.timestamp + router.pletherOracle().orderExecutionStalenessLimit() + 1);
 
-        vm.prank(eve);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
+            )
+        );
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 100e6, 1e8, false);
-
-        IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(eveAccount);
-        assertEq(pending.length, 1, "Stale cached marks should skip commit-time predictable-open rejection");
-        assertEq(pending[0].sizeDelta, 100_000e18, "Queued order should preserve the requested open intent");
     }
 
     /// @dev Bucket: spec. Source: ACCOUNTING_SPEC "Open projection" permits above-cap recovery only while the order
@@ -126,13 +144,16 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         _fundTrader(crossingShortTrader, 30_000e6);
         _open(longTrader, CfdTypes.Side.LONG, 300_000e18, 30_000e6, 1e8);
 
-        uint256 targetPoolAssets = 700_000e6;
+        // Skew policy uses pool cash net of refundable positive VPI. Keep that
+        // economic depth at the original 700,000-unit cap boundary.
+        uint256 positiveVpiReserveAssets = engine.totalPositiveVpiAccruedAssets();
+        uint256 targetPoolAssets = 700_000e6 + positiveVpiReserveAssets;
         uint256 poolAssetsBeforeDrainAssets = pool.totalAssets();
         vm.prank(address(pool));
         settlementToken.transfer(address(0xDEAD), poolAssetsBeforeDrainAssets - targetPoolAssets);
 
         uint256 poolAssets = pool.totalAssets();
-        uint256 maxSkewAssets = (poolAssets * 0.4e18) / 1e18;
+        uint256 maxSkewAssets = ((poolAssets - positiveVpiReserveAssets) * 0.4e18) / 1e18;
         uint256 preSkewAssets = 300_000e6;
         uint256 healingSize = 10_000e18;
         uint256 postHealingSkewAssets = preSkewAssets - 10_000e6;

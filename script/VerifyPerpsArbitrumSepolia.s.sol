@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
@@ -9,6 +9,7 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEngineProtocolLens} from "@plether/perps/CfdEngineProtocolLens.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderAdmissionValidator} from "@plether/perps/CfdOrderAdmissionValidator.sol";
 import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
@@ -42,6 +43,8 @@ contract VerifyPerpsArbitrumSepolia is Script {
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
     uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_ASSETS = 1000e6;
     uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
+    uint256 internal constant RELEASE_MIN_ORDER_SETTLEMENT_DELAY = 1;
+    uint256 internal constant RELEASE_MIN_OPEN_SLIPPAGE_TOLERANCE_BPS = 25;
     uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 0;
 
     bytes32 internal constant PHASE_DEPLOYED = keccak256("deployed");
@@ -182,6 +185,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         _requireCode(address(deployed.juniorVault), "Junior vault has no code");
         _requireCode(address(deployed.accountLens), "Account lens has no code");
         _requireCode(address(deployed.engineLens), "Engine lens has no code");
+        _requireCode(address(deployed.engineLens.orderAdmissionValidator()), "Order admission validator has no code");
         _requireCode(address(deployed.orderPolicyEvaluator), "Order policy evaluator has no code");
         _requireCode(address(deployed.closePreview), "Close preview has no code");
         _requireCode(address(deployed.orderExecutionSidecar), "Order execution sidecar has no code");
@@ -247,7 +251,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         );
         require(deployed.terminalNavBook.SIZE_QUANTUM() == 1e20, "Position quantum mismatch");
         require(
-            deployed.redemptionMathSidecar.implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
+            deployed.redemptionMathSidecar.implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v2"),
             "Redemption math implementation mismatch"
         );
 
@@ -268,6 +272,11 @@ contract VerifyPerpsArbitrumSepolia is Script {
 
         require(address(deployed.accountLens.engineContract()) == address(deployed.engine), "Account lens mismatch");
         require(deployed.engineLens.engine() == address(deployed.engine), "Engine lens mismatch");
+        require(
+            address(CfdOrderAdmissionValidator(address(deployed.engineLens.orderAdmissionValidator())).engine())
+                == address(deployed.engine),
+            "Order admission validator binding mismatch"
+        );
         require(address(deployed.router.engine()) == address(deployed.engine), "Router engine mismatch");
         require(
             deployed.router.policyEvaluator() != address(deployed.closePreview),
@@ -419,7 +428,15 @@ contract VerifyPerpsArbitrumSepolia is Script {
         require(params.protocolShareBps == 0, "Protocol share mismatch");
         require(deployed.engine.executionFeeBps() == 4, "Execution fee mismatch");
         require(deployed.engine.frozenCloseSpreadBps() == 50, "Frozen-close spread mismatch");
+        require(
+            deployed.engine.minOpenSlippageToleranceBps() == RELEASE_MIN_OPEN_SLIPPAGE_TOLERANCE_BPS,
+            "Minimum open slippage tolerance mismatch"
+        );
         require(deployed.oracle.basketMaxConfidenceRatioBps() == 10, "Basket confidence mismatch");
+        require(
+            deployed.oracle.minOrderSettlementDelay() == RELEASE_MIN_ORDER_SETTLEMENT_DELAY,
+            "Minimum order settlement delay mismatch"
+        );
         require(
             deployed.oracle.adverseConfidenceMultiplierBps() == RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS,
             "Adverse multiplier mismatch"

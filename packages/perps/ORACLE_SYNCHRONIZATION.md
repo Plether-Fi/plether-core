@@ -21,8 +21,9 @@ The Oracle stores the accepted live basket; only the configured Router can updat
 1. Set a caller-independent cutoff at `block.timestamp - min(LIVE_TICK_LOOKBACK, modeMaxStaleness)`.
    `LIVE_TICK_LOOKBACK` is 15 seconds.
 2. Parse a signed price for **every configured feed** between that cutoff and the current timestamp.
-3. Require each component to be at least as new as its previously accepted value. Validate positive prices,
-   component age/divergence, aggregate confidence and basket ordering.
+3. Require every component of the first live basket to be at least as new as `engine.lastMarkTime()`.
+   For later baskets, require each component to be at least as new as its own previously accepted value.
+   Validate positive prices, component age/divergence, aggregate confidence and basket ordering.
 4. Accept the entire basket together. Its publish time is the newest component time; an equal-time basket cannot
    change the aggregate price.
 
@@ -46,8 +47,13 @@ unique latest price for every component. See the
 ## Historical order execution
 
 Outside a freeze, the Oracle calls `parsePriceFeedUpdatesUnique` for each configured feed in
-`(commitTime, min(commitTime + orderSettlementWindow, block.timestamp)]`. It then calls `updatePriceFeeds` on the
+`[commitTime + minOrderSettlementDelay, min(commitTime + orderSettlementWindow, block.timestamp)]`. It then calls `updatePriceFeeds` on the
 **same payload**, and verifies that each stored feed timestamp covers its corresponding parsed component.
+Each component must be published at least `minOrderSettlementDelay` seconds after the commit.
+The default delay is one second, including on the Arbitrum Sepolia release. The default settlement window is 15 seconds.
+Governance can change the delay through a timelocked Router configuration, with
+`1 <= minOrderSettlementDelay <= orderSettlementWindow`.
+
 The fill and neutral mark come from the parsed historical basket, even if Pyth storage already has newer data.
 Execution prices include the applicable side-adverse confidence adjustment.
 
@@ -59,9 +65,9 @@ safely arm after the parent fill; the valid parent fill remains executed.
 ### Batch reuse
 
 The Router starts each execution call with an empty in-memory historical cache and only populates it after a
-successful parse and synchronization. Reuse for a later order requires all components to follow that order's commit,
-fit its historical window and satisfy cache coverage. Otherwise the Router requests a new historical resolution.
-If the supplied payload has no qualifying post-commit update, the order stays pending.
+successful parse and synchronization. Reuse for a later order requires all components to fit that order's
+historical range, including its minimum delay, and satisfy cache coverage. Otherwise the Router requests a new historical resolution.
+If the delay has yet to elapse or the payload has no qualifying update, the order stays pending.
 
 Public Router execution accepts no caller-supplied cache. The Oracle's lower-level batch helper does accept one, but
 its stored-feed coverage check authenticates timestamps, **not arbitrary cached prices**. External consumers must

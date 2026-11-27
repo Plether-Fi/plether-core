@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
@@ -111,7 +111,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         CfdTypes.Order memory order,
         CfdEnginePlanTypes.CloseCommitment memory effects
     ) internal override {
-        lifecycleBook.recordCommitment(order.orderId, effects);
+        lifecycleBook.recordCommitment(order.orderId, effects, order.isClose);
     }
 
     /// @notice Unlinks an order from every live queue, deletes its ephemeral record, and updates account aggregates.

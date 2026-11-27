@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 // Category: spec. All cases assert current documented behavior and are expected to pass.
 // Source of truth: packages/perps/ACCOUNTING_SPEC.md#open-projection
@@ -245,7 +245,7 @@ contract PendingOpenCloseAdmissionTest is BasePerpTest {
 
         vm.startPrank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8, false);
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__NoOpenPosition.selector);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector);
         router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 0, 0, true);
         vm.stopPrank();
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockERC20} from "./utils/MockAave.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -17,8 +17,9 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 ///      and timestamps are Unix seconds.
 library CfdEnginePlanTypes {
 
-    /// @notice Carry and custody effects computed when a close is committed.
-    /// @dev Close commitments have no bounty; open-order commitments can fund one from free settlement.
+    /// @notice Carry and custody effects recorded when an order is committed.
+    /// @dev Close commitments have no bounty; open-order commitments can fund one from free settlement and
+    ///      record custody after both bounty and committed-margin reservations.
     struct CloseCommitment {
         uint256 carryCollectedAssets;
         uint256 carryOutstandingAssets;
@@ -81,7 +82,7 @@ library CfdEnginePlanTypes {
     /// @param positionLastCarryIndex Global carry index last checkpointed for the position, scaled by 1e18.
     /// @param longSide Aggregate LONG-side state.
     /// @param shortSide Aggregate SHORT-side state.
-    /// @param poolAssets Gross physical assets used for planning; VPI and skew subtract aggregate trader claims.
+    /// @param poolAssets Gross physical assets used for planning; VPI and skew subtract claims and positive accrued VPI.
     /// @param poolCashAssets Physical-asset basis for open solvency and cash available for payouts and fee top-ups.
     /// @param poolAdditionalReservedAssets Pending claimant inflows and unassigned assets protected from fee top-ups.
     /// @param poolQueuesTradingRevenue Whether new revenue joins the pending claimant reserve until reconciliation.
@@ -91,8 +92,13 @@ library CfdEnginePlanTypes {
     /// @param actionReserveAssets Aggregate action reserve, including VPI backing and protected execution bounties.
     /// @param vpiRebateReserveAssets Dedicated backing for negative lifetime VPI, included in `actionReserveAssets`.
     /// @param protectedExecutionBountyAssets Execution-bounty reservations excluded from action-charge collection.
+    /// @param protectedPositionMarginAssets Portion of active pledge protected from increases until the queue clears.
+    /// @param protectedReleasedMarginAssets Released top-ups still encumbered for the pending queue and available
+    ///        for carry and action charges on closes and liquidation.
     /// @param unsettledCarryAssets Carry already checkpointed but not yet collected for `account`.
     /// @param totalTraderClaimBalanceAssets Aggregate outstanding trader-claim liability.
+    /// @param totalPositiveVpiAccruedAssets Aggregate refundable positive lifetime VPI held in pool cash.
+    /// @param totalNegativeVpiAccruedAssets Aggregate negative lifetime VPI backed in the clearinghouse.
     /// @param traderClaimBalanceForAccount Outstanding trader claim owned by `account`.
     /// @param degradedMode Whether the engine was already in degraded mode.
     /// @param capPrice Maximum execution and risk price, with 8 decimals.
@@ -127,9 +133,13 @@ library CfdEnginePlanTypes {
         uint256 actionReserveAssets;
         uint256 vpiRebateReserveAssets;
         uint256 protectedExecutionBountyAssets;
+        uint256 protectedPositionMarginAssets;
+        uint256 protectedReleasedMarginAssets;
 
         uint256 unsettledCarryAssets;
         uint256 totalTraderClaimBalanceAssets;
+        uint256 totalPositiveVpiAccruedAssets;
+        uint256 totalNegativeVpiAccruedAssets;
         uint256 traderClaimBalanceForAccount;
         bool degradedMode;
 
@@ -180,7 +190,7 @@ library CfdEnginePlanTypes {
         INVALID_SIZE_QUANTUM,
         /// @notice Order-supplied margin cannot fund the position's required dedicated liquidation reserve.
         LIQUIDATION_RESERVE_UNFUNDED,
-        /// @notice Existing VPI backing is deficient, or free settlement plus new pledge cannot back resulting negative VPI.
+        /// @notice Existing VPI backing is deficient, or the order's net rebate and new pledge cannot fund the increase.
         VPI_REBATE_RESERVE_UNFUNDED,
         /// @notice The open exceeds canonical position storage or representable accounting intermediates.
         NUMERIC_DOMAIN_EXCEEDED
@@ -200,7 +210,8 @@ library CfdEnginePlanTypes {
     /// @param positionMarginAfterOpen Resulting clearinghouse position-margin bucket in 6-decimal settlement token.
     /// @param sideOiIncrease Increase in aggregate side open interest, with 18 decimals.
     /// @param sideEntryNotionalDelta Signed change in exact side entry cost scaled by `1e20`, with 26-decimal precision.
-    /// @param requiredEffectiveAssetsAfterAssets Minimum post-settlement effective assets required by protected admission.
+    /// @param requiredEffectiveAssetsAfterAssets Claims-net physical assets required to cover price liability,
+    ///        settlement headroom, and the projected positive lifetime-VPI reserve.
     /// @param sideMaxProfitIncrease Increase in the aggregate side maximum-profit envelope, in 6-decimal settlement token.
     /// @param tradeCostAssets Signed VPI plus execution fee; positive debits the account and negative rebates it.
     /// @param marginDeltaAssets Order margin supplied for the open/increase.
@@ -264,7 +275,7 @@ library CfdEnginePlanTypes {
         OK,
         /// @notice Requested close size exceeds the snapshot position size.
         CLOSE_SIZE_EXCEEDS,
-        /// @notice Legacy dust-failure value retained for ABI compatibility; the current close planner does not emit it.
+        /// @notice A below-minimum close admitted as a projected full exit would leave a live position.
         DUST_POSITION,
         /// @notice Requested close size is zero or not divisible by the canonical 100-token position quantum.
         INVALID_SIZE_QUANTUM,

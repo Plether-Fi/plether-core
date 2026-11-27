@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
@@ -11,8 +11,10 @@ import {CloseAccountingLib} from "@plether/perps/libraries/CloseAccountingLib.so
 import {LiquidationAccountingLib} from "@plether/perps/libraries/LiquidationAccountingLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {OpenAccountingLib} from "@plether/perps/libraries/OpenAccountingLib.sol";
+import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
+import {VpiAccrualAccountingLib} from "@plether/perps/libraries/VpiAccrualAccountingLib.sol";
 
 /// @title CfdEnginePlanLib
 /// @notice Pure accounting and validation plans for the CfdEngine plan-to-apply architecture.
@@ -28,6 +30,59 @@ library CfdEnginePlanLib {
     // ──────────────────────────────────────────────
     //  HELPERS
     // ──────────────────────────────────────────────
+
+    /// @notice Checks unavoidable OPEN failures independently of an opposing live position or a stale mark.
+    /// @dev The maximum feasible price can disprove minimum size. Funding uses the cheapest planner-valid price
+    ///      and includes fees only when rebates cannot offset them. VPI, carry and existing reserves need a snapshot.
+    function getQueuedOpenRevertCode(
+        uint256 currentSize,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 minimumPrice,
+        uint256 maximumPrice,
+        uint256 unavoidableFeeBps,
+        CfdTypes.RiskParams memory params
+    ) internal pure returns (CfdEnginePlanTypes.OpenRevertCode) {
+        uint256 currentLots = currentSize / CfdTypes.SIZE_QUANTUM;
+        uint256 addedLots = sizeDelta / CfdTypes.SIZE_QUANTUM;
+        uint256 maximumLots = uint256(int256(type(int112).max));
+        if (currentLots > maximumLots || addedLots > maximumLots - currentLots) {
+            return CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
+        }
+        uint256 resultingLots = currentLots + addedLots;
+        if (params.bountyBps != 0) {
+            // The engine rejects prices whose reserve product overflows; preserve any lower valid price.
+            uint256 maximumNumericPrice = type(uint256).max / params.bountyBps / resultingLots;
+            if (maximumNumericPrice < minimumPrice) {
+                return CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
+            }
+            if (maximumPrice > maximumNumericPrice) {
+                maximumPrice = maximumNumericPrice;
+            }
+        }
+        if (
+            OpenAccountingLib.rawLiquidationRequirement(resultingLots, maximumPrice, params.bountyBps)
+                < params.minBountyAssets
+        ) {
+            return CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL;
+        }
+        if (currentSize == 0) {
+            // Only planner-valid fills matter: even the cheapest fill must meet minimum-position policy.
+            uint256 lotBountyBps = addedLots * params.bountyBps;
+            uint256 minimumSizePrice =
+                params.minBountyAssets == 0 ? 0 : Math.ceilDiv(params.minBountyAssets * 10_000, lotBountyBps);
+            if (minimumPrice < minimumSizePrice) {
+                minimumPrice = minimumSizePrice;
+            }
+            uint256 minimumReserve =
+                OpenAccountingLib.rawLiquidationRequirement(addedLots, minimumPrice, params.bountyBps);
+            uint256 minimumFees = (addedLots * minimumPrice * unavoidableFeeBps) / 10_000;
+            if (marginDelta < minimumReserve + minimumFees) {
+                return CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED;
+            }
+        }
+        return CfdEnginePlanTypes.OpenRevertCode.OK;
+    }
 
     /// @notice Replaces one position's post-carry margin inside its aggregate side-margin total.
     /// @dev Subtracts the replaced contribution first, avoiding an artificial signed-intermediate limit. Callers
@@ -48,10 +103,7 @@ library CfdEnginePlanLib {
     function _negativeVpiReserveTarget(
         int256 vpiAccruedAssets
     ) private pure returns (uint256 targetAssets) {
-        if (vpiAccruedAssets < 0) {
-            // This form also supports `type(int256).min` without negating it directly.
-            targetAssets = uint256(-(vpiAccruedAssets + 1)) + 1;
-        }
+        (, targetAssets) = VpiAccrualAccountingLib.contribution(vpiAccruedAssets);
     }
 
     /// @notice Projects release of no-longer-required VPI backing into an account-bucket snapshot.
@@ -79,17 +131,7 @@ library CfdEnginePlanLib {
     function getOpenFailurePolicyCategory(
         CfdEnginePlanTypes.OpenRevertCode code
     ) internal pure returns (CfdEnginePlanTypes.OpenFailurePolicyCategory) {
-        if (
-            code == CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING
-                || code == CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL
-                || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
-                || code == CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN
-                || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
-                || code == CfdEnginePlanTypes.OpenRevertCode.INVALID_SIZE_QUANTUM
-                || code == CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED
-                || code == CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED
-                || code == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED
-        ) {
+        if (OrderFailurePolicyLib.isPredictablyInvalidOpen(uint8(code), true)) {
             return CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable;
         }
 
@@ -116,12 +158,11 @@ library CfdEnginePlanLib {
             return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.None;
         }
 
-        if (
-            code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
-                || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
-                || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
-                || code == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED
-        ) {
+        uint256 protocolInvalidMask = (1 << uint8(CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE))
+            | (1 << uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH))
+            | (1 << uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED))
+            | (1 << uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
+        if (protocolInvalidMask & (uint256(1) << uint8(code)) != 0) {
             return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated;
         }
 
@@ -302,7 +343,7 @@ library CfdEnginePlanLib {
 
         if (
             effectiveSnap.position.size > 0
-                && _applyPendingCarryRealizationToSnapshot(effectiveSnap, delta.pendingCarryAssets)
+                && _applyPendingCarryRealizationToSnapshot(effectiveSnap, delta.pendingCarryAssets, false)
                     != delta.pendingCarryAssets
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
@@ -337,6 +378,18 @@ library CfdEnginePlanLib {
                     > type(uint256).max - effectiveSnap.accountBuckets.settlementBalanceAssets
         ) {
             return _numericOpenFailure(delta);
+        }
+
+        {
+            (bool aggregateVpiFits,,) = VpiAccrualAccountingLib.tryReplace(
+                effectiveSnap.totalPositiveVpiAccruedAssets,
+                effectiveSnap.totalNegativeVpiAccruedAssets,
+                effectiveSnap.position.vpiAccrued,
+                effectiveSnap.position.vpiAccrued + openState.vpiAssets
+            );
+            if (!aggregateVpiFits) {
+                return _numericOpenFailure(delta);
+            }
         }
 
         delta.vpiRebateReserveBeforeAssets = effectiveSnap.vpiRebateReserveAssets;
@@ -444,8 +497,9 @@ library CfdEnginePlanLib {
         CfdTypes.Order memory order,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) private pure {
-        uint256 netDepthAssets =
-            PositionRiskAccountingLib.computeNetPoolDepthAssets(snap.poolAssets, snap.totalTraderClaimBalanceAssets);
+        uint256 netDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
+            snap.poolAssets, snap.totalTraderClaimBalanceAssets, snap.totalPositiveVpiAccruedAssets
+        );
         if (netDepthAssets == 0) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
             return;
@@ -541,7 +595,16 @@ library CfdEnginePlanLib {
             && (change >= 0 || previous > type(int256).min - change);
     }
 
-    /// @notice Allocates newly required VPI and liquidation reserves from free cash and new position pledge.
+    /// @notice Returns the reserve increase left for new pledge after using this order's available net rebate.
+    function vpiReserveFromNewPledge(
+        MarginClearinghouseAccountingLib.OpenCostPlan memory cost,
+        uint256 vpiReserveIncreaseAssets
+    ) internal pure returns (uint256) {
+        uint256 availableRebateAssets = Math.min(cost.settlementCreditAssets, cost.resultingFreeSettlementAssets);
+        return vpiReserveIncreaseAssets - Math.min(vpiReserveIncreaseAssets, availableRebateAssets);
+    }
+
+    /// @notice Allocates newly required VPI and liquidation reserves and returns excess liquidation reserve to pledge.
     function _planOpenReserveFunding(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan,
@@ -549,10 +612,9 @@ library CfdEnginePlanLib {
     ) private pure {
         delta.liquidationReserveBeforeAssets = snap.liquidationReserveAssets;
         delta.liquidationReserveAfterAssets = delta.openState.liquidationReserveTargetAssets;
-        if (delta.liquidationReserveAfterAssets < delta.liquidationReserveBeforeAssets) {
-            delta.liquidationReserveAfterAssets = delta.liquidationReserveBeforeAssets;
-        }
-        uint256 reserveIncreaseAssets = delta.liquidationReserveAfterAssets - delta.liquidationReserveBeforeAssets;
+        uint256 reserveIncreaseAssets = delta.liquidationReserveAfterAssets > delta.liquidationReserveBeforeAssets
+            ? delta.liquidationReserveAfterAssets - delta.liquidationReserveBeforeAssets
+            : 0;
 
         uint256 newPledgeAvailableAssets = openCostPlan.resultingPositionMarginAssets > snap.position.margin
             ? openCostPlan.resultingPositionMarginAssets - snap.position.margin
@@ -560,10 +622,7 @@ library CfdEnginePlanLib {
         uint256 vpiReserveIncreaseAssets = delta.vpiRebateReserveAfterAssets > delta.vpiRebateReserveBeforeAssets
             ? delta.vpiRebateReserveAfterAssets - delta.vpiRebateReserveBeforeAssets
             : 0;
-        uint256 vpiReserveFromFreeAssets = vpiReserveIncreaseAssets < openCostPlan.resultingFreeSettlementAssets
-            ? vpiReserveIncreaseAssets
-            : openCostPlan.resultingFreeSettlementAssets;
-        delta.vpiRebateReserveFromPledgeAssets = vpiReserveIncreaseAssets - vpiReserveFromFreeAssets;
+        delta.vpiRebateReserveFromPledgeAssets = vpiReserveFromNewPledge(openCostPlan, vpiReserveIncreaseAssets);
         if (delta.vpiRebateReserveFromPledgeAssets > newPledgeAvailableAssets) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED;
             return;
@@ -576,6 +635,9 @@ library CfdEnginePlanLib {
         }
         delta.positionMarginAfterOpen =
             openCostPlan.resultingPositionMarginAssets - delta.vpiRebateReserveFromPledgeAssets - reserveIncreaseAssets;
+        if (delta.liquidationReserveBeforeAssets > delta.liquidationReserveAfterAssets) {
+            delta.positionMarginAfterOpen += delta.liquidationReserveBeforeAssets - delta.liquidationReserveAfterAssets;
+        }
     }
 
     /// @notice Projects the same size-independent carry collection used by open planning, in place.
@@ -590,7 +652,7 @@ library CfdEnginePlanLib {
             return true;
         }
         uint256 pending = _pendingCarryAssets(snap);
-        return _applyPendingCarryRealizationToSnapshot(snap, pending) == pending;
+        return _applyPendingCarryRealizationToSnapshot(snap, pending, false) == pending;
     }
 
     /// @notice Projects the carry checkpoint performed by close commitment, preserving any unpaid carry.
@@ -599,20 +661,22 @@ library CfdEnginePlanLib {
     function projectCloseCommitCarry(
         CfdEnginePlanTypes.RawSnapshot memory snap
     ) internal pure returns (uint256 collectedAssets) {
-        collectedAssets = _applyPendingCarryRealizationToSnapshot(snap, _pendingCarryAssets(snap));
+        collectedAssets = _applyPendingCarryRealizationToSnapshot(snap, _pendingCarryAssets(snap), false);
         snap.positionLastCarryIndex = snap.carryIndex;
         snap.position.lastCarryTimestamp = uint64(snap.currentTimestamp);
     }
 
     /// @notice Projects margin-first carry collection before trade validation and terminal settlement.
     /// @dev Mutates the existing local snapshot in place, including custody, pledge, side margin, and pool depth.
-    ///      The carry basis remains full maximum-profit exposure regardless of the remaining margin. Uncovered carry remains available for existing terminal recovery/waiver rules.
+    ///      Carry accrues on full maximum-profit exposure. Uncovered carry remains available for terminal recovery or waiver.
     /// @param snap Canonical, internally consistent snapshot to mutate.
     /// @param pendingCarryAssets Carry requested for realization.
-    /// @return realizedCarryAssets Carry covered by active position margin and free settlement.
+    /// @param includeProtected Whether reducing settlement can collect from protected pledge and released top-ups.
+    /// @return realizedCarryAssets Carry covered by the eligible custody buckets.
     function _applyPendingCarryRealizationToSnapshot(
         CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 pendingCarryAssets
+        uint256 pendingCarryAssets,
+        bool includeProtected
     ) private pure returns (uint256 realizedCarryAssets) {
         if (pendingCarryAssets == 0 || snap.position.size == 0) {
             return 0;
@@ -620,14 +684,23 @@ library CfdEnginePlanLib {
         (
             MarginClearinghouseAccountingLib.SettlementConsumption memory consumption,
             IMarginClearinghouse.AccountAssetBuckets memory afterBuckets
-        ) = MarginClearinghouseAccountingLib.projectCarryLoss(snap.accountBuckets, pendingCarryAssets);
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(
+            snap.accountBuckets,
+            pendingCarryAssets,
+            includeProtected ? 0 : snap.protectedPositionMarginAssets,
+            includeProtected ? snap.protectedReleasedMarginAssets : 0
+        );
         realizedCarryAssets = consumption.totalConsumedAssets;
+        snap.protectedReleasedMarginAssets -= consumption.otherLockedMarginConsumedAssets;
         snap.accountBuckets = afterBuckets;
         snap.position.margin = afterBuckets.activePositionMarginAssets;
         snap.lockedBuckets.positionMarginAssets = afterBuckets.activePositionMarginAssets;
         snap.lockedBuckets.totalLockedMarginAssets = afterBuckets.totalLockedMarginAssets;
         CfdEnginePlanTypes.SideSnapshot memory selected = _selectedSide(snap, snap.position.side);
         selected.totalMargin -= consumption.activeMarginConsumedAssets;
+        if (snap.protectedPositionMarginAssets > snap.position.margin) {
+            snap.protectedPositionMarginAssets = snap.position.margin;
+        }
         snap.positionLastCarryIndex = snap.carryIndex;
         snap.unsettledCarryAssets = consumption.uncoveredAssets;
         snap.poolAssets += realizedCarryAssets;
@@ -659,7 +732,8 @@ library CfdEnginePlanLib {
         if (snap.traderClaimBalanceForAccount > uint256(type(int256).max) - delta.positionMarginAfterOpen) {
             return (false, riskState);
         }
-        uint256 reachableCollateralAssets = delta.positionMarginAfterOpen + snap.traderClaimBalanceForAccount;
+        uint256 reachableCollateralAssets =
+            delta.positionMarginAfterOpen - snap.protectedPositionMarginAssets + snap.traderClaimBalanceForAccount;
         (bool isProfit, uint256 pnlAbs) = CfdMath.calculateExactPnl(
             delta.newPosSize / CfdTypes.SIZE_QUANTUM,
             delta.newPosEntryCostAssetAtoms,
@@ -685,11 +759,11 @@ library CfdEnginePlanLib {
     /// @notice Applies the effective-asset requirement when a planned open preserves protected settlement headroom.
     /// @dev The selected side copies are increased by the delta. Current assets use `snap.poolCashAssets`; the physical
     ///      asset delta reflects the fee actually credited from trade cost and affordable post-open pool cash. Trader
-    ///      claims and pending payouts are unchanged. The protected buffer is liability-scaled and rounded up. This
-    ///      helper writes the required effective-asset target into `delta` on success.
+    ///      claims and pending payouts are unchanged. Positive accrued VPI is protected alongside the liability-scaled
+    ///      buffer. This helper writes the required claims-net effective-asset target into `delta` on success.
     /// @param snap Current pool, claim, degradation, and side-liability snapshot.
     /// @param delta Partially built open delta with side and economic changes.
-    /// @return satisfied Whether projected effective assets cover liability and the configured settlement buffer.
+    /// @return satisfied Whether projected effective assets cover liability, positive accrued VPI, and settlement buffer.
     function _applyOpenSettlementBufferAfterPlan(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.OpenDelta memory delta
@@ -727,8 +801,8 @@ library CfdEnginePlanLib {
             }
             poolCashBeforeTopUp = snap.poolCashAssets - rebateAssets;
         }
-        uint256 newRevenueReserveAssets =
-            snap.poolQueuesTradingRevenue && cashDeltaBeforeTopUp > 0 ? uint256(cashDeltaBeforeTopUp) : 0;
+        uint256 positiveVpiAfterAssets =
+            _positiveVpiAfterPositionChange(snap, snap.position.vpiAccrued + delta.posVpiAccruedDelta);
         uint256 feeShortfallAssets = delta.executionFeeAssets - directlyCreditedAssets;
         uint256 topUpAssets = feeShortfallAssets == 0
             ? 0
@@ -739,7 +813,7 @@ library CfdEnginePlanLib {
                     poolCashBeforeTopUp,
                     postMaxLiability,
                     snap.totalTraderClaimBalanceAssets,
-                    newRevenueReserveAssets
+                    positiveVpiAfterAssets
                 )
             );
         if (cashDeltaBeforeTopUp < type(int256).min + int256(topUpAssets)) {
@@ -762,11 +836,14 @@ library CfdEnginePlanLib {
             }),
             snap.degradedMode
         );
-        satisfied = SolvencyAccountingLib.hasRequiredSettlementBuffer(
-            result.effectiveAssetsAfterAssets, result.maxLiabilityAfterAssets, snap.settlementBufferBps
-        );
+        satisfied = result.effectiveAssetsAfterAssets >= positiveVpiAfterAssets
+            && SolvencyAccountingLib.hasRequiredSettlementBuffer(
+                result.effectiveAssetsAfterAssets - positiveVpiAfterAssets,
+                result.maxLiabilityAfterAssets,
+                snap.settlementBufferBps
+            );
         if (satisfied) {
-            delta.requiredEffectiveAssetsAfterAssets = result.maxLiabilityAfterAssets
+            delta.requiredEffectiveAssetsAfterAssets = positiveVpiAfterAssets + result.maxLiabilityAfterAssets
                 + SolvencyAccountingLib.settlementBufferTargetAssets(
                     result.maxLiabilityAfterAssets, snap.settlementBufferBps
                 );
@@ -807,7 +884,7 @@ library CfdEnginePlanLib {
             return delta;
         }
         delta.pendingCarryAssets = _pendingCarryAssets(snap);
-        delta.realizedCarryAssets = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryAssets);
+        delta.realizedCarryAssets = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryAssets, true);
 
         CfdTypes.Position memory pos = snap.position;
         delta.side = pos.side;
@@ -977,6 +1054,8 @@ library CfdEnginePlanLib {
         delta.freshPayoutCreatesClaim = delta.pricePayoutCreatesClaim;
 
         uint256 feeTopUpAssets = delta.executionFeeAssets - delta.actionProtocolFeeCreditedAssets;
+        // Count the rebate against the fee only after it offsets other action charges.
+        feeTopUpAssets += cs.executionFeeAssets - Math.min(cs.executionFeeAssets, delta.actionChargeAssessedAssets);
         freePoolCashAssets =
             _freePoolCashForProtocolFee(snap, delta, poolCashAfterCollectionsAssets, claimsAfterPriceNettingAssets);
         delta.protocolFeeTopUpAssets = feeTopUpAssets < freePoolCashAssets ? feeTopUpAssets : freePoolCashAssets;
@@ -989,7 +1068,7 @@ library CfdEnginePlanLib {
         return delta;
     }
 
-    /// @dev Mirrors HousePool's live settlement reserve after the close side delta and cash movements preceding
+    /// @dev Mirrors HousePool's live settlement reserve after the close side/VPI deltas and cash movements preceding
     ///      the protocol-fee top-up. Fresh trader payouts and rebates retain their separate cash-priority policy.
     function _freePoolCashForProtocolFee(
         CfdEnginePlanTypes.RawSnapshot memory snap,
@@ -1000,30 +1079,48 @@ library CfdEnginePlanLib {
         uint256 maxLiabilityAssets = SolvencyAccountingLib.getMaxLiabilityAfterClose(
             snap.longSide.maxProfitAssets, snap.shortSide.maxProfitAssets, delta.side, delta.posMaxProfitReduction
         );
-        uint256 newRevenueReserveAssets;
-        if (snap.poolQueuesTradingRevenue) {
-            uint256 cashArrivedRevenueAssets = delta.pricePnlPledgeConsumedAssets + delta.actionChargeCollectedAssets
-                - delta.actionProtocolFeeCreditedAssets;
-            uint256 retainedRevenueAssets =
-                delta.actionChargeWithheldAssets - (delta.executionFeeAssets - delta.actionProtocolFeeCreditedAssets);
-            newRevenueReserveAssets = cashArrivedRevenueAssets + retainedRevenueAssets;
-        }
         return _freePoolCashAfterLiabilityReserves(
-            snap, poolCashAssets, maxLiabilityAssets, traderClaimsAssets, newRevenueReserveAssets
+            snap,
+            poolCashAssets,
+            maxLiabilityAssets,
+            traderClaimsAssets,
+            _positiveVpiAfterPositionChange(snap, snap.position.vpiAccrued - delta.posVpiAccruedReduction)
         );
     }
 
-    /// @dev Matches HousePool's settlement-free cash reserve after a projected side update and queued revenue.
+    /// @notice Replaces the current position's positive contribution for a projected cash reserve.
+    /// @dev Open planning checks aggregate replacement before reaching this helper. Closing only removes the
+    ///      proportional prior contribution, so canonical snapshots cannot increase or underflow the total.
+    function _positiveVpiAfterPositionChange(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        int256 nextVpiAccruedAssets
+    ) private pure returns (uint256) {
+        (uint256 oldPositiveAssets,) = VpiAccrualAccountingLib.contribution(snap.position.vpiAccrued);
+        (uint256 newPositiveAssets,) = VpiAccrualAccountingLib.contribution(nextVpiAccruedAssets);
+        return snap.totalPositiveVpiAccruedAssets - oldPositiveAssets + newPositiveAssets;
+    }
+
+    /// @dev Matches HousePool's settlement fee budget after a projected side and positive-VPI update.
     function _freePoolCashAfterLiabilityReserves(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         uint256 poolCashAssets,
         uint256 maxLiabilityAssets,
         uint256 traderClaimsAssets,
-        uint256 newRevenueReserveAssets
+        uint256 positiveVpiAfterAssets
     ) private pure returns (uint256) {
+        // With no claimed tranche capital, reconciliation must assign finalized equity before treasury top-ups.
+        // There is no unpaid-fee ledger: the uncollected top-up is forgone for this action.
+        if (snap.poolQueuesTradingRevenue) {
+            return 0;
+        }
+        // Deduct the new reservation separately so an exhausted budget cannot overflow a reserve sum.
+        if (poolCashAssets <= positiveVpiAfterAssets) {
+            return 0;
+        }
+        poolCashAssets -= positiveVpiAfterAssets;
         uint256 reservedAssets = maxLiabilityAssets + traderClaimsAssets
             + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, snap.settlementBufferBps)
-            + snap.poolAdditionalReservedAssets + newRevenueReserveAssets;
+            + snap.poolAdditionalReservedAssets;
         return poolCashAssets > reservedAssets ? poolCashAssets - reservedAssets : 0;
     }
 
@@ -1040,16 +1137,18 @@ library CfdEnginePlanLib {
         uint256 vpiClawbackWithheldAssets;
         if (actionNetAssets > 0) {
             delta.actionChargeAssessedAssets = uint256(actionNetAssets);
-            delta.actionChargeWithheldAssets = delta.priceGainAssets < delta.actionChargeAssessedAssets
-                ? delta.priceGainAssets
-                : delta.actionChargeAssessedAssets;
-            delta.actionChargeToCollectAssets = delta.actionChargeAssessedAssets - delta.actionChargeWithheldAssets;
-            uint256 vpiClawbackAssets =
-                _negativeVpiReserveTarget(snap.position.vpiAccrued) - delta.vpiRebateReserveAfterAssets;
-            vpiClawbackWithheldAssets = delta.actionChargeWithheldAssets < vpiClawbackAssets
-                ? delta.actionChargeWithheldAssets
-                : vpiClawbackAssets;
-            delta.vpiRebateReserveConsumedAssets = vpiClawbackAssets - vpiClawbackWithheldAssets;
+            // Canonical proportional removal has the prior accrual's sign and cannot exceed its magnitude.
+            (
+                delta.actionChargeWithheldAssets,
+                delta.actionChargeToCollectAssets,
+                vpiClawbackWithheldAssets,
+                delta.vpiRebateReserveConsumedAssets
+            ) =
+                _splitWithheldActionCharge(
+                    delta.priceGainAssets,
+                    delta.actionChargeAssessedAssets,
+                    _negativeVpiReserveTarget(delta.posVpiAccruedReduction)
+                );
             _planCloseCashSources(snap, delta, cs.remainingSize == 0);
         } else if (actionNetAssets < 0) {
             delta.actionRebateAssets = uint256(-actionNetAssets);
@@ -1058,14 +1157,10 @@ library CfdEnginePlanLib {
         delta.netReleasedMarginAssets = delta.unlockMarginAssets - delta.actionChargeFromReleasedMarginAssets;
         uint256 nonClawbackWithheldAssets = delta.actionChargeWithheldAssets - vpiClawbackWithheldAssets;
         uint256 nonVpiReserveCollectedAssets = delta.actionChargeCollectedAssets - delta.vpiRebateReserveConsumedAssets;
-        uint256 executionFeeEligibleAssets = nonClawbackWithheldAssets + nonVpiReserveCollectedAssets;
         delta.executionFeeAssets =
-            cs.executionFeeAssets < executionFeeEligibleAssets ? cs.executionFeeAssets : executionFeeEligibleAssets;
-        uint256 feeWithheldAssets =
-            delta.executionFeeAssets < nonClawbackWithheldAssets ? delta.executionFeeAssets : nonClawbackWithheldAssets;
-        uint256 feeToCollectAssets = delta.executionFeeAssets - feeWithheldAssets;
-        delta.actionProtocolFeeCreditedAssets =
-            feeToCollectAssets < nonVpiReserveCollectedAssets ? feeToCollectAssets : nonVpiReserveCollectedAssets;
+            Math.min(cs.executionFeeAssets, nonClawbackWithheldAssets + nonVpiReserveCollectedAssets);
+        // The eligibility cap already bounds this remainder by non-VPI collected cash.
+        delta.actionProtocolFeeCreditedAssets = Math.saturatingSub(delta.executionFeeAssets, nonClawbackWithheldAssets);
     }
 
     function _postCloseHealthy(
@@ -1079,10 +1174,82 @@ library CfdEnginePlanLib {
         uint256 claims =
             delta.existingTraderClaimRemainingAssets + (delta.pricePayoutCreatesClaim ? delta.pricePayoutAssets : 0);
         uint256 bps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
-        return !PositionRiskAccountingLib.buildExactPriceRiskState(
+        PositionRiskAccountingLib.PositionRiskState memory risk = PositionRiskAccountingLib.buildExactPriceRiskState(
             remaining, cs.remainingEntryCostAssetAtoms, delta.price, snap.capPrice, delta.posMarginAfter + claims, bps
+        );
+        return !risk.liquidatable
+            && uint256(risk.equityAssets)
+                >= _requiredPartialCloseEquity(snap, delta, cs.remainingSize, risk.maintenanceMarginAssets);
+    }
+
+    /// @dev Claim-funded losses must not release the residual's pre-close equity ratio. At the same price,
+    ///      notional scales with size; round up so a fractional equity atom stays pledged. The snapshot is post-carry.
+    function _requiredPartialCloseEquity(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta,
+        uint256 remainingSize,
+        uint256 maintenanceMarginAssets
+    ) private pure returns (uint256 requiredEquityAssets) {
+        requiredEquityAssets = maintenanceMarginAssets + 1;
+        if (delta.pricePnlClaimConsumedAssets == 0) {
+            return requiredEquityAssets;
+        }
+        PositionRiskAccountingLib.PositionRiskState memory beforeRisk =
+            PositionRiskAccountingLib.buildExactPriceRiskState(
+                snap.position,
+                snap.positionEntryCostAssetAtoms,
+                delta.price,
+                snap.capPrice,
+                snap.position.margin + snap.traderClaimBalanceForAccount,
+                0
+            );
+        if (beforeRisk.equityAssets > 0) {
+            uint256 proportionalEquityAssets =
+                Math.mulDiv(uint256(beforeRisk.equityAssets), remainingSize, snap.position.size, Math.Rounding.Ceil);
+            if (proportionalEquityAssets > requiredEquityAssets) {
+                requiredEquityAssets = proportionalEquityAssets;
+            }
+        }
+    }
+
+    function _splitWithheldActionCharge(
+        uint256 priceGainAssets,
+        uint256 assessedAssets,
+        uint256 vpiClawbackAssets
+    )
+        private
+        pure
+        returns (
+            uint256 withheldAssets,
+            uint256 toCollectAssets,
+            uint256 vpiClawbackWithheldAssets,
+            uint256 vpiRebateReserveConsumedAssets
         )
-        .liquidatable;
+    {
+        withheldAssets = Math.min(priceGainAssets, assessedAssets);
+        toCollectAssets = assessedAssets - withheldAssets;
+        vpiClawbackWithheldAssets = Math.min(withheldAssets, vpiClawbackAssets);
+        vpiRebateReserveConsumedAssets = vpiClawbackAssets - vpiClawbackWithheldAssets;
+    }
+
+    function _consumeSpendableActionReserve(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 actionChargeToCollectAssets,
+        uint256 vpiRebateReserveBeforeAssets,
+        uint256 vpiRebateReserveAfterAssets,
+        uint256 vpiRebateReserveConsumedAssets
+    )
+        private
+        pure
+        returns (uint256 actionReserveConsumedAssets, uint256 remainingAfterReserve, uint256 releasedVpiReserveAssets)
+    {
+        uint256 chargeExcludingVpi = actionChargeToCollectAssets - vpiRebateReserveConsumedAssets;
+        uint256 protectedActionReserveAssets = snap.protectedExecutionBountyAssets + snap.vpiRebateReserveAssets;
+        actionReserveConsumedAssets =
+            Math.min(chargeExcludingVpi, Math.saturatingSub(snap.actionReserveAssets, protectedActionReserveAssets));
+        remainingAfterReserve = chargeExcludingVpi - actionReserveConsumedAssets;
+        releasedVpiReserveAssets =
+            vpiRebateReserveBeforeAssets - vpiRebateReserveAfterAssets - vpiRebateReserveConsumedAssets;
     }
 
     function _planCloseCashSources(
@@ -1090,42 +1257,28 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.CloseDelta memory delta,
         bool terminal
     ) private pure {
-        uint256 remainingActionChargeToCollectAssets =
-            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
-        uint256 protectedActionReserveAssets = snap.protectedExecutionBountyAssets + snap.vpiRebateReserveAssets;
-        uint256 spendableActionReserveAssets = snap.actionReserveAssets > protectedActionReserveAssets
-            ? snap.actionReserveAssets - protectedActionReserveAssets
-            : 0;
-        delta.actionReserveConsumedAssets = remainingActionChargeToCollectAssets < spendableActionReserveAssets
-            ? remainingActionChargeToCollectAssets
-            : spendableActionReserveAssets;
-        uint256 actionChargeAfterReserveAssets =
-            remainingActionChargeToCollectAssets - delta.actionReserveConsumedAssets;
-        uint256 releasedVpiReserveAssets = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
-            - delta.vpiRebateReserveConsumedAssets;
-        uint256 collectibleFreeSettlementAssets = snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets;
+        uint256 remaining;
+        uint256 releasedVpiReserveAssets;
+        (delta.actionReserveConsumedAssets, remaining, releasedVpiReserveAssets) = _consumeSpendableActionReserve(
+            snap,
+            delta.actionChargeToCollectAssets,
+            delta.vpiRebateReserveBeforeAssets,
+            delta.vpiRebateReserveAfterAssets,
+            delta.vpiRebateReserveConsumedAssets
+        );
+        uint256 collectibleFree = snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets
+            + (terminal ? delta.liquidationReserveReleaseAssets : 0);
+        remaining = Math.saturatingSub(remaining, collectibleFree);
+        delta.actionChargeFromReleasedMarginAssets = Math.min(remaining, delta.unlockMarginAssets);
+        remaining = Math.saturatingSub(
+            remaining - delta.actionChargeFromReleasedMarginAssets, snap.protectedReleasedMarginAssets
+        );
         if (terminal) {
-            // The full-close reserve is released before pledge attribution and cash collection.
-            collectibleFreeSettlementAssets += delta.liquidationReserveReleaseAssets;
+            delta.actionCommittedMarginConsumedAssets =
+                Math.min(remaining, snap.lockedBuckets.committedOrderMarginAssets);
         }
-        uint256 freeConsumedAssets = actionChargeAfterReserveAssets < collectibleFreeSettlementAssets
-            ? actionChargeAfterReserveAssets
-            : collectibleFreeSettlementAssets;
-        uint256 actionChargeAfterFreeAssets = actionChargeAfterReserveAssets - freeConsumedAssets;
-        delta.actionChargeFromReleasedMarginAssets = actionChargeAfterFreeAssets < delta.unlockMarginAssets
-            ? actionChargeAfterFreeAssets
-            : delta.unlockMarginAssets;
-        actionChargeAfterFreeAssets -= delta.actionChargeFromReleasedMarginAssets;
-        if (terminal) {
-            delta.actionCommittedMarginConsumedAssets = actionChargeAfterFreeAssets
-                < snap.lockedBuckets.committedOrderMarginAssets
-                ? actionChargeAfterFreeAssets
-                : snap.lockedBuckets.committedOrderMarginAssets;
-        }
-        delta.actionChargeCollectedAssets = delta.vpiRebateReserveConsumedAssets + delta.actionReserveConsumedAssets
-            + freeConsumedAssets + delta.actionChargeFromReleasedMarginAssets
-            + delta.actionCommittedMarginConsumedAssets;
-        delta.actionChargeWaivedAssets = delta.actionChargeToCollectAssets - delta.actionChargeCollectedAssets;
+        delta.actionChargeWaivedAssets = remaining - delta.actionCommittedMarginConsumedAssets;
+        delta.actionChargeCollectedAssets = delta.actionChargeToCollectAssets - delta.actionChargeWaivedAssets;
     }
 
     /// @dev Claims are health collateral, never cash funding. Net gains contribute once whether paid or deferred.
@@ -1158,7 +1311,12 @@ library CfdEnginePlanLib {
         if (risk.liquidatable) {
             return false;
         }
-        uint256 headroom = uint256(risk.equityAssets) - risk.maintenanceMarginAssets - 1;
+        uint256 requiredEquityAssets =
+            _requiredPartialCloseEquity(snap, delta, cs.remainingSize, risk.maintenanceMarginAssets);
+        if (uint256(risk.equityAssets) < requiredEquityAssets) {
+            return false;
+        }
+        uint256 headroom = uint256(risk.equityAssets) - requiredEquityAssets;
         if (delta.unlockMarginAssets > headroom) {
             delta.unlockMarginAssets = headroom;
         }
@@ -1332,8 +1490,9 @@ library CfdEnginePlanLib {
                 preSkewAssets: preSkewAssets,
                 postSkewAssets: postSkewAssets,
                 poolDepthAssets: PositionRiskAccountingLib.computeNetPoolDepthAssets(
-                    snap.poolAssets, snap.totalTraderClaimBalanceAssets
+                    snap.poolAssets, snap.totalTraderClaimBalanceAssets, snap.totalPositiveVpiAccruedAssets
                 ),
+                degradedMode: snap.degradedMode,
                 vpiFactor: snap.riskParams.vpiFactor,
                 frozenCloseSpreadBps: snap.frozenCloseSpreadBps,
                 oracleFrozen: snap.oracleFrozen,
@@ -1433,7 +1592,7 @@ library CfdEnginePlanLib {
         }
 
         delta.pendingCarryAssets = _pendingCarryAssets(snap);
-        delta.realizedCarryAssets = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryAssets);
+        delta.realizedCarryAssets = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryAssets, true);
         pos = snap.position;
         delta.side = pos.side;
         delta.posSize = pos.size;
@@ -1471,9 +1630,10 @@ library CfdEnginePlanLib {
     /// @dev Price loss consumes only the same-account claim and PnL pledge; excess is a diagnostic write-off. The
     ///      keeper/protocol/LP charge is capped by `liquidationReserveAssets`. Still-unpaid carry and negative lifetime VPI
     ///      are action charges recovered from new price gain first, dedicated VPI backing for its clawback, spendable
-    ///      action reserve, pre-existing free settlement (including released VPI backing), then committed order margin.
-    ///      Any remainder is waived. These action charges cannot consume PnL pledge, liquidation reserve, or protected
-    ///      execution-bounty reserves, and no shortfall becomes protocol debt.
+    ///      action reserve, pre-existing free settlement (including released VPI backing), then released top-ups.
+    ///      Committed opening-order margin stays reserved for the surviving orders; any remaining action charge is waived.
+    ///      These charges cannot consume PnL pledge, liquidation reserve, or protected execution-bounty reserves, and no
+    ///      shortfall becomes protocol debt.
     /// @param snap Account, pool cash, claims, risk parameters, and aggregate side snapshot.
     /// @param delta Liquidatable delta containing precomputed risk state.
     /// @param pos Entire position being liquidated.
@@ -1555,13 +1715,8 @@ library CfdEnginePlanLib {
         delta.vpiRebateReserveBeforeAssets = snap.vpiRebateReserveAssets;
         delta.vpiRebateReserveAfterAssets = 0;
         delta.actionChargeAssessedAssets = delta.pendingCarryAssets - delta.realizedCarryAssets + vpiClawbackAssets;
-        delta.actionChargeWithheldAssets = delta.priceGainAssets < delta.actionChargeAssessedAssets
-            ? delta.priceGainAssets
-            : delta.actionChargeAssessedAssets;
-        delta.actionChargeToCollectAssets = delta.actionChargeAssessedAssets - delta.actionChargeWithheldAssets;
-        uint256 vpiClawbackWithheldAssets =
-            delta.actionChargeWithheldAssets < vpiClawbackAssets ? delta.actionChargeWithheldAssets : vpiClawbackAssets;
-        delta.vpiRebateReserveConsumedAssets = vpiClawbackAssets - vpiClawbackWithheldAssets;
+        (delta.actionChargeWithheldAssets, delta.actionChargeToCollectAssets,, delta.vpiRebateReserveConsumedAssets) =
+            _splitWithheldActionCharge(delta.priceGainAssets, delta.actionChargeAssessedAssets, vpiClawbackAssets);
         _collectLiquidationActionCharge(snap, delta);
     }
 
@@ -1570,38 +1725,20 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.LiquidationDelta memory delta
     ) private pure {
-        uint256 remainingActionChargeToCollectAssets =
-            delta.actionChargeToCollectAssets - delta.vpiRebateReserveConsumedAssets;
-        {
-            uint256 protectedActionReserveAssets = snap.protectedExecutionBountyAssets + snap.vpiRebateReserveAssets;
-            uint256 spendableActionReserveAssets = snap.actionReserveAssets > protectedActionReserveAssets
-                ? snap.actionReserveAssets - protectedActionReserveAssets
-                : 0;
-            delta.actionReserveConsumedAssets = remainingActionChargeToCollectAssets < spendableActionReserveAssets
-                ? remainingActionChargeToCollectAssets
-                : spendableActionReserveAssets;
-        }
-        uint256 actionChargeAfterReserveAssets =
-            remainingActionChargeToCollectAssets - delta.actionReserveConsumedAssets;
-        uint256 freeConsumedAssets;
-        {
-            uint256 releasedVpiReserveAssets = delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets
-                - delta.vpiRebateReserveConsumedAssets;
-            uint256 collectibleFreeSettlementAssets =
-                snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets;
-            freeConsumedAssets = actionChargeAfterReserveAssets;
-            if (freeConsumedAssets > collectibleFreeSettlementAssets) {
-                freeConsumedAssets = collectibleFreeSettlementAssets;
-            }
-        }
-        uint256 actionChargeAfterFreeAssets = actionChargeAfterReserveAssets - freeConsumedAssets;
-        delta.actionCommittedMarginConsumedAssets = actionChargeAfterFreeAssets
-            < snap.lockedBuckets.committedOrderMarginAssets
-            ? actionChargeAfterFreeAssets
-            : snap.lockedBuckets.committedOrderMarginAssets;
-        delta.actionChargeCollectedAssets = delta.vpiRebateReserveConsumedAssets + delta.actionReserveConsumedAssets
-            + freeConsumedAssets + delta.actionCommittedMarginConsumedAssets;
-        delta.actionChargeWaivedAssets = delta.actionChargeToCollectAssets - delta.actionChargeCollectedAssets;
+        uint256 remaining;
+        uint256 releasedVpiReserveAssets;
+        (delta.actionReserveConsumedAssets, remaining, releasedVpiReserveAssets) = _consumeSpendableActionReserve(
+            snap,
+            delta.actionChargeToCollectAssets,
+            delta.vpiRebateReserveBeforeAssets,
+            delta.vpiRebateReserveAfterAssets,
+            delta.vpiRebateReserveConsumedAssets
+        );
+        delta.actionChargeWaivedAssets = Math.saturatingSub(
+            remaining,
+            snap.accountBuckets.freeSettlementAssets + releasedVpiReserveAssets + snap.protectedReleasedMarginAssets
+        );
+        delta.actionChargeCollectedAssets = delta.actionChargeToCollectAssets - delta.actionChargeWaivedAssets;
     }
 
     function _buildLiquidationState(

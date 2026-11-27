@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Input-only close ledger for the mixed campaign's fixed risk configuration.
 /// @dev Inputs describe custody AFTER the ordinary margin/free carry checkpoint and BEFORE the executing order's
@@ -34,6 +34,7 @@ library CloseReferenceMath {
         uint256 poolCash;
         uint256 poolAccounted;
         uint256 allClaims;
+        uint256 poolLiabilityReserve;
         uint256 maintenanceBps;
     }
 
@@ -163,7 +164,7 @@ library CloseReferenceMath {
         }
         _payoutAndFees(x, v);
         v.remainingEquity = int256(v.remainingMargin + v.remainingClaim) + v.remainingPnl;
-        if (!v.terminal && v.remainingEquity <= int256(v.maintenance)) {
+        if (!v.terminal && v.remainingEquity < int256(_requiredResidualEquity(x, v))) {
             v.revertCode = 6;
             return v;
         }
@@ -180,7 +181,8 @@ library CloseReferenceMath {
     /// @dev Select the smallest permitted price recovery, then the greatest permitted release. The constraints are:
     ///      (1) claims net first; (2) pro-rata pledge pays its allocated loss; (3) recovered loss plus the residual
     ///      terminal curve equals the original curve; (4) release cannot exceed unused pro-rata pledge; and
-    ///      (5) residual price equity is strictly above the active requirement, including any fresh net gain once.
+    ///      (5) residual price equity is strictly above the active requirement, including any fresh net gain once;
+    ///      (6) a claim-funded loss preserves the positive pre-close equity per lot.
     function _priceConstraints(
         Input memory x,
         Values memory v
@@ -218,10 +220,11 @@ library CloseReferenceMath {
             }
             b.netGain = v.pricePayout;
             int256 equityBeforeRelease = int256(b.pledgeAfterLoss + b.claimAfterLoss + b.netGain) + v.remainingPnl;
-            if (equityBeforeRelease <= int256(v.maintenance)) {
+            uint256 requiredEquity = _requiredResidualEquity(x, v);
+            if (equityBeforeRelease < int256(requiredEquity)) {
                 return false;
             }
-            b.maximumRelease = _min(b.maximumRelease, uint256(equityBeforeRelease) - v.maintenance - 1);
+            b.maximumRelease = _min(b.maximumRelease, uint256(equityBeforeRelease) - requiredEquity);
             if (b.rawResidualLp > 0) {
                 uint256 residualBacking = b.pledgeAfterLoss + b.claimAfterLoss - b.maximumRelease;
                 if (int256(_min(uint256(b.rawResidualLp), residualBacking)) != v.requiredResidualLpDelta) {
@@ -233,6 +236,21 @@ library CloseReferenceMath {
         v.remainingMargin = b.pledgeAfterLoss - b.maximumRelease;
         v.remainingClaim = b.claimAfterLoss;
         return true;
+    }
+
+    function _requiredResidualEquity(
+        Input memory x,
+        Values memory v
+    ) private pure returns (uint256 required) {
+        required = v.maintenance + 1;
+        if (v.claimConsumed != 0) {
+            int256 preEquity = int256(x.margin + x.claim) + v.pnl + v.remainingPnl;
+            if (preEquity > 0) {
+                uint256 scaled = uint256(preEquity) * v.remainingLots;
+                uint256 proportionalEquity = scaled / x.lots + (scaled % x.lots == 0 ? 0 : 1);
+                required = _max(required, proportionalEquity);
+            }
+        }
     }
 
     /// @dev The four generic sources form an ordered cash budget. Only full closes may use released liquidation
@@ -317,15 +335,19 @@ library CloseReferenceMath {
         v.rebatePaid = _min(v.rebateAssessed, _unreserved(v.poolCashAfter, v.allClaimsAfter));
         v.rebateWaived = v.rebateAssessed - v.rebatePaid;
         v.poolCashAfter -= v.rebatePaid;
-        v.feeTopUp = _min(feeWithheld, _unreserved(v.poolCashAfter, v.allClaimsAfter));
-        v.poolCashAfter -= v.feeTopUp;
-        v.treasuryCredit = v.feeFromCash + v.feeTopUp;
-        v.remainingCash = x.cash - v.pledgeConsumed - v.actionCash + v.immediatePayout + v.rebatePaid;
         int256 accounted = int256(x.poolAccounted) + int256(v.poolCashAfter) - int256(x.poolCash);
         if (accounted < 0) {
             revert InvalidReferenceInput();
         }
-        v.poolAccountedAfter = uint256(accounted);
+        uint256 rebate = _negative(v.vpi);
+        uint256 otherCharges = v.assessedSpread + x.unpaidCarry;
+        uint256 feeOffset = rebate > otherCharges ? _min(v.assessedFee, rebate - otherCharges) : 0;
+        uint256 backedCash = _min(v.poolCashAfter, uint256(accounted));
+        v.feeTopUp = _min(feeWithheld + feeOffset, _unreserved(backedCash, v.allClaimsAfter + x.poolLiabilityReserve));
+        v.poolCashAfter -= v.feeTopUp;
+        v.poolAccountedAfter = uint256(accounted) - v.feeTopUp;
+        v.treasuryCredit = v.feeFromCash + v.feeTopUp;
+        v.remainingCash = x.cash - v.pledgeConsumed - v.actionCash + v.immediatePayout + v.rebatePaid;
     }
 
     function _pnl(

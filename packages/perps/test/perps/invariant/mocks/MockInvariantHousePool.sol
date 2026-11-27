@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -14,6 +14,7 @@ contract MockInvariantHousePool is IHousePool {
     MockSettlementToken public immutable settlementToken;
     address public immutable engine;
     bool public lpEpochSettlementPaused;
+    uint256 public juniorPrincipal;
     uint256 public pendingRecapitalizationAssets;
     uint256 public pendingTradingRevenueAssets;
 
@@ -51,12 +52,18 @@ contract MockInvariantHousePool is IHousePool {
     }
 
     function getSettlementFreeAssets() external view returns (uint256) {
+        // This fixture has no stored tranche principal. Match HousePool's zero-principal
+        // fee budget so newly finalized VPI cannot be paid as a protocol fee top-up.
+        if (this.seniorPrincipal() + this.juniorPrincipal() == 0) {
+            return 0;
+        }
         ICfdEngineCore host = ICfdEngineCore(engine);
         (uint256 longMaxProfitAssets,,,) = host.sides(0);
         (uint256 shortMaxProfitAssets,,,) = host.sides(1);
         uint256 maxLiabilityAssets =
             longMaxProfitAssets > shortMaxProfitAssets ? longMaxProfitAssets : shortMaxProfitAssets;
         uint256 reservedAssets = maxLiabilityAssets + host.totalTraderClaimBalanceAssets()
+            + host.totalPositiveVpiAccruedAssets()
             + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiabilityAssets, host.settlementBufferBps())
             + pendingRecapitalizationAssets + pendingTradingRevenueAssets;
         uint256 cashAssets = settlementToken.balanceOf(address(this));
@@ -99,7 +106,7 @@ contract MockInvariantHousePool is IHousePool {
         _requireAuthorized();
         if (kind == IHousePool.ClaimantInflowKind.Recapitalization) {
             pendingRecapitalizationAssets += amountAssets;
-        } else {
+        } else if (kind == IHousePool.ClaimantInflowKind.Revenue) {
             pendingTradingRevenueAssets += amountAssets;
         }
     }
@@ -134,11 +141,13 @@ contract MockInvariantHousePool is IHousePool {
         return true;
     }
 
-    function seniorPrincipal() external pure returns (uint256) {
-        return 0;
+    function setJuniorPrincipal(
+        uint256 amountAssets
+    ) external {
+        juniorPrincipal = amountAssets;
     }
 
-    function juniorPrincipal() external pure returns (uint256) {
+    function seniorPrincipal() external pure returns (uint256) {
         return 0;
     }
 

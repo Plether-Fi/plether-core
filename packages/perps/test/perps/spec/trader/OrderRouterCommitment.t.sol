@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
@@ -39,10 +39,15 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
         uint256 maxLiability = _maxLiability();
         uint256 settlementBuffer =
             SolvencyAccountingLib.settlementBufferTargetAssets(maxLiability, engine.settlementBufferBps());
-        uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceAssets() + settlementBuffer;
+        uint256 positiveVpi = engine.totalPositiveVpiAccruedAssets();
+        assertGt(positiveVpi, 0, "fixture must accrue refundable VPI");
+        uint256 expectedReserved =
+            maxLiability + engine.totalTraderClaimBalanceAssets() + settlementBuffer + positiveVpi;
         uint256 expectedFree = pool.totalAssets() > expectedReserved ? pool.totalAssets() - expectedReserved : 0;
         assertEq(
-            freeAssets, expectedFree, "Free settlementToken should exclude liabilities, claims, and settlement headroom"
+            freeAssets,
+            expectedFree,
+            "Free settlementToken should exclude liabilities, claims, refundable VPI, and settlement headroom"
         );
 
         (,, uint256 maxSeniorWithdrawAssets, uint256 maxJuniorWithdrawAssets) = pool.getPendingTrancheState();

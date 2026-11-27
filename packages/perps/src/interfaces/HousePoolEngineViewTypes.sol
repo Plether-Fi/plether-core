@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @title HousePoolEngineViewTypes
 /// @notice Shared snapshots supplied by the CFD engine to HousePool accounting.
@@ -13,11 +13,14 @@ library HousePoolEngineViewTypes {
     /// @param netPhysicalAssets Canonical pool assets, equal to physicalAssets. Treasury settlement is held
     ///        separately in the clearinghouse and must not be subtracted again; trader claims are also separate.
     /// @param maxLiabilityAssets Larger of the long-side and short-side maximum-profit envelopes.
-    /// @param supplementalReservedAssets Additional senior reservation supplied by the engine, including protected
-    ///        settlement headroom that does not affect terminal NAV.
+    /// @param supplementalReservedAssets Protected settlement headroom and pending-open backing for LP withdrawals.
+    ///        This supplemental reserve does not affect terminal NAV.
     /// @param terminalLpPriceDeltaAssets Signed terminal mark-to-close delta attributable to LPs.
     /// @param terminalNavBookVersion Monotonic terminal-NAV book version captured with the engine snapshot.
     /// @param traderClaimBalanceAssets Aggregate unpaid trader claims senior to fresh discretionary payouts.
+    /// @param totalPositiveVpiAccruedAssets Refundable lifetime VPI held by the pool; excluded from LP NAV and cash.
+    /// @param totalNegativeVpiAccruedAssets Negative lifetime VPI backed by clearinghouse reserves; included in LP NAV
+    ///        as a collectible receivable, but unavailable to fund withdrawals until collected.
     /// @param hasOpenPositions Whether either side has nonzero open interest.
     /// @param markFreshnessRequired Whether any open position requires a fresh mark, including zero-profit endpoints.
     /// @param maxMarkStaleness Maximum permitted mark age for the active calendar regime, in seconds; zero when
@@ -30,6 +33,8 @@ library HousePoolEngineViewTypes {
         int256 terminalLpPriceDeltaAssets;
         uint64 terminalNavBookVersion;
         uint256 traderClaimBalanceAssets;
+        uint256 totalPositiveVpiAccruedAssets;
+        uint256 totalNegativeVpiAccruedAssets;
         bool hasOpenPositions;
         bool markFreshnessRequired;
         uint256 maxMarkStaleness;

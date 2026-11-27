@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
@@ -29,8 +29,8 @@ interface IPositionProtectionActions {
         PositionProtectionTypes.PositionProtectionParams calldata params
     ) external;
 
-    /// @notice Lets the owner change close limits after a failed attempt relatches, before a fresh retry.
-    /// @dev The trigger and any terminal attempts remain recorded. A live child cannot be changed.
+    /// @notice Lets the owner set limits for future retries of a triggered or latched protection.
+    /// @dev A pending close retains the limits recorded when it was queued.
     function amendLatchedPositionProtectionCloseLimits(
         uint64 protectionId,
         PositionProtectionTypes.CloseFinancialLimits calldata limits

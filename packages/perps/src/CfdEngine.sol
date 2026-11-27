@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -16,10 +16,13 @@ import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineS
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
+import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
+import {VpiAccrualAccountingLib} from "@plether/perps/libraries/VpiAccrualAccountingLib.sol";
 
 interface ICfdEngineClearinghouseBinding {
 
@@ -126,15 +129,20 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     mapping(address => uint64) public positionEpoch;
     /// @notice Aggregate outstanding trader-claim liability, in 6-decimal settlement token units.
     uint256 public totalTraderClaimBalanceAssets;
+    /// @notice Gross positive lifetime VPI deferred from LP ownership until its position portion settles, in settlement token.
+    uint256 public totalPositiveVpiAccruedAssets;
+    /// @notice Gross negative lifetime VPI backed by dedicated clearinghouse reserves, in settlement token.
+    uint256 public totalNegativeVpiAccruedAssets;
     /// @notice One-time-configured router authorized to reserve bounties and execute orders and liquidations.
     address public orderRouter;
 
-    /// @notice Whether a Unix day number is configured as an all-day FAD and oracle-frozen override.
+    /// @notice Whether a Unix day number is configured as an all-day FAD override.
+    /// @dev The override adds frozen-oracle policy only before that day's 17:00 New York boundary.
     mapping(uint256 => bool) public fadDayOverrides;
     uint256[] private _fadOverrideDays;
     /// @notice Maximum accepted mark age during an oracle-frozen window, in seconds.
     uint256 public fadMaxStaleness = 3 days;
-    /// @notice Look-ahead interval before an override day during which FAD restrictions begin, in seconds.
+    /// @notice Look-ahead interval before an override day or a scheduled closure during which FAD restrictions begin.
     uint256 public fadRunwaySeconds = 1 hours;
     /// @notice Engine component of the live cached-mark age limit, in seconds.
     /// @dev Live checks use this value when the HousePool bound is zero, otherwise the smaller of the two bounds.
@@ -147,6 +155,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     /// @notice Protected headroom required per unit of maximum directional liability, in basis points.
     /// @dev This affects open/increase admission and LP withdrawals, but not raw insolvency or terminal NAV.
     uint256 public settlementBufferBps = 25;
+    /// @notice Minimum price/bound tolerance band enforced on open/increase commits around cached `lastMarkPrice`, in basis points.
+    /// @dev Zero disables the band check. Governance can tune this via `CfdEngineAdmin` up to 500 bps.
+    uint256 public minOpenSlippageToleranceBps;
+
+    /// @notice Active scheduled closures, ordered by start time and non-overlapping.
+    MarketClosure[] public marketClosures;
 
     function _sideIndex(
         CfdTypes.Side side
@@ -332,6 +346,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         planningReader = new CfdEnginePlanningReader();
     }
 
+    /// @notice Ownership cannot be renounced because governance must retain emergency recovery authority.
+    function renounceOwnership() public view override onlyOwner {
+        revert OwnableInvalidOwner(address(0));
+    }
+
     /// @notice Atomically configures the planner, settlement sidecar, and engine admin exactly once.
     /// @dev Callable only by the owner. The sidecar must be contract code whose `ENGINE()` is this engine, and the
     ///      admin must report this engine from `engine()`. The planner address is stored without an interface probe.
@@ -454,10 +473,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     }
 
     /// @notice Transfers reserved bounty value from a source account into a beneficiary clearinghouse account.
-    /// @dev Callable only by the router. For a beneficiary with an open position, carry is checkpointed before the
-    ///      settlement credit changes reachable collateral. Available margin and free settlement pay carry, and the
-    ///      unpaid remainder stays in `unsettledCarryAssets`. The incoming bounty is not collected in this call.
-    ///      A strictly newer mark is capped at `CAP_PRICE` and cached.
+    /// @dev Callable only by the router. A same-account credit releases the reserve without collecting carry.
+    ///      For a transfer to another account with an open position, carry is checkpointed before the settlement
+    ///      credit changes reachable collateral. Available margin and free settlement pay carry, and the unpaid
+    ///      remainder stays in `unsettledCarryAssets`. The incoming bounty is not collected in this call.
+    ///      A cross-account credit caches a strictly newer mark after capping it at `CAP_PRICE`.
     ///      The engine relies on the router to validate the supplied mark. A zero amount is a complete no-op.
     /// @param sourceAccount Account whose reserved settlement bounty funds the credit.
     /// @param beneficiary Account receiving the clearinghouse settlement credit.
@@ -475,12 +495,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             return;
         }
 
+        bool paysAnotherAccount = sourceAccount != beneficiary;
         bytes32 expectedOldHash;
-        bool syncCurve = _positions[beneficiary].lots > 0;
+        bool syncCurve = paysAnotherAccount && _positions[beneficiary].lots > 0;
         if (syncCurve) {
             expectedOldHash = _beginTerminalCurveMutation(beneficiary);
         }
-        _checkpointBountyRecipient(beneficiary, price, publishTime);
+        if (paysAnotherAccount) {
+            _checkpointBountyRecipient(beneficiary, price, publishTime);
+        }
         clearinghouse.transferReservedSettlement(sourceAccount, beneficiary, amountAssets);
         if (syncCurve) {
             _endTerminalCurveMutation(beneficiary, expectedOldHash);
@@ -491,8 +514,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     /// @notice Adds isolated margin to an existing open position without changing size.
     /// @dev The caller must equal `account`. Collectible accrued carry is realized first and any uncovered amount
     ///      remains unsettled; then clearinghouse free settlement is locked as active position margin and aggregate
-    ///      side margin accounting is refreshed; the full maximum-profit carry basis is unchanged. A zero amount
-    ///      reverts with `CfdEngine__ZeroAmount`.
+    ///      side margin accounting is refreshed. A top-up while orders are pending is protected from queued increases
+    ///      until the queue drains. Carry uses full maximum-profit exposure. A zero amount reverts with
+    ///      `CfdEngine__ZeroAmount`.
     /// @param account Position owner and required caller.
     /// @param amount Nonzero amount to move from free settlement into position margin, in 6-decimal settlement token units.
     function addMargin(
@@ -514,13 +538,27 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         _realizeCarryFromSettlement(account, pos);
 
-        clearinghouse.lockPositionMargin(account, amount);
+        clearinghouse.lockPositionTopUp(account, amount);
         _sideState(pos.side).totalMargin += amount;
         pos.lastUpdateTime = uint64(block.timestamp);
         pos.lastCarryTimestamp = uint64(block.timestamp);
         _endTerminalCurveMutation(account, expectedOldHash);
 
         emit MarginAdded(account, amount);
+    }
+
+    /// @notice Lifts the collateral restriction after the router removes the last pending order.
+    function releaseProtectedTopUp(
+        address account
+    ) external nonReentrant {
+        if (orderRouter.code.length == 0 || IOrderRouterAccounting(orderRouter).pendingOrderCounts(account) != 0) {
+            return;
+        }
+        (uint256 pledgedAssets, uint256 releasedAssets) = clearinghouse.protectedTopUps(account);
+        if (pledgedAssets == 0 && releasedAssets == 0) {
+            return;
+        }
+        clearinghouse.releaseProtectedTopUp(account);
     }
 
     /// @notice Collects available backing toward accrued carry when the clearinghouse changes an account's collateral basis.
@@ -546,17 +584,24 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Settles the caller's trader claim balance into the clearinghouse.
     /// @dev The caller must equal `account`. Settlement is all-or-nothing and is available only when HousePool cash
-    ///      covers all outstanding trader claims. The global carry index and any open-position indexed carry are
-    ///      checkpointed before the pool payout and clearinghouse credit change collateral balances. Available
-    ///      margin and free settlement pay carry first, retaining arrears. The incoming claim payment is not collected
-    ///      in this call. When it becomes PnL pledge, aggregate side margin accounting is refreshed; the full
-    ///      maximum-profit carry basis is unchanged.
+    ///      covers all outstanding trader claims and the account has no pending orders. This prevents a queued close
+    ///      from releasing paid claim collateral before a later open executes. The global carry index and any
+    ///      open-position indexed carry are checkpointed before the pool payout and clearinghouse credit change
+    ///      collateral balances. Available margin and free settlement pay carry first, retaining arrears. The incoming
+    ///      claim payment is not collected in this call. When it becomes PnL pledge, aggregate side margin accounting
+    ///      is refreshed; the full maximum-profit carry basis is unchanged.
     /// @param account Claim beneficiary and required caller.
     function settleTraderClaim(
         address account
     ) external nonReentrant {
         if (msg.sender != account) {
             revert CfdEngine__NotAccountOwner();
+        }
+        if (
+            traderClaimBalanceAssets[account] != 0 && orderRouter != address(0)
+                && IOrderRouterAccounting(orderRouter).pendingOrderCounts(account) != 0
+        ) {
+            revert CfdEngine__PendingOrdersExist();
         }
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         StoredPosition storage pos = _positions[account];
@@ -675,12 +720,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         executionFeeBps = config.executionFeeBps;
         frozenCloseSpreadBps = config.frozenCloseSpreadBps;
         settlementBufferBps = config.settlementBufferBps;
+        minOpenSlippageToleranceBps = config.minOpenSlippageToleranceBps;
     }
 
-    /// @notice Applies finalized FAD calendar overrides from the timelocked engine admin.
-    /// @dev Callable only by `admin`. Replaces the complete existing override set, normalizes each timestamp to its
-    ///      Unix day number, and ignores duplicate days. The admin is responsible for validation and timelock policy.
-    /// @param config Complete FAD day timestamp set and runway duration in seconds.
+    /// @notice Applies the finalized calendar from the timelocked engine admin.
+    /// @dev Replaces both override sets. Day timestamps are normalized to Unix day numbers and duplicates are ignored.
+    ///      The admin validates scheduled closures and enforces the timelock.
+    /// @param config Complete day override and scheduled closure sets, and runway duration in seconds.
     function applyCalendarConfig(
         ICfdEngineAdminHost.EngineCalendarConfig calldata config
     ) external onlyAdmin {
@@ -698,6 +744,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             }
         }
         fadRunwaySeconds = config.fadRunwaySeconds;
+        delete marketClosures;
+        for (uint256 i; i < config.marketClosures.length; ++i) {
+            marketClosures.push(config.marketClosures[i]);
+        }
+    }
+
+    /// @notice Returns the number of configured scheduled closures.
+    function marketClosureCount() external view returns (uint256) {
+        return marketClosures.length;
     }
 
     /// @notice Applies finalized mark freshness limits from the timelocked engine admin.
@@ -834,9 +889,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Reports whether Friday Afternoon Deleverage restrictions are currently active.
     /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after
-    ///      Sunday's 17:00 New York FX open. FAD is also active throughout an admin-configured override day and during
-    ///      `fadRunwaySeconds` immediately before an override day.
-    /// @return True when the recurring window, an override day, or its configured runway is active.
+    ///      Sunday's 17:00 New York FX open. FAD also covers override days, scheduled closures, the
+    ///      `fadRunwaySeconds` before either, and 15 minutes after a scheduled closure.
+    /// @return True during any applicable FAD window.
     function isFadWindow() public view returns (bool) {
         (bool fadWindow,) = _marketStatus();
         return fadWindow;
@@ -844,9 +899,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
 
     /// @notice Reports whether the engine is in the oracle-frozen regime where freshness policy can be relaxed.
     /// @dev The recurring window is Friday 17:00 New York time through Sunday 16:59:59 New York time, following the
-    ///      US daylight-saving transition. An admin-configured override freezes its entire UTC day. Unlike FAD, the
-    ///      frozen regime does not include the pre-override runway.
-    /// @return True during the recurring oracle closure or an override day.
+    ///      US daylight-saving transition. An admin-configured override adds freezing from UTC midnight until that
+    ///      day's 17:00 New York boundary (exclusive). Scheduled closures freeze from their start until their end
+    ///      (exclusive). These intervals are combined with the recurring weekend, and FAD shoulders do not freeze.
+    /// @return True during any applicable frozen-oracle window.
     function isOracleFrozen() public view returns (bool) {
         (, bool oracleFrozen) = _marketStatus();
         return oracleFrozen;
@@ -858,10 +914,42 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         }
         uint256 timestamp = block.timestamp;
         uint256 today = timestamp / 86_400;
-        return
-            planner.marketCalendarStatus(
-                timestamp, fadDayOverrides[today], fadDayOverrides[today + 1], fadRunwaySeconds
-            );
+        uint256 runway = fadRunwaySeconds;
+        (fadWindow, oracleFrozen) =
+            planner.marketCalendarStatus(timestamp, fadDayOverrides[today], fadDayOverrides[today + 1], runway);
+        if (oracleFrozen) {
+            return (fadWindow, oracleFrozen);
+        }
+        (bool closureFad, bool closureFrozen) = _scheduledClosureStatus(timestamp, runway);
+        return (fadWindow || closureFad, closureFrozen);
+    }
+
+    function _scheduledClosureStatus(
+        uint256 timestamp,
+        uint256 runway
+    ) private view returns (bool fadWindow, bool oracleFrozen) {
+        uint256 count = marketClosures.length;
+        uint256 next;
+        uint256 high = count;
+        // Find the first closure that has not started. The admin caps the array at 64 sorted intervals.
+        while (next < high) {
+            uint256 mid = (next + high) / 2;
+            if (marketClosures[mid].startTime <= timestamp) {
+                next = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        if (next != 0) {
+            uint256 end = marketClosures[next - 1].endTime;
+            if (timestamp < end) {
+                return (true, true);
+            }
+            if (timestamp - end < MarketCalendarLib.FAD_LAG) {
+                return (true, false);
+            }
+        }
+        return (next < count && marketClosures[next].startTime - timestamp <= runway, false);
     }
 
     /// @notice Returns the canonical current position tuple for an account.
@@ -911,6 +999,17 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             revert CfdEngine__AccountingMutationInProgress();
         }
         return _requireTerminalNavBook().terminalNavSnapshot();
+    }
+
+    /// @notice Returns stable deferred-VPI liability and backed-clawback receivable totals, in settlement token.
+    /// @dev Fails closed during multi-contract settlement, like the canonical terminal price snapshot.
+    /// @return positiveVpiAssets Gross positive accrued VPI excluded from LP NAV and economic pool depth.
+    /// @return negativeVpiAssets Gross negative accrued VPI recognized as a backed receivable, never withdrawal cash.
+    function vpiAccountingSnapshot() external view returns (uint256 positiveVpiAssets, uint256 negativeVpiAssets) {
+        if (_reentrancyGuardEntered()) {
+            revert CfdEngine__AccountingMutationInProgress();
+        }
+        return (totalPositiveVpiAccruedAssets, totalNegativeVpiAccruedAssets);
     }
 
     /// @notice Returns the carry-index basis stored for an account's current position.
@@ -1180,8 +1279,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     }
 
     /// @notice Writes post-settlement position state and checkpoints its global carry basis.
-    /// @dev Callable only by the configured settlement sidecar. Maximum-profit exposure is the sole carry basis.
-    ///      Margin is held by the clearinghouse; deletion uses `settlementDeletePosition`.
+    /// @dev Callable only by the configured settlement sidecar. Replaces the gross signed-VPI contributions.
+    ///      Maximum-profit exposure is the sole carry basis. Margin is held by the clearinghouse.
     /// @param account Position account to overwrite.
     /// @param position New engine-owned position fields supplied by the settlement sidecar.
     function settlementWritePosition(
@@ -1196,6 +1295,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         if (lots == 0 || lots > type(uint112).max || position.entryCostAssetAtoms > type(uint144).max) {
             revert CfdEngine__InvalidRiskParams();
         }
+        _replaceVpiAccrual(pos.vpiAccrued, position.vpiAccrued);
         pos.lots = uint112(lots);
         pos.entryCostAssetAtoms = uint144(position.entryCostAssetAtoms);
         pos.maxProfitAssets = position.maxProfitAssets;
@@ -1206,13 +1306,29 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         pos.vpiAccrued = position.vpiAccrued;
     }
 
-    /// @notice Deletes an account position and its carry checkpoint.
+    /// @notice Deletes an account position and removes its carry checkpoint and gross signed-VPI contributions.
     /// @dev Callable only by the configured settlement sidecar. Clearinghouse margin must be settled separately.
     /// @param account Position account to delete.
     function settlementDeletePosition(
         address account
     ) external onlySettlementSidecar {
+        _replaceVpiAccrual(_positions[account].vpiAccrued, 0);
         delete _positions[account];
+    }
+
+    /// @dev Position writes and deletes share the planner's checked aggregate replacement arithmetic.
+    function _replaceVpiAccrual(
+        int256 previousAccruedAssets,
+        int256 nextAccruedAssets
+    ) internal {
+        (bool valid, uint256 positiveAssets, uint256 negativeAssets) = VpiAccrualAccountingLib.tryReplace(
+            totalPositiveVpiAccruedAssets, totalNegativeVpiAccruedAssets, previousAccruedAssets, nextAccruedAssets
+        );
+        if (!valid) {
+            revert CfdEngine__InvalidRiskParams();
+        }
+        totalPositiveVpiAccruedAssets = positiveAssets;
+        totalNegativeVpiAccruedAssets = negativeAssets;
     }
 
     function _applyOpen(
@@ -1242,7 +1358,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
         StoredPosition storage pos = _positions[delta.account];
         CfdTypes.Side marginSide = pos.side;
-        _realizeCarryFromSettlement(delta.account, pos);
+        _realizeCarryFromSettlement(delta.account, pos, true);
         CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
         settlementSidecar.executeClose(delta, currentPosition, publishTime);
         emit PositionClosed(delta.account, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlAssets);
@@ -1259,7 +1375,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
         address keeper
     ) internal returns (uint256 keeperBountyAssets) {
         bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
-        _realizeCarryFromSettlement(delta.account, _positions[delta.account]);
+        _realizeCarryFromSettlement(delta.account, _positions[delta.account], true);
         bool syncKeeper = delta.keeperBountyAssets > 0 && keeper != delta.account && _positions[keeper].lots > 0;
         bytes32 keeperExpectedOldHash;
         if (syncKeeper) {
@@ -1339,6 +1455,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     function _realizeCarryFromSettlement(
         address account,
         StoredPosition storage pos
+    ) internal returns (uint256) {
+        return _realizeCarryFromSettlement(account, pos, false);
+    }
+
+    function _realizeCarryFromSettlement(
+        address account,
+        StoredPosition storage pos,
+        bool includeProtected
     ) internal returns (uint256 realizedCarryAssets) {
         uint256 carryDueAssets = _checkpointPositionCarry(account, pos);
         if (carryDueAssets == 0) {
@@ -1351,7 +1475,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             expectedOldHash = _beginTerminalCurveMutation(account);
         }
         (uint256 marginConsumedAssets, uint256 freeSettlementConsumedAssets, uint256 uncoveredAssets) =
-            clearinghouse.consumeSettlementLoss(account, carryDueAssets, address(this));
+            clearinghouse.consumePositionCarry(account, carryDueAssets, address(this), includeProtected);
         realizedCarryAssets = carryDueAssets - uncoveredAssets;
         unsettledCarryAssets[account] = uncoveredAssets;
 
@@ -1368,11 +1492,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
             );
         }
         emit CarryRealized(
-            account,
-            realizedCarryAssets,
-            freeSettlementConsumedAssets,
-            marginConsumedAssets,
-            unsettledCarryAssets[account]
+            account, realizedCarryAssets, freeSettlementConsumedAssets, marginConsumedAssets, uncoveredAssets
         );
         if (marginBefore > 0) {
             _endTerminalCurveMutation(account, expectedOldHash);

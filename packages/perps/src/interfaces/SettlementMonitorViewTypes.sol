@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 /// @notice Read-only operator and security-monitoring types for synchronized LP epoch settlement.
 /// @dev Masks use `1 << uint256(enumValue)`. An observed epoch is diagnostic only: HousePool always processes its

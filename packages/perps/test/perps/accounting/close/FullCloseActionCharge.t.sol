@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 import {CfdClosePreviewTestBase} from "../../CfdClosePreviewTestBase.sol";
 import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
@@ -30,11 +30,13 @@ contract FullCloseActionChargeTest is CfdClosePreviewTestBase {
     function test_RouterFullClose_PreservesPendingOpenMarginAndItsBounty() public {
         _openNormally(CfdTypes.Side.LONG, 200e6);
         CfdTypes.Order memory order = _order(CfdTypes.Side.LONG, SIZE);
+        uint256 neededFree = 100e6 + _openBountyFor(1000e18);
         vm.startPrank(ACCOUNT);
+        clearinghouse.withdraw(ACCOUNT, clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets - neededFree);
         uint64 closeId = router.commitOrder(order.side, order.sizeDelta, 0, order.targetPrice, true);
         uint64 pendingId = router.commitOrder(CfdTypes.Side.LONG, 1000e18, 100e6, PRICE, false);
-        clearinghouse.withdraw(ACCOUNT, clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets);
         vm.stopPrank();
+        assertEq(clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets, 0);
         uint256 bounty = 0;
         uint256 protectedBefore = clearinghouse.totalBountyReservationsAssets(ACCOUNT);
         OrderV3Types.ExecutionAssessment memory assessment =
@@ -66,11 +68,13 @@ contract FullCloseActionChargeTest is CfdClosePreviewTestBase {
         bool exhaustPledge
     ) private {
         _openNormally(CfdTypes.Side.LONG, 200e6);
+        uint256 neededFree = 120e6 + 2 * _openBountyFor(1000e18);
         vm.startPrank(ACCOUNT);
+        clearinghouse.withdraw(ACCOUNT, clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets - neededFree);
         uint64 firstId = router.commitOrder(CfdTypes.Side.LONG, 1000e18, 20e6, PRICE, false);
         uint64 secondId = router.commitOrder(CfdTypes.Side.LONG, 1000e18, 100e6, PRICE, false);
-        clearinghouse.withdraw(ACCOUNT, clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets);
         vm.stopPrank();
+        assertEq(clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets, 0);
         uint256 protectedBounties = clearinghouse.totalBountyReservationsAssets(ACCOUNT);
         assertGt(protectedBounties, 0);
         uint256 price = exhaustPledge ? 102_500_000 : PRICE;
@@ -234,6 +238,21 @@ contract FullCloseActionChargeTest is CfdClosePreviewTestBase {
             }
         }
         revert("Missing action charge event");
+    }
+
+    function _openBountyFor(
+        uint256 sizeDelta
+    ) private view returns (uint256 bounty) {
+        uint256 notional = (sizeDelta / CfdTypes.SIZE_QUANTUM) * PRICE;
+        bounty = (notional * router.openOrderExecutionBountyBps()) / 10_000;
+        uint256 minBounty = router.minOpenOrderExecutionBountyAssets();
+        if (bounty < minBounty) {
+            bounty = minBounty;
+        }
+        uint256 maxBounty = router.maxOpenOrderExecutionBountyAssets();
+        if (bounty > maxBounty) {
+            bounty = maxBounty;
+        }
     }
 
 }

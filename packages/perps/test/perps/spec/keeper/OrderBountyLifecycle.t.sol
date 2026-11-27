@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.35;
+pragma solidity 0.8.39;
 
 // Category: spec. All cases assert current documented behavior and are expected to pass.
 // Source of truth: packages/perps/ACCOUNTING_SPEC.md#pending-order-reservation-model
@@ -205,6 +205,7 @@ contract PositionFundedCloseBountyTest is BasePerpTest {
             orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.pletherOracle().liquidationStalenessLimit(),
             basketMaxConfidenceRatioBps: router.pletherOracle().basketMaxConfidenceRatioBps(),
+            minOrderSettlementDelay: router.pletherOracle().minOrderSettlementDelay(),
             orderSettlementWindow: router.pletherOracle().orderSettlementWindow(),
             maxComponentPublishTimeDivergence: router.pletherOracle().maxComponentPublishTimeDivergence(),
             adverseConfidenceMultiplierBps: router.pletherOracle().adverseConfidenceMultiplierBps(),
