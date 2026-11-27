@@ -9,7 +9,7 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 contract FrozenLpFeePolicyTest is BasePerpTest {
 
     uint256 internal constant SATURDAY_FROZEN = 1_710_021_600;
-    uint256 internal constant SUNDAY_FAD_ONLY = 1_710_105_000;
+    uint256 internal constant SUNDAY_FAD_ONLY = 1_710_104_600;
     uint256 internal constant MAINTENANCE_FEE_APR_BPS = 1000;
 
     address internal constant MAINTENANCE_FEE_RECIPIENT = address(0xFEE70002);

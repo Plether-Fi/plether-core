@@ -60,8 +60,8 @@ contract MarketCalendarReferenceTest is Test {
     function _assertFridayClose(
         uint256 closeTime
     ) private pure {
-        _assertStatus(closeTime - 30 minutes - 1, false, false);
-        _assertStatus(closeTime - 30 minutes, true, false);
+        _assertStatus(closeTime - 10 minutes - 1, false, false);
+        _assertStatus(closeTime - 10 minutes, true, false);
         _assertStatus(closeTime - 1, true, false);
         _assertStatus(closeTime, true, true);
         _assertStatus(closeTime + 1, true, true);
@@ -72,8 +72,8 @@ contract MarketCalendarReferenceTest is Test {
     ) private pure {
         _assertStatus(reopenTime - 1, true, true);
         _assertStatus(reopenTime, true, false);
-        _assertStatus(reopenTime + 15 minutes - 1, true, false);
-        _assertStatus(reopenTime + 15 minutes, false, false);
+        _assertStatus(reopenTime + 5 minutes - 1, true, false);
+        _assertStatus(reopenTime + 5 minutes, false, false);
     }
 
     function _assertStatus(

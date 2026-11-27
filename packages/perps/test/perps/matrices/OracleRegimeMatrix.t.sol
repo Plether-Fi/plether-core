@@ -15,7 +15,7 @@ contract OracleRegimeMatrixTest is BasePerpTest {
     address private constant ACCOUNT = address(0xCA10);
     address private constant KEEPER = address(0xCA11);
     address private constant LATCH = address(0xCA12);
-    uint256 private constant BEFORE_FAD = 1_729_283_399;
+    uint256 private constant BEFORE_FAD = 1_729_284_599;
 
     struct BeforeExecution {
         uint256 trader;
@@ -92,7 +92,7 @@ contract OracleRegimeMatrixTest is BasePerpTest {
             assertTrue(engine.degradedMode());
             settlementToken.mint(address(pool), cash);
         }
-        uint256 liquidationTime = regime == 0 ? BEFORE_FAD - 1 hours : regime == 1 ? BEFORE_FAD + 1 : BEFORE_FAD + 1801;
+        uint256 liquidationTime = regime == 0 ? BEFORE_FAD - 1 hours : regime == 1 ? BEFORE_FAD + 1 : BEFORE_FAD + 601;
         vm.warp(liquidationTime);
         uint256 ageLimit = regime == 2 ? engine.fadMaxStaleness() : pletherOracle.liquidationStalenessLimit();
         uint256 age = boundary == 0 ? 0 : ageLimit + boundary - 2;
@@ -175,7 +175,7 @@ contract OracleRegimeMatrixTest is BasePerpTest {
             treasury: clearinghouse.balanceAssets(engine.protocolTreasury()),
             poolCash: settlementToken.balanceOf(address(pool))
         });
-        vm.warp(regime == 0 ? commitTime + 1 : regime == 1 ? BEFORE_FAD + 1 : BEFORE_FAD + 1801);
+        vm.warp(regime == 0 ? commitTime + 1 : regime == 1 ? BEFORE_FAD + 1 : BEFORE_FAD + 601);
         baseMockPyth.setAllPrices(_basePythFeedIds(), 100_000_000, -8, block.timestamp);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         assertEq(engine.isFadWindow(), regime != 0);

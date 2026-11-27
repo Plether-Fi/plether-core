@@ -12,9 +12,9 @@ library MarketCalendarLib {
     /// @dev UTC second-of-day of the 17:00 New York FX boundary while standard time is active.
     uint256 internal constant NEW_YORK_STANDARD_MARKET_BOUNDARY = 22 hours;
     /// @dev FAD starts this long before the Friday FX close.
-    uint256 internal constant FAD_LEAD = 30 minutes;
+    uint256 internal constant FAD_LEAD = 10 minutes;
     /// @dev FAD remains active this long after the Sunday FX open.
-    uint256 internal constant FAD_LAG = 15 minutes;
+    uint256 internal constant FAD_LAG = 5 minutes;
     /// @dev New York enters daylight saving time at 02:00 local standard time (07:00 UTC).
     uint256 internal constant NEW_YORK_DST_START_UTC = 7 hours;
     /// @dev New York returns to standard time at 02:00 local daylight time (06:00 UTC).

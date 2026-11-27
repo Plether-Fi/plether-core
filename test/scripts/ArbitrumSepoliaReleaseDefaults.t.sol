@@ -265,8 +265,8 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(deployScript.frozenCloseSpreadBps(), 50, "frozen close spread");
         assertEq(params.maxSkewRatio, 0.4e18, "max skew");
         assertEq(params.maintMarginBps, 10, "maintenance margin");
-        assertEq(params.initMarginBps, 20, "initial margin");
-        assertEq(params.fadMarginBps, 300, "fad margin");
+        assertEq(params.initMarginBps, 30, "initial margin");
+        assertEq(params.fadMarginBps, 200, "fad margin");
         assertEq(params.baseCarryBps, 500, "base carry");
         assertEq(params.minBountyAssets, 1e6, "min bounty");
         assertEq(params.bountyBps, 10, "bounty bps");
@@ -822,12 +822,18 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         bootstrapScript.verifyInitialReleaseConfig(deployed.housePool, deployed.router);
         assertEq(deployed.engine.minOpenSlippageToleranceBps(), 25);
+        assertEq(deployed.engine.fadRunwaySeconds(), 10 minutes);
         assertEq(deployed.engineAdmin.riskConfigActivationTime(), 0);
         assertEq(deployed.engineAdmin.TIMELOCK_DELAY(), 72 hours);
         assertEq(deployed.housePool.maxSeniorExposureAssets(), 40_000_000e6);
         assertEq(deployed.housePool.maxSeniorShareBps(), 8000);
         assertEq(deployed.router.minOpenNotionalAssets(), 1000e6);
-        assertEq(deployed.router.pletherOracle().minOrderSettlementDelay(), 1);
+        assertEq(deployed.router.maxExecutionWindowSeconds(), 30);
+        assertEq(deployed.router.maxOpenOrderExecutionBountyAssets(), 250_000);
+        assertEq(deployed.router.positionProtectionTriggerBountyAssets(), 250_000);
+        assertEq(deployed.router.pletherOracle().minOrderSettlementDelay(), 2);
+        assertEq(deployed.router.pletherOracle().orderSettlementWindow(), 15);
+        assertEq(deployed.router.pletherOracle().basketMaxConfidenceRatioBps(), 25);
         assertEq(deployed.router.pletherOracle().adverseConfidenceMultiplierBps(), 2500);
         assertEq(deployed.housePool.poolConfigActivationTime(), 0);
         OrderRouterAdmin routerAdmin = OrderRouterAdmin(deployed.router.admin());

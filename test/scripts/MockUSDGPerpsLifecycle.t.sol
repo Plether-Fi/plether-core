@@ -159,7 +159,7 @@ contract MockUSDGPerpsLifecycleTest is Test {
         request.isClose = isClose;
         request.bounds = OrderV3Types.ExecutionBounds({
             submitBy: uint64(vm.getBlockTimestamp() + 60),
-            executionWindowSeconds: 60,
+            executionWindowSeconds: 30,
             allowedExecutionModes: 1,
             expectedConfigHash: deployed.lifecycleBook.currentExecutionConfigHash(),
             maxExecutionBountyAssets: 100e6,

@@ -451,7 +451,7 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
     }
 
     function test_RefreshFadShoulderRetainsLiveAgeLimit() public {
-        vm.warp(1_772_832_600); // Friday 21:30 UTC: FAD is active before the freeze.
+        vm.warp(1_772_833_800); // Friday 21:50 UTC: FAD is active before the freeze.
         assertTrue(engine.isFadWindow());
         assertFalse(engine.isOracleFrozen());
         handler.refreshMark(1e8, 16, 0, 0, false);

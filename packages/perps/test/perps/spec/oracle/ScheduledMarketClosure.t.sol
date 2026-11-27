@@ -68,9 +68,9 @@ contract ScheduledMarketClosureTest is AtomicLpEpochSettlementTestFixture {
         assertTrue(engine.isFadWindow(), "the reopening lag keeps FAD without freezing the oracle");
         _assertLiveExits(redeemId, redeemShares, closeTime - 1, reopenTime);
 
-        vm.warp(reopenTime + 15 minutes - 1);
+        vm.warp(reopenTime + 5 minutes - 1);
         assertTrue(engine.isFadWindow(), "FAD applies through the last second of the reopening lag");
-        vm.warp(reopenTime + 15 minutes);
+        vm.warp(reopenTime + 5 minutes);
         assertFalse(engine.isFadWindow(), "normal execution resumes at the end of the lag");
     }
 

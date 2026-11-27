@@ -34,7 +34,7 @@ interface ICfdEngineAdminHost {
     ///        normalized days are ignored by the engine.
     /// @param fadRunwaySeconds Duration of FAD restrictions before an override day or scheduled closure starts.
     /// @param marketClosures Scheduled closures ordered by start time with no overlaps. FAD also stays active for
-    ///        15 minutes after each closure ends.
+    ///        5 minutes after each closure ends.
     struct EngineCalendarConfig {
         uint256[] fadDayTimestamps;
         uint256 fadRunwaySeconds;

@@ -193,7 +193,7 @@ interface ICfdEngine is ICfdEngineTypes {
     function CAP_PRICE() external view returns (uint256);
 
     /// @notice Returns whether the engine calendar enables FAD, including configured days and closure intervals.
-    /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after
+    /// @dev The recurring window starts 10 minutes before Friday's 17:00 New York FX close and ends 5 minutes after
     ///      Sunday's 17:00 New York FX open. This window surrounds the narrower frozen-oracle interval.
     /// @return Whether FAD maintenance and risk-increase restrictions are active
     function isFadWindow() external view returns (bool);

@@ -69,12 +69,16 @@ contract BootstrapPerpsArbitrumSepolia is Script {
     uint256 internal constant RELEASE_SENIOR_SEED_ASSETS = 1e6;
     uint256 internal constant RELEASE_JUNIOR_SEED_ASSETS = 1e6;
     uint256 internal constant RELEASE_MIN_OPEN_SLIPPAGE_TOLERANCE_BPS = 25;
+    uint256 internal constant RELEASE_FAD_RUNWAY_SECONDS = 10 minutes;
     uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_ASSETS = 40_000_000e6;
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
     uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_ASSETS = 1000e6;
+    uint256 internal constant RELEASE_MAX_EXECUTION_WINDOW_SECONDS = 30;
+    uint256 internal constant RELEASE_MAX_OPEN_ORDER_EXECUTION_BOUNTY_ASSETS = 250_000;
+    uint256 internal constant RELEASE_POSITION_PROTECTION_TRIGGER_BOUNTY_ASSETS = 250_000;
     uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
-    uint256 internal constant RELEASE_MIN_ORDER_SETTLEMENT_DELAY = 1;
-    uint256 internal constant RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS = 10;
+    uint256 internal constant RELEASE_MIN_ORDER_SETTLEMENT_DELAY = 2;
+    uint256 internal constant RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS = 25;
     uint256 internal constant RELEASE_MAX_PENDING_ORDERS = 5;
     uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 0;
 
@@ -285,6 +289,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
             engine.minOpenSlippageToleranceBps() == RELEASE_MIN_OPEN_SLIPPAGE_TOLERANCE_BPS,
             "Unexpected minimum open slippage tolerance"
         );
+        require(engine.fadRunwaySeconds() == RELEASE_FAD_RUNWAY_SECONDS, "Unexpected FAD runway");
         require(CfdEngineAdmin(engine.admin()).riskConfigActivationTime() == 0, "Outstanding Engine risk proposal");
         require(
             housePool.maxSeniorExposureAssets() == RELEASE_MAX_SENIOR_EXPOSURE_ASSETS,
@@ -293,6 +298,17 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(housePool.maxSeniorShareBps() == RELEASE_MAX_SENIOR_SHARE_BPS, "Unexpected maximum senior share");
         require(housePool.poolConfigActivationTime() == 0, "Outstanding HousePool config proposal");
         require(router.minOpenNotionalAssets() == RELEASE_MIN_OPEN_NOTIONAL_ASSETS, "Unexpected opening notional");
+        require(
+            router.maxExecutionWindowSeconds() == RELEASE_MAX_EXECUTION_WINDOW_SECONDS, "Unexpected execution window"
+        );
+        require(
+            router.maxOpenOrderExecutionBountyAssets() == RELEASE_MAX_OPEN_ORDER_EXECUTION_BOUNTY_ASSETS,
+            "Unexpected max open bounty"
+        );
+        require(
+            router.positionProtectionTriggerBountyAssets() == RELEASE_POSITION_PROTECTION_TRIGGER_BOUNTY_ASSETS,
+            "Unexpected protection trigger bounty"
+        );
         require(
             router.pletherOracle().adverseConfidenceMultiplierBps() == RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS,
             "Unexpected adverse multiplier"

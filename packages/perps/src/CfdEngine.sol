@@ -888,9 +888,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, CfdT
     // ==========================================
 
     /// @notice Reports whether Friday Afternoon Deleverage restrictions are currently active.
-    /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after
+    /// @dev The recurring window starts 10 minutes before Friday's 17:00 New York FX close and ends 5 minutes after
     ///      Sunday's 17:00 New York FX open. FAD also covers override days, scheduled closures, the
-    ///      `fadRunwaySeconds` before either, and 15 minutes after a scheduled closure.
+    ///      `fadRunwaySeconds` before either, and 5 minutes after a scheduled closure.
     /// @return True during any applicable FAD window.
     function isFadWindow() public view returns (bool) {
         (bool fadWindow,) = _marketStatus();

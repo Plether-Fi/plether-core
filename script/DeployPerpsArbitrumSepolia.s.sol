@@ -66,8 +66,8 @@ interface IPositionProtectionBookDeploymentView {
 
 }
 
-/// @dev Release-only constructor wrapper for the Engine's minimum open slippage tolerance band. The shared CfdEngine
-///      constructor retains zero for generic deployments and tests; later changes flow exclusively through the
+/// @dev Release-only constructor wrapper for the Engine's initial release defaults. The shared CfdEngine constructor
+///      retains generic defaults for non-release deployments and tests; later changes flow exclusively through the
 ///      72-hour CfdEngineAdmin proposal/finalization path.
 contract ArbitrumSepoliaReleaseEngine is CfdEngine {
 
@@ -79,6 +79,7 @@ contract ArbitrumSepoliaReleaseEngine is CfdEngine {
         uint256 frozenCloseSpreadBps_
     ) CfdEngine(settlementToken_, clearinghouse_, capPrice_, riskParams_, frozenCloseSpreadBps_) {
         minOpenSlippageToleranceBps = 25;
+        fadRunwaySeconds = 10 minutes;
     }
 
 }
@@ -113,13 +114,15 @@ contract ArbitrumSepoliaReleaseOracle is PletherOracle {
         uint256[] memory basePrices,
         bool[] memory inversions
     ) PletherOracle(engine, housePool, pyth, feedIds, quantities, basePrices, inversions) {
+        basketMaxConfidenceRatioBps = 25;
         adverseConfidenceMultiplierBps = 2500;
+        minOrderSettlementDelay = 2;
     }
 
 }
 
-/// @dev Release-only constructor wrapper for the Router opening minimum. It also fail-closes on the paired oracle's
-///      constructor-initialized adverse-confidence multiplier. Later Router changes retain the standard admin delay.
+/// @dev Release-only constructor wrapper for the Router's initial release limits and keeper bounties. Later Router
+///      changes retain the standard 72-hour admin delay.
 contract ArbitrumSepoliaReleaseRouter is OrderRouter {
 
     constructor(
@@ -144,6 +147,9 @@ contract ArbitrumSepoliaReleaseRouter is OrderRouter {
         )
     {
         minOpenNotionalAssets = 1000e6;
+        maxExecutionWindowSeconds = 30;
+        maxOpenOrderExecutionBountyAssets = 250_000;
+        positionProtectionTriggerBountyAssets = 250_000;
     }
 
 }
@@ -460,8 +466,8 @@ contract DeployPerpsArbitrumSepolia is Script {
             vpiFactor: 0.01e18,
             maxSkewRatio: 0.4e18,
             maintMarginBps: 10,
-            initMarginBps: 20,
-            fadMarginBps: 300,
+            initMarginBps: 30,
+            fadMarginBps: 200,
             baseCarryBps: 500,
             minBountyAssets: 1e6,
             bountyBps: 10,
@@ -477,13 +483,18 @@ contract DeployPerpsArbitrumSepolia is Script {
     ) internal view {
         CfdEngine engine = CfdEngine(address(housePool.ENGINE()));
         require(engine.minOpenSlippageToleranceBps() == 25, "Initial minimum open slippage tolerance mismatch");
+        require(engine.fadRunwaySeconds() == 10 minutes, "Initial FAD runway mismatch");
         require(CfdEngineAdmin(engine.admin()).riskConfigActivationTime() == 0, "Unexpected initial Engine proposal");
         require(housePool.maxSeniorExposureAssets() == 40_000_000e6, "Initial maximum senior exposure mismatch");
         require(housePool.maxSeniorShareBps() == 8000, "Initial maximum senior share mismatch");
         require(housePool.poolConfigActivationTime() == 0, "Unexpected initial HousePool proposal");
         require(router.minOpenNotionalAssets() == 1000e6, "Initial opening notional mismatch");
+        require(router.maxExecutionWindowSeconds() == 30, "Initial execution window mismatch");
+        require(router.maxOpenOrderExecutionBountyAssets() == 250_000, "Initial max open bounty mismatch");
+        require(router.positionProtectionTriggerBountyAssets() == 250_000, "Initial protection trigger bounty mismatch");
+        require(router.pletherOracle().minOrderSettlementDelay() == 2, "Initial order settlement delay mismatch");
         require(router.pletherOracle().adverseConfidenceMultiplierBps() == 2500, "Initial adverse multiplier mismatch");
-        require(router.pletherOracle().basketMaxConfidenceRatioBps() == 10, "Initial basket confidence mismatch");
+        require(router.pletherOracle().basketMaxConfidenceRatioBps() == 25, "Initial basket confidence mismatch");
         require(router.maxPendingOrders() == 5, "Initial pending-order limit mismatch");
         require(routerAdmin.routerConfigActivationTime() == 0, "Unexpected initial Router proposal");
     }
@@ -733,6 +744,8 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("OrderRecoverySidecar:", deployed.orderExecutionSidecar.recoverySidecar());
         console.log("OrderRouter:", address(deployed.router));
         console.log("MinimumOpenNotionalAssets:", deployed.router.minOpenNotionalAssets());
+        console.log("MaxExecutionWindowSeconds:", deployed.router.maxExecutionWindowSeconds());
+        console.log("MaxOpenOrderExecutionBountyAssets:", deployed.router.maxOpenOrderExecutionBountyAssets());
         console.log("MinOrderSettlementDelay:", deployed.router.pletherOracle().minOrderSettlementDelay());
         console.log("AdverseConfidenceMultiplierBps:", deployed.router.pletherOracle().adverseConfidenceMultiplierBps());
         console.log("OrderRouterLiquidationBatchSidecar:", address(deployed.liquidationBatchSidecar));

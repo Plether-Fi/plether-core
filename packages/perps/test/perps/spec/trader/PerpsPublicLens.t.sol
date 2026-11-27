@@ -573,8 +573,8 @@ contract PerpsPublicLensTest is BasePerpTest {
     }
 
     function test_GetJuniorTranche_DoesNotChargeFrozenFeeDuringFadOnlyShoulder() public {
-        uint256 sunday2110 = 1_710_105_000;
-        vm.warp(sunday2110);
+        uint256 sunday2103 = 1_710_104_600;
+        vm.warp(sunday2103);
 
         assertTrue(engine.isFadWindow(), "setup should remain inside FAD");
         assertFalse(engine.isOracleFrozen(), "setup should be after the oracle-frozen window");

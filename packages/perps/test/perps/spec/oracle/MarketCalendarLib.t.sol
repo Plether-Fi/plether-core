@@ -75,23 +75,23 @@ contract MarketCalendarLibTest is Test {
     }
 
     function test_FadWindow_DerivesSpringTransitionShouldersFromFxBoundary() public view {
-        assertFalse(calendar.isFadWindow(1_772_832_599, false, false, 0)); // Friday 21:29:59 UTC
-        assertTrue(calendar.isFadWindow(1_772_832_600, false, false, 0)); // Friday 21:30:00 UTC
-        assertFalse(calendar.isOracleFrozen(1_772_832_600, false));
+        assertFalse(calendar.isFadWindow(1_772_833_799, false, false, 0)); // Friday 21:49:59 UTC
+        assertTrue(calendar.isFadWindow(1_772_833_800, false, false, 0)); // Friday 21:50:00 UTC
+        assertFalse(calendar.isOracleFrozen(1_772_833_800, false));
 
         assertFalse(calendar.isOracleFrozen(1_773_003_600, false)); // Sunday 21:00:00 UTC
-        assertTrue(calendar.isFadWindow(1_773_004_499, false, false, 0)); // Sunday 21:14:59 UTC
-        assertFalse(calendar.isFadWindow(1_773_004_500, false, false, 0)); // Sunday 21:15:00 UTC
+        assertTrue(calendar.isFadWindow(1_773_003_899, false, false, 0)); // Sunday 21:04:59 UTC
+        assertFalse(calendar.isFadWindow(1_773_003_900, false, false, 0)); // Sunday 21:05:00 UTC
     }
 
     function test_FadWindow_DerivesFallTransitionShouldersFromFxBoundary() public view {
-        assertFalse(calendar.isFadWindow(1_793_392_199, false, false, 0)); // Friday 20:29:59 UTC
-        assertTrue(calendar.isFadWindow(1_793_392_200, false, false, 0)); // Friday 20:30:00 UTC
-        assertFalse(calendar.isOracleFrozen(1_793_392_200, false));
+        assertFalse(calendar.isFadWindow(1_793_393_399, false, false, 0)); // Friday 20:49:59 UTC
+        assertTrue(calendar.isFadWindow(1_793_393_400, false, false, 0)); // Friday 20:50:00 UTC
+        assertFalse(calendar.isOracleFrozen(1_793_393_400, false));
 
         assertFalse(calendar.isOracleFrozen(1_793_570_400, false)); // Sunday 22:00:00 UTC
-        assertTrue(calendar.isFadWindow(1_793_571_299, false, false, 0)); // Sunday 22:14:59 UTC
-        assertFalse(calendar.isFadWindow(1_793_571_300, false, false, 0)); // Sunday 22:15:00 UTC
+        assertTrue(calendar.isFadWindow(1_793_570_699, false, false, 0)); // Sunday 22:04:59 UTC
+        assertFalse(calendar.isFadWindow(1_793_570_700, false, false, 0)); // Sunday 22:05:00 UTC
     }
 
     function test_OverridesRemainUtcDayBased() public view {

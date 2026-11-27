@@ -872,7 +872,7 @@ extend FAD only.
 Governance can also configure up to 64 scheduled closures as sorted, non-overlapping Unix timestamp intervals
 `[startTime, endTime)`. The engine freezes pricing at the start and resumes live pricing at the end unless a
 weekend, day override, or another scheduled closure is active. FAD starts `fadRunwaySeconds` before each closure
-and stays active for 15 minutes after it ends. Fresh-price and publish-ordering requirements resume at reopening
+and stays active for 5 minutes after it ends. Fresh-price and publish-ordering requirements resume at reopening
 even while FAD remains active. Closures use the same timelocked replacement and configuration version as day
 overrides. Configure them from the basket feeds' published schedule. An absent or stale update does not start a freeze.
 

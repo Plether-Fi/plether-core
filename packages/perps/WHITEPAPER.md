@@ -1125,7 +1125,7 @@ oracle row rather than replacing it.
 | Degraded | Blocked | Allowed when oracle regime permits | Allowed when oracle regime permits | Protective transitions and recapitalization |
 
 FAD addresses scheduled FX-market closure risk. The recurring protocol window
-runs from 30 minutes before Friday's 17:00 New York boundary until 15 minutes
+runs from 10 minutes before Friday's 17:00 New York boundary until 5 minutes
 after Sunday's 17:00 boundary, with US daylight-saving rules applied on-chain.
 Only the intervening closure interval uses frozen-oracle policy; the shoulders
 remain live but close-only. The reference FAD maintenance margin is 3%.

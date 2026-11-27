@@ -101,6 +101,14 @@ class SettlementConfigurationTest(unittest.TestCase):
         self.assertEqual(inventory[validator_id], "packages/perps/src/CfdOrderAdmissionValidator.sol")
         self.assertTrue((self.root / inventory[validator_id]).is_file())
         self.assertEqual(self.manifest["economics"]["minOpenSlippageToleranceBps"], 25)
+        self.assertEqual(self.manifest["economics"]["initialMarginBps"], 30)
+        self.assertEqual(self.manifest["economics"]["fadMarginBps"], 200)
+        self.assertEqual(self.manifest["economics"]["fadRunwaySeconds"], 600)
+        self.assertEqual(self.manifest["economics"]["maxExecutionWindowSeconds"], 30)
+        self.assertEqual(self.manifest["economics"]["basketMaxConfidenceRatioBps"], 25)
+        self.assertEqual(self.manifest["economics"]["minOrderSettlementDelay"], 2)
+        self.assertEqual(self.manifest["economics"]["maxOpenOrderExecutionBountyAssets"], "250000")
+        self.assertEqual(self.manifest["economics"]["positionProtectionTriggerBountyAssets"], "250000")
         self.assertEqual(self.manifest["economics"]["juniorMaintenanceFeeAprBps"], 0)
 
     def test_mock_cannot_advertise_signed_deposits_bridge_funding_or_gdn_eligibility(self):

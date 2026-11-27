@@ -108,7 +108,7 @@ contract ScheduledMarketClosureConfigTest is SettlementMonitorLensTestFixture {
 
     function test_MarketClosureGapIsUnfrozenAndAdjacentIntervalsStayFrozen() public {
         uint64 firstEnd = MONDAY + 1 hours;
-        uint64 secondStart = firstEnd + 10 minutes;
+        uint64 secondStart = firstEnd + 4 minutes;
         uint64 secondEnd = secondStart + 1 hours;
         uint64 thirdEnd = secondEnd + 1 hours;
         ICfdEngineAdminHost.EngineCalendarConfig memory config = _config(3);
@@ -125,7 +125,7 @@ contract ScheduledMarketClosureConfigTest is SettlementMonitorLensTestFixture {
         _assertCalendar(secondStart, true, true);
         _assertCalendar(secondEnd, true, true);
         _assertCalendar(thirdEnd, true, false);
-        _assertCalendar(thirdEnd + 15 minutes, false, false);
+        _assertCalendar(thirdEnd + 5 minutes, false, false);
     }
 
     function test_MarketClosureEndDoesNotThawOverlappingRecurringWeekend() public {
@@ -137,7 +137,7 @@ contract ScheduledMarketClosureConfigTest is SettlementMonitorLensTestFixture {
         _assertCalendar(start, true, true);
         _assertCalendar(end, true, true);
         _assertCalendar(FRIDAY_CLOSE + 2 days, true, false);
-        _assertCalendar(FRIDAY_CLOSE + 2 days + 15 minutes, false, false);
+        _assertCalendar(FRIDAY_CLOSE + 2 days + 5 minutes, false, false);
     }
 
     function _assertCalendar(

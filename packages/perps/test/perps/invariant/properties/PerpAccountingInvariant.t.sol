@@ -244,10 +244,10 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     }
 
     function test_ReusedLiquidationPreservesAndPaysRemainingClaimEntitlement() public {
-        // Start just before Friday's 21:30 UTC FAD margin window (November, standard time).
+        // Start just before Friday's 21:50 UTC FAD margin window (November, standard time).
         // The second position must be independently funded, so its surviving claim can only
         // coexist with liquidation once the higher FAD maintenance requirement applies.
-        vm.warp(1_795_210_200 - 60);
+        vm.warp(1_795_211_400 - 60);
         address actor = handler.actorAt(0);
         _openReusableActor();
         handler.liquidate(0, 1.69e8);
@@ -266,7 +266,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         (uint256 size,,,,,,) = engine.positions(actor);
         assertEq(size, 1000 * CfdTypes.SIZE_QUANTUM);
         uint256 reopenedAt = vm.getBlockTimestamp();
-        vm.warp(1_795_210_200);
+        vm.warp(1_795_211_400);
         assertTrue(engine.isFadWindow(), "FAD maintenance must be active");
         // A $4,200 price loss leaves part of the claim. Even with this order's independently
         // funded pledge, equity falls below the 3% FAD maintenance requirement.
