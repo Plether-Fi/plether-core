@@ -24,7 +24,11 @@
       "runtimeCodeHash": null
     },
     "marginClearinghouse": { "address": null, "runtimeCodeHash": null },
-    "cfdEngine": { "address": null, "runtimeCodeHash": null },
+    "cfdEngine": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseEngine",
+      "address": null,
+      "runtimeCodeHash": null
+    },
     "cfdEnginePlanningReader": { "address": null, "runtimeCodeHash": null },
     "terminalNavBookV2": { "address": null, "runtimeCodeHash": null },
     "cfdEnginePlanner": { "address": null, "runtimeCodeHash": null },
@@ -42,6 +46,7 @@
     "cfdEngineAccountLens": { "address": null, "runtimeCodeHash": null },
     "cfdEngineLens": { "address": null, "runtimeCodeHash": null },
     "cfdEngineOpenQuoter": { "address": null, "runtimeCodeHash": null },
+    "cfdOrderAdmissionValidator": { "address": null, "runtimeCodeHash": null },
     "cfdOrderPolicyEvaluator": { "address": null, "runtimeCodeHash": null },
     "cfdClosePreview": { "address": null, "runtimeCodeHash": null },
     "orderRouterExecutionSidecar": { "address": null, "runtimeCodeHash": null },
@@ -93,8 +98,10 @@
     "baseCarryBps": 500,
     "executionFeeBps": 4,
     "settlementBufferBps": 25,
+    "minOpenSlippageToleranceBps": 25,
     "frozenCloseSpreadBps": 50,
     "basketMaxConfidenceRatioBps": 10,
+    "minOrderSettlementDelay": 1,
     "adverseConfidenceMultiplierBps": 2500,
     "minimumOpenNotionalAssets": "1000000000",
     "maxPendingOrders": 5,
@@ -106,13 +113,15 @@
     "juniorSeedAssets": "1000000",
     "seniorSeedReceiver": null,
     "juniorSeedReceiver": null,
-    "juniorMaintenanceFeeAprBps": 100,
+    "juniorMaintenanceFeeAprBps": 0,
     "juniorMaintenanceFeeRecipient": null,
     "juniorFeeRecipientIsDeploymentTreasurySnapshot": true
   },
   "deploymentInitialization": {
+    "engineReleaseValuesConstructorInitialized": true,
     "housePoolReleaseValuesConstructorInitialized": true,
     "routerReleaseValuesConstructorInitialized": true,
+    "engineConfigActivationTimeAtDeployment": "0",
     "housePoolConfigActivationTimeAtDeployment": "0",
     "routerConfigActivationTimeAtDeployment": "0"
   },

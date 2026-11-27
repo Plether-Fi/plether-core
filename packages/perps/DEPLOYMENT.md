@@ -68,7 +68,7 @@ transaction evidence unset and must not be marked deployed or active.
 | Consumer ABI and build-evidence export | `scripts/export-perps-release.py` |
 | Order pass followed by one bounded LP settlement pass | `scripts/settle-lp-epoch.sh` |
 
-The full-stack manifest includes 30 contracts, including constructor-created children. Save the exact source commit,
+The full-stack manifest includes 31 contracts, including constructor-created children. Save the exact source commit,
 compiler settings, deployment block, transaction receipts, addresses, runtime hashes, creation inputs, and active
 execution-config hash. The standalone verifier checks the deployment graph and release state; it does not replace
 comparison of every deployed bytecode artifact with the release build.
@@ -77,7 +77,7 @@ comparison of every deployed bytecode artifact with the release build.
 
 The deploy script performs creation and one-time wiring in this order:
 
-1. Deploy MockUSDG, MarginClearinghouse, CfdEngine, and the empty Engine-bound TerminalNavBookV2. Wire the Book before
+1. Deploy MockUSDG, MarginClearinghouse, the release CfdEngine, and the empty Engine-bound TerminalNavBookV2. Wire the Book before
    any exposure. Deploy and wire the Engine planner, settlement sidecar, and admin.
    The Engine constructor creates its immutable planning reader, which owns read-only snapshot construction; the
    settlement sidecar resolves that reader lazily and retains the authorized snapshot facade.
@@ -86,7 +86,7 @@ The deploy script performs creation and one-time wiring in this order:
    `Engine.protocolTreasury()`, then deploy Junior with a zero fee and that recipient. Register Junior and wire the
    Engine to the Pool.
 3. Deploy the account lens, Engine lens, release Oracle, policy evaluator, CfdClosePreview, and execution sidecar.
-   CfdEngineLens internally creates CfdEngineOpenQuoter; the execution sidecar creates OrderRecoverySidecar.
+   CfdEngineLens internally creates CfdEngineOpenQuoter and CfdOrderAdmissionValidator; the execution sidecar creates OrderRecoverySidecar.
 4. Deploy the lifecycle Book, liquidation/keeper sidecar, and Router in the strict nonce sequence below. The Router
    constructor creates RouterAdmin and PositionProtectionBook. Complete Engine/Router/Clearinghouse wiring.
 5. Deploy PerpsPublicLens and SettlementMonitorLens. The monitor creates its own monitor-only sidecar.
@@ -106,9 +106,10 @@ Do not insert a nonce-consuming transaction into this sequence. The Router valid
 checks the actual Router address against the prediction. If the sequence breaks, recompute the prediction and deploy
 new dependencies; their immutable bindings cannot be repaired.
 
-The release wrappers initialize HousePool's `$40M/80%` Senior limits, the Oracle's `2,500`-bps adverse multiplier,
-and the Router's `$1,000` opening minimum. The release oracle inherits the one-second minimum settlement delay.
-Later configuration changes use the applicable 72-hour governance paths.
+The release wrappers initialize the Engine's `25`-bps minimum open slippage tolerance band, HousePool's `$40M/80%`
+Senior limits, the Oracle's `2,500`-bps adverse multiplier, and the Router's `$1,000` opening minimum. The release
+oracle inherits the one-second minimum settlement delay. Later configuration changes use the applicable 72-hour
+governance paths.
 
 Record and verify children as well as top-level deployments:
 
@@ -116,6 +117,7 @@ Record and verify children as well as top-level deployments:
 | --- | --- |
 | Engine protocol lens | `HousePool.ENGINE_PROTOCOL_LENS()`; verify Engine binding |
 | Engine open quoter | Recover from the Engine-lens creation trace; its internal immutable has no public getter |
+| Order admission validator | `CfdEngineLens.orderAdmissionValidator()`; verify Engine binding |
 | Recovery sidecar | `OrderRouterExecutionSidecar.recoverySidecar()` |
 | RouterAdmin | `OrderRouter.admin()` |
 | Position-protection Book | `OrderRouter.positionProtectionBook()`; verify Router and Engine |
@@ -167,6 +169,7 @@ six decimals; basis points use `10,000 = 100%`.
 | `protocolShareBps` | `0` (protocol liquidation fee disabled; remaining 50% goes to LPs) |
 | `executionFeeBps` | `4` |
 | `settlementBufferBps` | `25` (0.25% of maximum directional liability) |
+| `minOpenSlippageToleranceBps` | `25` (0.25% symmetric commit-time open/increase tolerance band; release-Engine constructor initialization) |
 | `positionSizeQuantum` | `1e20` raw units (100 synthetic tokens) |
 | `fadRunwaySeconds` | `1 hours` |
 | `basketMaxConfidenceRatioBps` | `10` |

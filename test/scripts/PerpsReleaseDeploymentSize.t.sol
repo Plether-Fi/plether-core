@@ -83,7 +83,7 @@ contract PerpsReleaseDeploymentSizeTest is Test {
         );
         _measure(
             "cfdEngine",
-            "CfdEngine.sol:CfdEngine",
+            string.concat(DEPLOY_SCRIPT, "ArbitrumSepoliaReleaseEngine"),
             address(d.engine),
             deployment.engineArguments(address(d.settlementToken), address(d.clearinghouse))
         );

@@ -10,6 +10,7 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderAdmissionValidator} from "@plether/perps/CfdOrderAdmissionValidator.sol";
 import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {EmergencyPauseCoordinator} from "@plether/perps/EmergencyPauseCoordinator.sol";
@@ -62,6 +63,23 @@ interface IPositionProtectionBookDeploymentView {
 
     function ROUTER() external view returns (address);
     function ENGINE() external view returns (address);
+
+}
+
+/// @dev Release-only constructor wrapper for the Engine's minimum open slippage tolerance band. The shared CfdEngine
+///      constructor retains zero for generic deployments and tests; later changes flow exclusively through the
+///      72-hour CfdEngineAdmin proposal/finalization path.
+contract ArbitrumSepoliaReleaseEngine is CfdEngine {
+
+    constructor(
+        address settlementToken_,
+        address clearinghouse_,
+        uint256 capPrice_,
+        CfdTypes.RiskParams memory riskParams_,
+        uint256 frozenCloseSpreadBps_
+    ) CfdEngine(settlementToken_, clearinghouse_, capPrice_, riskParams_, frozenCloseSpreadBps_) {
+        minOpenSlippageToleranceBps = 25;
+    }
 
 }
 
@@ -207,7 +225,7 @@ contract DeployPerpsArbitrumSepolia is Script {
 
         deployed.settlementToken = new MockUSDG();
         deployed.clearinghouse = new MarginClearinghouse(address(deployed.settlementToken));
-        deployed.engine = new CfdEngine(
+        deployed.engine = new ArbitrumSepoliaReleaseEngine(
             address(deployed.settlementToken),
             address(deployed.clearinghouse),
             CAP_PRICE,
@@ -273,6 +291,12 @@ contract DeployPerpsArbitrumSepolia is Script {
 
         deployed.accountLens = new CfdEngineAccountLens(address(deployed.engine));
         deployed.engineLens = new CfdEngineLens(address(deployed.engine));
+        address admissionValidator = address(deployed.engineLens.orderAdmissionValidator());
+        require(admissionValidator.code.length > 0, "Order admission validator has no code");
+        require(
+            address(CfdOrderAdmissionValidator(admissionValidator).engine()) == address(deployed.engine),
+            "Order admission validator Engine mismatch"
+        );
         deployed.pletherOracle = address(
             new ArbitrumSepoliaReleaseOracle(
                 address(deployed.engine),
@@ -451,6 +475,9 @@ contract DeployPerpsArbitrumSepolia is Script {
         OrderRouter router,
         OrderRouterAdmin routerAdmin
     ) internal view {
+        CfdEngine engine = CfdEngine(address(housePool.ENGINE()));
+        require(engine.minOpenSlippageToleranceBps() == 25, "Initial minimum open slippage tolerance mismatch");
+        require(CfdEngineAdmin(engine.admin()).riskConfigActivationTime() == 0, "Unexpected initial Engine proposal");
         require(housePool.maxSeniorExposureAssets() == 40_000_000e6, "Initial maximum senior exposure mismatch");
         require(housePool.maxSeniorShareBps() == 8000, "Initial maximum senior share mismatch");
         require(housePool.poolConfigActivationTime() == 0, "Unexpected initial HousePool proposal");
@@ -699,6 +726,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("JuniorMaintenanceFeeRecipient:", deployed.juniorVault.maintenanceFeeRecipient());
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
+        console.log("CfdOrderAdmissionValidator:", address(deployed.engineLens.orderAdmissionValidator()));
         console.log("CfdOrderPolicyEvaluator:", address(deployed.orderPolicyEvaluator));
         console.log("CfdClosePreview:", address(deployed.closePreview));
         console.log("OrderRouterExecutionSidecar:", address(deployed.orderExecutionSidecar));

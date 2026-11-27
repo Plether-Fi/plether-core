@@ -89,6 +89,20 @@ class SettlementConfigurationTest(unittest.TestCase):
         self.assertEqual(inventory[identifier], "packages/perps/src/CfdEnginePlanningReader.sol")
         self.assertTrue((self.root / inventory[identifier]).is_file())
 
+    def test_export_includes_release_engine_and_admission_validator(self):
+        engine_entry = self.manifest["contracts"]["cfdEngine"]
+        engine_id = release.artifact_identifier("cfdEngine", engine_entry)
+        self.assertEqual(engine_id, "DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseEngine")
+        validator_entry = self.manifest["contracts"]["cfdOrderAdmissionValidator"]
+        validator_id = release.artifact_identifier("cfdOrderAdmissionValidator", validator_entry)
+        self.assertEqual(validator_id, "CfdOrderAdmissionValidator.sol:CfdOrderAdmissionValidator")
+        inventory = release.consumer_inventory(self.root, self.manifest)
+        self.assertEqual(inventory[engine_id], "script/DeployPerpsArbitrumSepolia.s.sol")
+        self.assertEqual(inventory[validator_id], "packages/perps/src/CfdOrderAdmissionValidator.sol")
+        self.assertTrue((self.root / inventory[validator_id]).is_file())
+        self.assertEqual(self.manifest["economics"]["minOpenSlippageToleranceBps"], 25)
+        self.assertEqual(self.manifest["economics"]["juniorMaintenanceFeeAprBps"], 0)
+
     def test_mock_cannot_advertise_signed_deposits_bridge_funding_or_gdn_eligibility(self):
         for section, key, value in (
             ("settlementToken", "supportsReceiveWithAuthorization", True),

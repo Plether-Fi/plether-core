@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "network": {
+    "name": "arbitrum-sepolia",
+    "chainId": 421614
+  },
+  "release": {
+    "date": null,
+    "sourceCommit": null,
+    "forgeVersion": "1.5.1-stable",
+    "solcVersion": "0.8.39",
+    "deployer": null
+  },
+  "paymaster": {
+    "artifact": "packages/perps-aa/src/PletherKernelVerifyingPaymaster.sol:PletherKernelVerifyingPaymaster",
+    "address": null,
+    "creationCodeHash": null,
+    "runtimeCodeHash": null,
+    "deploymentTransaction": null,
+    "deploymentBlock": null,
+    "verified": false,
+    "paused": true,
+    "maxSponsoredCostWei": null
+  },
+  "profile": {
+    "entryPoint": "0x433709009B8330FDa32311DF1C2AFA402eD8D009",
+    "entryPointRuntimeCodeHash": null,
+    "policyId": null,
+    "kernelFactory": null,
+    "kernelFactoryRuntimeCodeHash": null,
+    "kernelImplementation": null,
+    "kernelImplementationRuntimeCodeHash": null,
+    "kernelRootValidator": null,
+    "kernelRootValidatorRuntimeCodeHash": null,
+    "kernelProxyRuntimeCodeHash": null,
+    "sampleOwner": null,
+    "maximumValiditySeconds": 600,
+    "paymasterPostOpGasLimit": 0,
+    "nonceKey": 0,
+    "allowedOuterSelectors": [
+      "0xe9ae5c53"
+    ]
+  },
+  "governance": {
+    "deployedOwner": null,
+    "pendingOwner": null,
+    "acceptedOwner": null,
+    "safeThreshold": null,
+    "safeOwners": [],
+    "sponsorSigner": null
+  },
+  "funding": {
+    "entryPointDepositWei": "0",
+    "depositTransaction": null
+  },
+  "activation": {
+    "configurationReadbackPassed": false,
+    "signerAttestationPassed": false,
+    "pauseDrillPassed": false,
+    "rotationDrillPassed": false,
+    "unpauseTransaction": null,
+    "canaryEnabledAt": null
+  }
+}

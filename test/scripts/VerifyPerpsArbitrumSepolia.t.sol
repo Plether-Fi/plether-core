@@ -78,6 +78,29 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         verifier.run();
         vm.clearMockedCalls();
 
+        vm.mockCall(
+            address(deployed.engineLens),
+            abi.encodeWithSignature("orderAdmissionValidator()"),
+            abi.encode(address(0xBAD))
+        );
+        vm.expectRevert(bytes("Order admission validator has no code"));
+        verifier.run();
+        vm.clearMockedCalls();
+        vm.mockCall(
+            address(deployed.engineLens.orderAdmissionValidator()),
+            abi.encodeWithSignature("engine()"),
+            abi.encode(address(0xBAD))
+        );
+        vm.expectRevert(bytes("Order admission validator binding mismatch"));
+        verifier.run();
+        vm.clearMockedCalls();
+        vm.mockCall(
+            address(deployed.engine), abi.encodeWithSignature("minOpenSlippageToleranceBps()"), abi.encode(uint256(0))
+        );
+        vm.expectRevert(bytes("Minimum open slippage tolerance mismatch"));
+        verifier.run();
+        vm.clearMockedCalls();
+
         vm.mockCall(address(deployed.settlementToken), abi.encodeWithSignature("name()"), abi.encode("Mock USDC"));
         vm.expectRevert(bytes("Settlement token name mismatch"));
         verifier.run();

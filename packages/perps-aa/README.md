@@ -129,7 +129,10 @@ evidence:
 | `KERNEL_PROXY_RUNTIME_CODE_HASH`, `KERNEL_SAMPLE_OWNER` | Runtime hash and owner of a qualified index-zero account |
 
 The script derives the sample account from the factory, then checks its runtime, implementation slot, beacon slot,
-root and registered owner. It deploys the paymaster paused. Attest its configuration to the gateway and initialize
-canonical reconciliation from the verified paymaster deployment block before funding and enabling the canary. Fund the new
-paymaster deposit separately. Keep the paymaster paused and gateway issuance off until the pinned deployment,
-funded signed UserOperations in both gas modes, and invalid-signature rejection pass with normal validation.
+root and registered owner. It deploys the paymaster paused. Copy `.env.arbitrum-sepolia-perps-aa-kernel.example` to
+an ignored `.env.arbitrum-sepolia-perps-aa-kernel` file for dry-run and broadcast runs, and record deployment evidence
+in `deployments/arbitrum-sepolia-perps-aa-kernel.template.json` (copied to the release directory). Attest its
+configuration to the gateway and initialize canonical reconciliation from the verified paymaster deployment block
+before funding and enabling the canary. Fund the new paymaster deposit separately. Keep the paymaster paused and
+gateway issuance off until the pinned deployment, funded signed UserOperations in both gas modes, and
+invalid-signature rejection pass with normal validation.
