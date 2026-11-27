@@ -1,0 +1,289 @@
+{
+  "schemaVersion": 4,
+  "orderInterfaceVersion": 3,
+  "network": {
+    "name": "arbitrum-sepolia",
+    "chainId": 421614
+  },
+  "release": {
+    "version": "v2.1.0",
+    "date": "2026-11-27",
+    "sourceCommit": "d5ef9725f72f5e131272da27004266d8a3d51e50",
+    "forgeVersion": "1.5.1-stable",
+    "phase": "active",
+    "deploymentBlock": 333192048,
+    "deployer": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "owner": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "guardian": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "deploymentTimeProtocolTreasury": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "pyth": "0x0B73614636C855Bf23F342F307FB981A3e47f42B"
+  },
+  "contracts": {
+    "settlementToken": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:MockUSDG",
+      "address": "0x66705F56f2c88C9474d021D9C6AFE134205a63CE",
+      "runtimeCodeHash": "0x6ab1c0eba44a137be0b30c0b16fbce6b37f02aae1c6c01d10fbaf9a9061a4f1f"
+    },
+    "marginClearinghouse": {
+      "address": "0x11BeF9BAB445C0E1F5b0280EE7E20498e3FC9D63",
+      "runtimeCodeHash": "0x8f578b0e77f398ece90442b076e8f4801c2bfff4037289c174019f20423d5685"
+    },
+    "cfdEngine": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseEngine",
+      "address": "0xa3C43242F4E0a7C9a21Bd7dE48376D2f0779CaA6",
+      "runtimeCodeHash": "0xeee3b771bddcd658ac75165e58711f22cae5cb01b1497dd0168c63f7ff8152ce"
+    },
+    "cfdEnginePlanningReader": {
+      "address": "0x3708FBff9dB10bAFbf2C098a739eaAD364FF95c3",
+      "runtimeCodeHash": "0xca63100a3f15a8b11fa7eaac68378c59500e6dd7b339131a1ea41ca2b621ca6b"
+    },
+    "terminalNavBookV2": {
+      "address": "0x0b729D041cf3Fb2Bb3606fB942D53FaE4722BC9f",
+      "runtimeCodeHash": "0x9bb9e0770843c02faa3747823e69ce08f1039edd4e5e45aa64d8fb8a69e4dc57"
+    },
+    "cfdEnginePlanner": {
+      "address": "0xeC94CBDc016438C6444E54B06037485551c6E825",
+      "runtimeCodeHash": "0xf8882a1325203427f943cc470b6993cd3897ef286406cfc9e23d945cbe4b2c9a"
+    },
+    "cfdEngineSettlementSidecar": {
+      "address": "0x0F5256Ace909F20Bc8C29ab7bff33edA45088C3c",
+      "runtimeCodeHash": "0x15a9589a9f9a85157b598b12f5f0554d8e0b14424f6bdd03ec7a72234afd4f4f"
+    },
+    "cfdEngineAdmin": {
+      "address": "0xAB43D03688DEB13D952864AA59bA0D90d4878Fb1",
+      "runtimeCodeHash": "0xd1231e3611360941af2d2dd537a031ba622833abf6c775fa7bb370b0f7598905"
+    },
+    "housePoolRedemptionMathSidecar": {
+      "address": "0x30b8c4AE1DeB1dD7d91c73676594bB59d5C043aA",
+      "runtimeCodeHash": "0xd84f68c4c94b0fc3fd8c1519ddfecab319469b689233671ded3dc04b6d40dab0"
+    },
+    "housePool": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseHousePool",
+      "address": "0x23735f88637cbf329ca1C4f49B96953d25A24b4a",
+      "runtimeCodeHash": "0xf7d7c7e56d72edfc197af599304d9fdd356c2c1a58d8adcf240534acd3c24b0e"
+    },
+    "cfdEngineProtocolLens": {
+      "address": "0xE9734d381d45ee7f3010f66Dabc00BE8fb72Cc7E",
+      "runtimeCodeHash": "0x84d6c440403c23af1b4fc3c28a8f6918c02d1a097882a40ab592c29e8f288ffb"
+    },
+    "seniorVault": {
+      "address": "0xCac0AeB2b8d7874e33b5CD7f6eF7c2f85d98469F",
+      "runtimeCodeHash": "0xbeeeb0cb875f468bef6bc13b82b452a3a0ff8818dfb655735389d39e68c93488"
+    },
+    "juniorVault": {
+      "address": "0xe69d0d809b8CdaD43074C2B92B0e4C0969364277",
+      "runtimeCodeHash": "0x88361bf472de00c834474053db667d5d6d59c4ae2d0d3385859c4afca7d422ed"
+    },
+    "cfdEngineAccountLens": {
+      "address": "0x36144884f200811d0576b461F374CBe123733421",
+      "runtimeCodeHash": "0xb6e1d08ff17e05dbe51956afa317b220be2d4d250734eaa78e6ed57b8d1fa8dc"
+    },
+    "cfdEngineLens": {
+      "address": "0x222a50891C5B60f29c30a9181Cd1EcFCD08CF4a1",
+      "runtimeCodeHash": "0x9c25a74c21e61acc25cb136f7693f59c1193fe95acf21d1bb00c1a11a6f6d29a"
+    },
+    "cfdEngineOpenQuoter": {
+      "address": "0x60ba0Dc33903444fDD76dAbF974E740732f73457",
+      "runtimeCodeHash": "0xc990f649d60efc3555a0f4066756953f7bd9702662d0c7d7c0c0fd0fc3b9465d"
+    },
+    "cfdOrderAdmissionValidator": {
+      "address": "0x6F6eBb24C49a449e0Ec14208D883d0e4938b4a58",
+      "runtimeCodeHash": "0x19e99291ac655b1ea19905c43beb67e4c573d3399d14f74ebf2e8df3572bdce3"
+    },
+    "cfdOrderPolicyEvaluator": {
+      "address": "0x412266d9A467150dD0Ec645d12E62E116c2109B8",
+      "runtimeCodeHash": "0x1e0e1a4d62f4b4d85d47a2198a372889613654d9372dcb654ac1ec4a30140f18"
+    },
+    "cfdClosePreview": {
+      "address": "0x2EAD91843fD8e161204B68CF518335BfFD514C58",
+      "runtimeCodeHash": "0x03b4ef6fade71157c8fcd02d09dcf3c7c58ba5e1b6f8893e8f406e9ca08bf514"
+    },
+    "orderRouterExecutionSidecar": {
+      "address": "0xDd65BF09b020222fF8f8A0D8a6B499788149e674",
+      "runtimeCodeHash": "0xcba19f0f9b2b5a2f1bc34f11faee459ef2f61b01f298878b99f58307149419a3"
+    },
+    "orderRecoverySidecar": {
+      "address": "0xe6C0cd497579F434494947dfe3d5c838945F7fAe",
+      "runtimeCodeHash": "0x275c2b53045c4bd875fc5386e8b4f381e5262f6f2c2c789feda24c7db586d51b"
+    },
+    "pletherOracle": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle",
+      "address": "0x3BAc571AF4f9F6535696F82460EFE56A348C91B2",
+      "runtimeCodeHash": "0x3d4209085377ed55a9abb72b9ea85b4a5236401877e422c8a949771a5b5b73d6"
+    },
+    "orderRouterLiquidationBatchSidecar": {
+      "address": "0x924723C489621CcDFb5af88f2F6E1761Ed5aCF1F",
+      "runtimeCodeHash": "0x00f8c1b28ee74b2bffd88695675a4c6809afad5dc82ffb14a87d9b8095aa7004"
+    },
+    "orderLifecycleBook": {
+      "address": "0x194cd4822c70a2851d5B14abC96018BE41a5a5f0",
+      "runtimeCodeHash": "0x9b21df6ddfc934562051b455a429bf7e50f40ab22618bb85ffbb5345b2130f56",
+      "executionConfigHash": "0xfeabe1396694c6257fd5b3feb89410ad4a7074b0a24be40d34e27d68f463744c"
+    },
+    "orderRouter": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseRouter",
+      "address": "0xB4c7548ba764e22107964637e31558af724c1c3E",
+      "runtimeCodeHash": "0xa46e0b1b93d3d2bf95330517b9504e447edc7d27d6d7cf15000b45dd67df33db"
+    },
+    "orderRouterAdmin": {
+      "address": "0x73D39254Fb540A3A4618A9C113Ea2E9C45D7a84F",
+      "runtimeCodeHash": "0x9b3bc24415ce378342b8ab98558cd19b4bc2b591375ac03977184cff834de957"
+    },
+    "positionProtectionBook": {
+      "address": "0xc7C8ED1cb968F124D4faF01655AdEC222EaEFf02",
+      "runtimeCodeHash": "0xa6f8cb9b28d13ba715f0b4d512199a4fc9c05ba41f3224f2e0a5383182c051c4"
+    },
+    "perpsPublicLens": {
+      "address": "0x3763AE4124B6b9d6E5caCFAd3b4f1d27f4b44f44",
+      "runtimeCodeHash": "0x032fabe87aa51aecba3ab20c50f60ef4512339dbfa0541cc12e1417ca503f3dd"
+    },
+    "settlementMonitorLens": {
+      "address": "0xEF20Dee333b6c518fbD1CD30304FDaf8f2fe27d8",
+      "runtimeCodeHash": "0x5d010877164ef5690b67b68ca669789efc52c2f2d70811f2e103c1e0e655c9d1"
+    },
+    "settlementMonitorLensSidecar": {
+      "address": "0xa20691b4aDB67088Afa4C79D9cF9342bd9959e74",
+      "runtimeCodeHash": "0xf09bb787dc4ef9350f086e3f506478fab9c0cfb8371d8b76aec91ef5d690077c"
+    },
+    "emergencyPauseCoordinator": {
+      "address": "0x59bb4dd58F9dd146F61A4aF8F7311ab2f4793056",
+      "runtimeCodeHash": "0x1d758276bf72e4648f498fbf4d472d0781e51cd62514a361ee6eed03c332c67e"
+    }
+  },
+  "settlementToken": {
+    "name": "Mock USDG",
+    "symbol": "USDG",
+    "decimals": 6,
+    "isMock": true,
+    "supportsReceiveWithAuthorization": false,
+    "supportsBridgeFunding": false
+  },
+  "rewards": {
+    "status": "not_applicable",
+    "holdingContracts": [
+      "marginClearinghouse",
+      "housePool"
+    ],
+    "payoutAddress": null,
+    "payoutController": null
+  },
+  "economics": {
+    "vpiFactorWad": "10000000000000000",
+    "maxSkewRatioWad": "400000000000000000",
+    "maintenanceMarginBps": 10,
+    "initialMarginBps": 30,
+    "liquidationChargeBps": 10,
+    "minimumLiquidationChargeAssets": "1000000",
+    "keeperShareBps": 5000,
+    "protocolShareBps": 0,
+    "minimumKeeperPayoutAssets": "500000",
+    "fadMarginBps": 200,
+    "fadRunwaySeconds": 600,
+    "fadLeadSeconds": 600,
+    "fadLagSeconds": 300,
+    "baseCarryBps": 500,
+    "executionFeeBps": 4,
+    "settlementBufferBps": 25,
+    "minOpenSlippageToleranceBps": 25,
+    "frozenCloseSpreadBps": 50,
+    "basketMaxConfidenceRatioBps": 25,
+    "minOrderSettlementDelay": 2,
+    "orderSettlementWindow": 15,
+    "adverseConfidenceMultiplierBps": 2500,
+    "minimumOpenNotionalAssets": "1000000000",
+    "maxExecutionWindowSeconds": 30,
+    "maxPendingOrders": 5,
+    "openOrderExecutionBountyBps": 1,
+    "minOpenOrderExecutionBountyAssets": "10000",
+    "maxOpenOrderExecutionBountyAssets": "250000",
+    "closeOrderExecutionBountyAssets": "0",
+    "positionProtectionTriggerBountyAssets": "250000",
+    "maxSeniorExposureAssets": "40000000000000",
+    "maxSeniorShareBps": 8000,
+    "seniorSeedAssets": "1000000",
+    "juniorSeedAssets": "1000000",
+    "seniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorMaintenanceFeeAprBps": 0,
+    "juniorMaintenanceFeeRecipient": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorFeeRecipientIsDeploymentTreasurySnapshot": true
+  },
+  "deploymentInitialization": {
+    "engineReleaseValuesConstructorInitialized": true,
+    "housePoolReleaseValuesConstructorInitialized": true,
+    "routerReleaseValuesConstructorInitialized": true,
+    "engineConfigActivationTimeAtDeployment": "0",
+    "housePoolConfigActivationTimeAtDeployment": "0",
+    "routerConfigActivationTimeAtDeployment": "0"
+  },
+  "transactions": {
+    "deployment": [
+      "0xc9a9146c75648ec97f65e77bf3a1a273392236d650acb6479ef84c2c74b3cf78",
+      "0xbe845a904eda795168fdfae4ba7e61f382e9f8c9a4780f5c1ca7e1513087999d",
+      "0x7de5fb3351602ece177036bbe73f5efc5332d00f82f245d65d9c7a1bc3ace4c1",
+      "0xa318bbf7a7aca12b3c5aa97a303c0d6e58e2e994c736545f5a28f4a317e3fcbe",
+      "0x0fa605dbb5b5c7ffa829836c48dee1db00f5422d3fa7f44208834ee71cb69957",
+      "0xeb44e65cc78949ad898e53a87600bd41d832e5ba5875f8b6c76ef10778140715",
+      "0x61d08ef30ad88c2bfdac357848df70f5c2a36e57d1a08c03bb17ea7f0169a646",
+      "0xd6d0f7eae5944a9ba527b3ceb505e4f825b0f4ca6b1ee07a56a3701b7538e243",
+      "0x6a5905e4b1a8f68e1b59bb3cbc769191f11492959d043b8f49e0c56fe4eb45e6",
+      "0x74c8dca3d3305ad46cb206f37c1c3dfdfaca4939b5b856d5448d54f7018efa58",
+      "0xc321f259e2cc789d5ab1d59318d749c8060254231763b5ff9405f6a86bc42b2f",
+      "0xcd1cec59c7417f590e39f41f50f5c0b80fb408deccdf8cc10f0da027f8664834",
+      "0xde74e7fec1344d1249473aa194d9820c6381934f7d11693e1d57db69fe796c78",
+      "0x16c2d51d65c1b00fdb13edc81cef793115766a00ed15c5e756a2eaedb398fa1a",
+      "0x74fa85595f1a37f15d381f621015f3465820a670c44ac4fbd9ac49dbaa9964ce",
+      "0x7467cf770a9d3e6c28169da01f8e16c30522dc7ad94a95795e65b7a8aa4e7141",
+      "0xb0285328a7036534bf7eb0113f2de97a4ef27e9135ad5fb3ad8c993954bbb1af",
+      "0x77561a30818927d3f4129e9c9e6aaac91e30f71da67a34bc908eab25eebf7c5d",
+      "0x88abd23d5e6d3565f6e29d619657b07bbeaf55a36fdb77f7a5f871c1b0727021",
+      "0x5dcddcf3ffc00c3fad463ee6a064a83327f2175c59713d4eb6ee801e8be299e6",
+      "0xed078433e8facbbe818927c032b53adc045e6f0a9448221b6c0c6fe455bb280b",
+      "0x792e1b02b0ea80359e02fcabd71cd4808630c1e088e424c92455494f5a017eb9",
+      "0xa44209431fc80c660d3d81279afc2905dc5b3265023e7d44e3d399a408fe62b3",
+      "0x8b681385d6f58bc31b66fde9b6cf6790d4a503b2f012be6965ef6c2e7d11f55c",
+      "0x9d3f11cd12ac27cac1259b98464a3d3fcc418aaf16eae6aa5ad1d5dd3550da6d",
+      "0x02790fc7dc8d6befc7804f705766a5b61894e8a4e004ba538d1f4e2e9a689eb5",
+      "0xe622ac82a2776342e8219069428cf2da4d91dabdc5048d5d688b33d3eaa65c71",
+      "0x0db698241abfedbeb9549e6ec019b1266ceb076cd5a1ad5d650e649bdff5c4ab",
+      "0xa2b14372a472f642c5ea7250a2e39c1755267534a6df31275b2d2a2c3921550a",
+      "0x4ba309d6e8a27dd04ea5ea3bb62ae392cdfad35a69bec09570fa47fc75f87935",
+      "0x831e74db967481537cff4f100fd2443212f21edfc4b20f9ecccb83de7ae19720",
+      "0x8a8bfbc5fbab2fea2347d1967802d1ecb96edc0f7f272d3c97f3710347c0c2f4"
+    ],
+    "bootstrapSeeding": [
+      "0x512b79ba79b9bbc3cfaa29afd814611798edf6407e91ce9edd0b0c820f0b0407",
+      "0x01460fd99176231010144e81c40cdb6ed7c5835058618d9ef25423702172d034",
+      "0xdacd122e61e572b4df0d7cfff15c11f688cfd65b6dd0b1791fa9935b6751be02",
+      "0x5d79b16034b00b8641af534d68c796750a512252b95d263eb6604de1cdfc0e6a",
+      "0x0a7f7dac47f2ded383412dde363e43131f04ca0065539d327e017abaceca8f50"
+    ],
+    "activation": [
+      "0x08e3f8de826b0d1b1520bca36929a6927ccf6a35f422721e9633095219fae46a",
+      "0x51ce1f05d371815044c5e7e4392b7169f24a3095d978f3e1f7467da28cd726a8"
+    ],
+    "liquidity": [
+      "0x961339eb012b1300b0c9cca458067b9c827703d8b9b9a659fb0e978ddc86b8b2",
+      "0x4773a5ce539f1e3a0f0d8f3a986ece3a6da1bab44363441ca295c9576154408e",
+      "0x5ffc1214ada3ed9e50d65e895267a13fc13cbb2d75a6ff073fba5c35fff1a84b"
+    ]
+  },
+  "verification": {
+    "deployedPhase": {
+      "txOrRunId": "0x8a8bfbc5fbab2fea2347d1967802d1ecb96edc0f7f272d3c97f3710347c0c2f4",
+      "passed": true
+    },
+    "seededPhase": {
+      "txOrRunId": "0x0a7f7dac47f2ded383412dde363e43131f04ca0065539d327e017abaceca8f50",
+      "passed": true
+    },
+    "activePhase": {
+      "txOrRunId": "0x51ce1f05d371815044c5e7e4392b7169f24a3095d978f3e1f7467da28cd726a8",
+      "passed": true
+    },
+    "authenticatedPythDryRun": {
+      "timestamp": "2026-11-27T16:15:49Z",
+      "passed": true
+    }
+  }
+}
