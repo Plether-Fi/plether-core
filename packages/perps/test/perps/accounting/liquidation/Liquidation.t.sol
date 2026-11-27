@@ -25,7 +25,7 @@ contract LiquidationTest is BasePerpTest {
     address keeper = address(0x999);
 
     uint256 constant WEDNESDAY_NOON = 1_729_080_000;
-    uint256 constant FRIDAY_EVENING = 1_729_283_400;
+    uint256 constant FRIDAY_EVENING = 1_729_284_600;
     uint256 constant BOUNDARY_CACHED_MARK_PRICE = 100_500_000;
     uint256 constant BOUNDARY_RESOLVED_MARK_PRICE = 101_000_000;
     uint256 constant BOUNDARY_LIQUIDATION_PRICE = 101_500_000;
@@ -471,25 +471,25 @@ contract LiquidationTest is BasePerpTest {
     }
 
     function test_FadWindow_ExactBoundaries() public {
-        // Friday 20:29:59 UTC → NOT FAD
-        vm.warp(1_729_283_399);
-        assertFalse(engine.isFadWindow(), "Friday 20:29:59 is not FAD");
+        // Friday 20:49:59 UTC → NOT FAD
+        vm.warp(1_729_284_599);
+        assertFalse(engine.isFadWindow(), "Friday 20:49:59 is not FAD");
 
-        // Friday 20:30:00 UTC → FAD begins while New York is on daylight time
-        vm.warp(1_729_283_400);
-        assertTrue(engine.isFadWindow(), "Friday 20:30:00 is FAD");
+        // Friday 20:50:00 UTC → FAD begins while New York is on daylight time
+        vm.warp(1_729_284_600);
+        assertTrue(engine.isFadWindow(), "Friday 20:50:00 is FAD");
 
         // Saturday midday → FAD (all Saturday is FAD)
-        vm.warp(1_729_283_400 + 15 hours + 30 minutes);
+        vm.warp(1_729_284_600 + 15 hours + 10 minutes);
         assertTrue(engine.isFadWindow(), "Saturday is FAD");
 
-        // Sunday 21:14:59 UTC → still FAD
-        vm.warp(1_729_458_899);
-        assertTrue(engine.isFadWindow(), "Sunday 21:14:59 is FAD");
+        // Sunday 21:04:59 UTC → still FAD
+        vm.warp(1_729_458_299);
+        assertTrue(engine.isFadWindow(), "Sunday 21:04:59 is FAD");
 
-        // Sunday 21:15:00 UTC → FAD ends
-        vm.warp(1_729_458_900);
-        assertFalse(engine.isFadWindow(), "Sunday 21:15:00 is not FAD");
+        // Sunday 21:05:00 UTC → FAD ends
+        vm.warp(1_729_458_300);
+        assertFalse(engine.isFadWindow(), "Sunday 21:05:00 is not FAD");
     }
 
 }

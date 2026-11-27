@@ -42,9 +42,14 @@ contract VerifyPerpsArbitrumSepolia is Script {
     uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_ASSETS = 40_000_000e6;
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
     uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_ASSETS = 1000e6;
+    uint256 internal constant RELEASE_MAX_EXECUTION_WINDOW_SECONDS = 30;
+    uint256 internal constant RELEASE_MAX_OPEN_ORDER_EXECUTION_BOUNTY_ASSETS = 250_000;
+    uint256 internal constant RELEASE_POSITION_PROTECTION_TRIGGER_BOUNTY_ASSETS = 250_000;
     uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
-    uint256 internal constant RELEASE_MIN_ORDER_SETTLEMENT_DELAY = 1;
+    uint256 internal constant RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS = 25;
+    uint256 internal constant RELEASE_MIN_ORDER_SETTLEMENT_DELAY = 2;
     uint256 internal constant RELEASE_MIN_OPEN_SLIPPAGE_TOLERANCE_BPS = 25;
+    uint256 internal constant RELEASE_FAD_RUNWAY_SECONDS = 10 minutes;
     uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 0;
 
     bytes32 internal constant PHASE_DEPLOYED = keccak256("deployed");
@@ -419,8 +424,8 @@ contract VerifyPerpsArbitrumSepolia is Script {
         require(params.vpiFactor == 0.01e18, "VPI mismatch");
         require(params.maxSkewRatio == 0.4e18, "Maximum skew mismatch");
         require(params.maintMarginBps == 10, "Maintenance margin mismatch");
-        require(params.initMarginBps == 20, "Initial margin mismatch");
-        require(params.fadMarginBps == 300, "FAD mismatch");
+        require(params.initMarginBps == 30, "Initial margin mismatch");
+        require(params.fadMarginBps == 200, "FAD mismatch");
         require(params.baseCarryBps == 500, "Base carry mismatch");
         require(params.minBountyAssets == 1e6, "Minimum liquidation charge mismatch");
         require(params.bountyBps == 10, "Liquidation charge mismatch");
@@ -432,7 +437,11 @@ contract VerifyPerpsArbitrumSepolia is Script {
             deployed.engine.minOpenSlippageToleranceBps() == RELEASE_MIN_OPEN_SLIPPAGE_TOLERANCE_BPS,
             "Minimum open slippage tolerance mismatch"
         );
-        require(deployed.oracle.basketMaxConfidenceRatioBps() == 10, "Basket confidence mismatch");
+        require(deployed.engine.fadRunwaySeconds() == RELEASE_FAD_RUNWAY_SECONDS, "FAD runway mismatch");
+        require(
+            deployed.oracle.basketMaxConfidenceRatioBps() == RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS,
+            "Basket confidence mismatch"
+        );
         require(
             deployed.oracle.minOrderSettlementDelay() == RELEASE_MIN_ORDER_SETTLEMENT_DELAY,
             "Minimum order settlement delay mismatch"
@@ -444,6 +453,19 @@ contract VerifyPerpsArbitrumSepolia is Script {
         require(deployed.router.maxPendingOrders() == 5, "Pending-order limit mismatch");
         require(
             deployed.router.minOpenNotionalAssets() == RELEASE_MIN_OPEN_NOTIONAL_ASSETS, "Opening notional mismatch"
+        );
+        require(
+            deployed.router.maxExecutionWindowSeconds() == RELEASE_MAX_EXECUTION_WINDOW_SECONDS,
+            "Execution window mismatch"
+        );
+        require(
+            deployed.router.maxOpenOrderExecutionBountyAssets() == RELEASE_MAX_OPEN_ORDER_EXECUTION_BOUNTY_ASSETS,
+            "Max open bounty mismatch"
+        );
+        require(
+            deployed.router.positionProtectionTriggerBountyAssets()
+                == RELEASE_POSITION_PROTECTION_TRIGGER_BOUNTY_ASSETS,
+            "Protection trigger bounty mismatch"
         );
         require(deployed.housePool.maxSeniorExposureAssets() == RELEASE_MAX_SENIOR_EXPOSURE_ASSETS, "Exposure mismatch");
         require(deployed.housePool.maxSeniorShareBps() == RELEASE_MAX_SENIOR_SHARE_BPS, "Senior share mismatch");

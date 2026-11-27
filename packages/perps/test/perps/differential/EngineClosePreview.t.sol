@@ -137,7 +137,7 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
 
         _open(account, CfdTypes.Side.LONG, 100_000e18, 4000e6, 1e8);
 
-        vm.warp(1_709_934_300); // Friday 21:45 UTC: FAD, but not oracle-frozen.
+        vm.warp(1_709_934_900); // Friday 21:55 UTC: FAD, but not oracle-frozen.
         assertTrue(engine.isFadWindow(), "Setup should be in FAD");
         assertFalse(engine.isOracleFrozen(), "FAD runway should still be live-market mode");
 

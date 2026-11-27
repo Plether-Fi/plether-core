@@ -168,15 +168,15 @@ contract LiveFadFreshnessTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _open(account, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
-        // Friday 21:30 UTC: FAD active but oracle still live until 22:00.
-        uint256 fridayEvening = _fridayAt(21) + 30 minutes;
+        // Friday 21:50 UTC: FAD active but oracle still live until 22:00.
+        uint256 fridayEvening = _fridayAt(21) + 50 minutes;
         vm.warp(fridayEvening);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(fridayEvening));
 
-        // 29m 59s later: still before the 22:00 oracle freeze boundary.
-        // Mark is far beyond the normal 120s limit and should revert.
-        vm.warp(fridayEvening + 30 minutes - 1);
+        // 9m 59s later: still before the 22:00 oracle freeze boundary.
+        // Mark is far beyond the normal 60s limit and should revert.
+        vm.warp(fridayEvening + 10 minutes - 1);
 
         vm.prank(alice);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
@@ -189,12 +189,12 @@ contract LiveFadFreshnessTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         _open(account, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
-        uint256 fridayEvening = _fridayAt(21) + 30 minutes;
+        uint256 fridayEvening = _fridayAt(21) + 50 minutes;
         vm.warp(fridayEvening);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(fridayEvening));
 
-        vm.warp(fridayEvening + 30 minutes - 1);
+        vm.warp(fridayEvening + 10 minutes - 1);
 
         // FAD alone does not relax mark age: the stale live-market mark blocks a new LP request.
         address lp = address(0x1111);

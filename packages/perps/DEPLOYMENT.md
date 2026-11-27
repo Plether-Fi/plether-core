@@ -106,10 +106,10 @@ Do not insert a nonce-consuming transaction into this sequence. The Router valid
 checks the actual Router address against the prediction. If the sequence breaks, recompute the prediction and deploy
 new dependencies; their immutable bindings cannot be repaired.
 
-The release wrappers initialize the Engine's `25`-bps minimum open slippage tolerance band, HousePool's `$40M/80%`
-Senior limits, the Oracle's `2,500`-bps adverse multiplier, and the Router's `$1,000` opening minimum. The release
-oracle inherits the one-second minimum settlement delay. Later configuration changes use the applicable 72-hour
-governance paths.
+The release wrappers initialize the Engine's `25`-bps minimum open slippage tolerance band and `10`-minute FAD runway,
+HousePool's `$40M/80%` Senior limits, the Oracle's `25`-bps max basket confidence ratio, `2,500`-bps adverse
+multiplier, and `2`-second minimum settlement delay, and the Router's `$1,000` opening minimum, `30`-second execution window, and `0.25 USDG` maximum open and
+protection-trigger bounties. Later configuration changes use the applicable 72-hour governance paths.
 
 Record and verify children as well as top-level deployments:
 
@@ -160,8 +160,8 @@ six decimals; basis points use `10,000 = 100%`.
 | `frozenCloseSpreadBps` | `50` |
 | `maxSkewRatio` | `0.4e18` |
 | `maintMarginBps` | `10` |
-| `initMarginBps` | `20` |
-| `fadMarginBps` | `300` |
+| `initMarginBps` | `30` (0.30% / 333x market-open initial margin) |
+| `fadMarginBps` | `200` (2.00% / 50x FAD/weekend margin) |
 | `baseCarryBps` | `500` (flat 5% annual carry on full maximum-profit exposure) |
 | `minBountyAssets` | `1e6` |
 | `bountyBps` | `10` total liquidation-charge rate |
@@ -171,14 +171,16 @@ six decimals; basis points use `10,000 = 100%`.
 | `settlementBufferBps` | `25` (0.25% of maximum directional liability) |
 | `minOpenSlippageToleranceBps` | `25` (0.25% symmetric commit-time open/increase tolerance band; release-Engine constructor initialization) |
 | `positionSizeQuantum` | `1e20` raw units (100 synthetic tokens) |
-| `fadRunwaySeconds` | `1 hours` |
-| `basketMaxConfidenceRatioBps` | `10` |
-| `minOrderSettlementDelay` | `1` second |
+| `fadRunwaySeconds` | `10 minutes` (release-Engine constructor initialization; recurring weekend FAD shoulders are `10m` pre-close / `5m` post-open) |
+| `basketMaxConfidenceRatioBps` | `25` (0.25% max aggregate basket confidence ratio; release-Oracle constructor initialization) |
+| `minOrderSettlementDelay` | `2` seconds (release-Oracle constructor initialization; `orderSettlementWindow` = `15` seconds) |
 | `adverseConfidenceMultiplierBps` | `2_500` (release-oracle constructor initialization) |
 | `minOpenNotionalAssets` | `1_000e6` (release-Router constructor initialization) |
+| `maxExecutionWindowSeconds` | `30` seconds (release-Router constructor initialization) |
 | `maxPendingOrders` | `5` |
+| `maxOpenOrderExecutionBountyAssets` | `250_000` (`0.25 USDG`; `min = 0.01 USDG`, `1 bps`; release-Router constructor initialization) |
 | Close execution bounty | Always zero; no configuration field or getter |
-| `positionProtectionTriggerBountyAssets` | `200_000` (`0.20 USDG`) |
+| `positionProtectionTriggerBountyAssets` | `250_000` (`0.25 USDG`; release-Router constructor initialization) |
 | `juniorMaintenanceFeeAprBps` | `0` nominal APR (disabled at deployment) |
 | `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
 | `maxSeniorExposureAssets` | `40_000_000e6` (release-HousePool constructor initialization) |

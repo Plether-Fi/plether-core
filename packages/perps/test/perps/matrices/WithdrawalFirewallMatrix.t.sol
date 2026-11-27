@@ -47,8 +47,8 @@ contract WithdrawalFirewallMatrixTest is BasePerpTest {
             assertTrue(engine.degradedMode(), "Real unaffordable settlement must latch degraded mode");
             settlementToken.mint(address(pool), cash);
         }
-        // Friday 2024-10-18: 20:29:59 live, 20:30:00 FAD-only, 21:00:00 frozen.
-        uint256 now_ = regime == 0 ? 1_729_283_399 : regime == 1 ? 1_729_283_400 : 1_729_285_200;
+        // Friday 2024-10-18: 20:49:59 live, 20:50:00 FAD-only, 21:00:00 frozen.
+        uint256 now_ = regime == 0 ? 1_729_284_599 : regime == 1 ? 1_729_284_600 : 1_729_285_200;
         vm.warp(now_);
         assertEq(engine.isFadWindow(), regime != 0);
         assertEq(engine.isOracleFrozen(), regime == 2);

@@ -1691,7 +1691,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     }
 
     function test_AdversarialCloseOnlyBatchPreservesPendingHeadAndReservations() public {
-        uint256 beforeFad = 1_729_283_399;
+        uint256 beforeFad = 1_729_284_599;
         vm.warp(beforeFad);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(beforeFad));

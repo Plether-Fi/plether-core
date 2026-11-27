@@ -484,7 +484,7 @@ contract FrozenFreshnessCouponTest is BasePerpTest {
     address alice = address(0xA11CE);
     address attacker = address(0xBAD);
 
-    /// @dev Friday 2024-03-08 21:30 UTC — 30min before oracle freeze
+    /// @dev Friday 2024-03-08 21:50 UTC — 10min before oracle freeze
     uint256 constant FRIDAY_BEFORE_FREEZE = 1_709_934_600;
     /// @dev Saturday 2024-03-09 12:00 UTC — mid-weekend
     uint256 constant SATURDAY_NOON = 1_709_985_600;

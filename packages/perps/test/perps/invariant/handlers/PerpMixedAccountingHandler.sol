@@ -1324,7 +1324,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
                 + (100 * currentPrice * 150 / 10_000) + 1;
             _trade(i, 100, contribution, false);
             // The independent opening margin exceeds normal maintenance; FAD raises the live threshold.
-            vm.warp(1_709_934_000); // Friday 2024-03-08 21:40 UTC, before the frozen window.
+            vm.warp(1_709_934_900); // Friday 2024-03-08 21:55 UTC, before the frozen window.
             assertTrue(_isFadReference(vm.getBlockTimestamp()));
             uint256 desiredLoss = traders[i].claim - 50e6;
             uint256 adverseMove = desiredLoss / 100;

@@ -467,7 +467,7 @@ contract FadStalenessTest is BasePerpTest {
 
     function test_FridayFadOnly_MevCheckStillActive() public {
         _startRecordingLogs();
-        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
+        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 50 minutes;
 
         uint256 publishTime = fridayFadStart - 30 minutes;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), publishTime);
@@ -487,7 +487,7 @@ contract FadStalenessTest is BasePerpTest {
 
     function test_FridayFadOnly_FreshPriceStillWorks() public {
         _startRecordingLogs();
-        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
+        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 50 minutes;
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayFadStart + 6);
 
@@ -508,7 +508,7 @@ contract FadStalenessTest is BasePerpTest {
 
     function test_FridayFadOnly_OpenStillBlocked() public {
         _startRecordingLogs();
-        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
+        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 50 minutes;
 
         vm.warp(fridayFadStart);
 
@@ -519,7 +519,7 @@ contract FadStalenessTest is BasePerpTest {
 
     function test_FridayFadOnly_HistoricalSettlementWindowAllowsDelayedReveal() public {
         _startRecordingLogs();
-        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
+        uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 50 minutes;
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxExecutionWindowSeconds = 300;

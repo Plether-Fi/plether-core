@@ -29,9 +29,9 @@ library MarketCalendarReference {
         uint256 boundary = timestamp >= dstStart && timestamp < dstEnd ? 21 hours : 22 hours;
         uint256 second = timestamp % 1 days;
         if (weekday == 5) {
-            return (second >= boundary - 30 minutes, second >= boundary);
+            return (second >= boundary - 10 minutes, second >= boundary);
         }
-        return (second < boundary + 15 minutes, second < boundary);
+        return (second < boundary + 5 minutes, second < boundary);
     }
 
     function _firstDay(

@@ -25,7 +25,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
     uint256 private constant NOTIONAL = 8000e6;
     uint256 private constant FEE = 3_200_000;
     uint256 private executionDelay;
-    uint256 private constant BEFORE_FAD = 1_729_283_399;
+    uint256 private constant BEFORE_FAD = 1_729_284_599;
 
     struct Row {
         uint8 action; // 0 fresh open, 1 increase, 2 partial close, 3 full close
@@ -319,7 +319,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
             vm.warp(vm.getBlockTimestamp() + executionDelay);
         }
         if (row.regime == 2) {
-            vm.warp(BEFORE_FAD + 1801);
+            vm.warp(BEFORE_FAD + 601);
         } else if (row.regime == 1) {
             vm.warp(BEFORE_FAD + 1);
         }

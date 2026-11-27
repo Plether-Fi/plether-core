@@ -287,13 +287,13 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         uint256 dayOfWeek = (dayIndex + 4) % 7;
         uint256 secondOfDay = timestamp % 86_400;
         uint256 marketBoundary = _expectedMarketBoundary(timestamp, dayOfWeek);
-        if (dayOfWeek == 5 && secondOfDay >= marketBoundary - 30 minutes) {
+        if (dayOfWeek == 5 && secondOfDay >= marketBoundary - 10 minutes) {
             return true;
         }
         if (dayOfWeek == 6) {
             return true;
         }
-        if (dayOfWeek == 0 && secondOfDay < marketBoundary + 15 minutes) {
+        if (dayOfWeek == 0 && secondOfDay < marketBoundary + 5 minutes) {
             return true;
         }
         if (engine.fadDayOverrides(dayIndex)) {
